@@ -1,0 +1,19 @@
+[package]
+name = "caley"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+axum = { version = "0.8.8", features = ["macros"] }
+axum-oidc = "0.6.0"
+chrono = "0.4.42"
+chrono-tz = "0.10.4"
+clap = { version = "4.5.54", features = ["derive", "env"] }
+dotenvy = { version = "0.15.7" }
+fast-dav-rs = "0.2.0"
+hyper-rustls = "0.27.7"
+hyper-util = { version = "0.1.19", features = ["client", "tokio"] }
+ical = "0.11.0"
+tokio = { version = "1.49.0", features = ["macros", "net", "rt-multi-thread", "time"] }
+tower-http = { version = "0.6.8", features = ["auth"] }
