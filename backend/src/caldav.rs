@@ -1,10 +1,12 @@
 use anyhow::{bail, Context};
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{NaiveDate, NaiveDateTime, TimeDelta, TimeZone as _};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
 use reqwest::Client;
+use rrule::RRuleSet;
 use serde::Serialize;
+use std::collections::HashMap;
 
 #[derive(Serialize)]
 pub struct Calendar {
@@ -14,9 +16,31 @@ pub struct Calendar {
 
 #[derive(Serialize)]
 pub struct Event {
+    pub uid: String,
     pub summary: String,
     pub dtstart: String,
+    pub dtend: Option<String>,
     pub tz: String,
+    pub is_recurring: bool,
+}
+
+struct DateProperty {
+    value: String,
+    tzid: Option<String>,
+}
+
+struct RawIcalEvent {
+    uid: String,
+    summary: String,
+    dtstart: NaiveDateTime,
+    dtstart_is_date: bool,
+    dtstart_tzid: Option<String>,
+    duration: TimeDelta,
+    rrule: Option<String>,
+    rdates: Vec<DateProperty>,
+    exdates: Vec<DateProperty>,
+    recurrence_id: Option<NaiveDateTime>,
+    recurrence_id_tzid: Option<String>,
 }
 
 #[derive(Clone)]
@@ -53,8 +77,14 @@ impl CalDavClient {
         Ok(all)
     }
 
-    pub async fn events(&self, href: &str) -> anyhow::Result<Vec<Event>> {
-        self.fetch_events(href).await
+    pub async fn events(
+        &self,
+        href: &str,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> anyhow::Result<Vec<Event>> {
+        let raw_events = self.fetch_events(href, start, end).await?;
+        Ok(expand_events(raw_events, start, end))
     }
 
     async fn start_url(&self) -> String {
@@ -77,7 +107,10 @@ impl CalDavClient {
         Some(resp.url().to_string().trim_end_matches('/').to_string())
     }
 
-    async fn discover_calendar_home_sets(&self, start_url: &str) -> anyhow::Result<Vec<String>> {
+    async fn discover_calendar_home_sets(
+        &self,
+        start_url: &str,
+    ) -> anyhow::Result<Vec<String>> {
         let principal_body = r#"<?xml version="1.0" encoding="utf-8"?>
 <propfind xmlns="DAV:">
   <prop>
@@ -120,7 +153,10 @@ impl CalDavClient {
         }
     }
 
-    async fn find_calendars_in_home_set(&self, home_set_url: &str) -> anyhow::Result<Vec<Calendar>> {
+    async fn find_calendars_in_home_set(
+        &self,
+        home_set_url: &str,
+    ) -> anyhow::Result<Vec<Calendar>> {
         let body = r#"<?xml version="1.0" encoding="utf-8"?>
 <propfind xmlns="DAV:">
   <prop>
@@ -132,24 +168,41 @@ impl CalDavClient {
         parse_all_calendars(&xml, home_set_url)
     }
 
-    async fn fetch_events(&self, calendar_url: &str) -> anyhow::Result<Vec<Event>> {
-        let body = r#"<?xml version="1.0" encoding="utf-8"?>
+    async fn fetch_events(
+        &self,
+        calendar_url: &str,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> anyhow::Result<Vec<RawIcalEvent>> {
+        let start_str = format!("{}T000000Z", start.format("%Y%m%d"));
+        let end_str = format!("{}T235959Z", end.format("%Y%m%d"));
+
+        let body = format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
 <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
   <d:prop>
     <c:calendar-data/>
   </d:prop>
   <c:filter>
     <c:comp-filter name="VCALENDAR">
-      <c:comp-filter name="VEVENT"/>
+      <c:comp-filter name="VEVENT">
+        <c:time-range start="{start_str}" end="{end_str}"/>
+      </c:comp-filter>
     </c:comp-filter>
   </c:filter>
-</c:calendar-query>"#;
+</c:calendar-query>"#
+        );
 
-        let xml = self.report(calendar_url, body).await?;
-        extract_events(&xml)
+        let xml = self.report(calendar_url, &body).await?;
+        extract_raw_events(&xml)
     }
 
-    async fn propfind(&self, url: &str, depth: &str, body: &str) -> anyhow::Result<String> {
+    async fn propfind(
+        &self,
+        url: &str,
+        depth: &str,
+        body: &str,
+    ) -> anyhow::Result<String> {
         let mut url = url.to_string();
         for _ in 0..5 {
             let depth_hdr = HeaderName::from_static("depth");
@@ -365,7 +418,7 @@ fn parse_all_calendars(xml: &str, base_url: &str) -> anyhow::Result<Vec<Calendar
     Ok(calendars)
 }
 
-fn extract_events(xml: &str) -> anyhow::Result<Vec<Event>> {
+fn extract_raw_events(xml: &str) -> anyhow::Result<Vec<RawIcalEvent>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
@@ -395,7 +448,7 @@ fn extract_events(xml: &str) -> anyhow::Result<Vec<Event>> {
                 if local == "calendar-data" {
                     in_calendar_data = false;
                     if !current_ical.is_empty() {
-                        if let Some(event) = parse_event(&current_ical) {
+                        if let Some(event) = parse_raw_event(&current_ical) {
                             events.push(event);
                         }
                     }
@@ -409,25 +462,127 @@ fn extract_events(xml: &str) -> anyhow::Result<Vec<Event>> {
     Ok(events)
 }
 
-fn parse_event(ical_data: &str) -> Option<Event> {
+fn parse_raw_event(ical_data: &str) -> Option<RawIcalEvent> {
     let calendar = ical::IcalParser::new(ical_data.as_bytes()).next()?;
     let calendar = calendar.ok()?;
 
     for event in calendar.events {
+        let mut uid: Option<String> = None;
         let mut summary: Option<String> = None;
         let mut dtstart_value: Option<String> = None;
         let mut dtstart_tzid: Option<String> = None;
+        let mut dtstart_is_date = false;
+        let mut dtend_value: Option<String> = None;
+        let mut _dtend_tzid: Option<String> = None;
+        let mut duration_str: Option<String> = None;
+        let mut rrule: Option<String> = None;
+        let mut rdates: Vec<DateProperty> = Vec::new();
+        let mut exdates: Vec<DateProperty> = Vec::new();
+        let mut recurrence_id_value: Option<String> = None;
+        let mut recurrence_id_tzid: Option<String> = None;
 
         for property in event.properties {
             match property.name.as_str() {
+                "UID" => uid = property.value,
                 "SUMMARY" => summary = property.value,
                 "DTSTART" => {
-                    dtstart_value = property.value;
+                    dtstart_value = property.value.clone();
+                    let mut found_tzid = None;
+                    let mut found_value_date = false;
+                    if let Some(params) = &property.params {
+                        for (key, vals) in params {
+                            if key == "TZID" {
+                                if let Some(first_val) = vals.first() {
+                                    found_tzid = Some(first_val.clone());
+                                }
+                            }
+                            if key == "VALUE" {
+                                if let Some(first_val) = vals.first() {
+                                    if first_val == "DATE" {
+                                        found_value_date = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    dtstart_tzid = found_tzid;
+                    if !found_value_date {
+                        if let Some(ref val) = property.value {
+                            if !val.contains('T') {
+                                dtstart_is_date = true;
+                            }
+                        }
+                    } else {
+                        dtstart_is_date = true;
+                    }
+                }
+                "DTEND" => {
+                    dtend_value = property.value;
                     if let Some(params) = property.params {
                         for (key, vals) in params {
                             if key == "TZID" {
                                 if let Some(first_val) = vals.first() {
-                                    dtstart_tzid = Some(first_val.clone());
+                                    _dtend_tzid = Some(first_val.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                "DURATION" => duration_str = property.value,
+                "RRULE" => rrule = property.value,
+                "RDATE" => {
+                    if let Some(val) = property.value {
+                        let mut rdate_tzid = None;
+                        if let Some(params) = &property.params {
+                            for (key, vals) in params {
+                                if key == "TZID" {
+                                    if let Some(first_val) = vals.first() {
+                                        rdate_tzid = Some(first_val.clone());
+                                    }
+                                }
+                            }
+                        }
+                        for v in val.split(',') {
+                            let v = v.trim();
+                            if !v.is_empty() {
+                                rdates.push(DateProperty {
+                                    value: v.to_string(),
+                                    tzid: rdate_tzid.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+                "EXDATE" => {
+                    if let Some(val) = property.value {
+                        let mut exdate_tzid = None;
+                        if let Some(params) = &property.params {
+                            for (key, vals) in params {
+                                if key == "TZID" {
+                                    if let Some(first_val) = vals.first() {
+                                        exdate_tzid = Some(first_val.clone());
+                                    }
+                                }
+                            }
+                        }
+                        for v in val.split(',') {
+                            let v = v.trim();
+                            if !v.is_empty() {
+                                exdates.push(DateProperty {
+                                    value: v.to_string(),
+                                    tzid: exdate_tzid.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+                "RECURRENCE-ID" => {
+                    recurrence_id_value = property.value;
+                    if let Some(params) = property.params {
+                        for (key, vals) in params {
+                            if key == "TZID" {
+                                if let Some(first_val) = vals.first() {
+                                    recurrence_id_tzid = Some(first_val.clone());
                                 }
                             }
                         }
@@ -437,35 +592,286 @@ fn parse_event(ical_data: &str) -> Option<Event> {
             }
         }
 
+        let uid = uid.unwrap_or_default();
         let name = summary.unwrap_or_default();
-        let raw = dtstart_value.as_deref()?;
+        let raw_dtstart = dtstart_value.as_deref()?;
+        let dtstart = parse_dtstart(raw_dtstart)?;
 
-        let (date_str, tz_str) = if let Some(tzid) = &dtstart_tzid {
-            let naive = parse_dtstart(raw)?;
-            (naive.format("%Y-%m-%d %H:%M:%S").to_string(), tzid.clone())
-        } else if raw.ends_with('Z') {
-            let trimmed = raw.trim_end_matches('Z');
-            let naive = parse_dtstart(trimmed)?;
-            (
-                naive.format("%Y-%m-%d %H:%M:%S").to_string(),
-                "UTC".to_string(),
-            )
+        let duration = if let Some(ref dtend_raw) = dtend_value {
+            let dtend = parse_dtstart(dtend_raw)?;
+            dtend - dtstart
+        } else if let Some(ref dur) = duration_str {
+            parse_ical_duration(dur).unwrap_or_else(|| {
+                if dtstart_is_date {
+                    TimeDelta::days(1)
+                } else {
+                    TimeDelta::zero()
+                }
+            })
+        } else if dtstart_is_date {
+            TimeDelta::days(1)
         } else {
-            let naive = parse_dtstart(raw)?;
-            (
-                naive.format("%Y-%m-%d %H:%M:%S").to_string(),
-                "UTC".to_string(),
-            )
+            TimeDelta::zero()
         };
 
-        return Some(Event {
+        let recurrence_id = recurrence_id_value.as_ref().and_then(|v| parse_dtstart(v));
+
+        return Some(RawIcalEvent {
+            uid,
             summary: name,
-            dtstart: date_str,
-            tz: tz_str,
+            dtstart,
+            dtstart_is_date,
+            dtstart_tzid,
+            duration,
+            rrule,
+            rdates,
+            exdates,
+            recurrence_id,
+            recurrence_id_tzid,
         });
     }
 
     None
+}
+
+fn parse_ical_duration(s: &str) -> Option<TimeDelta> {
+    let s = s.trim();
+    let negative = s.starts_with('-');
+    let s = s.trim_start_matches('+').trim_start_matches('-');
+
+    if !s.starts_with('P') {
+        return None;
+    }
+    let s = &s[1..];
+
+    let mut total_secs: i64 = 0;
+
+    if let Some(week_pos) = s.find('W') {
+        let weeks: i64 = s[..week_pos].parse().ok()?;
+        total_secs += weeks * 7 * 86400;
+        return Some(if negative {
+            TimeDelta::seconds(-total_secs)
+        } else {
+            TimeDelta::seconds(total_secs)
+        });
+    }
+
+    let (date_part, time_part) = if let Some(t_pos) = s.find('T') {
+        (&s[..t_pos], &s[t_pos + 1..])
+    } else {
+        (s, "")
+    };
+
+    if let Some(day_pos) = date_part.find('D') {
+        let days: i64 = date_part[..day_pos].parse().ok()?;
+        total_secs += days * 86400;
+    }
+
+    let mut remaining = time_part;
+    if let Some(hour_pos) = remaining.find('H') {
+        let hours: i64 = remaining[..hour_pos].parse().ok()?;
+        total_secs += hours * 3600;
+        remaining = &remaining[hour_pos + 1..];
+    }
+    if let Some(min_pos) = remaining.find('M') {
+        let mins: i64 = remaining[..min_pos].parse().ok()?;
+        total_secs += mins * 60;
+        remaining = &remaining[min_pos + 1..];
+    }
+    if let Some(sec_pos) = remaining.find('S') {
+        let secs: i64 = remaining[..sec_pos].parse().ok()?;
+        total_secs += secs;
+    }
+
+    Some(if negative {
+        TimeDelta::seconds(-total_secs)
+    } else {
+        TimeDelta::seconds(total_secs)
+    })
+}
+
+fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate) -> Vec<Event> {
+    let mut groups: HashMap<String, Vec<RawIcalEvent>> = HashMap::new();
+    for event in raw_events {
+        groups.entry(event.uid.clone()).or_default().push(event);
+    }
+
+    let mut events = Vec::new();
+
+    for (_, group) in groups {
+        let master = group.iter().find(|e| e.recurrence_id.is_none());
+        let overrides: Vec<&RawIcalEvent> = group.iter().filter(|e| e.recurrence_id.is_some()).collect();
+
+        let Some(master) = master else { continue };
+
+        if master.rrule.is_some() || !master.rdates.is_empty() {
+            let expanded = expand_recurring(master, start, end);
+
+            for dt in expanded {
+                let matched_override = overrides.iter().find(|o| {
+                    o.recurrence_id.as_ref().map_or(false, |rid| {
+                        let rid_ts = naive_to_utc_timestamp(*rid, &o.recurrence_id_tzid);
+                        let exp_ts = naive_to_utc_timestamp(dt, &master.dtstart_tzid);
+                        rid_ts == exp_ts
+                    })
+                });
+
+                if let Some(override_event) = matched_override {
+                    events.push(create_event(
+                        &override_event.uid,
+                        &override_event.summary,
+                        override_event.dtstart,
+                        override_event.dtstart_is_date,
+                        Some(override_event.dtstart + override_event.duration),
+                        override_event.dtstart_is_date,
+                        &override_event
+                            .dtstart_tzid
+                            .as_deref()
+                            .unwrap_or("UTC"),
+                        true,
+                    ));
+                } else {
+                    events.push(create_event(
+                        &master.uid,
+                        &master.summary,
+                        dt,
+                        master.dtstart_is_date,
+                        Some(dt + master.duration),
+                        master.dtstart_is_date,
+                        master.dtstart_tzid.as_deref().unwrap_or("UTC"),
+                        true,
+                    ));
+                }
+            }
+        } else {
+            events.push(create_event(
+                &master.uid,
+                &master.summary,
+                master.dtstart,
+                master.dtstart_is_date,
+                Some(master.dtstart + master.duration),
+                master.dtstart_is_date,
+                master.dtstart_tzid.as_deref().unwrap_or("UTC"),
+                false,
+            ));
+        }
+    }
+
+    events
+}
+
+fn expand_recurring(master: &RawIcalEvent, start: NaiveDate, end: NaiveDate) -> Vec<NaiveDateTime> {
+    let mut rrule_str = String::new();
+
+    if let Some(tzid) = &master.dtstart_tzid {
+        rrule_str.push_str(&format!(
+            "DTSTART;TZID={}:{}\n",
+            tzid,
+            master.dtstart.format("%Y%m%dT%H%M%S")
+        ));
+    } else {
+        rrule_str.push_str(&format!(
+            "DTSTART:{}Z\n",
+            master.dtstart.format("%Y%m%dT%H%M%S")
+        ));
+    }
+
+    if let Some(ref rrule) = master.rrule {
+        rrule_str.push_str(&format!("RRULE:{rrule}\n"));
+    }
+
+    for rdate in &master.rdates {
+        if let Some(tzid) = &rdate.tzid {
+            rrule_str.push_str(&format!("RDATE;TZID={}:{}\n", tzid, rdate.value));
+        } else if rdate.value.ends_with('Z') {
+            rrule_str.push_str(&format!("RDATE;VALUE=DATE-TIME:{}\n", rdate.value));
+        } else {
+            rrule_str.push_str(&format!("RDATE;VALUE=DATE-TIME:{}\n", rdate.value));
+        }
+    }
+
+    for exdate in &master.exdates {
+        if let Some(tzid) = &exdate.tzid {
+            rrule_str.push_str(&format!("EXDATE;TZID={}:{}\n", tzid, exdate.value));
+        } else if exdate.value.ends_with('Z') {
+            rrule_str.push_str(&format!("EXDATE;VALUE=DATE-TIME:{}\n", exdate.value));
+        } else {
+            rrule_str.push_str(&format!("EXDATE;VALUE=DATE-TIME:{}\n", exdate.value));
+        }
+    }
+
+    let rrule_set: RRuleSet = match rrule_str.parse() {
+        Ok(set) => set,
+        Err(e) => {
+            eprintln!("Failed to parse RRuleSet: {e} - string was: {rrule_str:?}");
+            return vec![master.dtstart];
+        }
+    };
+
+    let start_utc = rrule::Tz::UTC
+        .from_utc_datetime(&start.and_hms_opt(0, 0, 0).unwrap());
+    let end_utc = rrule::Tz::UTC
+        .from_utc_datetime(&end.and_hms_opt(23, 59, 59).unwrap());
+
+    let rrule_set = rrule_set.after(start_utc).before(end_utc);
+    let result = rrule_set.all(65535);
+
+    result
+        .dates
+        .into_iter()
+        .map(|dt| dt.naive_local())
+        .collect()
+}
+
+fn create_event(
+    uid: &str,
+    summary: &str,
+    dtstart: NaiveDateTime,
+    dtstart_is_date: bool,
+    dtend: Option<NaiveDateTime>,
+    dtend_is_date: bool,
+    tz: &str,
+    is_recurring: bool,
+) -> Event {
+    let dtstart_str = if dtstart_is_date {
+        dtstart.format("%Y-%m-%d").to_string()
+    } else {
+        dtstart.format("%Y-%m-%d %H:%M:%S").to_string()
+    };
+
+    let dtend_str = dtend.map(|dt| {
+        if dtend_is_date {
+            dt.format("%Y-%m-%d").to_string()
+        } else {
+            dt.format("%Y-%m-%d %H:%M:%S").to_string()
+        }
+    });
+
+    Event {
+        uid: uid.to_string(),
+        summary: summary.to_string(),
+        dtstart: dtstart_str,
+        dtend: dtend_str,
+        tz: tz.to_string(),
+        is_recurring,
+    }
+}
+
+fn naive_to_utc_timestamp(dt: NaiveDateTime, tzid: &Option<String>) -> i64 {
+    match tzid {
+        Some(tz_name) => {
+            if let Ok(tz) = tz_name.parse::<chrono_tz::Tz>() {
+                match tz.from_local_datetime(&dt) {
+                    chrono::LocalResult::Single(local_dt) => local_dt.timestamp(),
+                    chrono::LocalResult::Ambiguous(local_dt, _) => local_dt.timestamp(),
+                    chrono::LocalResult::None => dt.and_utc().timestamp(),
+                }
+            } else {
+                dt.and_utc().timestamp()
+            }
+        }
+        None => dt.and_utc().timestamp(),
+    }
 }
 
 fn parse_dtstart(raw: &str) -> Option<NaiveDateTime> {

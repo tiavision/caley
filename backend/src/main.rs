@@ -8,6 +8,7 @@ use axum::{
     Json, Router,
 };
 use caldav::CalDavClient;
+use chrono::{Datelike, NaiveDate};
 use clap::Parser;
 use dotenvy::dotenv;
 use serde::Deserialize;
@@ -32,6 +33,8 @@ struct AppState {
 #[derive(Deserialize)]
 struct EventsQuery {
     href: String,
+    start: Option<String>,
+    end: Option<String>,
 }
 
 async fn list_calendars(State(state): State<AppState>) -> impl IntoResponse {
@@ -41,8 +44,34 @@ async fn list_calendars(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
-async fn list_events(State(state): State<AppState>, Query(params): Query<EventsQuery>) -> impl IntoResponse {
-    match state.client.events(&params.href).await {
+async fn list_events(
+    State(state): State<AppState>,
+    Query(params): Query<EventsQuery>,
+) -> impl IntoResponse {
+    let start = params
+        .start
+        .as_deref()
+        .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+        .unwrap_or_else(|| {
+            let today = chrono::Local::now().date_naive();
+            NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap_or(today)
+        });
+
+    let end = params
+        .end
+        .as_deref()
+        .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+        .unwrap_or_else(|| {
+            let today = chrono::Local::now().date_naive();
+            let next_month = if today.month() == 12 {
+                NaiveDate::from_ymd_opt(today.year() + 1, 1, 1).unwrap_or(today)
+            } else {
+                NaiveDate::from_ymd_opt(today.year(), today.month() + 1, 1).unwrap_or(today)
+            };
+            next_month - chrono::TimeDelta::days(1)
+        });
+
+    match state.client.events(&params.href, start, end).await {
         Ok(events) => Json(events).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
