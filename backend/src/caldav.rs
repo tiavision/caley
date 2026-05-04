@@ -4,18 +4,22 @@ use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
 use reqwest::Client;
+use serde::Serialize;
 
+#[derive(Serialize)]
 pub struct Calendar {
     pub name: String,
-    pub url: String,
+    pub href: String,
 }
 
+#[derive(Serialize)]
 pub struct Event {
     pub summary: String,
     pub dtstart: String,
     pub tz: String,
 }
 
+#[derive(Clone)]
 pub struct CalDavClient {
     client: Client,
     base_url: String,
@@ -49,11 +53,8 @@ impl CalDavClient {
         Ok(all)
     }
 
-    pub async fn events(&self, calendar_name: &str) -> anyhow::Result<Vec<Event>> {
-        let start_url = self.start_url().await;
-        let home_sets = self.discover_calendar_home_sets(&start_url).await?;
-        let calendar_url = self.find_calendar_url(&home_sets, calendar_name).await?;
-        self.fetch_events(&calendar_url).await
+    pub async fn events(&self, href: &str) -> anyhow::Result<Vec<Event>> {
+        self.fetch_events(href).await
     }
 
     async fn start_url(&self) -> String {
@@ -129,35 +130,6 @@ impl CalDavClient {
 
         let xml = self.propfind(home_set_url, "1", body).await?;
         parse_all_calendars(&xml, home_set_url)
-    }
-
-    async fn find_calendar_url(
-        &self,
-        home_sets: &[String],
-        calendar_name: &str,
-    ) -> anyhow::Result<String> {
-        for home_set_url in home_sets {
-            if let Ok(url) = self.find_calendar_url_in_home_set(home_set_url, calendar_name).await {
-                return Ok(url);
-            }
-        }
-        bail!("Calendar '{calendar_name}' not found in any calendar home set")
-    }
-
-    async fn find_calendar_url_in_home_set(
-        &self,
-        home_set_url: &str,
-        calendar_name: &str,
-    ) -> anyhow::Result<String> {
-        let body = r#"<?xml version="1.0" encoding="utf-8"?>
-<propfind xmlns="DAV:">
-  <prop>
-    <displayname/>
-  </prop>
-</propfind>"#;
-
-        let xml = self.propfind(home_set_url, "1", body).await?;
-        find_calendar_by_name(&xml, calendar_name, home_set_url)
     }
 
     async fn fetch_events(&self, calendar_url: &str) -> anyhow::Result<Vec<Event>> {
@@ -375,7 +347,7 @@ fn parse_all_calendars(xml: &str, base_url: &str) -> anyhow::Result<Vec<Calendar
                                 });
                                 calendars.push(Calendar {
                                     name,
-                                    url: resolved,
+                                    href: resolved,
                                 });
                             }
                         }
@@ -391,19 +363,6 @@ fn parse_all_calendars(xml: &str, base_url: &str) -> anyhow::Result<Vec<Calendar
     }
 
     Ok(calendars)
-}
-
-fn find_calendar_by_name(
-    xml: &str,
-    calendar_name: &str,
-    base_url: &str,
-) -> anyhow::Result<String> {
-    let calendars = parse_all_calendars(xml, base_url)?;
-    calendars
-        .into_iter()
-        .find(|c| c.name == calendar_name)
-        .map(|c| c.url)
-        .with_context(|| format!("Calendar '{calendar_name}' not found in response"))
 }
 
 fn extract_events(xml: &str) -> anyhow::Result<Vec<Event>> {

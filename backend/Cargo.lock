@@ -275,6 +275,7 @@ dependencies = [
  "ical",
  "quick-xml",
  "reqwest 0.12.28",
+ "serde",
  "tokio",
  "tower-http",
 ]
