@@ -1,0 +1,15 @@
+type: workspace
+model: workspace
+id: wk_u4HFZcoL4J
+createdAt: 2026-05-04T18:39:48.352928
+updatedAt: 2026-05-04T19:28:39.728850500
+authentication: {}
+authenticationType: null
+description: ''
+headers: []
+name: Caley
+encryptionKeyChallenge: eUE0azNuQwG7lMAn1Y4l9KC5WNUEcGG8r3MXFHrCFXN84i54uCtuKwgTszr5FTSD1Ii9HRbNvBWl3mKjHmkulCuNvF2npk2yyaTGm4iTq1QHJqgq1OmG8X7Dj1Nft7ztBpI=
+settingValidateCertificates: true
+settingFollowRedirects: true
+settingRequestTimeout: 0
+settingDnsOverrides: []
