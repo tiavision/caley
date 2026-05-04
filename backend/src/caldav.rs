@@ -22,6 +22,19 @@ pub struct Event {
     pub dtend: Option<String>,
     pub tz: String,
     pub is_recurring: bool,
+    pub recurrence: Option<RecurrenceInfo>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct RecurrenceInfo {
+    pub freq: String,
+    pub interval: u32,
+    pub until: Option<String>,
+    pub count: Option<u32>,
+    pub by_day: Vec<String>,
+    pub by_month_day: Vec<u32>,
+    pub by_month: Vec<u32>,
+    pub by_set_pos: Vec<i32>,
 }
 
 struct DateProperty {
@@ -705,6 +718,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
         let Some(master) = master else { continue };
 
         if master.rrule.is_some() || !master.rdates.is_empty() {
+            let recurrence = master.rrule.as_ref().map(|r| parse_rrule_info(r));
             let expanded = expand_recurring(master, start, end);
 
             for dt in expanded {
@@ -729,6 +743,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                             .as_deref()
                             .unwrap_or("UTC"),
                         true,
+                        recurrence.clone(),
                     ));
                 } else {
                     events.push(create_event(
@@ -740,6 +755,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                         master.dtstart_is_date,
                         master.dtstart_tzid.as_deref().unwrap_or("UTC"),
                         true,
+                        recurrence.clone(),
                     ));
                 }
             }
@@ -753,6 +769,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                 master.dtstart_is_date,
                 master.dtstart_tzid.as_deref().unwrap_or("UTC"),
                 false,
+                None,
             ));
         }
     }
@@ -832,6 +849,7 @@ fn create_event(
     dtend_is_date: bool,
     tz: &str,
     is_recurring: bool,
+    recurrence: Option<RecurrenceInfo>,
 ) -> Event {
     let dtstart_str = if dtstart_is_date {
         dtstart.format("%Y-%m-%d").to_string()
@@ -854,7 +872,66 @@ fn create_event(
         dtend: dtend_str,
         tz: tz.to_string(),
         is_recurring,
+        recurrence,
     }
+}
+
+fn parse_rrule_info(rrule_str: &str) -> RecurrenceInfo {
+    let mut info = RecurrenceInfo {
+        freq: String::new(),
+        interval: 1,
+        until: None,
+        count: None,
+        by_day: Vec::new(),
+        by_month_day: Vec::new(),
+        by_month: Vec::new(),
+        by_set_pos: Vec::new(),
+    };
+
+    for part in rrule_str.split(';') {
+        let part = part.trim();
+        let Some((key, val)) = part.split_once('=') else { continue };
+        match key {
+            "FREQ" => info.freq = val.to_string(),
+            "INTERVAL" => info.interval = val.parse().unwrap_or(1),
+            "UNTIL" => {
+                let s = val.trim_end_matches('Z');
+                let formatted = if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y%m%dT%H%M%S") {
+                    dt.format("%Y-%m-%d %H:%M:%S").to_string()
+                } else if let Ok(d) = NaiveDate::parse_from_str(s, "%Y%m%d") {
+                    d.format("%Y-%m-%d").to_string()
+                } else {
+                    val.to_string()
+                };
+                info.until = Some(formatted);
+            }
+            "COUNT" => info.count = val.parse().ok(),
+            "BYDAY" => {
+                info.by_day = val.split(',').map(|s| s.trim().to_string()).collect();
+            }
+            "BYMONTHDAY" => {
+                info.by_month_day = val
+                    .split(',')
+                    .filter_map(|s| s.trim().parse().ok())
+                    .collect();
+            }
+            "BYMONTH" => {
+                info.by_month = val
+                    .split(',')
+                    .filter_map(|s| s.trim().parse().ok())
+                    .collect();
+            }
+            "BYSETPOS" => {
+                info.by_set_pos = val
+                    .split(',')
+                    .filter_map(|s| s.trim().parse().ok())
+                    .collect();
+            }
+            _ => {}
+        }
+    }
+
+    info
 }
 
 fn naive_to_utc_timestamp(dt: NaiveDateTime, tzid: &Option<String>) -> i64 {
