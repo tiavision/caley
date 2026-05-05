@@ -1,10 +1,11 @@
     <h2>Weekly Calendar</h2>
     
-    <div id="weekly-events" class="calendar"
+    <div id="weekly-events" class="calendar" style="position: relative"
          hx-get="/api/events"
          hx-trigger="htmx:afterSettle from:#calendar-container, change from:#calendar-form"
          hx-include="#calendar-form"
          hx-swap="innerHTML">
+        <div class="week-loading">Loading events</div>
     </div>
 
 
@@ -40,5 +41,28 @@ article {
   width: 10px;
   height:10px;
   display:inline-block
+}
+</style>
+
+<style is:global>
+.week-loading {
+  display: none;
+}
+
+.htmx-request .day {
+  opacity: 0.3;
+  transition: opacity 200ms ease-in;
+}
+
+.htmx-request .week-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 1.5rem;
+  z-index: 1;
+  font-style: italic;
+  color: var(--pico-muted-color);
 }
 </style>
