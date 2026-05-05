@@ -21,6 +21,10 @@ pub struct Event {
     pub summary: String,
     pub dtstart: String,
     pub dtend: Option<String>,
+    pub date: NaiveDate,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub is_all_day: bool,
     pub tz: String,
     pub is_recurring: bool,
     pub recurrence: Option<RecurrenceInfo>,
@@ -867,19 +871,39 @@ fn create_event(
         dtstart.format("%Y-%m-%d %H:%M:%S").to_string()
     };
 
-    let dtend_str = dtend.map(|dt| {
-        if dtend_is_date {
-            dt.format("%Y-%m-%d").to_string()
-        } else {
-            dt.format("%Y-%m-%d %H:%M:%S").to_string()
+    let date = dtstart.date();
+    let start_time = if dtstart_is_date {
+        None
+    } else {
+        Some(dtstart.format("%H:%M").to_string())
+    };
+
+    let (dtend_str, end_time) = match dtend {
+        Some(dt) => {
+            let s = if dtend_is_date {
+                dt.format("%Y-%m-%d").to_string()
+            } else {
+                dt.format("%Y-%m-%d %H:%M:%S").to_string()
+            };
+            let et = if dtend_is_date {
+                None
+            } else {
+                Some(dt.format("%H:%M").to_string())
+            };
+            (Some(s), et)
         }
-    });
+        None => (None, None),
+    };
 
     Event {
         uid: uid.to_string(),
         summary: summary.to_string(),
         dtstart: dtstart_str,
         dtend: dtend_str,
+        date,
+        start_time,
+        end_time,
+        is_all_day: dtstart_is_date,
         tz: tz.to_string(),
         is_recurring,
         recurrence,

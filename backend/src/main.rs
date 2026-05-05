@@ -2,23 +2,42 @@ mod caldav;
 
 use askama::Template;
 use axum::{
-    extract::{Query, State},
+    extract::{RawQuery, State},
     http::StatusCode,
     response::{Html, IntoResponse},
     routing::get,
-    Json, Router,
+    Router,
 };
 use caldav::{CalDavClient, Calendar};
 use chrono::{Datelike, NaiveDate};
 use clap::Parser;
 use dotenvy::dotenv;
-use serde::Deserialize;
 use tower_http::services::ServeDir;
+use url::form_urlencoded;
 
 #[derive(Template)]
 #[template(path = "calendars.html")]
 struct CalendarsTemplate {
     calendars: Vec<Calendar>,
+}
+
+#[derive(Template)]
+#[template(path = "weekly.html")]
+struct WeeklyTemplate {
+    days: Vec<DayView>,
+}
+
+struct DayView {
+    day_name: String,
+    is_today: bool,
+    events: Vec<EventView>,
+}
+
+#[derive(Clone)]
+struct EventView {
+    time_range: String,
+    summary: String,
+    color: String,
 }
 
 #[derive(clap::Parser, Debug)]
@@ -38,12 +57,7 @@ struct AppState {
     client: CalDavClient,
 }
 
-#[derive(Deserialize)]
-struct EventsQuery {
-    href: String,
-    start: Option<String>,
-    end: Option<String>,
-}
+
 
 async fn list_calendars(State(state): State<AppState>) -> impl IntoResponse {
     match state.client.calendars().await {
@@ -60,33 +74,95 @@ async fn list_calendars(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn list_events(
     State(state): State<AppState>,
-    Query(params): Query<EventsQuery>,
+    RawQuery(raw_query): RawQuery,
 ) -> impl IntoResponse {
-    let start = params
-        .start
-        .as_deref()
-        .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
-        .unwrap_or_else(|| {
-            let today = chrono::Local::now().date_naive();
-            NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap_or(today)
-        });
+    let today = chrono::Local::now().date_naive();
 
-    let end = params
-        .end
-        .as_deref()
-        .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
-        .unwrap_or_else(|| {
-            let today = chrono::Local::now().date_naive();
-            let next_month = if today.month() == 12 {
-                NaiveDate::from_ymd_opt(today.year() + 1, 1, 1).unwrap_or(today)
+    let weekday = today.weekday().num_days_from_monday();
+    let week_start = today - chrono::TimeDelta::days(weekday as i64);
+    let week_end = week_start + chrono::TimeDelta::days(6);
+
+    let mut cal_params: Vec<String> = Vec::new();
+    let mut start: Option<NaiveDate> = None;
+    let mut end: Option<NaiveDate> = None;
+
+    if let Some(query) = raw_query {
+        for (key, value) in form_urlencoded::parse(query.as_bytes()) {
+            match key.as_ref() {
+                "cal" => cal_params.push(value.into_owned()),
+                "start" => start =
+                    NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok(),
+                "end" => end =
+                    NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok(),
+                _ => {}
+            }
+        }
+    }
+
+    let start = start.unwrap_or(week_start);
+    let end = end.unwrap_or(week_end);
+
+    let mut all_events: Vec<(NaiveDate, EventView)> = Vec::new();
+
+    for entry in &cal_params {
+        let (href, color) = match entry.split_once('|') {
+            Some((h, c)) => (h, c),
+            None => (entry.as_str(), ""),
+        };
+
+        match state.client.events(href, start, end).await {
+            Ok(events) => {
+                for event in events {
+                    let time_range = match (&event.start_time, &event.end_time) {
+                        (Some(s), Some(e)) => format!("{}-{}", s, e),
+                        (Some(s), None) => s.clone(),
+                        (None, _) => "All day".to_string(),
+                    };
+                    all_events.push((
+                        event.date,
+                        EventView {
+                            time_range,
+                            summary: event.summary,
+                            color: color.to_string(),
+                        },
+                    ));
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to fetch events for {href}: {e}");
+            }
+        }
+    }
+
+    let mut days = Vec::new();
+    for i in 0..7 {
+        let day = week_start + chrono::TimeDelta::days(i);
+        let mut events: Vec<EventView> = all_events
+            .iter()
+            .filter(|(d, _)| *d == day)
+            .map(|(_, ev)| ev.clone())
+            .collect();
+
+        events.sort_by(|a, b| {
+            let a_all_day = a.time_range == "All day";
+            let b_all_day = b.time_range == "All day";
+            if a_all_day != b_all_day {
+                a_all_day.cmp(&b_all_day).reverse()
             } else {
-                NaiveDate::from_ymd_opt(today.year(), today.month() + 1, 1).unwrap_or(today)
-            };
-            next_month - chrono::TimeDelta::days(1)
+                a.time_range.cmp(&b.time_range)
+            }
         });
 
-    match state.client.events(&params.href, start, end).await {
-        Ok(events) => Json(events).into_response(),
+        days.push(DayView {
+            day_name: day.format("%A").to_string(),
+            is_today: day == today,
+            events,
+        });
+    }
+
+    let tpl = WeeklyTemplate { days };
+    match tpl.render() {
+        Ok(html) => Html(html).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

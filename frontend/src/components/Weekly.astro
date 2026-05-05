@@ -1,81 +1,10 @@
     <h2>Weekly Calendar</h2>
     
-    <div class="calendar">
-      <div class="day">
-        <h5>Monday</h5>
-        <div class="appointments">
-          <article class="appointment">
-            <header>10:00-10:30 <span class="dot" style="background-color: yellow;"></span></header>
-            <p>Team Standup</p>
-          </article>
-          <article class="appointment">
-            <header>14:00-15:00</header>
-            <p>Code Review</p>
-          </article>
-        </div>
-      </div>
-      <div class="day">
-        <h5>Tuesday</h5>
-        <div class="appointments">
-          <article class="appointment">
-            <header>12:30-13:30</header>
-            <p>Lunch with Client</p>
-          </article>
-        </div>
-      </div>
-      <div class="day today">
-        <h5>Wednesday</h5>
-        <div class="appointments">
-          <article class="appointment">
-            <header>16:00-17:00 <span class="dot" style="background-color: green;"></span></header>
-            <p>Dentist Appointment</p>
-          </article>
-          <article class="appointment">
-            <header>18:00-19:00</header>
-            <p>Gym Session</p>
-          </article>
-        </div>
-      </div>
-      <div class="day">
-        <h5>Thursday</h5>
-        <div class="appointments">
-          <article class="appointment">
-            <header>11:00-12:00</header>
-            <p>Project Demo</p>
-          </article>
-          <article class="appointment">
-            <header>15:00-17:00 <span class="dot" style="background-color: yellow;"></span></header>
-            <p>Rust Workshop</p>
-          </article>
-        </div>
-      </div>
-      <div class="day">
-        <h5>Friday</h5>
-        <div class="appointments">
-          <article class="appointment">
-            <header>09:00-10:00</header>
-            <p>Weekly Retrospective</p>
-          </article>
-        </div>
-      </div>
-      <div class="day">
-        <h5>Saturday</h5>
-        <div class="appointments">
-          <article class="appointment">
-            <header>20:00</header>
-            <p>Gaming Night</p>
-          </article>
-        </div>
-      </div>
-      <div class="day">
-        <h5>Sunday</h5>
-        <div class="appointments">
-          <article class="appointment">
-            <header>11:00 <span class="dot" style="background-color: blueviolet;"></span></header>
-            <p>Family Brunch</p>
-          </article>
-        </div>
-      </div>
+    <div id="weekly-events" class="calendar"
+         hx-get="/api/events"
+         hx-trigger="htmx:afterSettle from:#calendar-container, change from:#calendar-form"
+         hx-include="#calendar-form"
+         hx-swap="innerHTML">
     </div>
 
 

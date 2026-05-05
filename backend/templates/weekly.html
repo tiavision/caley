@@ -1,0 +1,13 @@
+{% for day in days %}
+<div class="day{% if day.is_today %} today{% endif %}">
+  <h5>{{ day.day_name }}</h5>
+  <div class="appointments">
+    {% for event in day.events %}
+    <article class="appointment">
+      <header>{{ event.time_range }}{% if !event.color.is_empty() %} <span class="dot" style="background-color: {{ event.color }};"></span>{% endif %}</header>
+      <p>{{ event.summary }}</p>
+    </article>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}

@@ -1,8 +1,10 @@
 
     <h2>Calendars</h2>
-    <div hx-get="/api/calendars" hx-trigger="load" hx-swap="innerHTML">
-        <p>Loading calendars…</p>
-    </div>
+    <form id="calendar-form">
+        <div id="calendar-container" hx-get="/api/calendars" hx-trigger="load" hx-swap="innerHTML">
+            <p>Loading calendars…</p>
+        </div>
+    </form>
 
 <style is:global>
 .calendar-list {
