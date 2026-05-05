@@ -12,6 +12,7 @@ use std::collections::HashMap;
 pub struct Calendar {
     pub name: String,
     pub href: String,
+    pub color: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -171,9 +172,10 @@ impl CalDavClient {
         home_set_url: &str,
     ) -> anyhow::Result<Vec<Calendar>> {
         let body = r#"<?xml version="1.0" encoding="utf-8"?>
-<propfind xmlns="DAV:">
+<propfind xmlns="DAV:" xmlns:APPLE="http://apple.com/ns/ical/">
   <prop>
     <displayname/>
+    <APPLE:calendar-color/>
   </prop>
 </propfind>"#;
 
@@ -369,8 +371,10 @@ fn parse_all_calendars(xml: &str, base_url: &str) -> anyhow::Result<Vec<Calendar
     let mut calendars = Vec::new();
     let mut current_href: Option<String> = None;
     let mut current_displayname: Option<String> = None;
+    let mut current_color: Option<String> = None;
     let mut in_href = false;
     let mut in_displayname = false;
+    let mut in_color = false;
     let mut buf = Vec::new();
 
     loop {
@@ -381,6 +385,7 @@ fn parse_all_calendars(xml: &str, base_url: &str) -> anyhow::Result<Vec<Calendar
                 match local {
                     "href" => in_href = true,
                     "displayname" => in_displayname = true,
+                    "calendar-color" => in_color = true,
                     _ => {}
                 }
             }
@@ -389,6 +394,8 @@ fn parse_all_calendars(xml: &str, base_url: &str) -> anyhow::Result<Vec<Calendar
                     current_href = Some(e.unescape()?.to_string());
                 } else if in_displayname {
                     current_displayname = Some(e.unescape()?.to_string());
+                } else if in_color {
+                    current_color = Some(e.unescape()?.to_string());
                 }
             }
             XmlEvent::End(e) => {
@@ -397,6 +404,7 @@ fn parse_all_calendars(xml: &str, base_url: &str) -> anyhow::Result<Vec<Calendar
                 match local {
                     "href" => in_href = false,
                     "displayname" => in_displayname = false,
+                    "calendar-color" => in_color = false,
                     "response" => {
                         if let Some(href) = &current_href {
                             let resolved = resolve_url(base_url, href);
@@ -414,11 +422,13 @@ fn parse_all_calendars(xml: &str, base_url: &str) -> anyhow::Result<Vec<Calendar
                                 calendars.push(Calendar {
                                     name,
                                     href: resolved,
+                                    color: current_color.clone(),
                                 });
                             }
                         }
                         current_href = None;
                         current_displayname = None;
+                        current_color = None;
                     }
                     _ => {}
                 }
