@@ -1,54 +1,22 @@
-  <article class="card contrast" style="max-width: 28rem;">
-    <header>
-      <hgroup>
-        <h2><span style="cursor: pointer;">&lt</span> January 2026 <span style="cursor: pointer;">></span></h2>
-        <p>Monthly calendar view</p>
-      </hgroup>
-    </header>
-    <div role="grid" aria-label="January 2026 calendar">
-      <!-- Weekday headers using Pico grid -->
-      <div class="grid date-grid" role="row">
-        <small>Mon</small><small>Tue</small><small>Wed</small>
-        <small>Thu</small><small>Fri</small><small>Sat</small><small>Sun</small>
-      </div>
-      <!-- Date grid -->
-      <div class="grid date-grid" role="grid">
-        <!-- 3 empty cells (Jan 1 is Thursday) -->
-        <div class="date-cell empty"></div>
-        <div class="date-cell empty"></div>
-        <div class="date-cell empty"></div>
-        <!-- Days 1-31 -->
-        <div class="date-cell">1</div>
-        <div class="date-cell">2</div>
-        <div class="date-cell">3</div>
-        <div class="date-cell"><span class="today">8</span></div>
-        <div class="date-cell">9</div>
-        <div class="date-cell">10</div>
-        <div class="date-cell">11</div>
-        <div class="date-cell">12</div>
-        <div class="date-cell">13</div>
-        <div class="date-cell">14</div>
-        <div class="date-cell">15</div>
-        <div class="date-cell">16</div>
-        <div class="date-cell">17</div>
-        <div class="date-cell">18</div>
-        <div class="date-cell">19</div>
-        <div class="date-cell">20</div>
-        <div class="date-cell">21</div>
-        <div class="date-cell">22</div>
-        <div class="date-cell">23</div>
-        <div class="date-cell">24</div>
-        <div class="date-cell">25</div>
-        <div class="date-cell">26</div>
-        <div class="date-cell">27</div>
-        <div class="date-cell">28</div>
-        <div class="date-cell">29</div>
-        <div class="date-cell">30</div>
-        <div class="date-cell">31</div>
-      </div>
+<article class="card contrast" style="max-width: 28rem;">
+  <header>
+    <hgroup>
+      <h2>
+        <span id="prev-month" role="button" tabindex="0" aria-label="Previous month" style="cursor: pointer;">&lt;</span>
+        <span id="month-title">January 2026</span>
+        <span id="next-month" role="button" tabindex="0" aria-label="Next month" style="cursor: pointer;">></span>
+      </h2>
+      <p>Monthly calendar view</p>
+    </hgroup>
+  </header>
+  <div role="grid" aria-label="Calendar">
+    <div class="grid date-grid" role="row">
+      <small>Mon</small><small>Tue</small><small>Wed</small>
+      <small>Thu</small><small>Fri</small><small>Sat</small><small>Sun</small>
     </div>
-  </article>
-</div>
+    <div class="grid date-grid" id="date-grid" role="grid"></div>
+  </div>
+</article>
 
 <style>
     .date-grid {
@@ -56,6 +24,8 @@
       grid-template-columns: repeat(7, 1fr);
       gap: 0;
     }
+</style>
+<style is:global>
     .date-cell {
       padding: 0.75rem 0.25rem;
       text-align: center;
@@ -69,20 +39,166 @@
     .date-cell:nth-child(7n) {
       border-right: none;
     }
-    .date-cell:nth-child(n+36) {
+    .date-cell:nth-last-child(-n+7) {
       border-bottom: none;
     }
-    .today {
-      background: var(--primary, #007bff);
-      color: white;
-      border-radius: 50%;
+    .selected-week {
+      background: var(--pico-primary-background, var(--primary, #007bff));
+      color: var(--pico-primary-inverse, white);
       font-weight: 600;
-      width: 1.5rem;
-      height: 1.5rem;
-      margin: auto;
+      border-color: var(--pico-primary-background, var(--primary, #007bff));
+    }
+    .selected-week-start {
+      border-top-left-radius: var(--pico-border-radius, 0.5rem);
+      border-bottom-left-radius: var(--pico-border-radius, 0.5rem);
+    }
+    .selected-week-end {
+      border-top-right-radius: var(--pico-border-radius, 0.5rem);
+      border-bottom-right-radius: var(--pico-border-radius, 0.5rem);
     }
     .empty {
       background: transparent;
       cursor: default;
     }
+    .date-cell.empty.selected-week {
+      background: var(--pico-primary-background, var(--primary, #007bff));
+    }
 </style>
+
+<script>
+(function () {
+  var viewedDate = new Date();
+  viewedDate.setDate(1);
+  viewedDate.setHours(0, 0, 0, 0);
+
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  var selectedWeekStart = getMonday(today);
+
+  var monthTitle = document.getElementById('month-title');
+  var grid = document.getElementById('date-grid');
+  var prevBtn = document.getElementById('prev-month');
+  var nextBtn = document.getElementById('next-month');
+
+  function getMonday(d) {
+    var date = new Date(d);
+    var day = date.getDay();
+    var diff = date.getDate() - day + (day === 0 ? -6 : 1);
+    date.setDate(diff);
+    date.setHours(0, 0, 0, 0);
+    return date;
+  }
+
+  function addMonths(date, months) {
+    var result = new Date(date);
+    result.setMonth(result.getMonth() + months);
+    if (result.getDate() !== date.getDate()) {
+      result.setDate(0);
+    }
+    return result;
+  }
+
+  function formatMonthYear(date) {
+    return date.toLocaleDateString(navigator.language, { month: 'long', year: 'numeric' });
+  }
+
+  function formatDate(d) {
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  function render() {
+    var year = viewedDate.getFullYear();
+    var month = viewedDate.getMonth();
+    var firstDay = new Date(year, month, 1);
+    var daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    var startOffset = firstDay.getDay() - 1;
+    if (startOffset < 0) startOffset = 6;
+    var totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+
+    monthTitle.textContent = formatMonthYear(viewedDate);
+    grid.setAttribute('aria-label', 'Calendar for ' + formatMonthYear(viewedDate));
+    grid.innerHTML = '';
+
+    var weekEnd = new Date(selectedWeekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    weekEnd.setHours(23, 59, 59, 999);
+    var weekStartMs = selectedWeekStart.getTime();
+    var weekEndMs = weekEnd.getTime();
+
+    for (var i = 0; i < totalCells; i++) {
+      var cell = document.createElement('div');
+      cell.className = 'date-cell';
+
+      var dayOffset = i - startOffset + 1;
+      var cellDate = new Date(year, month, dayOffset);
+      cellDate.setHours(0, 0, 0, 0);
+      var isCurrentMonth = dayOffset > 0 && dayOffset <= daysInMonth;
+
+      if (!isCurrentMonth) {
+        cell.classList.add('empty');
+      } else {
+        cell.textContent = dayOffset;
+      }
+
+      var cellMs = cellDate.getTime();
+      if (cellMs >= weekStartMs && cellMs <= weekEndMs) {
+        cell.classList.add('selected-week');
+        var dow = (cellDate.getDay() + 6) % 7;
+        if (dow === 0) cell.classList.add('selected-week-start');
+        if (dow === 6) cell.classList.add('selected-week-end');
+      }
+
+      if (isCurrentMonth) {
+        cell.style.cursor = 'pointer';
+        cell.addEventListener('click', (function (d) {
+          return function () { selectWeek(d); };
+        })(cellDate));
+      }
+
+      grid.appendChild(cell);
+    }
+  }
+
+  function updateHiddenInputs() {
+    var weekStartInput = document.getElementById('week-start-input');
+    var weekEndInput = document.getElementById('week-end-input');
+    if (!weekStartInput || !weekEndInput) return;
+    var end = new Date(selectedWeekStart);
+    end.setDate(end.getDate() + 6);
+    weekStartInput.value = formatDate(selectedWeekStart);
+    weekEndInput.value = formatDate(end);
+  }
+
+  function selectWeek(date) {
+    selectedWeekStart = getMonday(date);
+    render();
+    updateHiddenInputs();
+    var form = document.getElementById('calendar-form');
+    if (form) {
+      form.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+
+  function navigateMonth(delta) {
+    viewedDate = addMonths(viewedDate, delta);
+    render();
+  }
+
+  prevBtn.addEventListener('click', function () { navigateMonth(-1); });
+  nextBtn.addEventListener('click', function () { navigateMonth(1); });
+
+  prevBtn.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigateMonth(-1); }
+  });
+  nextBtn.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigateMonth(1); }
+  });
+
+  render();
+  updateHiddenInputs();
+})();
+</script>

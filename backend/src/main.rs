@@ -136,7 +136,7 @@ async fn list_events(
 
     let mut days = Vec::new();
     for i in 0..7 {
-        let day = week_start + chrono::TimeDelta::days(i);
+        let day = start + chrono::TimeDelta::days(i);
         let mut events: Vec<EventView> = all_events
             .iter()
             .filter(|(d, _)| *d == day)

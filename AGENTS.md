@@ -4,8 +4,8 @@
 
 Two-package monorepo with no root-level tooling:
 
-- **`backend/`** — Rust binary crate (edition 2024). CalDAV client that fetches and parses iCal events. Axum web server code exists but is commented out; it currently runs as a CLI only.
-- **`frontend/`** — Astro 5 static site. Pico CSS + HTMX + Sass. Calendar UI with placeholder/hardcoded data (not yet wired to backend).
+- **`backend/`** — Rust binary crate (edition 2024). CalDAV client that fetches and parses iCal events. Axum web server.
+- **`frontend/`** — Astro 5 static site. Pico CSS + HTMX + Sass. Calendar UI wired to the backend.
 
 ## Backend
 

@@ -1,6 +1,8 @@
 
     <h2>Calendars</h2>
     <form id="calendar-form">
+        <input type="hidden" name="start" id="week-start-input">
+        <input type="hidden" name="end" id="week-end-input">
         <div id="calendar-container" hx-get="/api/calendars" hx-trigger="load" hx-swap="innerHTML">
             <p>Loading calendars…</p>
         </div>
@@ -25,8 +27,8 @@
 
 .dot {
 	border-radius: 50%;
-	width: 10px;
-	height:10px;
+	width: 12px;
+	height:12px;
 	display:inline-block
 }
 </style>
