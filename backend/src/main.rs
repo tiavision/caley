@@ -12,6 +12,7 @@ use chrono::{Datelike, NaiveDate};
 use clap::Parser;
 use dotenvy::dotenv;
 use serde::Deserialize;
+use tower_http::services::ServeDir;
 
 #[derive(clap::Parser, Debug)]
 struct Cli {
@@ -86,9 +87,12 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState { client };
 
     let app = Router::new()
-        .route("/calendars", get(list_calendars))
-        .route("/events", get(list_events))
-        .with_state(state);
+        .route("/api/calendars", get(list_calendars))
+        .route("/api/events", get(list_events))
+        .with_state(state)
+        .fallback_service(
+            ServeDir::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../frontend/dist"))
+        );
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port)).await?;
     println!("Listening on {}", listener.local_addr()?);
