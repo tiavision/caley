@@ -1,0 +1,13 @@
+<ul class="calendar-list">
+{% for cal in calendars %}
+<li>
+    <label>
+        <input type="checkbox" value="{{ cal.href }}" checked />
+        {{ cal.name }}
+        {% if let Some(color) = cal.color %}
+        <span class="dot" style="background-color: {{ color }};"></span>
+        {% endif %}
+    </label>
+</li>
+{% endfor %}
+</ul>

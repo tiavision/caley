@@ -2,7 +2,7 @@ type: http_request
 model: http_request
 id: rq_YhfoTXbZbR
 createdAt: 2026-05-04T18:42:02.178494900
-updatedAt: 2026-05-04T19:28:13.435001700
+updatedAt: 2026-05-05T08:34:18.381111300
 workspaceId: wk_u4HFZcoL4J
 folderId: null
 authentication: {}
@@ -14,7 +14,7 @@ headers: []
 method: GET
 name: ''
 sortPriority: -1777920060312.0
-url: ${[ BASE_URL ]}/events
+url: ${[ BASE_URL ]}/api/events
 urlParameters:
 - enabled: true
   name: href

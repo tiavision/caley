@@ -2,7 +2,7 @@ type: http_request
 model: http_request
 id: rq_NSPxQ95QkT
 createdAt: 2026-05-04T18:41:00.314212400
-updatedAt: 2026-05-04T18:41:11.802395100
+updatedAt: 2026-05-05T08:34:14.572630200
 workspaceId: wk_u4HFZcoL4J
 folderId: null
 authentication: {}
@@ -14,5 +14,5 @@ headers: []
 method: GET
 name: ''
 sortPriority: -1777920060312.0
-url: ${[ BASE_URL ]}/calendars
+url: ${[ BASE_URL ]}/api/calendars
 urlParameters: []

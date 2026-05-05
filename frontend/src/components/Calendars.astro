@@ -1,50 +1,10 @@
 
     <h2>Calendars</h2>
-    <ul class="calendar-list">
-        <li>
-            <label>
-                <input 
-                    type="checkbox" 
-                    id="1" 
-                    checked
-                />
-                Default</span>
-            </label>
-        </li>
-        <li>
-            <label>
-                <input 
-                    type="checkbox" 
-                    id="1" 
-                    checked
-                />
-                Termine <span class="dot" style="background-color: yellow;"></span>
-            </label>
-        </li>
-        <li>
-            <label>
-                <input 
-                    type="checkbox" 
-                    id="2" 
-                    checked
-                />
-                Ferien <span class="dot" style="background-color: green;"></span>
-            </label>
-        </li>
-        <li>
-            <label>
-                <input 
-                    type="checkbox" 
-                    id="2" 
-                    checked
-                />
-                Family <span class="dot" style="background-color: blueviolet;"></span>
-            </label>
-        </li>
+    <div hx-get="/api/calendars" hx-trigger="load" hx-swap="innerHTML">
+        <p>Loading calendars…</p>
+    </div>
 
-    </ul>
-
-<style>
+<style is:global>
 .calendar-list {
 	padding: 0;
 

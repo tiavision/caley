@@ -1,18 +1,25 @@
 mod caldav;
 
+use askama::Template;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{Html, IntoResponse},
     routing::get,
     Json, Router,
 };
-use caldav::CalDavClient;
+use caldav::{CalDavClient, Calendar};
 use chrono::{Datelike, NaiveDate};
 use clap::Parser;
 use dotenvy::dotenv;
 use serde::Deserialize;
 use tower_http::services::ServeDir;
+
+#[derive(Template)]
+#[template(path = "calendars.html")]
+struct CalendarsTemplate {
+    calendars: Vec<Calendar>,
+}
 
 #[derive(clap::Parser, Debug)]
 struct Cli {
@@ -40,7 +47,13 @@ struct EventsQuery {
 
 async fn list_calendars(State(state): State<AppState>) -> impl IntoResponse {
     match state.client.calendars().await {
-        Ok(calendars) => Json(calendars).into_response(),
+        Ok(calendars) => {
+            let tpl = CalendarsTemplate { calendars };
+            match tpl.render() {
+                Ok(html) => Html(html).into_response(),
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+            }
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
