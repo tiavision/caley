@@ -24,6 +24,29 @@
       grid-template-columns: repeat(7, 1fr);
       gap: 0;
     }
+    h2 {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+    #prev-month, #next-month {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.5em;
+      height: 1.5em;
+      border-radius: var(--pico-border-radius, 0.25rem);
+      font-size: 1em;
+      line-height: 1;
+      color: inherit;
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+    #prev-month:hover, #next-month:hover,
+    #prev-month:focus, #next-month:focus {
+      background: var(--pico-contrast-border, rgba(128, 128, 128, 0.15));
+    }
 </style>
 <style is:global>
     .date-cell {
