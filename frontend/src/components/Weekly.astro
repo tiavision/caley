@@ -22,8 +22,17 @@
   }
 }
 
+.dot {
+  border-radius: 50%;
+  width: 10px;
+  height:10px;
+  display:inline-block
+}
+</style>
+
+<style is:global>
 article {
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.5rem !important;
   font-size: medium;
 
   &.appointment {
@@ -32,19 +41,11 @@ article {
     }
     header {
       font-size: small;
-      margin-bottom: 0.125rem;
+      /* margin-bottom: 0.125rem; */
+    }
   }
 }
 
-.dot {
-  border-radius: 50%;
-  width: 12px;
-  height:12px;
-  display:inline-block
-}
-</style>
-
-<style is:global>
 .week-loading {
   display: none;
 }
