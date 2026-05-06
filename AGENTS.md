@@ -5,11 +5,11 @@
 Two-package monorepo with no root-level tooling:
 
 - **`backend/`** — Rust binary crate (edition 2024). CalDAV client that fetches and parses iCal events. Axum web server.
-- **`frontend/`** — Astro 5 static site. Pico CSS + HTMX + Sass. Calendar UI wired to the backend.
+- **`frontend/`** — Astro 6 static site. Pico CSS + HTMX + Sass. Calendar UI wired to the backend.
 
 ## Backend
 
-- Run: `cargo run` from `backend/` -> Serves frontend at `localhost:3000`, backend/API at `localhost:3000/api`. For frontend make sure to first `npm run build` before `cargo run`
+- Run: `cargo run` from `backend/` → `localhost:3000`
 - Requires `.env` in `backend/` with `BASE_URL`, `USERNAME`, `PASSWORD` (clap reads these via `#[arg(env)]`)
 - Uses `dotenvy` to load `.env`; `clap` with derive + env feature for CLI args
 - Rust edition 2024 (not 2021)  
