@@ -9,10 +9,10 @@ Two-package monorepo with no root-level tooling:
 
 ## Backend
 
-- Run: `cargo run` from `backend/`
+- Run: `cargo run` from `backend/` -> Serves frontend at `localhost:3000`, backend/API at `localhost:3000/api`. For frontend make sure to first `npm run build` before `cargo run`
 - Requires `.env` in `backend/` with `BASE_URL`, `USERNAME`, `PASSWORD` (clap reads these via `#[arg(env)]`)
 - Uses `dotenvy` to load `.env`; `clap` with derive + env feature for CLI args
-- Rust edition 2024 (not 2021)
+- Rust edition 2024 (not 2021)  
 - No tests configured yet
 
 ## Frontend
