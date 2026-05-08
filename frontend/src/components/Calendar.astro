@@ -45,15 +45,15 @@
     }
     #prev-month:hover, #next-month:hover,
     #prev-month:focus, #next-month:focus {
-      background: var(--pico-contrast-border, rgba(128, 128, 128, 0.15));
+      background: var(--pico-contrast-border);
     }
 </style>
 <style is:global>
     .date-cell {
       padding: 0.75rem 0.25rem;
       text-align: center;
-      border-bottom: 1px solid #ddd;
-      border-right: 1px solid #ddd;
+      border-bottom: 1px solid;
+      border-right: 1px solid;
       min-height: 3rem;
       display: flex;
       align-items: center;
@@ -66,8 +66,8 @@
       border-bottom: none;
     }
     .selected-week {
-      background: var(--pico-primary-background, var(--primary, #007bff));
-      color: var(--pico-primary-inverse, white);
+      background: var(--pico-primary-background);
+      color: var(--pico-primary-inverse);
       font-weight: 600;
     }
     .empty {
@@ -75,7 +75,7 @@
       cursor: default;
     }
     .date-cell.empty.selected-week {
-      background: var(--pico-primary-background, var(--primary, #007bff));
+      background: var(--pico-primary-background);
     }
 </style>
 

@@ -1,12 +1,12 @@
 
-    <h2>Calendars</h2>
-    <form id="calendar-form">
-        <input type="hidden" name="start" id="week-start-input">
-        <input type="hidden" name="end" id="week-end-input">
-        <div id="calendar-container" hx-get="/api/calendars" hx-trigger="load" hx-swap="innerHTML">
-            <p>Loading calendars…</p>
-        </div>
-    </form>
+<h2>Calendars</h2>
+<form id="calendar-form">
+	<input type="hidden" name="start" id="week-start-input">
+	<input type="hidden" name="end" id="week-end-input">
+	<div id="calendar-container" hx-get="/api/calendars" hx-trigger="load" hx-swap="innerHTML">
+		<p>Loading calendars…</p>
+	</div>
+</form>
 
 <style is:global>
 .calendar-list {
@@ -15,10 +15,6 @@
 	li {
 		list-style: none;
 	}
-}
-
-.calendar-list li {
-	margin: 0.5rem 0;
 }
 
 .calendar-list input[type="checkbox"] {
