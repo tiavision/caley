@@ -1,0 +1,26 @@
+<div data-month="{{ month }}">
+  <header>
+    <hgroup>
+      <h2>
+        <span hx-get="/api/calendar?month={{ prev_month }}" hx-indicator="#calendar-grid" role="button" tabindex="0" aria-label="Previous month" style="cursor: pointer;"><span class="arrow">&#8249;</span></span>
+        <span id="month-title">{{ month_name }} {{ year }}</span>
+        <span hx-get="/api/calendar?month={{ next_month }}" hx-indicator="#calendar-grid" role="button" tabindex="0" aria-label="Next month" style="cursor: pointer;"><span class="arrow">&#8250;</span></span>
+      </h2>
+      <p>Monthly calendar view</p>
+    </hgroup>
+  </header>
+  <div class="calendar-content" style="position: relative;">
+    <div class="calendar-loading">Loading calendar…</div>
+    <div role="grid" aria-label="Calendar for {{ month_name }} {{ year }}">
+      <div class="date-grid" role="row">
+        <small>Mon</small><small>Tue</small><small>Wed</small>
+        <small>Thu</small><small>Fri</small><small>Sat</small><small>Sun</small>
+      </div>
+      <div class="date-grid" id="date-grid" role="grid">
+        {% for day in days %}
+        <div class="date-cell{% if !day.is_current_month %} empty{% endif %}" data-date="{{ day.date_str }}">{% if day.is_current_month %}{{ day.day_number }}{% if !day.event_colors.is_empty() %}<div class="event-dots">{% for color in day.event_colors %}<span class="event-dot" style="background-color: {{ color }};"></span>{% endfor %}</div>{% endif %}{% endif %}</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>

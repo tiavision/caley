@@ -8,6 +8,16 @@
 	</div>
 </form>
 
+<script>
+(function () {
+  document.getElementById('calendar-form').addEventListener('change', function (e) {
+    if (e.target.type === 'checkbox' && e.target.name === 'cal') {
+      document.body.dispatchEvent(new CustomEvent('calendarChange'));
+    }
+  });
+})();
+</script>
+
 <style is:global>
 .calendar-list {
 	padding: 0;
