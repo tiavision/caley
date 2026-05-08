@@ -20,5 +20,7 @@ serde = { version = "1", features = ["derive"] }
 hyper-rustls = "0.27.7"
 hyper-util = { version = "0.1.19", features = ["client", "tokio"] }
 tokio = { version = "1.49.0", features = ["macros", "net", "rt-multi-thread", "time"] }
+tower = "0.5"
 tower-http = { version = "0.6.8", features = ["auth", "fs"] }
+tower-sessions = "0.14"
 url = "2"

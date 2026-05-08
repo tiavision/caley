@@ -9,14 +9,22 @@ import '../styles/main.scss';
 		<meta name="viewport" content="width=device-width" />
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<meta name="generator" content={Astro.generator} />
-		<title>Caly</title>
+		<title>Caley</title>
 		<script>
 			import 'htmx.org';
 		</script>
 	</head>
 	<body>
+		<header class="container">
+			<nav>
+				<ul><li><strong>Caley</strong></li></ul>
+				<ul>
+					<li hx-get="/api/user" hx-trigger="load" hx-swap="innerHTML">Loading...</li>
+				</ul>
+			</nav>
+		</header>
 		<main class="container">
-		<slot />
+			<slot />
 		</main>
 	</body>
 </html>

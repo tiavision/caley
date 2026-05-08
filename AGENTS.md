@@ -10,8 +10,15 @@ Two-package monorepo with no root-level tooling:
 ## Backend
 
 - Run: `cargo run` from `backend/` → `localhost:3000`
-- Requires `.env` in `backend/` with `BASE_URL`, `USERNAME`, `PASSWORD` (clap reads these via `#[arg(env)]`)
+- Requires `.env` in `backend/` with:
+  - `CALDAV_BASE_URL`, `CALDAV_USERNAME`, `CALDAV_PASSWORD` — CalDAV server credentials (clap reads these via `#[arg(env)]`)
+  - `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` — OIDC provider configuration
+  - `APP_BASE_URL` — public URL of this app (e.g. `http://localhost:3000`), used for OIDC callback
+  - `OIDC_LOGOUT` — set to `false` to skip OIDC provider logout and just clear the session (default: `true`)
+  - `CALDAV_PORT` — listen port (default: `3000`)
 - Uses `dotenvy` to load `.env`; `clap` with derive + env feature for CLI args
+- Auth: all endpoints require OIDC authentication via `axum-oidc`; unauthenticated requests redirect to the OIDC provider
+- Session store: in-memory (`MemoryStore` from `tower-sessions`); sessions lost on restart
 - Rust edition 2024 (not 2021)  
 - No tests configured yet
 
@@ -29,3 +36,4 @@ Two-package monorepo with no root-level tooling:
 - No CI, no linter, no formatter, no test runner configured in either package
 - No root `package.json` or workspace config — each package is independent
 - Frontend data is all hardcoded; backend is not yet serving an API
+- OIDC authentication protects all endpoints; username shown in top-right via HTMX

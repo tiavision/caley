@@ -2,18 +2,28 @@ mod caldav;
 
 use askama::Template;
 use axum::{
+    body::Body,
     extract::{RawQuery, State},
-    http::StatusCode,
-    response::{Html, IntoResponse},
+    http::{Request, StatusCode, Uri},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::get,
     Router,
+};
+use axum_oidc::{
+    ClearSessionFlag, EmptyAdditionalClaims, OidcAuthLayer, OidcClaims, OidcLoginLayer,
+    OidcRpInitiatedLogout,
 };
 use caldav::{CalDavClient, Calendar};
 use chrono::{Datelike, NaiveDate};
 use clap::Parser;
 use dotenvy::dotenv;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use tower::{Layer, Service};
 use tower_http::services::ServeDir;
+use tower_sessions::{MemoryStore, SessionManagerLayer};
 use url::form_urlencoded;
 
 const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
@@ -71,11 +81,22 @@ struct Cli {
     password: String,
     #[arg(env = "CALDAV_PORT", default_value = "3000")]
     port: u16,
+    #[arg(long, env = "OIDC_ISSUER")]
+    oidc_issuer: String,
+    #[arg(long, env = "OIDC_CLIENT_ID")]
+    oidc_client_id: String,
+    #[arg(long, env = "OIDC_CLIENT_SECRET")]
+    oidc_client_secret: String,
+    #[arg(long, env = "APP_BASE_URL")]
+    app_base_url: String,
+    #[arg(long, env = "OIDC_LOGOUT", default_value = "true")]
+    oidc_logout: bool,
 }
 
 #[derive(Clone)]
 struct AppState {
     client: CalDavClient,
+    do_oidc_logout: bool,
 }
 
 
@@ -301,22 +322,142 @@ async fn list_calendar(
     }
 }
 
+async fn user_info(claims: OidcClaims<EmptyAdditionalClaims>) -> impl IntoResponse {
+    let username = claims
+        .name().unwrap().get(None).unwrap();
+        // .preferred_username()
+        // .map(|u| u.to_string())
+        // .unwrap_or_else(|| claims.subject().to_string());
+    Html(format!(
+        r#"<span>{}</span> | <a href="/logout">Logout</a>"#,
+        html_escape(&username),
+    ))
+}
+
+async fn logout_handler(
+    State(state): State<AppState>,
+    logout: OidcRpInitiatedLogout,
+) -> Response {
+    let response = if state.do_oidc_logout {
+        match logout.uri() {
+            Ok(uri) => {
+                let s = uri.to_string();
+                Redirect::to(&s).into_response()
+            }
+            Err(_) => Redirect::to("/").into_response(),
+        }
+    } else {
+        Redirect::to("/").into_response()
+    };
+    let mut response = response;
+    response.extensions_mut().insert(ClearSessionFlag);
+    response
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+#[derive(Clone)]
+struct CatchLayer<L> {
+    inner: L,
+}
+
+impl<L> CatchLayer<L> {
+    fn new(inner: L) -> Self {
+        Self { inner }
+    }
+}
+
+impl<S, L: Layer<S>> Layer<S> for CatchLayer<L> {
+    type Service = CatchService<L::Service>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        CatchService {
+            inner: self.inner.layer(inner),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct CatchService<S> {
+    inner: S,
+}
+
+impl<S> Service<Request<Body>> for CatchService<S>
+where
+    S: Service<Request<Body>, Response = Response> + Clone + Send + 'static,
+    S::Error: std::fmt::Debug + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = std::convert::Infallible;
+    type Future = Pin<Box<dyn Future<Output = Result<Response, std::convert::Infallible>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx).map(|_| Ok(()))
+    }
+
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
+        let mut inner = self.inner.clone();
+        Box::pin(async move {
+            match inner.call(req).await {
+                Ok(response) => Ok(response),
+                Err(e) => {
+                    eprintln!("middleware error: {:?}", e);
+                    Ok(Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from("Internal Server Error"))
+                        .unwrap())
+                }
+            }
+        })
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     let args = Cli::parse();
 
     let client = CalDavClient::new(args.base_url, args.username, args.password)?;
-    let state = AppState { client };
+    let state = AppState {
+        client,
+        do_oidc_logout: args.oidc_logout,
+    };
+
+    let app_base_uri: Uri = args.app_base_url.parse()?;
+
+    let session_store = MemoryStore::default();
+    let session_layer = SessionManagerLayer::new(session_store);
+
+    let oidc_auth_layer = OidcAuthLayer::<EmptyAdditionalClaims>::discover_client(
+        app_base_uri,
+        args.oidc_issuer,
+        args.oidc_client_id,
+        Some(args.oidc_client_secret),
+        vec!["openid".into(), "profile".into()],
+    )
+    .await?;
 
     let app = Router::new()
         .route("/api/calendars", get(list_calendars))
         .route("/api/events", get(list_events))
         .route("/api/calendar", get(list_calendar))
+        .route("/api/user", get(user_info))
+        .route("/logout", get(logout_handler))
         .with_state(state)
-        .fallback_service(
-            ServeDir::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../frontend/dist"))
-        );
+        .fallback_service(ServeDir::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../frontend/dist"
+        )))
+        .layer(CatchLayer::new(OidcLoginLayer::<EmptyAdditionalClaims>::new()))
+        .layer(CatchLayer::new(oidc_auth_layer))
+        .layer(session_layer);
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port)).await?;
     println!("Listening on {}", listener.local_addr()?);
