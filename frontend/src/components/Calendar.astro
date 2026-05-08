@@ -27,7 +27,7 @@
     h2 {
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: space-between;
       gap: 0.5rem;
     }
     #prev-month, #next-month {
@@ -69,15 +69,6 @@
       background: var(--pico-primary-background, var(--primary, #007bff));
       color: var(--pico-primary-inverse, white);
       font-weight: 600;
-      border-color: var(--pico-primary-background, var(--primary, #007bff));
-    }
-    .selected-week-start {
-      border-top-left-radius: var(--pico-border-radius, 0.5rem);
-      border-bottom-left-radius: var(--pico-border-radius, 0.5rem);
-    }
-    .selected-week-end {
-      border-top-right-radius: var(--pico-border-radius, 0.5rem);
-      border-bottom-right-radius: var(--pico-border-radius, 0.5rem);
     }
     .empty {
       background: transparent;
@@ -170,9 +161,6 @@
       var cellMs = cellDate.getTime();
       if (cellMs >= weekStartMs && cellMs <= weekEndMs) {
         cell.classList.add('selected-week');
-        var dow = (cellDate.getDay() + 6) % 7;
-        if (dow === 0) cell.classList.add('selected-week-start');
-        if (dow === 6) cell.classList.add('selected-week-end');
       }
 
       if (isCurrentMonth) {
