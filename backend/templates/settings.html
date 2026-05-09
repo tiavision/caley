@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Settings - Caley</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        .settings-form { max-width: 32rem; margin: 2rem auto; }
+        .error-msg { color: var(--pico-del-color); }
+        .success-msg { color: var(--pico-ins-color); }
+    </style>
+    <script src="https://unpkg.com/htmx.org@2.0.8"></script>
+</head>
+<body>
+    <header class="container">
+        <nav>
+            <ul><li><strong>Caley</strong></li></ul>
+            <ul><li><a href="/">Calendar</a></li></ul>
+        </nav>
+    </header>
+    <main class="container">
+        <div class="settings-form">
+            <hgroup>
+                <h2>Settings</h2>
+                <p>Configure your CalDAV connection to fetch calendar events.</p>
+            </hgroup>
+            <div id="settings-result"></div>
+            <form hx-post="/api/settings" hx-target="#settings-result" hx-swap="innerHTML">
+                <fieldset>
+                    <label for="caldav_base_url">CalDAV Base URL
+                        <input type="url" id="caldav_base_url" name="caldav_base_url"
+                               value="{{ base_url }}"
+                               placeholder="https://caldav.example.com" required>
+                    </label>
+                    <label for="caldav_username">CalDAV Username
+                        <input type="text" id="caldav_username" name="caldav_username"
+                               value="{{ username }}"
+                               placeholder="your-username" required>
+                    </label>
+                    <label for="caldav_password">CalDAV Password
+                        <input type="password" id="caldav_password" name="caldav_password"
+                               value="{{ password }}"
+                               placeholder="your-password" required>
+                    </label>
+                </fieldset>
+                <button type="submit">Save &amp; Test Connection</button>
+            </form>
+        </div>
+    </main>
+</body>
+</html>

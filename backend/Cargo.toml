@@ -19,6 +19,7 @@ rrule = "0.13"
 serde = { version = "1", features = ["derive"] }
 hyper-rustls = { version = "0.27.7", default-features = false, features = ["webpki-tokio", "logging"] }
 hyper-util = { version = "0.1.19", features = ["client", "tokio"] }
+rusqlite = { version = "0.34", features = ["bundled"] }
 tokio = { version = "1.49.0", features = ["macros", "net", "rt-multi-thread", "time"] }
 tower = "0.5"
 tower-http = { version = "0.6.8", features = ["auth", "fs"] }

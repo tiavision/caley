@@ -11,14 +11,18 @@ Two-package monorepo with no root-level tooling:
 
 - Run: `cargo run` from `backend/` → `localhost:3000`
 - Requires `.env` in `backend/` with:
-  - `CALDAV_BASE_URL`, `CALDAV_USERNAME`, `CALDAV_PASSWORD` — CalDAV server credentials (clap reads these via `#[arg(env)]`)
   - `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` — OIDC provider configuration
-  - `APP_BASE_URL` — public URL of this app (e.g. `http://localhost:3000`), used for OIDC callback
   - `OIDC_LOGOUT` — set to `false` to skip OIDC provider logout and just clear the session (default: `true`)
+  - `APP_BASE_URL` — public URL of this app (e.g. `http://localhost:3000`), used for OIDC callback
   - `CALDAV_PORT` — listen port (default: `3000`)
+  - `DATABASE_PATH` — path to SQLite database file (default: `./data/caley.db`)
+  - `OIDC_USER_ID_CLAIM` — which OIDC claim to use as user ID: `sub` (default), `preferred_username`, `email`, or `name`
+- CalDAV credentials (base URL, username, password) are per-user settings stored in SQLite, not global env vars
+- New users are redirected to `/settings` to configure their CalDAV connection; settings are tested before saving
 - Uses `dotenvy` to load `.env`; `clap` with derive + env feature for CLI args
 - Auth: all endpoints require OIDC authentication via `axum-oidc`; unauthenticated requests redirect to the OIDC provider
 - Session store: in-memory (`MemoryStore` from `tower-sessions`); sessions lost on restart
+- Database: SQLite via `rusqlite` (bundled); per-user CalDAV settings stored in `user_settings` table
 - Rust edition 2024 (not 2021)  
 - No tests configured yet
 

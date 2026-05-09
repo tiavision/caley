@@ -2,11 +2,11 @@ type: http_request
 model: http_request
 id: rq_NSPxQ95QkT
 createdAt: 2026-05-04T18:41:00.314212400
-updatedAt: 2026-05-05T08:34:14.572630200
+updatedAt: 2026-05-09T14:54:25.728762100
 workspaceId: wk_u4HFZcoL4J
 folderId: null
 authentication: {}
-authenticationType: null
+authenticationType: none
 body: {}
 bodyType: null
 description: ''

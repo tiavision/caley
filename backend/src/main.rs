@@ -1,12 +1,13 @@
 mod caldav;
+mod db;
 
 use askama::Template;
 use axum::{
     body::Body,
-    extract::{RawQuery, State},
+    extract::{Form, RawQuery, State},
     http::{Request, StatusCode, Uri},
     response::{Html, IntoResponse, Redirect, Response},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use axum_oidc::{
@@ -16,10 +17,13 @@ use axum_oidc::{
 use caldav::{CalDavClient, Calendar};
 use chrono::{Datelike, NaiveDate};
 use clap::Parser;
+use db::{Db, UserSettings};
 use dotenvy::dotenv;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 use tower_http::services::ServeDir;
@@ -29,13 +33,13 @@ use url::form_urlencoded;
 const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
 
 #[derive(Template)]
-#[template(path = "calendars.html", whitespace="minimize")]
+#[template(path = "calendars.html", whitespace = "minimize")]
 struct CalendarsTemplate {
     calendars: Vec<Calendar>,
 }
 
 #[derive(Template)]
-#[template(path = "weekly.html", whitespace="minimize")]
+#[template(path = "weekly.html", whitespace = "minimize")]
 struct WeeklyTemplate {
     days: Vec<DayView>,
 }
@@ -54,7 +58,7 @@ struct EventView {
 }
 
 #[derive(Template)]
-#[template(path = "calendar.html", whitespace="minimize")]
+#[template(path = "calendar.html", whitespace = "minimize")]
 struct CalendarTemplate {
     month: String,
     month_name: String,
@@ -71,14 +75,16 @@ struct CalendarDay {
     event_colors: Vec<String>,
 }
 
+#[derive(Template)]
+#[template(path = "settings.html", whitespace = "minimize")]
+struct SettingsTemplate {
+    base_url: String,
+    username: String,
+    password: String,
+}
+
 #[derive(clap::Parser, Debug)]
 struct Cli {
-    #[arg(env = "CALDAV_BASE_URL")]
-    base_url: String,
-    #[arg(env = "CALDAV_USERNAME")]
-    username: String,
-    #[arg(env = "CALDAV_PASSWORD")]
-    password: String,
     #[arg(env = "CALDAV_PORT", default_value = "3000")]
     port: u16,
     #[arg(long, env = "OIDC_ISSUER")]
@@ -93,18 +99,77 @@ struct Cli {
     oidc_logout: bool,
     #[arg(long, env = "STATIC_DIR")]
     static_dir: Option<String>,
+    #[arg(long, env = "DATABASE_PATH", default_value = "./data/caley.db")]
+    database_path: String,
+    #[arg(long, env = "OIDC_USER_ID_CLAIM", default_value = "sub")]
+    oidc_user_id_claim: String,
 }
 
 #[derive(Clone)]
 struct AppState {
-    client: CalDavClient,
+    db: Arc<Db>,
     do_oidc_logout: bool,
+    oidc_user_id_claim: String,
 }
 
+fn extract_user_id(claims: &OidcClaims<EmptyAdditionalClaims>, claim: &str) -> Option<String> {
+    match claim {
+        "sub" => Some(claims.subject().as_str().to_owned()),
+        "preferred_username" => claims
+            .preferred_username()
+            .map(|u| u.as_str().to_owned()),
+        "email" => claims.email().map(|e| e.as_str().to_owned()),
+        "name" => claims
+            .name()
+            .and_then(|n| n.get(None).map(|s| s.as_str().to_owned())),
+        _ => None,
+    }
+}
 
+fn require_client(
+    state: &AppState,
+    claims: &OidcClaims<EmptyAdditionalClaims>,
+) -> Result<CalDavClient, Response> {
+    let user_id = match extract_user_id(claims, &state.oidc_user_id_claim) {
+        Some(id) => id,
+        None => {
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Could not determine user ID from OIDC claims").into_response());
+        }
+    };
 
-async fn list_calendars(State(state): State<AppState>) -> impl IntoResponse {
-    match state.client.calendars().await {
+    let db = state.db.lock().unwrap();
+    let settings = match db::get_settings(&db, &user_id) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Database error: {e}");
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response());
+        }
+    };
+
+    match settings {
+        Some(s) => CalDavClient::new(s.caldav_base_url, s.caldav_username, s.caldav_password)
+            .map_err(|e| {
+                eprintln!("CalDAV client error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "CalDAV configuration error").into_response()
+            }),
+        None => {
+            let mut response = (StatusCode::OK, "Redirecting to settings\u{2026}").into_response();
+            response.headers_mut().insert("HX-Redirect", "/settings".parse().unwrap());
+            Err(response)
+        }
+    }
+}
+
+async fn list_calendars(
+    State(state): State<AppState>,
+    claims: OidcClaims<EmptyAdditionalClaims>,
+) -> Response {
+    let client = match require_client(&state, &claims) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+
+    match client.calendars().await {
         Ok(calendars) => {
             let tpl = CalendarsTemplate { calendars };
             match tpl.render() {
@@ -118,8 +183,14 @@ async fn list_calendars(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn list_events(
     State(state): State<AppState>,
+    claims: OidcClaims<EmptyAdditionalClaims>,
     RawQuery(raw_query): RawQuery,
-) -> impl IntoResponse {
+) -> Response {
+    let client = match require_client(&state, &claims) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+
     let today = chrono::Local::now().date_naive();
 
     let weekday = today.weekday().num_days_from_monday();
@@ -134,10 +205,8 @@ async fn list_events(
         for (key, value) in form_urlencoded::parse(query.as_bytes()) {
             match key.as_ref() {
                 "cal" => cal_params.push(value.into_owned()),
-                "start" => start =
-                    NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok(),
-                "end" => end =
-                    NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok(),
+                "start" => start = NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok(),
+                "end" => end = NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok(),
                 _ => {}
             }
         }
@@ -154,7 +223,7 @@ async fn list_events(
             None => (entry.as_str(), ""),
         };
 
-        match state.client.events(href, start, end).await {
+        match client.events(href, start, end).await {
             Ok(events) => {
                 for event in events {
                     let time_range = match (&event.start_time, &event.end_time) {
@@ -218,8 +287,14 @@ async fn list_events(
 
 async fn list_calendar(
     State(state): State<AppState>,
+    claims: OidcClaims<EmptyAdditionalClaims>,
     RawQuery(raw_query): RawQuery,
-) -> impl IntoResponse {
+) -> Response {
+    let client = match require_client(&state, &claims) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+
     let today = chrono::Local::now().date_naive();
 
     let mut cal_params: Vec<String> = Vec::new();
@@ -269,7 +344,7 @@ async fn list_calendar(
             color.to_string()
         };
 
-        match state.client.events(href, first_day, last_day).await {
+        match client.events(href, first_day, last_day).await {
             Ok(events) => {
                 for event in events {
                     colors_map
@@ -324,15 +399,134 @@ async fn list_calendar(
     }
 }
 
-async fn user_info(claims: OidcClaims<EmptyAdditionalClaims>) -> impl IntoResponse {
-    let username = claims
-        .name().unwrap().get(None).unwrap();
-        // .preferred_username()
-        // .map(|u| u.to_string())
-        // .unwrap_or_else(|| claims.subject().to_string());
+async fn settings_page(
+    State(state): State<AppState>,
+    claims: OidcClaims<EmptyAdditionalClaims>,
+) -> Response {
+    let user_id = match extract_user_id(&claims, &state.oidc_user_id_claim) {
+        Some(id) => id,
+        None => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Could not determine user ID").into_response();
+        }
+    };
+
+    let db = state.db.lock().unwrap();
+    let existing = match db::get_settings(&db, &user_id) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Database error: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+        }
+    };
+
+    let (base_url, username, password) = match existing {
+        Some(ref s) => (s.caldav_base_url.clone(), s.caldav_username.clone(), s.caldav_password.clone()),
+        None => (String::new(), String::new(), String::new()),
+    };
+
+    let tpl = SettingsTemplate {
+        base_url,
+        username,
+        password,
+    };
+    match tpl.render() {
+        Ok(html) => Html(html).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct SettingsForm {
+    caldav_base_url: String,
+    caldav_username: String,
+    caldav_password: String,
+}
+
+async fn save_settings(
+    State(state): State<AppState>,
+    claims: OidcClaims<EmptyAdditionalClaims>,
+    Form(form): Form<SettingsForm>,
+) -> Response {
+    let user_id = match extract_user_id(&claims, &state.oidc_user_id_claim) {
+        Some(id) => id,
+        None => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Could not determine user ID").into_response();
+        }
+    };
+
+    let settings = UserSettings {
+        caldav_base_url: form.caldav_base_url,
+        caldav_username: form.caldav_username,
+        caldav_password: form.caldav_password,
+    };
+
+    let client = match CalDavClient::new(
+        settings.caldav_base_url.clone(),
+        settings.caldav_username.clone(),
+        settings.caldav_password.clone(),
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            return format!(
+                r#"<div class="error-msg">Connection failed: {}</div>"#,
+                html_escape(&e.to_string()),
+            )
+            .into_response();
+        }
+    };
+
+    match client.calendars().await {
+        Ok(_) => {}
+        Err(e) => {
+            return format!(
+                r#"<div class="error-msg">Connection test failed: {}</div>"#,
+                html_escape(&e.to_string()),
+            )
+            .into_response();
+        }
+    }
+
+    let db = state.db.lock().unwrap();
+    if let Err(e) = db::upsert_settings(&db, &user_id, &settings) {
+        eprintln!("Database error: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save settings").into_response();
+    }
+
+    r#"<div class="success-msg">Settings saved! Redirecting...</div><script>setTimeout(function(){ window.location.href='/'; }, 500);</script>"#.into_response()
+}
+
+async fn user_info(
+    State(state): State<AppState>,
+    claims: OidcClaims<EmptyAdditionalClaims>,
+) -> impl IntoResponse {
+    let display_name = claims
+        .name()
+        .and_then(|n| n.get(None).map(|s| s.as_str().to_owned()))
+        .or_else(|| claims.preferred_username().map(|u| u.as_str().to_owned()))
+        .or_else(|| Some(claims.subject().as_str().to_owned()))
+        .unwrap_or_default();
+
+    let has_settings = {
+        let user_id = extract_user_id(&claims, &state.oidc_user_id_claim);
+        match user_id {
+            Some(uid) => {
+                let db = state.db.lock().unwrap();
+                db::get_settings(&db, &uid).ok().flatten().is_some()
+            }
+            None => false,
+        }
+    };
+
+    let settings_link = if has_settings {
+        r#" | <a href="/settings">Settings</a>"#
+    } else {
+        r#" | <a href="/settings">Set up CalDAV</a>"#
+    };
+
     Html(format!(
-        r#"<span>{}</span> | <a href="/logout">Logout</a>"#,
-        html_escape(&username),
+        r#"<span>{}</span>{} | <a href="/logout">Logout</a>"#,
+        html_escape(&display_name),
+        settings_link,
     ))
 }
 
@@ -426,10 +620,13 @@ async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     let args = Cli::parse();
 
-    let client = CalDavClient::new(args.base_url, args.username, args.password)?;
+    let db_conn = db::init_db(&args.database_path)?;
+    let db = Arc::new(Mutex::new(db_conn));
+
     let state = AppState {
-        client,
+        db,
         do_oidc_logout: args.oidc_logout,
+        oidc_user_id_claim: args.oidc_user_id_claim,
     };
 
     let app_base_uri: Uri = args.app_base_url.parse()?;
@@ -451,12 +648,14 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/events", get(list_events))
         .route("/api/calendar", get(list_calendar))
         .route("/api/user", get(user_info))
+        .route("/settings", get(settings_page))
+        .route("/api/settings", post(save_settings))
         .route("/logout", get(logout_handler))
         .with_state(state)
         .fallback_service(ServeDir::new(
-        args.static_dir
-            .unwrap_or_else(|| concat!(env!("CARGO_MANIFEST_DIR"), "/../frontend/dist").to_string()),
-    ))
+            args.static_dir
+                .unwrap_or_else(|| concat!(env!("CARGO_MANIFEST_DIR"), "/../frontend/dist").to_string()),
+        ))
         .layer(CatchLayer::new(OidcLoginLayer::<EmptyAdditionalClaims>::new()))
         .layer(CatchLayer::new(oidc_auth_layer))
         .layer(session_layer);
