@@ -91,6 +91,8 @@ struct Cli {
     app_base_url: String,
     #[arg(long, env = "OIDC_LOGOUT", default_value = "true")]
     oidc_logout: bool,
+    #[arg(long, env = "STATIC_DIR")]
+    static_dir: Option<String>,
 }
 
 #[derive(Clone)]
@@ -451,10 +453,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/user", get(user_info))
         .route("/logout", get(logout_handler))
         .with_state(state)
-        .fallback_service(ServeDir::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../frontend/dist"
-        )))
+        .fallback_service(ServeDir::new(
+        args.static_dir
+            .unwrap_or_else(|| concat!(env!("CARGO_MANIFEST_DIR"), "/../frontend/dist").to_string()),
+    ))
         .layer(CatchLayer::new(OidcLoginLayer::<EmptyAdditionalClaims>::new()))
         .layer(CatchLayer::new(oidc_auth_layer))
         .layer(session_layer);

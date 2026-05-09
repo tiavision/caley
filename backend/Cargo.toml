@@ -14,10 +14,10 @@ clap = { version = "4.5.54", features = ["derive", "env"] }
 dotenvy = { version = "0.15.7" }
 ical = "0.11"
 quick-xml = "0.37"
-reqwest = { version = "0.12", features = ["rustls-tls-native-roots"] }
+reqwest = { version = "0.12", features = ["rustls-tls-webpki-roots"] }
 rrule = "0.13"
 serde = { version = "1", features = ["derive"] }
-hyper-rustls = "0.27.7"
+hyper-rustls = { version = "0.27.7", default-features = false, features = ["webpki-tokio", "logging"] }
 hyper-util = { version = "0.1.19", features = ["client", "tokio"] }
 tokio = { version = "1.49.0", features = ["macros", "net", "rt-multi-thread", "time"] }
 tower = "0.5"
