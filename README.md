@@ -15,16 +15,17 @@ Requires `.env` or environment variables with:
 
 | Variable | Description |
 |---|---|
-| `CALDAV_BASE_URL` | CalDAV server URL |
-| `CALDAV_USERNAME` | CalDAV username |
-| `CALDAV_PASSWORD` | CalDAV password |
 | `OIDC_ISSUER` | OIDC provider issuer URL |
 | `OIDC_CLIENT_ID` | OIDC client ID |
 | `OIDC_CLIENT_SECRET` | OIDC client secret |
 | `APP_BASE_URL` | Public URL of this app (e.g. `https://calendar.mydomain.ltd`) |
 | `OIDC_LOGOUT` | Set to `false` to skip OIDC logout (default: `true`) |
+| `OIDC_USER_ID_CLAIM` | Which OIDC claim to use as user ID: `sub` (default), `preferred_username`, `email`, or `name` |
 | `CALDAV_PORT` | Listen port (default: `3000`) |
+| `DATABASE_PATH` | Path to SQLite database file (default: `./data/caley.db`). Parent directory is created automatically. |
 | `STATIC_DIR` | Path to frontend dist directory (default: `../frontend/dist`) |
+
+CalDAV credentials (base URL, username, password) are configured per-user through the settings page after login, not via environment variables.
 
 ### Frontend
 
@@ -47,9 +48,7 @@ docker build -t caley .
 
 ```bash
 docker run -p 3000:3000 \
-  -e CALDAV_BASE_URL=https://caldav.mydomain.ltd \
-  -e CALDAV_USERNAME=user \
-  -e CALDAV_PASSWORD=pass \
+  -v caley-data:/data \
   -e OIDC_ISSUER=https://auth.mydomain.ltd \
   -e OIDC_CLIENT_ID=caley \
   -e OIDC_CLIENT_SECRET=secret \
@@ -57,4 +56,4 @@ docker run -p 3000:3000 \
   caley
 ```
 
-All environment variables from the `.env` section above can be passed with `-e`. `STATIC_DIR` is preset to `/static` in the image and doesn't need to be overridden.
+All environment variables from the `.env` section above can be passed with `-e`. `STATIC_DIR` is preset to `/static` in the image and doesn't need to be overridden. Mount a volume at `/data` (or your configured `DATABASE_PATH`) to persist the SQLite database across container restarts.

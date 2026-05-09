@@ -23,6 +23,7 @@ Two-package monorepo with no root-level tooling:
 - Auth: all endpoints require OIDC authentication via `axum-oidc`; unauthenticated requests redirect to the OIDC provider
 - Session store: in-memory (`MemoryStore` from `tower-sessions`); sessions lost on restart
 - Database: SQLite via `rusqlite` (bundled); per-user CalDAV settings stored in `user_settings` table
+- Database file location is configurable via `DATABASE_PATH` env var (default: `./data/caley.db`). The parent directory is created automatically. When running in Podman/Docker, mount a volume at `/data` (or your configured path) to persist the database across container restarts, e.g. `podman run -v caley-data:/data …`
 - Rust edition 2024 (not 2021)  
 - No tests configured yet
 
