@@ -29,13 +29,13 @@ use url::form_urlencoded;
 const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
 
 #[derive(Template)]
-#[template(path = "calendars.html")]
+#[template(path = "calendars.html", whitespace="minimize")]
 struct CalendarsTemplate {
     calendars: Vec<Calendar>,
 }
 
 #[derive(Template)]
-#[template(path = "weekly.html")]
+#[template(path = "weekly.html", whitespace="minimize")]
 struct WeeklyTemplate {
     days: Vec<DayView>,
 }
@@ -54,7 +54,7 @@ struct EventView {
 }
 
 #[derive(Template)]
-#[template(path = "calendar.html")]
+#[template(path = "calendar.html", whitespace="minimize")]
 struct CalendarTemplate {
     month: String,
     month_name: String,
