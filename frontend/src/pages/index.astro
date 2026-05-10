@@ -10,12 +10,55 @@ import Calendars from '../components/Calendars.astro';
 ---
 
 <Layout>
-    <div class="grid">
-        <div><Calendar /></div>
-        <div><Calendars /></div>
+    <div class="layout">
+        <div class="calendar-picker"><Calendar /></div>
+        <div class="calendar-list"><Calendars /></div>
+        <div class="weekly"><Weekly /></div>
     </div>
-	
-	<Weekly />
-
-
 </Layout>
+
+<style>
+.layout {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.calendar-picker {
+    order: 1;
+}
+
+.weekly {
+    order: 2;
+}
+
+.calendar-list {
+    order: 3;
+}
+
+@media (min-width: 768px) {
+    .layout {
+        display: grid;
+        grid-template-columns: minmax(auto, 28rem) 1fr;
+        grid-template-areas:
+            "picker list"
+            "weekly weekly";
+        gap: 1rem;
+    }
+
+    .calendar-picker {
+        grid-area: picker;
+        order: unset;
+    }
+
+    .calendar-list {
+        grid-area: list;
+        order: unset;
+    }
+
+    .weekly {
+        grid-area: weekly;
+        order: unset;
+    }
+}
+</style>
