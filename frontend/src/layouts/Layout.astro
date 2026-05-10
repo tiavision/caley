@@ -11,7 +11,8 @@ import '../styles/main.scss';
 		<meta name="generator" content={Astro.generator} />
 		<title>Caley</title>
 		<script>
-			import 'htmx.org';
+			import htmx from 'htmx.org';
+			window.htmx = htmx;
 		</script>
 	</head>
 	<body>

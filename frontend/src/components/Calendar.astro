@@ -133,6 +133,16 @@
     return y + '-' + m + '-' + day;
   }
 
+  function formatMonth(d) {
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    return y + '-' + m;
+  }
+
+  function isSameMonth(a, b) {
+    return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+  }
+
   function updateHiddenInputs() {
     var weekStartInput = document.getElementById('week-start-input');
     var weekEndInput = document.getElementById('week-end-input');
@@ -189,10 +199,53 @@
     }
   });
 
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'n' && e.key !== 'N' && e.key !== 'p' && e.key !== 'P') return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    var active = document.activeElement;
+    if (active) {
+      var tag = active.tagName.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || active.isContentEditable) return;
+    }
+
+    var dialog = document.getElementById('event-detail');
+    if (dialog && dialog.open) return;
+
+    e.preventDefault();
+
+    var delta = 0;
+    if (e.key === 'n') delta = 7;
+    else if (e.key === 'N') delta = 28;
+    else if (e.key === 'p') delta = -7;
+    else if (e.key === 'P') delta = -28;
+
+    selectedWeekStart.setDate(selectedWeekStart.getDate() + delta);
+    updateHiddenInputs();
+
+    var currentMonthEl = grid.querySelector('[data-month]');
+    var currentMonth = currentMonthEl ? currentMonthEl.getAttribute('data-month') : null;
+
+    if (currentMonth && isSameMonth(selectedWeekStart, new Date(currentMonth + '-01'))) {
+      applyWeekHighlight();
+    } else {
+      var newMonth = formatMonth(selectedWeekStart);
+      if (window.htmx) {
+        window.htmx.ajax('GET', '/api/calendar?month=' + newMonth, { target: grid, swap: 'innerHTML', source: grid });
+      }
+    }
+
+    var form = document.getElementById('calendar-form');
+    if (form) {
+      form.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+
   document.body.addEventListener('htmx:afterSettle', function (e) {
     if (e.detail.target && e.detail.target.id === 'calendar-grid') {
       updateHxGet();
       applyWeekHighlight();
+      updateHiddenInputs();
     }
   });
 
