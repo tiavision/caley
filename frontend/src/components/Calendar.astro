@@ -107,6 +107,34 @@
     opacity: 0.3;
     transition: opacity 200ms ease-in;
   }
+  .month-picker {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.25rem;
+    white-space: nowrap;
+  }
+  .month-picker select {
+    background-color: var(--pico-form-element-background-color);
+    color: var(--pico-form-element-color);
+    border-radius: var(--pico-border-radius);
+    font: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    cursor: pointer;
+    padding: 0.125rem 0.5rem;
+    margin: 0;
+    text-align: center;
+    width: auto;
+  }
+  .month-picker select option {
+    background-color: var(--pico-form-element-background-color);
+    color: var(--pico-form-element-color);
+  }
+  .month-picker select:hover,
+  .month-picker select:focus {
+    border-color: var(--pico-form-element-active-border-color);
+    outline: none;
+  }
 </style>
 
 <script>
@@ -178,6 +206,57 @@
     });
   }
 
+  var MONTH_NAMES = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  function enhanceMonthPicker() {
+    var container = grid.querySelector('[data-month]');
+    var title = grid.querySelector('#month-title');
+    if (!container || !title) return;
+
+    var monthAttr = container.getAttribute('data-month');
+    if (!monthAttr) return;
+
+    var parts = monthAttr.split('-');
+    var currentYear = +parts[0];
+    var currentMonth = +parts[1];
+
+    var picker = document.createElement('span');
+    picker.className = 'month-picker';
+
+    var monthSelect = document.createElement('select');
+    monthSelect.className = 'month-select';
+    monthSelect.setAttribute('aria-label', 'Month');
+    MONTH_NAMES.forEach(function(name, idx) {
+      var opt = document.createElement('option');
+      var val = String(idx + 1).padStart(2, '0');
+      opt.value = val;
+      opt.textContent = name;
+      if (idx + 1 === currentMonth) opt.selected = true;
+      monthSelect.appendChild(opt);
+    });
+
+    var yearSelect = document.createElement('select');
+    yearSelect.className = 'year-select';
+    yearSelect.setAttribute('aria-label', 'Year');
+    var yearNow = new Date().getFullYear();
+    for (var y = yearNow - 50; y <= yearNow + 50; y++) {
+      var opt = document.createElement('option');
+      opt.value = y;
+      opt.textContent = y;
+      if (y === currentYear) opt.selected = true;
+      yearSelect.appendChild(opt);
+    }
+
+    picker.appendChild(monthSelect);
+    picker.appendChild(yearSelect);
+
+    title.innerHTML = '';
+    title.appendChild(picker);
+  }
+
   function updateHxGet() {
     var monthEl = grid.querySelector('[data-month]');
     if (monthEl) {
@@ -206,7 +285,7 @@
     var active = document.activeElement;
     if (active) {
       var tag = active.tagName.toLowerCase();
-      if (tag === 'input' || tag === 'textarea' || active.isContentEditable) return;
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || active.isContentEditable) return;
     }
 
     var dialog = document.getElementById('event-detail');
@@ -241,11 +320,30 @@
     }
   });
 
+  grid.addEventListener('change', function (e) {
+    var target = e.target;
+    if (!target.classList) return;
+    if (!target.classList.contains('month-select') && !target.classList.contains('year-select')) return;
+
+    var picker = target.closest('.month-picker');
+    if (!picker) return;
+
+    var monthSelect = picker.querySelector('.month-select');
+    var yearSelect = picker.querySelector('.year-select');
+    if (!monthSelect || !yearSelect) return;
+
+    var newMonth = yearSelect.value + '-' + monthSelect.value;
+    if (window.htmx) {
+      window.htmx.ajax('GET', '/api/calendar?month=' + newMonth, { target: grid, swap: 'innerHTML', source: grid });
+    }
+  });
+
   document.body.addEventListener('htmx:afterSettle', function (e) {
     if (e.detail.target && e.detail.target.id === 'calendar-grid') {
       updateHxGet();
       applyWeekHighlight();
       updateHiddenInputs();
+      enhanceMonthPicker();
     }
   });
 
