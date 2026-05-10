@@ -19,6 +19,8 @@ pub struct Calendar {
 pub struct Event {
     pub uid: String,
     pub summary: String,
+    pub description: String,
+    pub location: String,
     pub dtstart: String,
     pub dtend: Option<String>,
     pub date: NaiveDate,
@@ -50,6 +52,8 @@ struct DateProperty {
 struct RawIcalEvent {
     uid: String,
     summary: String,
+    description: String,
+    location: String,
     dtstart: NaiveDateTime,
     dtstart_is_date: bool,
     dtstart_tzid: Option<String>,
@@ -489,6 +493,42 @@ fn extract_raw_events(xml: &str) -> anyhow::Result<Vec<RawIcalEvent>> {
     Ok(events)
 }
 
+fn unescape_ical_text(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            match chars[i + 1] {
+                'n' | 'N' => {
+                    result.push('\n');
+                    i += 2;
+                }
+                ',' => {
+                    result.push(',');
+                    i += 2;
+                }
+                ';' => {
+                    result.push(';');
+                    i += 2;
+                }
+                '\\' => {
+                    result.push('\\');
+                    i += 2;
+                }
+                _ => {
+                    result.push(chars[i]);
+                    i += 1;
+                }
+            }
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+    result
+}
+
 fn parse_raw_event(ical_data: &str) -> Option<RawIcalEvent> {
     let calendar = ical::IcalParser::new(ical_data.as_bytes()).next()?;
     let calendar = calendar.ok()?;
@@ -496,6 +536,8 @@ fn parse_raw_event(ical_data: &str) -> Option<RawIcalEvent> {
     for event in calendar.events {
         let mut uid: Option<String> = None;
         let mut summary: Option<String> = None;
+        let mut description: Option<String> = None;
+        let mut location: Option<String> = None;
         let mut dtstart_value: Option<String> = None;
         let mut dtstart_tzid: Option<String> = None;
         let mut dtstart_is_date = false;
@@ -511,7 +553,9 @@ fn parse_raw_event(ical_data: &str) -> Option<RawIcalEvent> {
         for property in event.properties {
             match property.name.as_str() {
                 "UID" => uid = property.value,
-                "SUMMARY" => summary = property.value,
+                "SUMMARY" => summary = property.value.map(|v| unescape_ical_text(&v)),
+                "DESCRIPTION" => description = property.value.map(|v| unescape_ical_text(&v)),
+                "LOCATION" => location = property.value.map(|v| unescape_ical_text(&v)),
                 "DTSTART" => {
                     dtstart_value = property.value.clone();
                     let mut found_tzid = None;
@@ -620,7 +664,9 @@ fn parse_raw_event(ical_data: &str) -> Option<RawIcalEvent> {
         }
 
         let uid = uid.unwrap_or_default();
-        let name = summary.unwrap_or_default();
+        let summary = summary.unwrap_or_default();
+        let description = description.unwrap_or_default();
+        let location = location.unwrap_or_default();
         let raw_dtstart = dtstart_value.as_deref()?;
         let dtstart = parse_dtstart(raw_dtstart)?;
 
@@ -645,7 +691,9 @@ fn parse_raw_event(ical_data: &str) -> Option<RawIcalEvent> {
 
         return Some(RawIcalEvent {
             uid,
-            summary: name,
+            summary,
+            description,
+            location,
             dtstart,
             dtstart_is_date,
             dtstart_tzid,
@@ -748,6 +796,8 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                     events.push(create_event(
                         &override_event.uid,
                         &override_event.summary,
+                        &override_event.description,
+                        &override_event.location,
                         override_event.dtstart,
                         override_event.dtstart_is_date,
                         Some(override_event.dtstart + override_event.duration),
@@ -763,6 +813,8 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                     events.push(create_event(
                         &master.uid,
                         &master.summary,
+                        &master.description,
+                        &master.location,
                         dt,
                         master.dtstart_is_date,
                         Some(dt + master.duration),
@@ -777,6 +829,8 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
             events.push(create_event(
                 &master.uid,
                 &master.summary,
+                &master.description,
+                &master.location,
                 master.dtstart,
                 master.dtstart_is_date,
                 Some(master.dtstart + master.duration),
@@ -857,6 +911,8 @@ fn expand_recurring(master: &RawIcalEvent, start: NaiveDate, end: NaiveDate) -> 
 fn create_event(
     uid: &str,
     summary: &str,
+    description: &str,
+    location: &str,
     dtstart: NaiveDateTime,
     dtstart_is_date: bool,
     dtend: Option<NaiveDateTime>,
@@ -898,6 +954,8 @@ fn create_event(
     Event {
         uid: uid.to_string(),
         summary: summary.to_string(),
+        description: description.to_string(),
+        location: location.to_string(),
         dtstart: dtstart_str,
         dtend: dtend_str,
         date,

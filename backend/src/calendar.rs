@@ -36,9 +36,18 @@ struct DayView {
 
 #[derive(Clone)]
 struct EventView {
+    uid: String,
     time_range: String,
     summary: String,
     color: String,
+    dtstart: String,
+    dtend: String,
+    is_all_day: bool,
+    tz: String,
+    location: String,
+    description: String,
+    is_recurring: bool,
+    recurrence_json: String,
 }
 
 #[derive(Template)]
@@ -192,12 +201,29 @@ pub async fn list_events(
                     } else {
                         color.to_string()
                     };
+                    let recurrence_json = if event.is_recurring {
+                        match &event.recurrence {
+                            Some(r) => serde_json::to_string(r).unwrap_or_default(),
+                            None => "{}".to_string(),
+                        }
+                    } else {
+                        String::new()
+                    };
                     all_events.push((
                         event.date,
                         EventView {
+                            uid: event.uid,
                             time_range,
                             summary: event.summary,
                             color: dot_color,
+                            dtstart: event.dtstart,
+                            dtend: event.dtend.unwrap_or_default(),
+                            is_all_day: event.is_all_day,
+                            tz: event.tz,
+                            location: event.location,
+                            description: event.description,
+                            is_recurring: event.is_recurring,
+                            recurrence_json,
                         },
                     ));
                 }

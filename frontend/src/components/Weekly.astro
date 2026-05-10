@@ -1,4 +1,4 @@
-    <h2>Weekly Calendar</h2>
+<h2>Weekly Calendar</h2>
     
     <div id="weekly-events" class="calendar" style="position: relative"
          hx-get="/api/events"
@@ -7,6 +7,150 @@
          hx-swap="innerHTML">
         <div class="week-loading">Loading events</div>
     </div>
+
+<dialog id="event-detail">
+  <article>
+    <header>
+      <h3 id="event-detail-summary"></h3>
+      <button id="event-detail-close" class="close-btn" aria-label="Close">&times;</button>
+    </header>
+    <div class="event-detail-body">
+      <div class="event-detail-row" id="event-detail-time-row">
+        <span class="event-detail-label">Time</span>
+        <span id="event-detail-time"></span>
+      </div>
+      <div class="event-detail-row" id="event-detail-location-row">
+        <span class="event-detail-label">Location</span>
+        <span id="event-detail-location"></span>
+      </div>
+      <div class="event-detail-row" id="event-detail-recurrence-row">
+        <span class="event-detail-label">Repeats</span>
+        <span id="event-detail-recurrence"></span>
+      </div>
+      <div id="event-detail-description-row">
+        <span class="event-detail-label">Description</span>
+        <p id="event-detail-description"></p>
+      </div>
+    </div>
+  </article>
+</dialog>
+
+<script>
+function formatRecurrence(r, locale) {
+  if (!r || !r.freq) return '';
+  const freq = { DAILY: 'day', WEEKLY: 'week', MONTHLY: 'month', YEARLY: 'year' };
+  const dayNames = { MO: 0, TU: 1, WE: 2, TH: 3, FR: 4, SA: 5, SU: 6 };
+  const interval = r.interval && r.interval > 1 ? r.interval : 1;
+  const unit = freq[r.freq] || r.freq.toLowerCase();
+  let text = '';
+  if (interval === 1) {
+    text += 'Every ' + unit;
+  } else {
+    text += 'Every ' + interval + ' ' + unit + 's';
+  }
+  if (r.by_day && r.by_day.length > 0 && r.freq === 'WEEKLY') {
+    const dtf = new Intl.DateTimeFormat(locale, { weekday: 'long' });
+    const refDate = new Date(2024, 0, 7);
+    const dayFn = (code) => {
+      const jsDay = dayNames[code];
+      if (jsDay === undefined) return code;
+      refDate.setDate(7 + jsDay);
+      return dtf.format(refDate);
+    };
+    text += ' on ' + r.by_day.map(dayFn).join(', ');
+  }
+  if (r.by_month_day && r.by_month_day.length > 0 && r.freq === 'MONTHLY') {
+    text += ' on day ' + r.by_month_day.join(', ');
+  }
+  if (r.count) {
+    text += ', ' + r.count + ' times';
+  } else if (r.until) {
+    const untilDate = new Date(r.until + 'Z');
+    if (!isNaN(untilDate.getTime())) {
+      text += ', until ' + untilDate.toLocaleDateString(locale, { dateStyle: 'long' });
+    }
+  }
+  return text;
+}
+
+function openEventDetail(article) {
+  const dialog = document.getElementById('event-detail');
+  const locale = navigator.language || 'en';
+
+  const summary = article.getAttribute('data-summary') || '';
+  const dtstart = article.getAttribute('data-dtstart') || '';
+  const dtend = article.getAttribute('data-dtend') || '';
+  const tz = article.getAttribute('data-tz') || '';
+  const isAllDay = article.getAttribute('data-is-all-day') === 'true';
+  const location = article.getAttribute('data-location') || '';
+  const description = article.getAttribute('data-description') || '';
+  const isRecurring = article.getAttribute('data-is-recurring') === 'true';
+  const recurrenceRaw = article.getAttribute('data-recurrence') || '{}';
+  let recurrence = null;
+  try { recurrence = JSON.parse(recurrenceRaw); } catch(e) { recurrence = null; }
+
+  document.getElementById('event-detail-summary').textContent = summary;
+
+  let timeText = '';
+  if (isAllDay) {
+    timeText = 'All day' + (dtstart ? ' \u00B7 ' + new Date(dtstart + 'T00:00:00').toLocaleDateString(locale, { dateStyle: 'long' }) : '');
+  } else if (dtstart) {
+    const s = new Date(dtstart.includes('Z') || dtstart.includes('+') ? dtstart : dtstart + 'Z');
+    const dateStr = s.toLocaleDateString(locale, { dateStyle: 'long' });
+    const timeStr = s.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+    timeText = dateStr + ', ' + timeStr;
+    if (dtend) {
+      const e = new Date(dtend.includes('Z') || dtend.includes('+') ? dtend : dtend + 'Z');
+      const endSameDay = s.toDateString() === e.toDateString();
+      if (endSameDay) {
+        timeText += ' \u2013 ' + e.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+      } else {
+        timeText += ' \u2013 ' + e.toLocaleDateString(locale, { dateStyle: 'long' }) + ', ' + e.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+      }
+    }
+    if (tz && tz !== 'UTC') timeText += ' (' + tz + ')';
+  }
+  document.getElementById('event-detail-time').textContent = timeText;
+  document.getElementById('event-detail-time-row').style.display = timeText ? '' : 'none';
+
+  const locEl = document.getElementById('event-detail-location');
+  locEl.textContent = location;
+  document.getElementById('event-detail-location-row').style.display = location ? '' : 'none';
+
+  const recText = isRecurring ? formatRecurrence(recurrence, locale) : '';
+  const recEl = document.getElementById('event-detail-recurrence');
+  recEl.textContent = recText;
+  document.getElementById('event-detail-recurrence-row').style.display = recText ? '' : 'none';
+
+  const descEl = document.getElementById('event-detail-description');
+  descEl.textContent = description;
+  document.getElementById('event-detail-description-row').style.display = description ? '' : 'none';
+
+  dialog.showModal();
+}
+
+function setupEventDetailListeners() {
+  document.querySelectorAll('.event-trigger').forEach(el => {
+    el.removeEventListener('click', el._eventDetailHandler);
+    el.removeEventListener('keydown', el._eventDetailKeyHandler);
+    el._eventDetailHandler = () => openEventDetail(el);
+    el._eventDetailKeyHandler = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEventDetail(el); } };
+    el.addEventListener('click', el._eventDetailHandler);
+    el.addEventListener('keydown', el._eventDetailKeyHandler);
+  });
+}
+
+document.getElementById('event-detail-close').addEventListener('click', () => {
+  document.getElementById('event-detail').close();
+});
+
+document.getElementById('event-detail').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) e.currentTarget.close();
+});
+
+setupEventDetailListeners();
+document.addEventListener('htmx:afterSettle', setupEventDetailListeners);
+</script>
 
 
 <style>
@@ -41,9 +185,94 @@ article {
     }
     header {
       font-size: small;
-      /* margin-bottom: 0.125rem; */
     }
   }
+}
+
+.event-trigger {
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+.event-trigger:hover {
+  filter: brightness(0.95);
+}
+.event-trigger:focus-visible {
+  outline: 2px solid var(--pico-primary-background, #0074d9);
+  outline-offset: 2px;
+}
+
+#event-detail {
+  border: 1px solid var(--pico-muted-border-color, #c8c8c8);
+  border-radius: var(--pico-border-radius, 0.25rem);
+  padding: 0;
+  max-width: 28rem;
+  width: 90vw;
+  background: var(--pico-background-color, #fff);
+  color: var(--pico-color, #333);
+  box-shadow: 0 0.5rem 2rem rgba(0,0,0,0.25);
+}
+
+#event-detail::backdrop {
+  background: rgba(0,0,0,0.4);
+}
+
+#event-detail article {
+  margin: 0;
+  padding: 1.5rem;
+}
+
+#event-detail article header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+#event-detail article header h3 {
+  margin: 0;
+  flex: 1;
+  word-break: break-word;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  padding: 0 0.25rem;
+  cursor: pointer;
+  color: var(--pico-muted-color, #666);
+  transition: color 0.15s;
+}
+.close-btn:hover {
+  color: var(--pico-color, #333);
+}
+
+.event-detail-body {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.event-detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.event-detail-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--pico-muted-color, #666);
+  font-weight: 600;
+}
+
+#event-detail-description-row p {
+  margin: 0.25rem 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .week-loading {
