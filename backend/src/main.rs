@@ -10,7 +10,7 @@ use axum::Router;
 use axum_oidc::{EmptyAdditionalClaims, OidcAuthLayer, OidcLoginLayer};
 use clap::Parser;
 use dotenvy::dotenv;
-use oidc::AppState;
+use oidc::{AppState, UserIdClaim};
 use std::sync::{Arc, Mutex};
 use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
@@ -35,7 +35,7 @@ struct Cli {
     #[arg(long, env = "DATABASE_PATH", default_value = "./data/caley.db")]
     database_path: String,
     #[arg(long, env = "OIDC_USER_ID_CLAIM", default_value = "sub")]
-    oidc_user_id_claim: String,
+    oidc_user_id_claim: UserIdClaim,
 }
 
 #[tokio::main]

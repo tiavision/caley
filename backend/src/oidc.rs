@@ -4,30 +4,38 @@ use axum::{
     response::{Html, IntoResponse, Redirect, Response},
 };
 use axum_oidc::{ClearSessionFlag, EmptyAdditionalClaims, OidcClaims, OidcRpInitiatedLogout};
+use clap::ValueEnum;
 use crate::caldav::CalDavClient;
 use crate::db;
 use crate::db::Db;
 use crate::settings::html_escape;
 use std::sync::Arc;
 
+#[derive(Clone, Debug, ValueEnum)]
+pub enum UserIdClaim {
+    Sub,
+    PreferredUsername,
+    Email,
+    Name,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Db>,
     pub do_oidc_logout: bool,
-    pub oidc_user_id_claim: String,
+    pub oidc_user_id_claim: UserIdClaim,
 }
 
-pub fn extract_user_id(claims: &OidcClaims<EmptyAdditionalClaims>, claim: &str) -> Option<String> {
+pub fn extract_user_id(claims: &OidcClaims<EmptyAdditionalClaims>, claim: &UserIdClaim) -> Option<String> {
     match claim {
-        "sub" => Some(claims.subject().as_str().to_owned()),
-        "preferred_username" => claims
+        UserIdClaim::Sub => Some(claims.subject().as_str().to_owned()),
+        UserIdClaim::PreferredUsername => claims
             .preferred_username()
             .map(|u| u.as_str().to_owned()),
-        "email" => claims.email().map(|e| e.as_str().to_owned()),
-        "name" => claims
+        UserIdClaim::Email => claims.email().map(|e| e.as_str().to_owned()),
+        UserIdClaim::Name => claims
             .name()
             .and_then(|n| n.get(None).map(|s| s.as_str().to_owned())),
-        _ => None,
     }
 }
 

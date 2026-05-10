@@ -16,7 +16,7 @@ Two-package monorepo with no root-level tooling:
   - `APP_BASE_URL` — public URL of this app (e.g. `http://localhost:3000`), used for OIDC callback
   - `CALDAV_PORT` — listen port (default: `3000`)
   - `DATABASE_PATH` — path to SQLite database file (default: `./data/caley.db`)
-  - `OIDC_USER_ID_CLAIM` — which OIDC claim to use as user ID: `sub` (default), `preferred_username`, `email`, or `name`
+  - `OIDC_USER_ID_CLAIM` — which OIDC claim to use as user ID (enum): `sub` (default), `preferred-username`, `email`, or `name`
 - CalDAV credentials (base URL, username, password) are per-user settings stored in SQLite, not global env vars
 - New users are redirected to `/settings` to configure their CalDAV connection; settings are tested before saving
 - Uses `dotenvy` to load `.env`; `clap` with derive + env feature for CLI args
