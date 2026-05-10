@@ -1,10 +1,10 @@
 <div class="week-loading">Loading events</div>
 {% for day in days %}
-<div class="day{% if day.is_today %} today{% endif %}">
-  <h5>{{ day.day_name }}</h5>
-  <div class="appointments">
+<div class="day{% if day.is_today %} today{% endif %}" role="row" aria-label="{{ day.day_name }}">
+  <h5 aria-hidden="true">{{ day.day_name }}</h5>
+  <div class="appointments" role="presentation">
     {% for event in day.events %}
-    <article class="appointment event-trigger" tabindex="0"
+    <article class="appointment event-trigger" tabindex="-1" role="gridcell"
       data-uid="{{ event.uid }}"
       data-summary="{{ event.summary }}"
       data-dtstart="{{ event.dtstart }}"

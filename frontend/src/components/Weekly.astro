@@ -1,6 +1,7 @@
 <h2>Weekly Calendar</h2>
     
     <div id="weekly-events" class="calendar" style="position: relative"
+         role="grid" aria-label="Weekly calendar"
          hx-get="/api/events"
          hx-trigger="htmx:afterSettle from:#calendar-container, change from:#calendar-form"
          hx-include="#calendar-form"
@@ -150,6 +151,71 @@ document.getElementById('event-detail').addEventListener('click', (e) => {
 
 setupEventDetailListeners();
 document.addEventListener('htmx:afterSettle', setupEventDetailListeners);
+
+(function initGridKeyboard() {
+  var grid = document.getElementById('weekly-events');
+  if (!grid) return;
+
+  function getGridModel() {
+    return Array.from(grid.querySelectorAll('.day'))
+      .map(function(day) { return Array.from(day.querySelectorAll('.appointment.event-trigger')); })
+      .filter(function(col) { return col.length > 0; });
+  }
+
+  function initRovingTabindex() {
+    var found = false;
+    grid.querySelectorAll('.appointment.event-trigger').forEach(function(el) {
+      if (!found) { el.setAttribute('tabindex', '0'); found = true; }
+      else { el.setAttribute('tabindex', '-1'); }
+    });
+  }
+
+  grid.addEventListener('keydown', function(e) {
+    if (document.getElementById('event-detail') && document.getElementById('event-detail').open) return;
+    var target = e.target;
+    if (!target.classList || !target.classList.contains('event-trigger')) return;
+
+    var model = getGridModel();
+    if (model.length === 0) return;
+
+    var col = -1, row = -1;
+    for (var c = 0; c < model.length; c++) {
+      var r = model[c].indexOf(target);
+      if (r !== -1) { col = c; row = r; break; }
+    }
+    if (col === -1) return;
+
+    var nextCol = col, nextRow = row, moved = false;
+
+    switch (e.key) {
+      case 'ArrowLeft':
+        if (col > 0) { nextCol = col - 1; nextRow = Math.min(row, model[nextCol].length - 1); moved = true; }
+        break;
+      case 'ArrowRight':
+        if (col < model.length - 1) { nextCol = col + 1; nextRow = Math.min(row, model[nextCol].length - 1); moved = true; }
+        break;
+      case 'ArrowUp':
+        if (row > 0) { nextRow = row - 1; moved = true; }
+        break;
+      case 'ArrowDown':
+        if (row < model[col].length - 1) { nextRow = row + 1; moved = true; }
+        break;
+      default:
+        return;
+    }
+
+    if (moved) {
+      e.preventDefault();
+      var next = model[nextCol][nextRow];
+      grid.querySelectorAll('.appointment.event-trigger').forEach(function(el) { el.setAttribute('tabindex', '-1'); });
+      next.setAttribute('tabindex', '0');
+      next.focus();
+    }
+  });
+
+  initRovingTabindex();
+  document.addEventListener('htmx:afterSettle', initRovingTabindex);
+})();
 </script>
 
 
