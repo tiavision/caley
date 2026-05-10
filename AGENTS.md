@@ -17,12 +17,13 @@ Two-package monorepo with no root-level tooling:
   - `CALDAV_PORT` — listen port (default: `3000`)
   - `DATABASE_PATH` — path to SQLite database file (default: `./data/caley.db`)
   - `OIDC_USER_ID_CLAIM` — which OIDC claim to use as user ID (enum): `sub` (default), `preferred-username`, `email`, or `name`
-- CalDAV credentials (base URL, username, password) are per-user settings stored in SQLite, not global env vars
+  - `ENCRYPTION_KEY` — passphrase used to derive an AES-256-GCM key for encrypting stored CalDAV credentials (required)
+- CalDAV credentials (base URL, username, password) are per-user settings stored encrypted in SQLite with AES-256-GCM
 - New users are redirected to `/settings` to configure their CalDAV connection; settings are tested before saving
 - Uses `dotenvy` to load `.env`; `clap` with derive + env feature for CLI args
 - Auth: all endpoints require OIDC authentication via `axum-oidc`; unauthenticated requests redirect to the OIDC provider
 - Session store: in-memory (`MemoryStore` from `tower-sessions`); sessions lost on restart
-- Database: SQLite via `rusqlite` (bundled); per-user CalDAV settings stored in `user_settings` table
+- Database: SQLite via `rusqlite` (bundled); per-user CalDAV settings stored encrypted (AES-256-GCM) in `user_settings` table; encryption key derived from `ENCRYPTION_KEY` env var via HKDF-SHA256
 - Database file location is configurable via `DATABASE_PATH` env var (default: `./data/caley.db`). The parent directory is created automatically. When running in Podman/Docker, mount a volume at `/data` (or your configured path) to persist the database across container restarts, e.g. `podman run -v caley-data:/data …`
 - Rust edition 2024 (not 2021)  
 - No tests configured yet

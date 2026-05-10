@@ -44,7 +44,7 @@ pub async fn settings_page(
     };
 
     let db = state.db.lock().unwrap();
-    let existing = match crate::db::get_settings(&db, &user_id) {
+    let existing = match crate::db::get_settings(&db, &user_id, &state.encryption_key) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Database error: {e}");
@@ -113,7 +113,7 @@ pub async fn save_settings(
     }
 
     let db = state.db.lock().unwrap();
-    if let Err(e) = crate::db::upsert_settings(&db, &user_id, &settings) {
+    if let Err(e) = crate::db::upsert_settings(&db, &user_id, &settings, &state.encryption_key) {
         eprintln!("Database error: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save settings").into_response();
     }

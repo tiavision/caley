@@ -11,6 +11,14 @@ pub struct UserSettings {
 
 pub type Db = Mutex<Connection>;
 
+fn encrypt_field(value: &str, key: &[u8; 32]) -> anyhow::Result<String> {
+    crate::crypto::encrypt(value, key)
+}
+
+fn decrypt_field(value: &str, key: &[u8; 32]) -> anyhow::Result<String> {
+    crate::crypto::decrypt(value, key)
+}
+
 pub fn init_db(path: &str) -> anyhow::Result<Connection> {
     if let Some(parent) = Path::new(path).parent() {
         if !parent.as_os_str().is_empty() {
@@ -34,47 +42,59 @@ pub fn init_db(path: &str) -> anyhow::Result<Connection> {
     Ok(conn)
 }
 
-pub fn get_deactivated_calendars(db: &Connection, user_id: &str) -> anyhow::Result<HashSet<String>> {
+pub fn get_deactivated_calendars(db: &Connection, user_id: &str, key: &[u8; 32]) -> anyhow::Result<HashSet<String>> {
     let mut stmt = db.prepare(
         "SELECT calendar_href FROM deactivated_calendars WHERE user_id = ?1",
     )?;
     let rows = stmt.query_map(params![user_id], |row| row.get::<_, String>(0))?;
     let mut set = HashSet::new();
     for row in rows {
-        set.insert(row?);
+        let enc_href = row?;
+        set.insert(decrypt_field(&enc_href, key)?);
     }
     Ok(set)
 }
 
-pub fn deactivate_calendar(db: &Connection, user_id: &str, calendar_href: &str) -> anyhow::Result<()> {
+pub fn deactivate_calendar(db: &Connection, user_id: &str, calendar_href: &str, key: &[u8; 32]) -> anyhow::Result<()> {
+    let enc_href = encrypt_field(calendar_href, key)?;
     db.execute(
         "INSERT OR IGNORE INTO deactivated_calendars (user_id, calendar_href) VALUES (?1, ?2)",
-        params![user_id, calendar_href],
+        params![user_id, enc_href],
     )?;
     Ok(())
 }
 
-pub fn activate_calendar(db: &Connection, user_id: &str, calendar_href: &str) -> anyhow::Result<()> {
+pub fn activate_calendar(db: &Connection, user_id: &str, calendar_href: &str, key: &[u8; 32]) -> anyhow::Result<()> {
+    let enc_href = encrypt_field(calendar_href, key)?;
     db.execute(
         "DELETE FROM deactivated_calendars WHERE user_id = ?1 AND calendar_href = ?2",
-        params![user_id, calendar_href],
+        params![user_id, enc_href],
     )?;
     Ok(())
 }
 
-pub fn get_settings(db: &Connection, user_id: &str) -> anyhow::Result<Option<UserSettings>> {
+pub fn get_settings(db: &Connection, user_id: &str, key: &[u8; 32]) -> anyhow::Result<Option<UserSettings>> {
     let mut stmt = db.prepare(
         "SELECT caldav_base_url, caldav_username, caldav_password FROM user_settings WHERE user_id = ?1",
     )?;
     let result = stmt.query_row(params![user_id], |row| {
-        Ok(UserSettings {
-            caldav_base_url: row.get(0)?,
-            caldav_username: row.get(1)?,
-            caldav_password: row.get(2)?,
-        })
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
     });
     match result {
-        Ok(settings) => Ok(Some(settings)),
+        Ok((enc_url, enc_user, enc_pass)) => {
+            let caldav_base_url = decrypt_field(&enc_url, key)?;
+            let caldav_username = decrypt_field(&enc_user, key)?;
+            let caldav_password = decrypt_field(&enc_pass, key)?;
+            Ok(Some(UserSettings {
+                caldav_base_url,
+                caldav_username,
+                caldav_password,
+            }))
+        }
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
@@ -84,7 +104,11 @@ pub fn upsert_settings(
     db: &Connection,
     user_id: &str,
     settings: &UserSettings,
+    key: &[u8; 32],
 ) -> anyhow::Result<()> {
+    let enc_url = encrypt_field(&settings.caldav_base_url, key)?;
+    let enc_user = encrypt_field(&settings.caldav_username, key)?;
+    let enc_pass = encrypt_field(&settings.caldav_password, key)?;
     db.execute(
         "INSERT INTO user_settings (user_id, caldav_base_url, caldav_username, caldav_password)
          VALUES (?1, ?2, ?3, ?4)
@@ -92,12 +116,7 @@ pub fn upsert_settings(
             caldav_base_url = excluded.caldav_base_url,
             caldav_username = excluded.caldav_username,
             caldav_password = excluded.caldav_password",
-        params![
-            user_id,
-            settings.caldav_base_url,
-            settings.caldav_username,
-            settings.caldav_password,
-        ],
+        params![user_id, enc_url, enc_user, enc_pass],
     )?;
     Ok(())
 }

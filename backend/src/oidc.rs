@@ -24,6 +24,7 @@ pub struct AppState {
     pub db: Arc<Db>,
     pub do_oidc_logout: bool,
     pub oidc_user_id_claim: UserIdClaim,
+    pub encryption_key: [u8; 32],
 }
 
 pub fn extract_user_id(claims: &OidcClaims<EmptyAdditionalClaims>, claim: &UserIdClaim) -> Option<String> {
@@ -51,7 +52,7 @@ pub fn require_client(
     };
 
     let db = state.db.lock().unwrap();
-    let settings = match db::get_settings(&db, &user_id) {
+    let settings = match db::get_settings(&db, &user_id, &state.encryption_key) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Database error: {e}");
@@ -89,7 +90,7 @@ pub async fn user_info(
         match user_id {
             Some(uid) => {
                 let db = state.db.lock().unwrap();
-                db::get_settings(&db, &uid).ok().flatten().is_some()
+                db::get_settings(&db, &uid, &state.encryption_key).ok().flatten().is_some()
             }
             None => false,
         }

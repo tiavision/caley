@@ -4,19 +4,24 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+aes-gcm = "0.10"
 anyhow = "1.0.100"
 askama = "0.16"
 axum = { version = "0.8.8", features = ["macros"] }
 axum-oidc = "0.6.0"
+base64 = "0.22"
 chrono = "0.4.42"
 chrono-tz = "0.10.4"
 clap = { version = "4.5.54", features = ["derive", "env"] }
 dotenvy = { version = "0.15.7" }
+hkdf = "0.12"
 ical = "0.11"
 quick-xml = "0.37"
+rand = "0.9"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots"] }
 rrule = "0.13"
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
 hyper-rustls = { version = "0.27.7", default-features = false, features = ["webpki-tokio", "logging"] }
 hyper-util = { version = "0.1.19", features = ["client", "tokio"] }
 rusqlite = { version = "0.34", features = ["bundled"] }

@@ -1,5 +1,6 @@
 mod calendar;
 mod caldav;
+mod crypto;
 mod db;
 mod oidc;
 mod settings;
@@ -36,6 +37,8 @@ struct Cli {
     database_path: String,
     #[arg(long, env = "OIDC_USER_ID_CLAIM", default_value = "sub")]
     oidc_user_id_claim: UserIdClaim,
+    #[arg(long, env = "ENCRYPTION_KEY")]
+    encryption_key: String,
 }
 
 #[tokio::main]
@@ -46,10 +49,13 @@ async fn main() -> anyhow::Result<()> {
     let db_conn = db::init_db(&args.database_path)?;
     let db = Arc::new(Mutex::new(db_conn));
 
+    let encryption_key = crypto::derive_key(&args.encryption_key);
+
     let state = AppState {
         db,
         do_oidc_logout: args.oidc_logout,
         oidc_user_id_claim: args.oidc_user_id_claim,
+        encryption_key,
     };
 
     let app_base_uri = args.app_base_url.parse()?;

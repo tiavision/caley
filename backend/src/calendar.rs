@@ -75,7 +75,7 @@ pub async fn list_calendars(
 
     let deactivated = {
         let db = state.db.lock().unwrap();
-        match db::get_deactivated_calendars(&db, &user_id) {
+        match db::get_deactivated_calendars(&db, &user_id, &state.encryption_key) {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("Database error fetching deactivated calendars: {e}");
@@ -123,9 +123,9 @@ pub async fn toggle_calendar(
 
     let db = state.db.lock().unwrap();
     let result = if active {
-        db::activate_calendar(&db, &user_id, &href)
+        db::activate_calendar(&db, &user_id, &href, &state.encryption_key)
     } else {
-        db::deactivate_calendar(&db, &user_id, &href)
+        db::deactivate_calendar(&db, &user_id, &href, &state.encryption_key)
     };
 
     match result {
