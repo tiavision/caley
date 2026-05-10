@@ -68,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/api/calendars", get(calendar::list_calendars))
+        .route("/api/calendar/toggle", post(calendar::toggle_calendar))
         .route("/api/events", get(calendar::list_events))
         .route("/api/calendar", get(calendar::list_calendar))
         .route("/api/user", get(oidc::user_info))

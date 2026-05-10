@@ -12,6 +12,14 @@
 (function () {
   document.getElementById('calendar-form').addEventListener('change', function (e) {
     if (e.target.type === 'checkbox' && e.target.name === 'cal') {
+      var val = e.target.value;
+      var href = val.split('|')[0];
+      var active = e.target.checked;
+      fetch('/api/calendar/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'href=' + encodeURIComponent(href) + '&active=' + (active ? 'true' : 'false')
+      });
       document.body.dispatchEvent(new CustomEvent('calendarChange'));
     }
   });

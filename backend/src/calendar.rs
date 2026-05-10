@@ -7,10 +7,11 @@ use axum::{
 use axum_oidc::{EmptyAdditionalClaims, OidcClaims};
 use crate::caldav::Calendar;
 use chrono::{Datelike, NaiveDate};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use url::form_urlencoded;
 
 use crate::oidc::{require_client, AppState};
+use crate::db;
 
 const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
 
@@ -18,6 +19,7 @@ const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
 #[template(path = "calendars.html", whitespace = "minimize")]
 struct CalendarsTemplate {
     calendars: Vec<Calendar>,
+    deactivated: HashSet<String>,
 }
 
 #[derive(Template)]
@@ -66,15 +68,72 @@ pub async fn list_calendars(
         Err(r) => return r,
     };
 
-    match client.calendars().await {
+    let user_id = match crate::oidc::extract_user_id(&claims, &state.oidc_user_id_claim) {
+        Some(id) => id,
+        None => return (StatusCode::INTERNAL_SERVER_ERROR, "Could not determine user ID").into_response(),
+    };
+
+    let deactivated = {
+        let db = state.db.lock().unwrap();
+        match db::get_deactivated_calendars(&db, &user_id) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("Database error fetching deactivated calendars: {e}");
+                HashSet::new()
+            }
+        }
+    };
+
+match client.calendars().await {
         Ok(calendars) => {
-            let tpl = CalendarsTemplate { calendars };
+            let tpl = CalendarsTemplate { calendars, deactivated };
             match tpl.render() {
                 Ok(html) => Html(html).into_response(),
                 Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
             }
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+pub async fn toggle_calendar(
+    State(state): State<AppState>,
+    claims: OidcClaims<EmptyAdditionalClaims>,
+    body: String,
+) -> Response {
+    let user_id = match crate::oidc::extract_user_id(&claims, &state.oidc_user_id_claim) {
+        Some(id) => id,
+        None => return (StatusCode::INTERNAL_SERVER_ERROR, "Could not determine user ID").into_response(),
+    };
+
+    let mut href = String::new();
+    let mut active = true;
+
+    for (key, value) in form_urlencoded::parse(body.as_bytes()) {
+        match key.as_ref() {
+            "href" => href = value.into_owned(),
+            "active" => active = value != "false",
+            _ => {}
+        }
+    }
+
+    if href.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing href parameter").into_response();
+    }
+
+    let db = state.db.lock().unwrap();
+    let result = if active {
+        db::activate_calendar(&db, &user_id, &href)
+    } else {
+        db::deactivate_calendar(&db, &user_id, &href)
+    };
+
+    match result {
+        Ok(_) => StatusCode::OK.into_response(),
+        Err(e) => {
+            eprintln!("Database error toggling calendar: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response()
+        }
     }
 }
 
