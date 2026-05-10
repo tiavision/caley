@@ -65,11 +65,22 @@ pub fn deactivate_calendar(db: &Connection, user_id: &str, calendar_href: &str, 
 }
 
 pub fn activate_calendar(db: &Connection, user_id: &str, calendar_href: &str, key: &[u8; 32]) -> anyhow::Result<()> {
-    let enc_href = encrypt_field(calendar_href, key)?;
-    db.execute(
-        "DELETE FROM deactivated_calendars WHERE user_id = ?1 AND calendar_href = ?2",
-        params![user_id, enc_href],
+    let mut stmt = db.prepare(
+        "SELECT rowid, calendar_href FROM deactivated_calendars WHERE user_id = ?1",
     )?;
+    let rows = stmt.query_map(params![user_id], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (rowid, enc_href) = row?;
+        if decrypt_field(&enc_href, key)? == calendar_href {
+            db.execute(
+                "DELETE FROM deactivated_calendars WHERE rowid = ?1",
+                params![rowid],
+            )?;
+            break;
+        }
+    }
     Ok(())
 }
 
