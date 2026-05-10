@@ -19,7 +19,7 @@ COPY backend/src/ src/
 COPY backend/templates/ templates/
 RUN touch src/main.rs && cargo build --release --target x86_64-unknown-linux-musl
 
-FROM gcr.io/distroless/static-debian12
+FROM scratch
 
 COPY --from=backend-build /app/backend/target/x86_64-unknown-linux-musl/release/caley /caley
 COPY --from=frontend-build /app/frontend/dist /static
