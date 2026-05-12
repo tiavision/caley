@@ -14,6 +14,12 @@ import '../styles/main.scss';
 			import htmx from 'htmx.org';
 			window.htmx = htmx;
 		</script>
+		<style>
+			a.brand {
+				color: inherit;
+				text-decoration: none;
+			}
+		</style>
 		<script>
 			import { initI18n, t, setLocale, getLang, createLocalePicker } from '../i18n/index.ts';
 			initI18n();
@@ -30,7 +36,7 @@ import '../styles/main.scss';
 	<body>
 		<header class="container">
 			<nav>
-				<ul><li><strong data-i18n="app.brand">Caley</strong></li></ul>
+				<ul><li><a href="/" class="brand"><strong data-i18n="app.brand">Caley</strong></a></li></ul>
 				<ul>
 					<li class="locale-picker-li"></li>
 					<li hx-get="/api/user" hx-trigger="load" hx-swap="innerHTML"><span data-i18n="nav.loading">Loading...</span></li>
