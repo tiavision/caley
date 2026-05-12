@@ -347,7 +347,7 @@ article {
 #event-detail article header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.5rem;
 }
 
@@ -358,17 +358,40 @@ article {
 }
 
 .close-btn {
+  position: relative;
   background: none;
   border: none;
   font-size: 1.5rem;
   line-height: 1;
-  padding: 0 0.25rem;
+  padding: 0;
+  width: 1.2em;
+  height: 1.2em;
   cursor: pointer;
-  color: var(--pico-muted-color, #666);
-  transition: color 0.15s;
+  color: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.close-btn:hover {
-  color: var(--pico-color, #333);
+.close-btn::before,
+.close-btn::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.75em;
+  height: 0.1em;
+  background-color: var(--pico-muted-color, #666);
+  transition: background-color 0.15s;
+}
+.close-btn::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.close-btn::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+.close-btn:hover::before,
+.close-btn:hover::after {
+  background-color: var(--pico-color, #333);
 }
 
 .event-detail-body {
