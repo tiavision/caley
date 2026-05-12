@@ -43,5 +43,6 @@
   "settings.usernamePlaceholder": "dein-benutzername",
   "settings.password": "CalDAV-Passwort",
   "settings.passwordPlaceholder": "dein-passwort",
+  "settings.passwordHint": "Leer lassen, um das aktuelle Passwort zu behalten",
   "settings.submit": "Speichern & Verbindung testen"
 }

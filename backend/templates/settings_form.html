@@ -18,9 +18,14 @@
         <label for="caldav_password">
             <span data-i18n="settings.password">CalDAV Password</span>
             <input type="password" id="caldav_password" name="caldav_password"
-                   value="{{ password }}"
+                   autocomplete="new-password"
+                   {% if has_password %}
+                   data-i18n-attr="placeholder:settings.passwordHint"
+                   placeholder="Leave blank to keep current"
+                   {% else %}
                    data-i18n-attr="placeholder:settings.passwordPlaceholder"
-                   placeholder="your-password" required>
+                   placeholder="your-password" required
+                   {% endif %}>
         </label>
     </fieldset>
     <button type="submit" data-i18n="settings.submit">Save &amp; Test Connection</button>

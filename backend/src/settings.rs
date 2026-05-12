@@ -14,7 +14,7 @@ use crate::oidc::{extract_user_id, AppState};
 struct SettingsFormTemplate {
     base_url: String,
     username: String,
-    password: String,
+    has_password: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -52,15 +52,15 @@ pub async fn settings_form(
         }
     };
 
-    let (base_url, username, password) = match existing {
-        Some(ref s) => (s.caldav_base_url.clone(), s.caldav_username.clone(), s.caldav_password.clone()),
-        None => (String::new(), String::new(), String::new()),
+    let (base_url, username, has_password) = match existing {
+        Some(ref s) => (s.caldav_base_url.clone(), s.caldav_username.clone(), true),
+        None => (String::new(), String::new(), false),
     };
 
     let tpl = SettingsFormTemplate {
         base_url,
         username,
-        password,
+        has_password,
     };
     match tpl.render() {
         Ok(html) => Html(html).into_response(),
@@ -80,10 +80,22 @@ pub async fn save_settings(
         }
     };
 
+    let password = if form.caldav_password.is_empty() {
+        let db = state.db.lock().unwrap();
+        match crate::db::get_settings(&db, &user_id, &state.encryption_key) {
+            Ok(Some(s)) => s.caldav_password,
+            _ => {
+                return r#"<div class="error-msg">Password is required for new connections.</div>"#.into_response();
+            }
+        }
+    } else {
+        form.caldav_password
+    };
+
     let settings = UserSettings {
         caldav_base_url: form.caldav_base_url,
         caldav_username: form.caldav_username,
-        caldav_password: form.caldav_password,
+        caldav_password: password,
     };
 
     let client = match crate::caldav::CalDavClient::new(
