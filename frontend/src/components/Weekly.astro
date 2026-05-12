@@ -54,11 +54,11 @@ function formatRecurrence(r, locale) {
   }
   if (r.by_day && r.by_day.length > 0 && r.freq === 'WEEKLY') {
     const dtf = new Intl.DateTimeFormat(locale, { weekday: 'long' });
-    const refDate = new Date(2024, 0, 7);
+    const refDate = new Date(2024, 0, 1);
     const dayFn = (code) => {
       const jsDay = dayNames[code];
       if (jsDay === undefined) return code;
-      refDate.setDate(7 + jsDay);
+      refDate.setDate(1 + jsDay);
       return dtf.format(refDate);
     };
     text += ' on ' + r.by_day.map(dayFn).join(', ');
