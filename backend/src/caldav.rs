@@ -908,6 +908,26 @@ fn expand_recurring(master: &RawIcalEvent, start: NaiveDate, end: NaiveDate) -> 
         .collect()
 }
 
+fn format_datetime_with_tz(dt: NaiveDateTime, tz: &str) -> String {
+    if tz == "UTC" {
+        format!("{}Z", dt.format("%Y-%m-%dT%H:%M:%S"))
+    } else if let Ok(tz) = tz.parse::<chrono_tz::Tz>() {
+        match tz.from_local_datetime(&dt) {
+            chrono::LocalResult::Single(local_dt) => {
+                local_dt.format("%Y-%m-%dT%H:%M:%S%:z").to_string()
+            }
+            chrono::LocalResult::Ambiguous(local_dt, _) => {
+                local_dt.format("%Y-%m-%dT%H:%M:%S%:z").to_string()
+            }
+            chrono::LocalResult::None => {
+                format!("{}Z", dt.format("%Y-%m-%dT%H:%M:%S"))
+            }
+        }
+    } else {
+        format!("{}Z", dt.format("%Y-%m-%dT%H:%M:%S"))
+    }
+}
+
 fn create_event(
     uid: &str,
     summary: &str,
@@ -924,7 +944,7 @@ fn create_event(
     let dtstart_str = if dtstart_is_date {
         dtstart.format("%Y-%m-%d").to_string()
     } else {
-        dtstart.format("%Y-%m-%d %H:%M:%S").to_string()
+        format_datetime_with_tz(dtstart, tz)
     };
 
     let date = dtstart.date();
@@ -939,7 +959,7 @@ fn create_event(
             let s = if dtend_is_date {
                 dt.format("%Y-%m-%d").to_string()
             } else {
-                dt.format("%Y-%m-%d %H:%M:%S").to_string()
+                format_datetime_with_tz(dt, tz)
             };
             let et = if dtend_is_date {
                 None
