@@ -15,7 +15,7 @@ use oidc::{AppState, UserIdClaim};
 use std::sync::{Arc, Mutex};
 use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
-use tower_sessions::{MemoryStore, SessionManagerLayer};
+use tower_sessions::{cookie::SameSite, MemoryStore, SessionManagerLayer};
 
 #[derive(clap::Parser, Debug)]
 struct Cli {
@@ -61,7 +61,8 @@ async fn main() -> anyhow::Result<()> {
     let app_base_uri = args.app_base_url.parse()?;
 
     let session_store = MemoryStore::default();
-    let session_layer = SessionManagerLayer::new(session_store);
+    let session_layer = SessionManagerLayer::new(session_store)
+        .with_same_site(SameSite::Lax);
 
     let oidc_auth_layer = OidcAuthLayer::<EmptyAdditionalClaims>::discover_client(
         app_base_uri,
@@ -73,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     let app = Router::new()
+        .route("/auth/callback", get(oidc::auth_callback_handler))
         .route("/api/calendars", get(calendar::list_calendars))
         .route("/api/calendar/toggle", post(calendar::toggle_calendar))
         .route("/api/events", get(calendar::list_events))
@@ -91,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
                 .layer(HandleErrorLayer::new(|e| async { e }))
                 .layer(oidc_auth_layer)
                 .layer(HandleErrorLayer::new(|e| async { e }))
+                .layer(oidc::RequireAuthLayer)
                 .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new())
                 .into_inner(),
         )

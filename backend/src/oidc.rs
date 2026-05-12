@@ -1,15 +1,22 @@
 use axum::{
+    body::Body,
     extract::State,
-    http::StatusCode,
+    http::{Request, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
 };
 use axum_oidc::{ClearSessionFlag, EmptyAdditionalClaims, OidcClaims, OidcRpInitiatedLogout};
 use clap::ValueEnum;
+use futures_util::future::BoxFuture;
+use std::{
+    sync::Arc,
+    task::{Context, Poll},
+};
+use tower::{Layer, Service};
+use tower_sessions::Session;
 use crate::caldav::CalDavClient;
 use crate::db;
 use crate::db::Db;
 use crate::settings::html_escape;
-use std::sync::Arc;
 
 #[derive(Clone, Debug, ValueEnum)]
 pub enum UserIdClaim {
@@ -127,4 +134,65 @@ pub async fn logout_handler(
     let mut response = response;
     response.extensions_mut().insert(ClearSessionFlag);
     response
+}
+
+#[derive(Clone)]
+pub struct RequireAuthLayer;
+
+impl<S> Layer<S> for RequireAuthLayer {
+    type Service = RequireAuthService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        RequireAuthService { inner }
+    }
+}
+
+#[derive(Clone)]
+pub struct RequireAuthService<S> {
+    inner: S,
+}
+
+impl<S> Service<Request<Body>> for RequireAuthService<S>
+where
+    S: Service<Request<Body>, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: Request<Body>) -> Self::Future {
+        let inner = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, inner);
+
+        if request.extensions().get::<OidcClaims<EmptyAdditionalClaims>>().is_some() {
+            return Box::pin(async move { inner.call(request).await });
+        }
+
+        if request.uri().path() == "/auth/callback" {
+            return Box::pin(async move { inner.call(request).await });
+        }
+
+        let session = request.extensions().get::<Session>().cloned();
+        let target = request.uri().to_string();
+
+        Box::pin(async move {
+            if let Some(session) = session {
+                let _ = session.insert("auth_target", target).await;
+            }
+            Ok(Redirect::temporary("/auth/callback").into_response())
+        })
+    }
+}
+
+pub async fn auth_callback_handler(
+    session: Session,
+) -> impl IntoResponse {
+    let target: Option<String> = session.get("auth_target").await.ok().flatten();
+    let _ = session.remove_value("auth_target").await;
+    Redirect::to(target.as_deref().unwrap_or("/"))
 }
