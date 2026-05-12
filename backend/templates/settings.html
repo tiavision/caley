@@ -3,50 +3,168 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Settings - Caley</title>
+    <title data-i18n="settings.title">Settings - Caley</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <style>
         .settings-form { max-width: 32rem; margin: 2rem auto; }
         .error-msg { color: var(--pico-del-color); }
         .success-msg { color: var(--pico-ins-color); }
+        .locale-picker { font-size: 0.875rem; padding: 0.125rem 1.5rem 0.125rem 0.5rem; margin: 0; background-color: var(--pico-form-element-background-color); color: var(--pico-form-element-color); border: var(--pico-border-width) solid var(--pico-form-element-border-color); border-radius: var(--pico-border-radius); font-family: inherit; cursor: pointer; }
     </style>
     <script src="https://unpkg.com/htmx.org@2.0.8"></script>
 </head>
 <body>
     <header class="container">
         <nav>
-            <ul><li><strong>Caley</strong></li></ul>
-            <ul><li><a href="/">Calendar</a></li></ul>
+            <ul><li><strong data-i18n="app.brand">Caley</strong></li></ul>
+            <ul>
+                <li class="locale-picker-li"></li>
+                <li><a href="/" data-i18n="nav.calendar">Calendar</a></li>
+            </ul>
         </nav>
     </header>
     <main class="container">
         <div class="settings-form">
             <hgroup>
-                <h2>Settings</h2>
-                <p>Configure your CalDAV connection to fetch calendar events.</p>
+                <h2 data-i18n="settings.heading">Settings</h2>
+                <p data-i18n="settings.subtitle">Configure your CalDAV connection to fetch calendar events.</p>
             </hgroup>
             <div id="settings-result"></div>
             <form hx-post="/api/settings" hx-target="#settings-result" hx-swap="innerHTML">
                 <fieldset>
-                    <label for="caldav_base_url">CalDAV Base URL
+                    <label for="caldav_base_url">
+                        <span data-i18n="settings.baseUrl">CalDAV Base URL</span>
                         <input type="url" id="caldav_base_url" name="caldav_base_url"
                                value="{{ base_url }}"
-                               placeholder="https://caldav.example.com" required>
+                               data-i18n-attr="placeholder:settings.baseUrlPlaceholder" placeholder="https://caldav.example.com" required>
                     </label>
-                    <label for="caldav_username">CalDAV Username
+                    <label for="caldav_username">
+                        <span data-i18n="settings.username">CalDAV Username</span>
                         <input type="text" id="caldav_username" name="caldav_username"
                                value="{{ username }}"
-                               placeholder="your-username" required>
+                               data-i18n-attr="placeholder:settings.usernamePlaceholder" placeholder="your-username" required>
                     </label>
-                    <label for="caldav_password">CalDAV Password
+                    <label for="caldav_password">
+                        <span data-i18n="settings.password">CalDAV Password</span>
                         <input type="password" id="caldav_password" name="caldav_password"
                                value="{{ password }}"
-                               placeholder="your-password" required>
+                               data-i18n-attr="placeholder:settings.passwordPlaceholder" placeholder="your-password" required>
                     </label>
                 </fieldset>
-                <button type="submit">Save &amp; Test Connection</button>
+                <button type="submit" data-i18n="settings.submit">Save &amp; Test Connection</button>
             </form>
         </div>
     </main>
+    <script>
+    (function() {
+        var en = {
+            "settings.title": "Settings - Caley",
+            "settings.heading": "Settings",
+            "settings.subtitle": "Configure your CalDAV connection to fetch calendar events.",
+            "settings.baseUrl": "CalDAV Base URL",
+            "settings.baseUrlPlaceholder": "https://caldav.example.com",
+            "settings.username": "CalDAV Username",
+            "settings.usernamePlaceholder": "your-username",
+            "settings.password": "CalDAV Password",
+            "settings.passwordPlaceholder": "your-password",
+            "settings.submit": "Save & Test Connection",
+            "app.brand": "Caley",
+            "nav.calendar": "Calendar",
+            "cal.aria.month": "Month"
+        };
+        var de = {
+            "settings.title": "Einstellungen - Caley",
+            "settings.heading": "Einstellungen",
+            "settings.subtitle": "Konfiguriere deine CalDAV-Verbindung, um Kalendertermine abzurufen.",
+            "settings.baseUrl": "CalDAV-Basis-URL",
+            "settings.baseUrlPlaceholder": "https://caldav.example.com",
+            "settings.username": "CalDAV-Benutzername",
+            "settings.usernamePlaceholder": "dein-benutzername",
+            "settings.password": "CalDAV-Passwort",
+            "settings.passwordPlaceholder": "dein-passwort",
+            "settings.submit": "Speichern & Verbindung testen",
+            "app.brand": "Caley",
+            "nav.calendar": "Kalender",
+            "cal.aria.month": "Monat"
+        };
+        var locales = { en: en, de: de };
+        var stored = localStorage.getItem('locale');
+        var browserLang = navigator.language || 'en';
+        var currentLocale = stored || browserLang;
+        var lang = currentLocale.slice(0, 2);
+        var t = locales[lang] || en;
+        function apply() {
+            document.documentElement.lang = lang;
+            document.querySelectorAll('[data-i18n]').forEach(function(el) {
+                var key = el.getAttribute('data-i18n');
+                if (key && t[key] !== undefined) el.textContent = t[key];
+            });
+            document.querySelectorAll('[data-i18n-attr]').forEach(function(el) {
+                var spec = el.getAttribute('data-i18n-attr');
+                if (spec) {
+                    var colon = spec.indexOf(':');
+                    if (colon !== -1) {
+                        var attr = spec.slice(0, colon);
+                        var key = spec.slice(colon + 1);
+                        if (t[key] !== undefined) el.setAttribute(attr, t[key]);
+                    }
+                }
+            });
+            document.querySelectorAll('[data-i18n-month]').forEach(function(el) {
+                var m = parseInt(el.getAttribute('data-i18n-month') || '0', 10);
+                var y = parseInt(el.getAttribute('data-i18n-year') || '0', 10);
+                if (m >= 1 && m <= 12 && y > 0) {
+                    var d = new Date(y, m - 1, 1);
+                    el.textContent = d.toLocaleDateString(currentLocale, { month: 'long', year: 'numeric' });
+                }
+            });
+            document.querySelectorAll('[data-raw-date]').forEach(function(el) {
+                var iso = el.getAttribute('data-raw-date');
+                if (iso) {
+                    var p = iso.split('-');
+                    var d = new Date(+p[0], +p[1] - 1, +p[2]);
+                    if (!isNaN(d.getTime())) {
+                        el.textContent = d.toLocaleDateString(currentLocale, { weekday: 'long' });
+                    }
+                }
+            });
+            document.querySelectorAll('[data-raw-date-aria]').forEach(function(el) {
+                var iso = el.getAttribute('data-raw-date-aria');
+                if (iso) {
+                    var p = iso.split('-');
+                    var d = new Date(+p[0], +p[1] - 1, +p[2]);
+                    if (!isNaN(d.getTime())) {
+                        el.setAttribute('aria-label', d.toLocaleDateString(currentLocale, { weekday: 'long' }));
+                    }
+                }
+            });
+        }
+        apply();
+        window.__settingsI18n = {
+            setLocale: function(locale) {
+                currentLocale = locale;
+                lang = locale.slice(0, 2);
+                t = locales[lang] || en;
+                localStorage.setItem('locale', locale);
+                apply();
+            }
+        };
+        var pickerLi = document.querySelector('.locale-picker-li');
+        if (pickerLi) {
+            var select = document.createElement('select');
+            select.className = 'locale-picker';
+            select.setAttribute('aria-label', t['cal.aria.month'] || 'Month');
+            var opts = [{v:'en',l:'English'},{v:'de',l:'Deutsch'}];
+            opts.forEach(function(o) {
+                var opt = document.createElement('option');
+                opt.value = o.v; opt.textContent = o.l;
+                if (lang === o.v) opt.selected = true;
+                select.appendChild(opt);
+            });
+            select.addEventListener('change', function() { window.__settingsI18n.setLocale(select.value); });
+            pickerLi.appendChild(select);
+        }
+    })();
+    </script>
 </body>
 </html>

@@ -30,6 +30,7 @@ struct WeeklyTemplate {
 
 struct DayView {
     day_name: String,
+    date_iso: String,
     is_today: bool,
     events: Vec<EventView>,
 }
@@ -55,6 +56,7 @@ struct EventView {
 struct CalendarTemplate {
     month: String,
     month_name: String,
+    month_number: u32,
     year: i32,
     days: Vec<CalendarDay>,
     prev_month: String,
@@ -255,6 +257,7 @@ pub async fn list_events(
 
         days.push(DayView {
             day_name: day.format("%A").to_string(),
+            date_iso: day.format("%Y-%m-%d").to_string(),
             is_today: day == today,
             events,
         });
@@ -369,6 +372,7 @@ pub async fn list_calendar(
     let tpl = CalendarTemplate {
         month: first_day.format("%Y-%m").to_string(),
         month_name: first_day.format("%B").to_string(),
+        month_number: first_day.month(),
         year: first_day.year(),
         days,
         prev_month: prev_first.format("%Y-%m").to_string(),

@@ -2,19 +2,19 @@
   <header>
     <hgroup>
       <h2>
-        <span hx-get="/api/calendar?month={{ prev_month }}" hx-indicator="#calendar-grid" role="button" tabindex="0" aria-label="Previous month" style="cursor: pointer;"><span class="arrow">&#8249;</span></span>
-        <span id="month-title">{{ month_name }} {{ year }}</span>
-        <span hx-get="/api/calendar?month={{ next_month }}" hx-indicator="#calendar-grid" role="button" tabindex="0" aria-label="Next month" style="cursor: pointer;"><span class="arrow">&#8250;</span></span>
+        <span hx-get="/api/calendar?month={{ prev_month }}" hx-indicator="#calendar-grid" role="button" tabindex="0" data-i18n-attr="aria-label:cal.aria.prevMonth" aria-label="Previous month" style="cursor: pointer;"><span class="arrow">&#8249;</span></span>
+        <span id="month-title" data-i18n-month="{{ month_number }}" data-i18n-year="{{ year }}">{{ month_name }} {{ year }}</span>
+        <span hx-get="/api/calendar?month={{ next_month }}" hx-indicator="#calendar-grid" role="button" tabindex="0" data-i18n-attr="aria-label:cal.aria.nextMonth" aria-label="Next month" style="cursor: pointer;"><span class="arrow">&#8250;</span></span>
       </h2>
-      <p>Monthly calendar view</p>
+      <p data-i18n="cal.monthlyView">Monthly calendar view</p>
     </hgroup>
   </header>
   <div class="calendar-content" style="position: relative;">
-    <div class="calendar-loading">Loading calendar…</div>
-    <div role="grid" aria-label="Calendar for {{ month_name }} {{ year }}">
+    <div class="calendar-loading" data-i18n="cal.loadingCalendar">Loading calendar…</div>
+    <div role="grid">
       <div class="date-grid" role="row">
-        <small>Mon</small><small>Tue</small><small>Wed</small>
-        <small>Thu</small><small>Fri</small><small>Sat</small><small>Sun</small>
+        <small data-i18n-day-short="1">Mon</small><small data-i18n-day-short="2">Tue</small><small data-i18n-day-short="3">Wed</small>
+        <small data-i18n-day-short="4">Thu</small><small data-i18n-day-short="5">Fri</small><small data-i18n-day-short="6">Sat</small><small data-i18n-day-short="7">Sun</small>
       </div>
       <div class="date-grid" id="date-grid" role="grid">
         {% for day in days %}

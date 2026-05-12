@@ -9,18 +9,31 @@ import '../styles/main.scss';
 		<meta name="viewport" content="width=device-width" />
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<meta name="generator" content={Astro.generator} />
-		<title>Caley</title>
+		<title data-i18n="app.title">Caley</title>
 		<script>
 			import htmx from 'htmx.org';
 			window.htmx = htmx;
+		</script>
+		<script>
+			import { initI18n, t, setLocale, getLang, createLocalePicker } from '../i18n/index.ts';
+			initI18n();
+			window.__i18n = { t, setLocale, getLang };
+			if (document.readyState === 'loading') {
+				document.addEventListener('DOMContentLoaded', () => {
+					document.querySelector('.locale-picker-li')?.appendChild(createLocalePicker());
+				});
+			} else {
+				document.querySelector('.locale-picker-li')?.appendChild(createLocalePicker());
+			}
 		</script>
 	</head>
 	<body>
 		<header class="container">
 			<nav>
-				<ul><li><strong>Caley</strong></li></ul>
+				<ul><li><strong data-i18n="app.brand">Caley</strong></li></ul>
 				<ul>
-					<li hx-get="/api/user" hx-trigger="load" hx-swap="innerHTML">Loading...</li>
+					<li class="locale-picker-li"></li>
+					<li hx-get="/api/user" hx-trigger="load" hx-swap="innerHTML"><span data-i18n="nav.loading">Loading...</span></li>
 				</ul>
 			</nav>
 		</header>

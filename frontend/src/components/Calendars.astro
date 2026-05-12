@@ -1,10 +1,10 @@
 
-<h2>Calendars</h2>
+<h2 data-i18n="cal.heading">Calendars</h2>
 <form id="calendar-form">
 	<input type="hidden" name="start" id="week-start-input">
 	<input type="hidden" name="end" id="week-end-input">
 	<div id="calendar-container" hx-get="/api/calendars" hx-trigger="load" hx-swap="innerHTML">
-		<p>Loading calendars…</p>
+		<p data-i18n="cal.loading">Loading calendars…</p>
 	</div>
 </form>
 

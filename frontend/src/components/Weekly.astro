@@ -1,5 +1,5 @@
 <div class="weekly-header">
-  <h2>Weekly Calendar</h2>
+  <h2 data-i18n="weekly.heading">Weekly Calendar</h2>
   <span id="week-range-display"></span>
 </div>
     
@@ -9,30 +9,30 @@
          hx-trigger="htmx:afterSettle from:#calendar-container, change from:#calendar-form"
          hx-include="#calendar-form"
          hx-swap="innerHTML">
-        <div class="week-loading">Loading events</div>
+        <div class="week-loading" data-i18n="weekly.loading">Loading events</div>
     </div>
 
 <dialog id="event-detail">
   <article>
     <header>
       <h3 id="event-detail-summary"></h3>
-      <button id="event-detail-close" class="close-btn" aria-label="Close">&times;</button>
+      <button id="event-detail-close" class="close-btn" data-i18n-attr="aria-label:weekly.aria.close" aria-label="Close">&times;</button>
     </header>
     <div class="event-detail-body">
       <div class="event-detail-row" id="event-detail-time-row">
-        <span class="event-detail-label">Time</span>
+        <span class="event-detail-label" data-i18n="event.time">Time</span>
         <span id="event-detail-time"></span>
       </div>
       <div class="event-detail-row" id="event-detail-location-row">
-        <span class="event-detail-label">Location</span>
+        <span class="event-detail-label" data-i18n="event.location">Location</span>
         <span id="event-detail-location"></span>
       </div>
       <div class="event-detail-row" id="event-detail-recurrence-row">
-        <span class="event-detail-label">Repeats</span>
+        <span class="event-detail-label" data-i18n="event.repeats">Repeats</span>
         <span id="event-detail-recurrence"></span>
       </div>
       <div id="event-detail-description-row">
-        <span class="event-detail-label">Description</span>
+        <span class="event-detail-label" data-i18n="event.description">Description</span>
         <p id="event-detail-description"></p>
       </div>
     </div>
@@ -42,15 +42,16 @@
 <script>
 function formatRecurrence(r, locale) {
   if (!r || !r.freq) return '';
-  const freq = { DAILY: 'day', WEEKLY: 'week', MONTHLY: 'month', YEARLY: 'year' };
+  const t = window.__i18n ? window.__i18n.t : (k) => k;
+  const singular = { DAILY: 'rec.everyDay', WEEKLY: 'rec.everyWeek', MONTHLY: 'rec.everyMonth', YEARLY: 'rec.everyYear' };
+  const plural = { DAILY: 'rec.everyNDays', WEEKLY: 'rec.everyNWeeks', MONTHLY: 'rec.everyNMonths', YEARLY: 'rec.everyNYears' };
   const dayNames = { MO: 0, TU: 1, WE: 2, TH: 3, FR: 4, SA: 5, SU: 6 };
   const interval = r.interval && r.interval > 1 ? r.interval : 1;
-  const unit = freq[r.freq] || r.freq.toLowerCase();
   let text = '';
   if (interval === 1) {
-    text += 'Every ' + unit;
+    text += t(singular[r.freq]);
   } else {
-    text += 'Every ' + interval + ' ' + unit + 's';
+    text += t(plural[r.freq]).replace('{n}', interval);
   }
   if (r.by_day && r.by_day.length > 0 && r.freq === 'WEEKLY') {
     const dtf = new Intl.DateTimeFormat(locale, { weekday: 'long' });
@@ -61,17 +62,17 @@ function formatRecurrence(r, locale) {
       refDate.setDate(1 + jsDay);
       return dtf.format(refDate);
     };
-    text += ' on ' + r.by_day.map(dayFn).join(', ');
+    text += t('rec.on') + r.by_day.map(dayFn).join(', ');
   }
   if (r.by_month_day && r.by_month_day.length > 0 && r.freq === 'MONTHLY') {
-    text += ' on day ' + r.by_month_day.join(', ');
+    text += t('rec.onDay') + r.by_month_day.join(', ');
   }
   if (r.count) {
-    text += ', ' + r.count + ' times';
+    text += ', ' + r.count + t('rec.times');
   } else if (r.until) {
     const untilDate = new Date(r.until + 'Z');
     if (!isNaN(untilDate.getTime())) {
-      text += ', until ' + untilDate.toLocaleDateString(locale, { dateStyle: 'long' });
+      text += t('rec.until') + untilDate.toLocaleDateString(locale, { dateStyle: 'long' });
     }
   }
   return text;
@@ -96,8 +97,9 @@ function openEventDetail(article) {
   document.getElementById('event-detail-summary').textContent = summary;
 
   let timeText = '';
+  const tr = window.__i18n ? window.__i18n.t : (k) => k;
   if (isAllDay) {
-    timeText = 'All day' + (dtstart ? ' \u00B7 ' + new Date(dtstart + 'T00:00:00').toLocaleDateString(locale, { dateStyle: 'long' }) : '');
+    timeText = tr('event.allDay') + (dtstart ? ' \u00B7 ' + new Date(dtstart + 'T00:00:00').toLocaleDateString(locale, { dateStyle: 'long' }) : '');
   } else if (dtstart) {
     const s = new Date(dtstart.includes('Z') || dtstart.includes('+') ? dtstart : dtstart + 'Z');
     const dateStr = s.toLocaleDateString(locale, { dateStyle: 'long' });

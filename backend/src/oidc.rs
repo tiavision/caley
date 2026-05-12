@@ -97,13 +97,13 @@ pub async fn user_info(
     };
 
     let settings_link = if has_settings {
-        r#" | <a href="/settings">Settings</a>"#
+        r#" | <a href="/settings" data-i18n="nav.settings">Settings</a>"#
     } else {
-        r#" | <a href="/settings">Set up CalDAV</a>"#
+        r#" | <a href="/settings" data-i18n="nav.setup">Set up CalDAV</a>"#
     };
 
     Html(format!(
-        r#"<span>{}</span>{} | <a href="/logout">Logout</a>"#,
+        r#"<span>{}</span>{} | <a href="/logout" data-i18n="nav.logout">Logout</a>"#,
         html_escape(&display_name),
         settings_link,
     ))
