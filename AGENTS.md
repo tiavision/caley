@@ -10,14 +10,9 @@ Two-package monorepo with no root-level tooling:
 ## Backend
 
 - Run: `cargo run` from `backend/` → `localhost:3000`
-- Requires `.env` in `backend/` with:
-  - `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` — OIDC provider configuration
-  - `OIDC_LOGOUT` — set to `false` to skip OIDC provider logout and just clear the session (default: `true`)
-  - `APP_BASE_URL` — public URL of this app (e.g. `http://localhost:3000`), used for OIDC callback
-  - `CALDAV_PORT` — listen port (default: `3000`)
-  - `DATABASE_PATH` — path to SQLite database file (default: `./data/caley.db`)
-  - `OIDC_USER_ID_CLAIM` — which OIDC claim to use as user ID (enum): `sub` (default), `preferred-username`, `email`, or `name`
-  - `ENCRYPTION_KEY` — passphrase used to derive an AES-256-GCM key for encrypting stored CalDAV credentials (required)
+- Configuration is via environment variables. A `.env` file in `backend/` is also loaded automatically.
+- Required: `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `APP_BASE_URL`, `ENCRYPTION_KEY`
+- Optional: `CALDAV_PORT` (default: `3000`), `OIDC_LOGOUT` (default: `true`), `OIDC_USER_ID_CLAIM` (default: `sub`), `DATABASE_PATH` (default: `./data/caley.db`), `STATIC_DIR` (optional, defaults to `../frontend/dist`)
 - CalDAV credentials (base URL, username, password) are per-user settings stored encrypted in SQLite with AES-256-GCM
 - New users are redirected to `/settings` to configure their CalDAV connection; settings are tested before saving
 - Uses `dotenvy` to load `.env`; `clap` with derive + env feature for CLI args
@@ -25,7 +20,7 @@ Two-package monorepo with no root-level tooling:
 - Session store: in-memory (`MemoryStore` from `tower-sessions`); sessions lost on restart
 - Database: SQLite via `rusqlite` (bundled); per-user CalDAV settings stored encrypted (AES-256-GCM) in `user_settings` table; encryption key derived from `ENCRYPTION_KEY` env var via HKDF-SHA256
 - Database file location is configurable via `DATABASE_PATH` env var (default: `./data/caley.db`). The parent directory is created automatically. When running in Podman/Docker, mount a volume at `/data` (or your configured path) to persist the database across container restarts, e.g. `podman run -v caley-data:/data …`
-- Rust edition 2024 (not 2021)  
+- Rust edition 2024
 - No tests configured yet
 
 ## Frontend
@@ -35,11 +30,10 @@ Two-package monorepo with no root-level tooling:
 - Build: `npm run build` → `frontend/dist/`
 - TypeScript strict mode (extends `astro/tsconfigs/strict`)
 - SCSS via `sass-embedded` (not dart-sass)
-- HTMX is a dependency but not yet integrated into components
+- HTMX integrated into components and backend templates for dynamic loading, calendar navigation, and user info
 
 ## Notes
 
 - No CI, no linter, no formatter, no test runner configured in either package
 - No root `package.json` or workspace config — each package is independent
-- Frontend data is all hardcoded; backend is not yet serving an API
 - OIDC authentication protects all endpoints; username shown in top-right via HTMX
