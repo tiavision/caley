@@ -1,0 +1,24 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout>
+    <div class="settings-form">
+        <hgroup>
+            <h2 data-i18n="settings.heading">Settings</h2>
+            <p data-i18n="settings.subtitle">Configure your CalDAV connection to fetch calendar events.</p>
+        </hgroup>
+        <div id="settings-form-container"
+             hx-get="/api/settings/form"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+            <p data-i18n="settings.subtitle">Loading...</p>
+        </div>
+    </div>
+</Layout>
+
+<style>
+    .settings-form { max-width: 32rem; margin: 2rem auto; }
+    .error-msg { color: var(--pico-del-color); }
+    .success-msg { color: var(--pico-ins-color); }
+</style>

@@ -10,8 +10,8 @@ use crate::db::UserSettings;
 use crate::oidc::{extract_user_id, AppState};
 
 #[derive(Template)]
-#[template(path = "settings.html", whitespace = "minimize")]
-struct SettingsTemplate {
+#[template(path = "settings_form.html", whitespace = "minimize")]
+struct SettingsFormTemplate {
     base_url: String,
     username: String,
     password: String,
@@ -32,7 +32,7 @@ pub fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-pub async fn settings_page(
+pub async fn settings_form(
     State(state): State<AppState>,
     claims: OidcClaims<EmptyAdditionalClaims>,
 ) -> Response {
@@ -57,7 +57,7 @@ pub async fn settings_page(
         None => (String::new(), String::new(), String::new()),
     };
 
-    let tpl = SettingsTemplate {
+    let tpl = SettingsFormTemplate {
         base_url,
         username,
         password,
@@ -118,5 +118,7 @@ pub async fn save_settings(
         return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save settings").into_response();
     }
 
-    r#"<div class="success-msg">Settings saved! Redirecting...</div><script>setTimeout(function(){ window.location.href='/'; }, 500);</script>"#.into_response()
+    let mut response = Html(r#"<div class="success-msg">Settings saved! Redirecting...</div>"#).into_response();
+    response.headers_mut().insert("HX-Redirect", "/".parse().unwrap());
+    response
 }

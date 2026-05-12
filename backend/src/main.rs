@@ -80,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/events", get(calendar::list_events))
         .route("/api/calendar", get(calendar::list_calendar))
         .route("/api/user", get(oidc::user_info))
-        .route("/settings", get(settings::settings_page))
+        .route("/api/settings/form", get(settings::settings_form))
         .route("/api/settings", post(settings::save_settings))
         .route("/logout", get(oidc::logout_handler))
         .with_state(state)
