@@ -102,11 +102,31 @@
       </label>
 
       <div id="event-form-rrule-options" style="display:none">
-        <label class="rrule-interval-label">
-          <span data-i18n="event.repeatEvery">Every</span>
-          <input type="number" id="event-form-interval" min="1" value="1" style="width:4rem">
-          <span id="event-form-interval-unit"></span>
-        </label>
+        <div class="rrule-header-row">
+          <label class="rrule-interval-label">
+            <span data-i18n="event.repeatEvery">Every</span>
+            <input type="number" id="event-form-interval" min="1" value="1" style="width:4rem">
+            <span id="event-form-interval-unit"></span>
+          </label>
+
+          <div class="rrule-end-row">
+            <span data-i18n="event.repeatEnd">Ends</span>
+            <div class="rrule-end-controls">
+              <select id="event-form-end-type">
+                <option value="never" data-i18n="event.repeatEndNever">Never</option>
+                <option value="count" data-i18n="event.repeatEndAfter">After</option>
+                <option value="until" data-i18n="event.repeatEndOn">On date</option>
+              </select>
+              <div id="event-form-end-count" style="display:none">
+                <input type="number" id="event-form-count" min="1" value="1" style="width:4rem">
+                <span data-i18n="event.repeatEndAfterN">occurrences</span>
+              </div>
+              <div id="event-form-end-until" style="display:none">
+                <input type="date" id="event-form-until">
+              </div>
+            </div>
+          </div>
+        </div>
 
         <fieldset id="event-form-byday-field" style="display:none">
           <span class="fieldset-label" data-i18n="event.repeatOn">On days</span>
@@ -147,24 +167,6 @@
               <option value="SU" data-i18n="event.daySu">Sunday</option>
             </select>
           </label>
-        </div>
-
-        <div class="rrule-end-row">
-          <span class="fieldset-label" data-i18n="event.repeatEnd">Ends</span>
-          <div class="rrule-end-controls">
-            <select id="event-form-end-type">
-              <option value="never" data-i18n="event.repeatEndNever">Never</option>
-              <option value="count" data-i18n="event.repeatEndAfter">After</option>
-              <option value="until" data-i18n="event.repeatEndOn">On date</option>
-            </select>
-            <div id="event-form-end-count" style="display:none">
-              <input type="number" id="event-form-count" min="1" value="1" style="width:4rem">
-              <span data-i18n="event.repeatEndAfterN">occurrences</span>
-            </div>
-            <div id="event-form-end-until" style="display:none">
-              <input type="date" id="event-form-until">
-            </div>
-          </div>
         </div>
       </div>
 
@@ -594,8 +596,8 @@ function updateIntervalUnit() {
   var freq = document.getElementById('event-form-freq').value;
   var unitEl = document.getElementById('event-form-interval-unit');
   var tr = window.__i18n ? window.__i18n.t : function(k) { return k; };
-  var map = { DAILY: tr('event.repeatDaily'), WEEKLY: tr('event.repeatWeekly'), MONTHLY: tr('event.repeatMonthly'), YEARLY: tr('event.repeatYearly') };
-  unitEl.textContent = map[freq] ? map[freq].toLowerCase() : '';
+  var map = { DAILY: tr('event.repeatUnitDaily'), WEEKLY: tr('event.repeatUnitWeekly'), MONTHLY: tr('event.repeatUnitMonthly'), YEARLY: tr('event.repeatUnitYearly') };
+  unitEl.textContent = map[freq] || '';
 }
 
 function updateEndFields() {
@@ -1090,12 +1092,19 @@ article {
 #event-form-rrule-options {
   margin-bottom: 0.75rem;
 }
+.rrule-header-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
 #event-form-rrule-options label.rrule-interval-label {
   display: flex;
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0;
 }
 #event-form-rrule-options fieldset {
   border: none;
@@ -1124,24 +1133,31 @@ article {
   margin-bottom: 0 !important;
   flex-direction: row;
 }
-.monthly-mode-label {
+#event-form-rrule-options label.monthly-mode-label {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.5rem;
   flex-direction: row;
 }
+#event-form-rrule-options label.monthly-mode-label input[type="radio"] {
+  flex-shrink: 0;
+}
 #event-form-monthly-field {
   margin-bottom: 0.75rem;
 }
 .rrule-end-row {
-  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.rrule-end-row .fieldset-label {
+  margin-bottom: 0;
 }
 .rrule-end-controls {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-wrap: wrap;
 }
 #event-form-end-count {
   display: flex;
@@ -1219,6 +1235,11 @@ article {
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
+}
+#event-form input:not([type=checkbox],[type=radio]),
+#event-form select,
+#event-form textarea {
+  margin-bottom: 0;
 }
 .time-fields {
   display: flex;
