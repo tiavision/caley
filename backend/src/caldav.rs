@@ -119,15 +119,22 @@ impl CalDavClient {
     async fn discover_caldav_endpoint(&self) -> Option<String> {
         let well_known = format!("{}/.well-known/caldav", self.base_url);
 
-        let redirect_client = Client::builder()
-            .user_agent("caley/0.1.0")
-            .redirect(reqwest::redirect::Policy::limited(5))
-            .build()
+        let resp = self
+            .client
+            .get(&well_known)
+            .basic_auth(&self.username, Some(&self.password))
+            .send()
+            .await
             .ok()?;
 
-        let resp = redirect_client.get(&well_known).send().await.ok()?;
+        if resp.status().is_redirection() {
+            if let Some(location) = resp.headers().get("location") {
+                let location = location.to_str().ok()?.to_string();
+                return Some(resolve_url(&well_known, &location).trim_end_matches('/').to_string());
+            }
+        }
 
-        Some(resp.url().to_string().trim_end_matches('/').to_string())
+        None
     }
 
     async fn discover_calendar_home_sets(
