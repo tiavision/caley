@@ -544,8 +544,15 @@ document.getElementById('event-form-delete').addEventListener('click', function(
   if (!uid || !href) return;
   var msg = window.__i18n ? window.__i18n.t('event.deleteConfirm') : 'Delete this event?';
   if (!confirm(msg)) return;
+  var scope = document.getElementById('event-form-scope').value;
+  var url = '/api/event?uid=' + encodeURIComponent(uid) + '&calendar_href=' + encodeURIComponent(href);
+  if (scope === 'this_instance') {
+    var originalDtstart = document.getElementById('event-form-original-dtstart').value;
+    var tz = document.getElementById('event-form-tz').value;
+    url += '&scope=this_instance&original_dtstart=' + encodeURIComponent(originalDtstart) + '&tz=' + encodeURIComponent(tz);
+  }
   var xhr = new XMLHttpRequest();
-  xhr.open('DELETE', '/api/event?uid=' + encodeURIComponent(uid) + '&calendar_href=' + encodeURIComponent(href), true);
+  xhr.open('DELETE', url, true);
   xhr.onload = function() {
     if (xhr.status >= 200 && xhr.status < 300) {
       document.getElementById('event-form').close();

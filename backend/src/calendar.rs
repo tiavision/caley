@@ -12,7 +12,7 @@ use url::form_urlencoded;
 
 use crate::oidc::{require_client, AppState};
 use crate::db;
-use crate::caldav::{generate_ical_event, add_recurrence_override, generate_new_uid, RecurrenceInfo};
+use crate::caldav::{generate_ical_event, add_recurrence_override, add_exdate, generate_new_uid, RecurrenceInfo};
 
 const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
 
@@ -252,11 +252,17 @@ pub async fn delete_event(
 
     let mut uid = String::new();
     let mut calendar_href = String::new();
+    let mut scope = String::new();
+    let mut original_dtstart = String::new();
+    let mut tz = String::new();
     if let Some(query) = raw_query {
         for (key, value) in form_urlencoded::parse(query.as_bytes()) {
             match key.as_ref() {
                 "uid" => uid = value.into_owned(),
                 "calendar_href" => calendar_href = value.into_owned(),
+                "scope" => scope = value.into_owned(),
+                "original_dtstart" => original_dtstart = value.into_owned(),
+                "tz" => tz = value.into_owned(),
                 _ => {}
             }
         }
@@ -266,6 +272,30 @@ pub async fn delete_event(
     }
     if calendar_href.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing calendar_href").into_response();
+    }
+
+    if scope == "this_instance" && !original_dtstart.is_empty() {
+        // Only exclude this occurrence: add EXDATE to master and drop the override.
+        let raw_ical = match client.get_event(&calendar_href, &uid).await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Failed to GET event for instance delete: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, format!("<p class='error'>Failed to get event: {e}</p>")).into_response();
+            }
+        };
+        let tz_ref = if tz.is_empty() { "UTC" } else { &tz };
+        let modified = add_exdate(&raw_ical, &original_dtstart, tz_ref);
+        return match client.put_event(&calendar_href, &uid, &modified).await {
+            Ok(_) => (
+                StatusCode::OK,
+                [("HX-Trigger", "calendarChange")],
+                "OK",
+            ).into_response(),
+            Err(e) => {
+                eprintln!("Failed to PUT event after instance delete: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("<p class='error'>Failed to update event: {e}</p>")).into_response()
+            }
+        };
     }
 
     match client.delete_event(&calendar_href, &uid).await {

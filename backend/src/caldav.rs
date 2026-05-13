@@ -1450,3 +1450,86 @@ pub fn add_recurrence_override(
 
     result.replace('\n', "\r\n")
 }
+
+/// Add EXDATE for one occurrence to the master VEVENT and drop any existing
+/// override VEVENT for the same date.
+/// `occurrence_dtstart` is in display format: "YYYY-MM-DD" for all-day or
+/// "YYYY-MM-DDTHH:MM:SS..." for timed (the `data-dtstart` attribute value).
+/// `tz` is the TZID name (e.g. "UTC", "Europe/Berlin").
+pub fn add_exdate(ical_data: &str, occurrence_dtstart: &str, tz: &str) -> String {
+    let ical = ical_data.replace("\r\n", "\n");
+    let is_all_day = !occurrence_dtstart.contains('T');
+
+    // Build the EXDATE line to insert into the master VEVENT.
+    let exdate_line = if is_all_day {
+        let date_compact = occurrence_dtstart.replace('-', "");
+        format!("EXDATE;VALUE=DATE:{}", date_compact)
+    } else {
+        let parts: Vec<&str> = occurrence_dtstart.splitn(2, 'T').collect();
+        let date_compact = parts[0].replace('-', "");
+        let time_str = parts.get(1).copied().unwrap_or("000000Z");
+        // Keep only the digit portion of the time component.
+        let time_compact: String = time_str.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if occurrence_dtstart.ends_with('Z') || tz.is_empty() || tz == "UTC" {
+            format!("EXDATE:{}T{}Z", date_compact, time_compact)
+        } else {
+            format!("EXDATE;TZID={}:{}T{}", tz, date_compact, time_compact)
+        }
+    };
+
+    // 8-digit YYYYMMDD for matching existing override VEVENTs.
+    let rid_date: String = occurrence_dtstart.replace('-', "").chars().take(8).collect();
+
+    let mut result = String::new();
+    let mut search_from = 0;
+    let mut master_modified = false;
+
+    while let Some(rel_start) = ical[search_from..].find("BEGIN:VEVENT") {
+        let abs_start = search_from + rel_start;
+        result.push_str(&ical[search_from..abs_start]);
+
+        if let Some(rel_end) = ical[abs_start..].find("\nEND:VEVENT") {
+            let abs_end = abs_start + rel_end + 1 + 10; // \n + "END:VEVENT"
+            let block = &ical[abs_start..abs_end];
+
+            let has_recurrence_id = block.lines().any(|l| {
+                let t = l.trim();
+                t.starts_with("RECURRENCE-ID:") || t.starts_with("RECURRENCE-ID;")
+            });
+
+            if has_recurrence_id {
+                // Override VEVENT: drop if it matches our target date, keep otherwise.
+                let is_target = block.lines().any(|l| {
+                    let t = l.trim();
+                    if !t.starts_with("RECURRENCE-ID:") && !t.starts_with("RECURRENCE-ID;") {
+                        return false;
+                    }
+                    t.rsplit(':').next().map_or(false, |val| {
+                        val.chars().take(8).collect::<String>() == rid_date
+                    })
+                });
+                if !is_target {
+                    result.push_str(block);
+                }
+            } else if !master_modified {
+                // Master VEVENT: inject EXDATE before END:VEVENT.
+                let before_end = &ical[abs_start..abs_start + rel_end];
+                result.push_str(before_end);
+                result.push('\n');
+                result.push_str(&exdate_line);
+                result.push('\n');
+                result.push_str("END:VEVENT");
+                master_modified = true;
+            } else {
+                result.push_str(block);
+            }
+            search_from = abs_end;
+        } else {
+            result.push_str(&ical[search_from..]);
+            search_from = ical.len();
+            break;
+        }
+    }
+    result.push_str(&ical[search_from..]);
+    result.replace('\n', "\r\n")
+}
