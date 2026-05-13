@@ -6,7 +6,7 @@
     <div id="weekly-events" class="calendar" style="position: relative"
          role="grid" aria-label="Weekly calendar"
          hx-get="/api/events"
-         hx-trigger="htmx:afterSettle from:#calendar-container, change from:#calendar-form"
+         hx-trigger="htmx:afterSettle from:#calendar-container, change from:#calendar-form, calendarChange from:body"
          hx-include="#calendar-form"
          hx-swap="innerHTML">
         <div class="week-loading" data-i18n="weekly.loading">Loading events</div>
