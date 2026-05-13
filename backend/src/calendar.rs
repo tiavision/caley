@@ -148,7 +148,7 @@ pub async fn save_event(
     let is_all_day = parse_form_field(&form, "is_all_day") == Some("true");
     let calendar_href = match parse_form_field(&form, "calendar_href") {
         Some(h) => h.to_string(),
-        None => return (StatusCode::BAD_REQUEST, "Missing calendar_href").into_response(),
+        None => return (StatusCode::BAD_REQUEST, "<p class='error'>Missing calendar_href</p>").into_response(),
     };
     let scope = parse_form_field(&form, "scope").unwrap_or("series").to_string();
     let original_dtstart = parse_form_field(&form, "original_dtstart");
@@ -158,10 +158,10 @@ pub async fn save_event(
         .and_then(|r| serde_json::from_str(r).ok());
 
     if summary.is_empty() {
-        return (StatusCode::BAD_REQUEST, "Missing summary").into_response();
+        return (StatusCode::BAD_REQUEST, "<p class='error'>Missing summary</p>").into_response();
     }
     if date.is_empty() {
-        return (StatusCode::BAD_REQUEST, "Missing date").into_response();
+        return (StatusCode::BAD_REQUEST, "<p class='error'>Missing date</p>").into_response();
     }
 
     if scope == "this_instance" {

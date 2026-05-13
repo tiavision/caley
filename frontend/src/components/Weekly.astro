@@ -169,9 +169,10 @@
       <input type="hidden" name="recurrence" id="event-form-recurrence" value="">
 
       <input type="hidden" name="original_calendar_href" id="event-form-original-calendar-href" value="">
+      <input type="hidden" name="calendar_href" id="event-form-calendar-href" value="">
       <label>
         <span data-i18n="event.calendar">Calendar</span>
-        <select name="calendar_href" id="event-form-calendar-select"></select>
+        <select id="event-form-calendar-select"></select>
       </label>
       <div class="event-form-actions">
         <button type="submit" data-i18n="event.save">Save</button>
@@ -421,6 +422,7 @@ function openEventForm(article, scope) {
   document.getElementById('event-form-delete').style.display = '';
   populateCalendarSelect();
   document.getElementById('event-form-calendar-select').value = article.getAttribute('data-calendar-href') || '';
+  document.getElementById('event-form-calendar-href').value = article.getAttribute('data-calendar-href') || '';
   document.getElementById('event-form-original-calendar-href').value = article.getAttribute('data-calendar-href') || '';
 
   // Recurrence
@@ -481,6 +483,7 @@ function openNewEventForm() {
   populateCalendarSelect();
   var firstOpt = document.getElementById('event-form-calendar-select').options[0];
   if (firstOpt) document.getElementById('event-form-calendar-select').value = firstOpt.value;
+  document.getElementById('event-form-calendar-href').value = document.getElementById('event-form-calendar-select').value;
 
   document.getElementById('event-form-result').innerHTML = '';
   dialog.showModal();
@@ -521,10 +524,16 @@ document.getElementById('event-form').addEventListener('click', function(e) {
   if (e.target === e.currentTarget) this.close();
 });
 
+document.getElementById('event-form-calendar-select').addEventListener('change', function() {
+  document.getElementById('event-form-calendar-href').value = this.value;
+});
+
 document.addEventListener('htmx:afterRequest', function(evt) {
   if (evt.detail.target && evt.detail.target.id === 'event-form-result') {
     if (evt.detail.successful) {
       document.getElementById('event-form').close();
+    } else {
+      evt.detail.target.innerHTML = evt.detail.xhr.responseText;
     }
   }
 });
