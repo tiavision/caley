@@ -379,9 +379,15 @@ function populateCalendarSelect() {
 function openEventForm(article, scope) {
   var dialog = document.getElementById('event-form');
   var isAllDay = article.getAttribute('data-is-all-day') === 'true';
+  var isRecurring = article.getAttribute('data-is-recurring') === 'true';
+  var masterDtstart = article.getAttribute('data-master-dtstart') || '';
   var dtstart = article.getAttribute('data-dtstart') || '';
   var dtend = article.getAttribute('data-dtend') || '';
   var tz = article.getAttribute('data-tz') || 'UTC';
+
+  if (scope === 'series' && isRecurring && masterDtstart) {
+    dtstart = masterDtstart;
+  }
 
   document.getElementById('event-form-uid').value = article.getAttribute('data-uid') || '';
   document.getElementById('event-form-summary').value = article.getAttribute('data-summary') || '';
@@ -389,7 +395,7 @@ function openEventForm(article, scope) {
   document.getElementById('event-form-description').value = article.getAttribute('data-description') || '';
   document.getElementById('event-form-tz').value = tz;
   document.getElementById('event-form-scope').value = scope || 'series';
-  document.getElementById('event-form-original-dtstart').value = dtstart;
+  document.getElementById('event-form-original-dtstart').value = article.getAttribute('data-dtstart') || '';
 
   var datePart = dtstart.split('T')[0] || '';
   document.getElementById('event-form-date').value = datePart;

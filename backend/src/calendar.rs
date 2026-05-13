@@ -51,6 +51,7 @@ struct EventView {
     is_recurring: bool,
     recurrence_json: String,
     calendar_href: String,
+    master_dtstart: String,
 }
 
 #[derive(Template)]
@@ -401,6 +402,7 @@ pub async fn list_events(
                             is_recurring: event.is_recurring,
                             recurrence_json,
                             calendar_href: cal_href.clone(),
+                            master_dtstart: event.master_dtstart,
                         },
                     ));
                 }

@@ -31,6 +31,7 @@ pub struct Event {
     pub tz: String,
     pub is_recurring: bool,
     pub recurrence: Option<RecurrenceInfo>,
+    pub master_dtstart: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -887,6 +888,12 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
             let recurrence = master.rrule.as_ref().map(|r| parse_rrule_info(r));
             let expanded = expand_recurring(master, start, end);
 
+            let master_dtstart_str = if master.dtstart_is_date {
+                format_datetime_with_tz(master.dtstart, "UTC").split('T').next().unwrap_or("").to_string()
+            } else {
+                format_datetime_with_tz(master.dtstart, master.dtstart_tzid.as_deref().unwrap_or("UTC"))
+            };
+
             for dt in expanded {
                 let matched_override = overrides.iter().find(|o| {
                     o.recurrence_id.as_ref().map_or(false, |rid| {
@@ -912,6 +919,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                             .unwrap_or("UTC"),
                         true,
                         recurrence.clone(),
+                        master_dtstart_str.clone(),
                     ));
                 } else {
                     events.push(create_event(
@@ -926,6 +934,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                         master.dtstart_tzid.as_deref().unwrap_or("UTC"),
                         true,
                         recurrence.clone(),
+                        master_dtstart_str.clone(),
                     ));
                 }
             }
@@ -942,6 +951,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                 master.dtstart_tzid.as_deref().unwrap_or("UTC"),
                 false,
                 None,
+                String::new(),
             ));
         }
     }
@@ -1049,6 +1059,7 @@ fn create_event(
     tz: &str,
     is_recurring: bool,
     recurrence: Option<RecurrenceInfo>,
+    master_dtstart: String,
 ) -> Event {
     let dtstart_str = if dtstart_is_date {
         dtstart.format("%Y-%m-%d").to_string()
@@ -1094,6 +1105,7 @@ fn create_event(
         tz: tz.to_string(),
         is_recurring,
         recurrence,
+        master_dtstart,
     }
 }
 
