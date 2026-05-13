@@ -89,6 +89,85 @@
         <span data-i18n="event.description">Description</span>
         <textarea name="description" id="event-form-description" rows="3"></textarea>
       </label>
+
+      <label>
+        <span data-i18n="event.repeat">Repeat</span>
+        <select id="event-form-freq">
+          <option value="" data-i18n="event.repeatNone">No repeat</option>
+          <option value="DAILY" data-i18n="event.repeatDaily">Daily</option>
+          <option value="WEEKLY" data-i18n="event.repeatWeekly">Weekly</option>
+          <option value="MONTHLY" data-i18n="event.repeatMonthly">Monthly</option>
+          <option value="YEARLY" data-i18n="event.repeatYearly">Yearly</option>
+        </select>
+      </label>
+
+      <div id="event-form-rrule-options" style="display:none">
+        <label class="rrule-interval-label">
+          <span data-i18n="event.repeatEvery">Every</span>
+          <input type="number" id="event-form-interval" min="1" value="1" style="width:4rem">
+          <span id="event-form-interval-unit"></span>
+        </label>
+
+        <fieldset id="event-form-byday-field" style="display:none">
+          <span class="fieldset-label" data-i18n="event.repeatOn">On days</span>
+          <div class="weekday-checks">
+            <label><input type="checkbox" value="MO"> <span data-i18n="event.dayMo">Mon</span></label>
+            <label><input type="checkbox" value="TU"> <span data-i18n="event.dayTu">Tue</span></label>
+            <label><input type="checkbox" value="WE"> <span data-i18n="event.dayWe">Wed</span></label>
+            <label><input type="checkbox" value="TH"> <span data-i18n="event.dayTh">Thu</span></label>
+            <label><input type="checkbox" value="FR"> <span data-i18n="event.dayFr">Fri</span></label>
+            <label><input type="checkbox" value="SA"> <span data-i18n="event.daySa">Sat</span></label>
+            <label><input type="checkbox" value="SU"> <span data-i18n="event.daySu">Sun</span></label>
+          </div>
+        </fieldset>
+
+        <div id="event-form-monthly-field" style="display:none">
+          <label class="monthly-mode-label">
+            <input type="radio" name="monthly_mode" value="by_day" checked>
+            <span data-i18n="event.monthlyByDay">On day</span>
+            <input type="number" id="event-form-monthday" min="1" max="31" value="1" style="width:4rem">
+          </label>
+          <label class="monthly-mode-label">
+            <input type="radio" name="monthly_mode" value="by_setpos">
+            <span data-i18n="event.monthlyByPos">On the</span>
+            <select id="event-form-setpos">
+              <option value="1" data-i18n="event.monthlyPos1">1st</option>
+              <option value="2" data-i18n="event.monthlyPos2">2nd</option>
+              <option value="3" data-i18n="event.monthlyPos3">3rd</option>
+              <option value="4" data-i18n="event.monthlyPos4">4th</option>
+              <option value="-1" data-i18n="event.monthlyPosLast">last</option>
+            </select>
+            <select id="event-form-setpos-day">
+              <option value="MO" data-i18n="event.dayMo">Monday</option>
+              <option value="TU" data-i18n="event.dayTu">Tuesday</option>
+              <option value="WE" data-i18n="event.dayWe">Wednesday</option>
+              <option value="TH" data-i18n="event.dayTh">Thursday</option>
+              <option value="FR" data-i18n="event.dayFr">Friday</option>
+              <option value="SA" data-i18n="event.daySa">Saturday</option>
+              <option value="SU" data-i18n="event.daySu">Sunday</option>
+            </select>
+          </label>
+        </div>
+
+        <label>
+          <span data-i18n="event.repeatEnd">Ends</span>
+          <select id="event-form-end-type">
+            <option value="never" data-i18n="event.repeatEndNever">Never</option>
+            <option value="count" data-i18n="event.repeatEndAfter">After</option>
+            <option value="until" data-i18n="event.repeatEndOn">On date</option>
+          </select>
+        </label>
+        <div id="event-form-end-count" style="display:none">
+          <input type="number" id="event-form-count" min="1" value="1" style="width:4rem">
+          <span data-i18n="event.repeatEndAfterN">occurrences</span>
+        </div>
+        <div id="event-form-end-until" style="display:none">
+          <input type="date" id="event-form-until">
+        </div>
+      </div>
+
+      <input type="hidden" name="recurrence" id="event-form-recurrence" value="">
+
       <label>
         <span data-i18n="event.calendar">Calendar</span>
         <select name="calendar_href" id="event-form-calendar-select"></select>
@@ -273,7 +352,7 @@ function populateCalendarSelect() {
   container.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
     var raw = cb.value;
     var href = raw.split('|')[0] || raw;
-    var label = container.querySelector('label[for="' + cb.id + '"]');
+    var label = cb.closest('label');
     var name = label ? label.textContent.trim() : href;
     var option = document.createElement('option');
     option.value = href;
@@ -322,6 +401,21 @@ function openEventForm(article, scope) {
   populateCalendarSelect();
   document.getElementById('event-form-calendar-select').value = article.getAttribute('data-calendar-href') || '';
 
+  // Recurrence
+  var isRecurring = article.getAttribute('data-is-recurring') === 'true';
+  if (scope === 'series' && isRecurring) {
+    var recRaw = article.getAttribute('data-recurrence') || '{}';
+    populateRecurrenceFields(recRaw);
+  } else {
+    resetRecurrenceFields();
+  }
+  if (scope === 'this_instance') {
+    document.getElementById('event-form-freq').disabled = true;
+    document.getElementById('event-form-rrule-options').style.display = 'none';
+  } else {
+    document.getElementById('event-form-freq').disabled = false;
+  }
+
   document.getElementById('event-detail').close();
   document.getElementById('event-form-result').innerHTML = '';
   dialog.showModal();
@@ -351,6 +445,8 @@ function openNewEventForm() {
   }
   document.getElementById('event-form-date').value = dateVal;
 
+  resetRecurrenceFields();
+  document.getElementById('event-form-freq').disabled = false;
   document.getElementById('event-form-title').textContent = window.__i18n ? window.__i18n.t('event.create') : 'New event';
   populateCalendarSelect();
   var firstOpt = document.getElementById('event-form-calendar-select').options[0];
@@ -359,6 +455,20 @@ function openNewEventForm() {
   document.getElementById('event-form-result').innerHTML = '';
   dialog.showModal();
 }
+
+function autoFillEndTime() {
+  var endInput = document.getElementById('event-form-end-time');
+  if (endInput.value) return;
+  var startInput = document.getElementById('event-form-start-time');
+  if (!startInput.value) return;
+  var parts = startInput.value.split(':');
+  var totalMin = parseInt(parts[0]) * 60 + parseInt(parts[1]) + 30;
+  var h = Math.floor(totalMin / 60) % 24;
+  var m = totalMin % 60;
+  endInput.value = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
+
+document.getElementById('event-form-start-time').addEventListener('change', autoFillEndTime);
 
 document.getElementById('event-form-all-day').addEventListener('change', function() {
   var fields = document.getElementById('event-form-time-fields');
@@ -409,6 +519,189 @@ document.getElementById('event-form-delete').addEventListener('click', function(
 });
 
 document.getElementById('fab-new-event').addEventListener('click', openNewEventForm);
+
+// ── Recurrence helpers ──
+
+function resetRecurrenceFields() {
+  document.getElementById('event-form-freq').value = '';
+  document.getElementById('event-form-freq').disabled = false;
+  document.getElementById('event-form-rrule-options').style.display = 'none';
+  document.getElementById('event-form-interval').value = '1';
+  document.querySelectorAll('#event-form-byday-field input[type="checkbox"]').forEach(function(cb) { cb.checked = false; });
+  document.getElementById('event-form-monthly-field').style.display = 'none';
+  var modeRadios = document.querySelectorAll('input[name="monthly_mode"]');
+  modeRadios.forEach(function(r) { r.checked = r.value === 'by_day'; });
+  document.getElementById('event-form-monthday').value = '1';
+  document.getElementById('event-form-setpos').value = '1';
+  document.getElementById('event-form-setpos-day').value = 'MO';
+  document.getElementById('event-form-end-type').value = 'never';
+  document.getElementById('event-form-count').value = '1';
+  document.getElementById('event-form-until').value = '';
+  document.getElementById('event-form-end-count').style.display = 'none';
+  document.getElementById('event-form-end-until').style.display = 'none';
+  document.getElementById('event-form-recurrence').value = '';
+}
+
+function updateIntervalUnit() {
+  var freq = document.getElementById('event-form-freq').value;
+  var unitEl = document.getElementById('event-form-interval-unit');
+  var tr = window.__i18n ? window.__i18n.t : function(k) { return k; };
+  var map = { DAILY: tr('event.repeatDaily'), WEEKLY: tr('event.repeatWeekly'), MONTHLY: tr('event.repeatMonthly'), YEARLY: tr('event.repeatYearly') };
+  unitEl.textContent = map[freq] ? map[freq].toLowerCase() : '';
+}
+
+function updateEndFields() {
+  var et = document.getElementById('event-form-end-type').value;
+  document.getElementById('event-form-end-count').style.display = et === 'count' ? '' : 'none';
+  document.getElementById('event-form-end-until').style.display = et === 'until' ? '' : 'none';
+}
+
+function updateRecurrenceVisibility() {
+  var freq = document.getElementById('event-form-freq').value;
+  document.getElementById('event-form-rrule-options').style.display = freq ? '' : 'none';
+  document.getElementById('event-form-byday-field').style.display = freq === 'WEEKLY' ? '' : 'none';
+  document.getElementById('event-form-monthly-field').style.display = freq === 'MONTHLY' ? '' : 'none';
+  updateIntervalUnit();
+  updateEndFields();
+}
+
+function buildRecurrenceJson() {
+  var freq = document.getElementById('event-form-freq').value;
+  if (!freq) return '';
+  var obj = {
+    freq: freq,
+    interval: parseInt(document.getElementById('event-form-interval').value) || 1,
+    by_day: [],
+    by_month_day: [],
+    by_month: [],
+    by_set_pos: [],
+    until: null,
+    count: null
+  };
+  if (freq === 'WEEKLY') {
+    document.querySelectorAll('#event-form-byday-field input[type="checkbox"]:checked').forEach(function(cb) {
+      obj.by_day.push(cb.value);
+    });
+  }
+  if (freq === 'MONTHLY') {
+    var mode = document.querySelector('input[name="monthly_mode"]:checked');
+    if (mode && mode.value === 'by_setpos') {
+      var pos = parseInt(document.getElementById('event-form-setpos').value);
+      var day = document.getElementById('event-form-setpos-day').value;
+      if (pos) obj.by_set_pos = [pos];
+      if (day) obj.by_day = [day];
+    } else {
+      var d = parseInt(document.getElementById('event-form-monthday').value);
+      if (d) obj.by_month_day = [d];
+    }
+  }
+  var et = document.getElementById('event-form-end-type').value;
+  if (et === 'count') {
+    var c = parseInt(document.getElementById('event-form-count').value);
+    if (c) obj.count = c;
+  } else if (et === 'until') {
+    obj.until = document.getElementById('event-form-until').value || null;
+  }
+  return JSON.stringify(obj);
+}
+
+function populateRecurrenceFields(jsonStr) {
+  var rec = {};
+  try { rec = JSON.parse(jsonStr); } catch(e) {}
+  var freq = rec.freq || '';
+  document.getElementById('event-form-freq').value = freq;
+  if (!freq) { resetRecurrenceFields(); return; }
+  document.getElementById('event-form-rrule-options').style.display = '';
+  document.getElementById('event-form-interval').value = rec.interval || 1;
+  updateIntervalUnit();
+  // Weekly days
+  if (freq === 'WEEKLY') {
+    document.getElementById('event-form-byday-field').style.display = '';
+    document.querySelectorAll('#event-form-byday-field input[type="checkbox"]').forEach(function(cb) {
+      cb.checked = rec.by_day && rec.by_day.indexOf(cb.value) !== -1;
+    });
+  } else {
+    document.getElementById('event-form-byday-field').style.display = 'none';
+  }
+  // Monthly mode
+  if (freq === 'MONTHLY') {
+    document.getElementById('event-form-monthly-field').style.display = '';
+    if (rec.by_set_pos && rec.by_set_pos.length > 0) {
+      document.querySelectorAll('input[name="monthly_mode"]').forEach(function(r) { r.checked = r.value === 'by_setpos'; });
+      document.getElementById('event-form-setpos').value = String(rec.by_set_pos[0]);
+      if (rec.by_day && rec.by_day.length > 0) document.getElementById('event-form-setpos-day').value = rec.by_day[0];
+    } else {
+      document.querySelectorAll('input[name="monthly_mode"]').forEach(function(r) { r.checked = r.value === 'by_day'; });
+      if (rec.by_month_day && rec.by_month_day.length > 0) document.getElementById('event-form-monthday').value = rec.by_month_day[0];
+    }
+  } else {
+    document.getElementById('event-form-monthly-field').style.display = 'none';
+  }
+  // End condition
+  if (rec.count) {
+    document.getElementById('event-form-end-type').value = 'count';
+    document.getElementById('event-form-count').value = rec.count;
+  } else if (rec.until) {
+    document.getElementById('event-form-end-type').value = 'until';
+    document.getElementById('event-form-until').value = rec.until.split(' ')[0];
+  } else {
+    document.getElementById('event-form-end-type').value = 'never';
+  }
+  updateEndFields();
+  document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
+}
+
+// ── Recurrence event listeners ──
+
+document.getElementById('event-form-freq').addEventListener('change', function() {
+  updateRecurrenceVisibility();
+  document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
+});
+
+document.getElementById('event-form-interval').addEventListener('input', function() {
+  document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
+});
+
+document.querySelectorAll('#event-form-byday-field input[type="checkbox"]').forEach(function(cb) {
+  cb.addEventListener('change', function() {
+    document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
+  });
+});
+
+document.querySelectorAll('input[name="monthly_mode"]').forEach(function(r) {
+  r.addEventListener('change', function() {
+    document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
+  });
+});
+
+document.getElementById('event-form-monthday').addEventListener('input', function() {
+  document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
+});
+
+document.getElementById('event-form-setpos').addEventListener('change', function() {
+  document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
+});
+
+document.getElementById('event-form-setpos-day').addEventListener('change', function() {
+  document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
+});
+
+document.getElementById('event-form-end-type').addEventListener('change', function() {
+  updateEndFields();
+  document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
+});
+
+document.getElementById('event-form-count').addEventListener('input', function() {
+  document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
+});
+
+document.getElementById('event-form-until').addEventListener('input', function() {
+  document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
+});
+
+document.getElementById('event-form-form').addEventListener('htmx:configRequest', function() {
+  document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
+});
 
 (function updateWeekRange() {
   var display = document.getElementById('week-range-display');
@@ -741,6 +1034,69 @@ article {
 .edit-choice-popover button:hover {
   background: var(--pico-primary-background);
   color: var(--pico-primary-inverse);
+}
+
+.rrule-options {
+  margin-bottom: 0.75rem;
+}
+.rrule-options label.rrule-interval-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.rrule-options fieldset {
+  border: none;
+  padding: 0;
+  margin: 0 0 0.5rem;
+}
+.rrule-options .fieldset-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--pico-muted-color);
+  font-weight: 600;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+.weekday-checks {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.weekday-checks label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  margin-bottom: 0 !important;
+  flex-direction: row;
+}
+.monthly-mode-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  flex-direction: row;
+}
+#event-form-monthly-field {
+  margin-bottom: 0.75rem;
+}
+#event-form-end-count {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+#event-form-end-until {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+#event-form-freq:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .fab {

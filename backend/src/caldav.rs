@@ -5,7 +5,7 @@ use quick_xml::Reader;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
 use reqwest::Client;
 use rrule::RRuleSet;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -33,7 +33,7 @@ pub struct Event {
     pub recurrence: Option<RecurrenceInfo>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct RecurrenceInfo {
     pub freq: String,
     pub interval: u32,
@@ -1184,6 +1184,7 @@ fn escape_ical_text(s: &str) -> String {
 
 /// Generate a VCALENDAR with a single VEVENT.
 /// `recurrence_id` is set for "edit this instance" overrides.
+/// `recurrence` carries the RRULE information (None for non-recurring or instance overrides).
 pub fn generate_ical_event(
     uid: &str,
     summary: &str,
@@ -1195,6 +1196,7 @@ pub fn generate_ical_event(
     tz: &str,
     is_all_day: bool,
     recurrence_id: Option<(&str, &str)>,
+    recurrence: Option<&RecurrenceInfo>,
 ) -> String {
     let dtstart = if is_all_day {
         date.replace('-', "")
@@ -1239,6 +1241,12 @@ pub fn generate_ical_event(
         ical.push_str(&format!("DTEND;TZID={}:{}\r\n", tz, dtend));
     }
 
+    if let Some(rec) = recurrence {
+        if !rec.freq.is_empty() {
+            ical.push_str(&format!("RRULE:{}\r\n", recurrence_info_to_rrule(rec)));
+        }
+    }
+
     if let Some((rid_date, rid_tz)) = recurrence_id {
         let is_date = rid_date.len() <= 10;
         let rid_ical = if is_date {
@@ -1269,6 +1277,43 @@ pub fn generate_ical_event(
 
     ical.push_str("END:VEVENT\r\nEND:VCALENDAR\r\n");
     ical
+}
+
+/// Convert a RecurrenceInfo back to an iCal RRULE string (inverse of parse_rrule_info).
+pub fn recurrence_info_to_rrule(info: &RecurrenceInfo) -> String {
+    let mut parts = vec![format!("FREQ={}", info.freq)];
+    if info.interval > 1 {
+        parts.push(format!("INTERVAL={}", info.interval));
+    }
+    if !info.by_day.is_empty() {
+        parts.push(format!("BYDAY={}", info.by_day.join(",")));
+    }
+    if !info.by_month_day.is_empty() {
+        parts.push(format!("BYMONTHDAY={}", info.by_month_day.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(",")));
+    }
+    if !info.by_month.is_empty() {
+        parts.push(format!("BYMONTH={}", info.by_month.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(",")));
+    }
+    if !info.by_set_pos.is_empty() {
+        parts.push(format!("BYSETPOS={}", info.by_set_pos.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(",")));
+    }
+    if let Some(count) = info.count {
+        parts.push(format!("COUNT={}", count));
+    }
+    if let Some(ref until) = info.until {
+        parts.push(format!("UNTIL={}", format_until(until)));
+    }
+    parts.join(";")
+}
+
+fn format_until(until: &str) -> String {
+    if let Ok(dt) = NaiveDateTime::parse_from_str(until, "%Y-%m-%d %H:%M:%S") {
+        format!("{}T{}Z", dt.format("%Y%m%d"), dt.format("%H%M%S"))
+    } else if let Ok(d) = NaiveDate::parse_from_str(until, "%Y-%m-%d") {
+        format!("{}T235959Z", d.format("%Y%m%d"))
+    } else {
+        until.to_string()
+    }
 }
 
 fn parse_datetime(date: &str, time: &str) -> (String, String) {

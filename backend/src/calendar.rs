@@ -12,7 +12,7 @@ use url::form_urlencoded;
 
 use crate::oidc::{require_client, AppState};
 use crate::db;
-use crate::caldav::{generate_ical_event, add_recurrence_override, generate_new_uid};
+use crate::caldav::{generate_ical_event, add_recurrence_override, generate_new_uid, RecurrenceInfo};
 
 const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
 
@@ -134,8 +134,7 @@ pub async fn save_event(
         Some(u) => u.to_string(),
         None => String::new(),
     };
-    let is_create = uid.is_empty();
-    if is_create {
+    if uid.is_empty() {
         uid = generate_new_uid();
     }
     let summary = parse_form_field(&form, "summary").unwrap_or_default().to_string();
@@ -152,6 +151,9 @@ pub async fn save_event(
     };
     let scope = parse_form_field(&form, "scope").unwrap_or("series").to_string();
     let original_dtstart = parse_form_field(&form, "original_dtstart");
+    let recurrence: Option<RecurrenceInfo> = parse_form_field(&form, "recurrence")
+        .filter(|r| !r.is_empty() && *r != "{}")
+        .and_then(|r| serde_json::from_str(r).ok());
 
     if summary.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing summary").into_response();
@@ -172,7 +174,7 @@ pub async fn save_event(
                 let override_ical = generate_ical_event(
                     &uid, &summary, &description, &location,
                     &date, start_time, end_time, &tz, is_all_day,
-                    Some((rid_value, &tz)),
+                    Some((rid_value, &tz)), None,
                 );
                 let override_vevent = extract_vevent(&override_ical);
                 let modified = add_recurrence_override(&raw_ical, &override_vevent, rid_value);
@@ -198,6 +200,7 @@ pub async fn save_event(
         let ical = generate_ical_event(
             &uid, &summary, &description, &location,
             &date, start_time, end_time, &tz, is_all_day, None,
+            recurrence.as_ref(),
         );
 
         match client.put_event(&calendar_href, &uid, &ical).await {
