@@ -57,7 +57,7 @@
       <input type="hidden" name="uid" id="event-form-uid" value="">
       <input type="hidden" name="original_dtstart" id="event-form-original-dtstart" value="">
       <input type="hidden" name="scope" id="event-form-scope" value="series">
-      <input type="hidden" name="tz" id="event-form-tz" value="UTC">
+      <input type="hidden" name="tz" id="event-form-tz" value="">
 
       <label>
         <span data-i18n="event.summary">Summary</span>
@@ -421,13 +421,17 @@ function openEventForm(article, scope) {
   dialog.showModal();
 }
 
+function getUserTimezone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch(e) { return 'UTC'; }
+}
+
 function openNewEventForm() {
   var dialog = document.getElementById('event-form');
   document.getElementById('event-form-uid').value = '';
   document.getElementById('event-form-summary').value = '';
   document.getElementById('event-form-location').value = '';
   document.getElementById('event-form-description').value = '';
-  document.getElementById('event-form-tz').value = 'UTC';
+  document.getElementById('event-form-tz').value = getUserTimezone();
   document.getElementById('event-form-scope').value = 'series';
   document.getElementById('event-form-original-dtstart').value = '';
   document.getElementById('event-form-all-day').checked = false;
@@ -807,6 +811,9 @@ document.getElementById('event-form-form').addEventListener('htmx:configRequest'
   initRovingTabindex();
   document.addEventListener('htmx:afterSettle', initRovingTabindex);
 })();
+
+var tzInput = document.getElementById('event-form-tz');
+if (tzInput && !tzInput.value) tzInput.value = getUserTimezone();
 </script>
 
 

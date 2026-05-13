@@ -1,5 +1,5 @@
 use anyhow::{bail, Context};
-use chrono::{NaiveDate, NaiveDateTime, TimeDelta, TimeZone as _};
+use chrono::{NaiveDate, NaiveDateTime, TimeDelta, TimeZone as _, Utc};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
@@ -1229,6 +1229,8 @@ pub fn generate_ical_event(
     );
 
     ical.push_str(&format!("UID:{}\r\n", uid));
+    ical.push_str(&format!("DTSTAMP:{}\r\n", Utc::now().format("%Y%m%dT%H%M%SZ")));
+    ical.push_str("SEQUENCE:0\r\n");
 
     if is_all_day {
         ical.push_str(&format!("DTSTART;VALUE=DATE:{}\r\n", dtstart));
