@@ -305,6 +305,13 @@ document.getElementById('event-detail').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) e.currentTarget.close();
 });
 
+document.getElementById('event-detail').addEventListener('keydown', function(e) {
+  if (e.key === 'e' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    document.getElementById('event-detail-edit').click();
+  }
+});
+
 setupEventDetailListeners();
 document.addEventListener('htmx:afterSettle', setupEventDetailListeners);
 
