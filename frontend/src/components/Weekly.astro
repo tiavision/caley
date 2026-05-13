@@ -220,7 +220,14 @@ function formatRecurrence(r, locale) {
   if (r.count) {
     text += ', ' + r.count + t('rec.times');
   } else if (r.until) {
-    const untilDate = new Date(r.until + 'Z');
+    var untilDate;
+    var dateStr = r.until.split(' ')[0];
+    var parts = dateStr.split('-');
+    if (parts.length === 3) {
+      untilDate = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+    } else {
+      untilDate = new Date(r.until + 'T00:00:00');
+    }
     if (!isNaN(untilDate.getTime())) {
       text += t('rec.until') + untilDate.toLocaleDateString(locale, { dateStyle: 'long' });
     }

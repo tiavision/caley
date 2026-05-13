@@ -952,7 +952,12 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
 fn expand_recurring(master: &RawIcalEvent, start: NaiveDate, end: NaiveDate) -> Vec<NaiveDateTime> {
     let mut rrule_str = String::new();
 
-    if let Some(tzid) = &master.dtstart_tzid {
+    if master.dtstart_is_date {
+        rrule_str.push_str(&format!(
+            "DTSTART;VALUE=DATE:{}\n",
+            master.dtstart.format("%Y%m%d")
+        ));
+    } else if let Some(tzid) = &master.dtstart_tzid {
         rrule_str.push_str(&format!(
             "DTSTART;TZID={}:{}\n",
             tzid,
@@ -1252,7 +1257,7 @@ pub fn generate_ical_event(
 
     if let Some(rec) = recurrence {
         if !rec.freq.is_empty() {
-            ical.push_str(&format!("RRULE:{}\r\n", recurrence_info_to_rrule(rec)));
+            ical.push_str(&format!("RRULE:{}\r\n", recurrence_info_to_rrule(rec, tz, is_all_day)));
         }
     }
 
@@ -1289,7 +1294,7 @@ pub fn generate_ical_event(
 }
 
 /// Convert a RecurrenceInfo back to an iCal RRULE string (inverse of parse_rrule_info).
-pub fn recurrence_info_to_rrule(info: &RecurrenceInfo) -> String {
+pub fn recurrence_info_to_rrule(info: &RecurrenceInfo, tz: &str, is_all_day: bool) -> String {
     let mut parts = vec![format!("FREQ={}", info.freq)];
     if info.interval > 1 {
         parts.push(format!("INTERVAL={}", info.interval));
@@ -1310,16 +1315,30 @@ pub fn recurrence_info_to_rrule(info: &RecurrenceInfo) -> String {
         parts.push(format!("COUNT={}", count));
     }
     if let Some(ref until) = info.until {
-        parts.push(format!("UNTIL={}", format_until(until)));
+        parts.push(format!("UNTIL={}", format_until(until, tz, is_all_day)));
     }
     parts.join(";")
 }
 
-fn format_until(until: &str) -> String {
-    if let Ok(dt) = NaiveDateTime::parse_from_str(until, "%Y-%m-%d %H:%M:%S") {
-        format!("{}T{}Z", dt.format("%Y%m%d"), dt.format("%H%M%S"))
+fn format_until(until: &str, tz: &str, is_all_day: bool) -> String {
+    if is_all_day {
+        if let Ok(d) = NaiveDate::parse_from_str(until, "%Y-%m-%d") {
+            d.format("%Y%m%d").to_string()
+        } else {
+            until.to_string()
+        }
+    } else if let Ok(dt) = NaiveDateTime::parse_from_str(until, "%Y-%m-%d %H:%M:%S") {
+        if tz.is_empty() || tz == "UTC" {
+            format!("{}T{}Z", dt.format("%Y%m%d"), dt.format("%H%M%S"))
+        } else {
+            format!("{}T{}", dt.format("%Y%m%d"), dt.format("%H%M%S"))
+        }
     } else if let Ok(d) = NaiveDate::parse_from_str(until, "%Y-%m-%d") {
-        format!("{}T235959Z", d.format("%Y%m%d"))
+        if tz.is_empty() || tz == "UTC" {
+            format!("{}T235959Z", d.format("%Y%m%d"))
+        } else {
+            format!("{}T235959", d.format("%Y%m%d"))
+        }
     } else {
         until.to_string()
     }
