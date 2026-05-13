@@ -6,8 +6,10 @@ mod oidc;
 mod settings;
 
 use axum::error_handling::HandleErrorLayer;
+use axum::response::{IntoResponse, Redirect};
 use axum::routing::{get, post};
 use axum::Router;
+use axum_oidc::error::MiddlewareError;
 use axum_oidc::{EmptyAdditionalClaims, OidcAuthLayer, OidcLoginLayer};
 use clap::Parser;
 use dotenvy::dotenv;
@@ -15,7 +17,7 @@ use oidc::{AppState, UserIdClaim};
 use std::sync::{Arc, Mutex};
 use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
-use tower_sessions::{cookie::SameSite, MemoryStore, SessionManagerLayer};
+use tower_sessions::{cookie::SameSite, MemoryStore, Session, SessionManagerLayer};
 
 #[derive(clap::Parser, Debug)]
 struct Cli {
@@ -90,7 +92,15 @@ async fn main() -> anyhow::Result<()> {
         ))
         .layer(
             ServiceBuilder::new()
-                .layer(HandleErrorLayer::new(|e| async { e }))
+                .layer(HandleErrorLayer::new(|session: Session, err: MiddlewareError| async move {
+                    match err {
+                        MiddlewareError::RequestToken(_) => {
+                            session.remove_value("axum-oidc").await.unwrap_or_default();
+                            Redirect::to("/").into_response()
+                        }
+                        _ => err.into_response(),
+                    }
+                }))
                 .layer(oidc_auth_layer)
                 .layer(HandleErrorLayer::new(|e| async { e }))
                 .layer(oidc::RequireAuthLayer)
