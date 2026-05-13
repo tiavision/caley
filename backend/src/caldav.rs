@@ -1013,9 +1013,9 @@ fn expand_recurring(master: &RawIcalEvent, start: NaiveDate, end: NaiveDate) -> 
     };
 
     let start_utc = rrule::Tz::UTC
-        .from_utc_datetime(&start.and_hms_opt(0, 0, 0).unwrap());
+        .from_utc_datetime(&(start - TimeDelta::days(1)).and_hms_opt(0, 0, 0).unwrap());
     let end_utc = rrule::Tz::UTC
-        .from_utc_datetime(&end.and_hms_opt(23, 59, 59).unwrap());
+        .from_utc_datetime(&(end + TimeDelta::days(1)).and_hms_opt(23, 59, 59).unwrap());
 
     let rrule_set = rrule_set.after(start_utc).before(end_utc);
     let result = rrule_set.all(65535);
@@ -1023,6 +1023,10 @@ fn expand_recurring(master: &RawIcalEvent, start: NaiveDate, end: NaiveDate) -> 
     result
         .dates
         .into_iter()
+        .filter(|dt| {
+            let date = dt.naive_local().date();
+            date >= start && date <= end
+        })
         .map(|dt| dt.naive_local())
         .collect()
 }
