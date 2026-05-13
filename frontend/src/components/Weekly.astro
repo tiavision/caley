@@ -149,20 +149,22 @@
           </label>
         </div>
 
-        <label>
-          <span data-i18n="event.repeatEnd">Ends</span>
-          <select id="event-form-end-type">
-            <option value="never" data-i18n="event.repeatEndNever">Never</option>
-            <option value="count" data-i18n="event.repeatEndAfter">After</option>
-            <option value="until" data-i18n="event.repeatEndOn">On date</option>
-          </select>
-        </label>
-        <div id="event-form-end-count" style="display:none">
-          <input type="number" id="event-form-count" min="1" value="1" style="width:4rem">
-          <span data-i18n="event.repeatEndAfterN">occurrences</span>
-        </div>
-        <div id="event-form-end-until" style="display:none">
-          <input type="date" id="event-form-until">
+        <div class="rrule-end-row">
+          <span class="fieldset-label" data-i18n="event.repeatEnd">Ends</span>
+          <div class="rrule-end-controls">
+            <select id="event-form-end-type">
+              <option value="never" data-i18n="event.repeatEndNever">Never</option>
+              <option value="count" data-i18n="event.repeatEndAfter">After</option>
+              <option value="until" data-i18n="event.repeatEndOn">On date</option>
+            </select>
+            <div id="event-form-end-count" style="display:none">
+              <input type="number" id="event-form-count" min="1" value="1" style="width:4rem">
+              <span data-i18n="event.repeatEndAfterN">occurrences</span>
+            </div>
+            <div id="event-form-end-until" style="display:none">
+              <input type="date" id="event-form-until">
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1085,21 +1087,22 @@ article {
   color: var(--pico-primary-inverse);
 }
 
-.rrule-options {
+#event-form-rrule-options {
   margin-bottom: 0.75rem;
 }
-.rrule-options label.rrule-interval-label {
+#event-form-rrule-options label.rrule-interval-label {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.5rem;
 }
-.rrule-options fieldset {
+#event-form-rrule-options fieldset {
   border: none;
   padding: 0;
   margin: 0 0 0.5rem;
 }
-.rrule-options .fieldset-label {
+#event-form-rrule-options .fieldset-label {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1131,17 +1134,23 @@ article {
 #event-form-monthly-field {
   margin-bottom: 0.75rem;
 }
+.rrule-end-row {
+  margin-bottom: 0.75rem;
+}
+.rrule-end-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
 #event-form-end-count {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.5rem;
 }
 #event-form-end-until {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
 }
 #event-form-freq:disabled {
   opacity: 0.5;
