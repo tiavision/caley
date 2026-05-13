@@ -168,6 +168,7 @@
 
       <input type="hidden" name="recurrence" id="event-form-recurrence" value="">
 
+      <input type="hidden" name="original_calendar_href" id="event-form-original-calendar-href" value="">
       <label>
         <span data-i18n="event.calendar">Calendar</span>
         <select name="calendar_href" id="event-form-calendar-select"></select>
@@ -400,6 +401,7 @@ function openEventForm(article, scope) {
   document.getElementById('event-form-delete').style.display = '';
   populateCalendarSelect();
   document.getElementById('event-form-calendar-select').value = article.getAttribute('data-calendar-href') || '';
+  document.getElementById('event-form-original-calendar-href').value = article.getAttribute('data-calendar-href') || '';
 
   // Recurrence
   var isRecurring = article.getAttribute('data-is-recurring') === 'true';
@@ -412,8 +414,10 @@ function openEventForm(article, scope) {
   if (scope === 'this_instance') {
     document.getElementById('event-form-freq').disabled = true;
     document.getElementById('event-form-rrule-options').style.display = 'none';
+    document.getElementById('event-form-calendar-select').disabled = true;
   } else {
     document.getElementById('event-form-freq').disabled = false;
+    document.getElementById('event-form-calendar-select').disabled = false;
   }
 
   document.getElementById('event-detail').close();
@@ -439,6 +443,8 @@ function openNewEventForm() {
   document.getElementById('event-form-start-time').value = '';
   document.getElementById('event-form-end-time').value = '';
   document.getElementById('event-form-delete').style.display = 'none';
+  document.getElementById('event-form-original-calendar-href').value = '';
+  document.getElementById('event-form-calendar-select').disabled = false;
 
   var startInput = document.getElementById('week-start-input');
   var dateVal = '';

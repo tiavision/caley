@@ -151,6 +151,7 @@ pub async fn save_event(
     };
     let scope = parse_form_field(&form, "scope").unwrap_or("series").to_string();
     let original_dtstart = parse_form_field(&form, "original_dtstart");
+    let original_calendar_href = parse_form_field(&form, "original_calendar_href").map(|s| s.to_string());
     let recurrence: Option<RecurrenceInfo> = parse_form_field(&form, "recurrence")
         .filter(|r| !r.is_empty() && *r != "{}")
         .and_then(|r| serde_json::from_str(r).ok());
@@ -204,11 +205,20 @@ pub async fn save_event(
         );
 
         match client.put_event(&calendar_href, &uid, &ical).await {
-            Ok(_) => (
-                StatusCode::OK,
-                [("HX-Trigger", "calendarChange")],
-                "OK",
-            ).into_response(),
+            Ok(_) => {
+                if let Some(ref orig) = original_calendar_href {
+                    if *orig != calendar_href && !orig.is_empty() {
+                        if let Err(e) = client.delete_event(orig, &uid).await {
+                            eprintln!("Failed to delete event from old calendar: {e}");
+                        }
+                    }
+                }
+                (
+                    StatusCode::OK,
+                    [("HX-Trigger", "calendarChange")],
+                    "OK",
+                ).into_response()
+            }
             Err(e) => {
                 eprintln!("Failed to update event: {e}");
                 (StatusCode::INTERNAL_SERVER_ERROR, format!("<p class='error'>Failed to save event: {e}</p>")).into_response()
