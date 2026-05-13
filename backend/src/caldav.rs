@@ -584,9 +584,7 @@ fn extract_raw_events(xml: &str) -> anyhow::Result<Vec<RawIcalEvent>> {
                 if local == "calendar-data" {
                     in_calendar_data = false;
                     if !current_ical.is_empty() {
-                        if let Some(event) = parse_raw_event(&current_ical) {
-                            events.push(event);
-                        }
+                        events.extend(parse_raw_events(&current_ical));
                     }
                 }
             }
@@ -634,9 +632,13 @@ fn unescape_ical_text(s: &str) -> String {
     result
 }
 
-fn parse_raw_event(ical_data: &str) -> Option<RawIcalEvent> {
-    let calendar = ical::IcalParser::new(ical_data.as_bytes()).next()?;
-    let calendar = calendar.ok()?;
+fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
+    let calendar = match ical::IcalParser::new(ical_data.as_bytes()).next() {
+        Some(Ok(c)) => c,
+        _ => return vec![],
+    };
+
+    let mut results = Vec::new();
 
     for event in calendar.events {
         let mut uid: Option<String> = None;
@@ -772,19 +774,23 @@ fn parse_raw_event(ical_data: &str) -> Option<RawIcalEvent> {
         let summary = summary.unwrap_or_default();
         let description = description.unwrap_or_default();
         let location = location.unwrap_or_default();
-        let raw_dtstart = dtstart_value.as_deref()?;
-        let dtstart = parse_dtstart(raw_dtstart)?;
+        let raw_dtstart = match dtstart_value.as_deref() {
+            Some(s) => s,
+            None => continue,
+        };
+        let dtstart = match parse_dtstart(raw_dtstart) {
+            Some(dt) => dt,
+            None => continue,
+        };
 
         let duration = if let Some(ref dtend_raw) = dtend_value {
-            let dtend = parse_dtstart(dtend_raw)?;
-            dtend - dtstart
+            match parse_dtstart(dtend_raw) {
+                Some(dtend) => dtend - dtstart,
+                None => continue,
+            }
         } else if let Some(ref dur) = duration_str {
             parse_ical_duration(dur).unwrap_or_else(|| {
-                if dtstart_is_date {
-                    TimeDelta::days(1)
-                } else {
-                    TimeDelta::zero()
-                }
+                if dtstart_is_date { TimeDelta::days(1) } else { TimeDelta::zero() }
             })
         } else if dtstart_is_date {
             TimeDelta::days(1)
@@ -794,7 +800,7 @@ fn parse_raw_event(ical_data: &str) -> Option<RawIcalEvent> {
 
         let recurrence_id = recurrence_id_value.as_ref().and_then(|v| parse_dtstart(v));
 
-        return Some(RawIcalEvent {
+        results.push(RawIcalEvent {
             uid,
             summary,
             description,
@@ -811,7 +817,7 @@ fn parse_raw_event(ical_data: &str) -> Option<RawIcalEvent> {
         });
     }
 
-    None
+    results
 }
 
 fn parse_ical_duration(s: &str) -> Option<TimeDelta> {
@@ -1288,8 +1294,15 @@ pub fn generate_ical_event(
                 format!("{}", rid_date.replace('-', "").replace(':', "").replace('T', "T"))
             }
         };
-        if is_date {
+        if is_date && is_all_day {
             ical.push_str(&format!("RECURRENCE-ID;VALUE=DATE:{}\r\n", rid_ical));
+        } else if is_date {
+            // Timed override of an all-day master: use midnight to keep same type as DTSTART
+            if rid_tz.is_empty() || rid_tz == "UTC" {
+                ical.push_str(&format!("RECURRENCE-ID:{}T000000Z\r\n", rid_ical));
+            } else {
+                ical.push_str(&format!("RECURRENCE-ID;TZID={}:{}T000000\r\n", rid_tz, rid_ical));
+            }
         } else if rid_tz.is_empty() || rid_tz == "UTC" {
             ical.push_str(&format!("RECURRENCE-ID:{}\r\n", rid_ical));
         } else {
@@ -1379,6 +1392,10 @@ pub fn add_recurrence_override(
     let ical = ical_data.replace("\r\n", "\n");
     let override_vevent = override_vevent.replace("\r\n", "\n");
 
+    // Match overrides by the 8-digit YYYYMMDD date only, so VALUE=DATE and
+    // datetime formats (e.g. T000000Z) both hit for the same calendar date.
+    let rid_date: String = recurrence_id_value.replace('-', "").chars().take(8).collect();
+
     let mut result = String::new();
     let mut found = false;
     let mut search_from = 0;
@@ -1393,8 +1410,12 @@ pub fn add_recurrence_override(
 
             let needs_replace = block.lines().any(|l| {
                 let t = l.trim();
-                (t.starts_with("RECURRENCE-ID:") || t.starts_with("RECURRENCE-ID;"))
-                    && t.contains(recurrence_id_value)
+                if !t.starts_with("RECURRENCE-ID:") && !t.starts_with("RECURRENCE-ID;") {
+                    return false;
+                }
+                t.rsplit(':').next().map_or(false, |val| {
+                    val.chars().take(8).collect::<String>() == rid_date
+                })
             });
 
             if needs_replace && !found {
@@ -1420,12 +1441,10 @@ pub fn add_recurrence_override(
 
     if !found {
         if let Some(pos) = result.rfind("END:VCALENDAR") {
-            let before = &result[..pos];
-            let after = &result[pos..];
-            result = format!("{}{}{}", before, &override_vevent, after);
-            if !override_vevent.ends_with('\n') {
-                result.insert_str(pos, "\n");
-            }
+            let before = result[..pos].to_string();
+            let after = result[pos..].to_string();
+            let sep = if override_vevent.ends_with('\n') { "" } else { "\n" };
+            result = format!("{}{}{}{}", before, override_vevent, sep, after);
         }
     }
 
