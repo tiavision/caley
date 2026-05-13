@@ -14,6 +14,7 @@
       data-location="{{ event.location }}"
       data-description="{{ event.description }}"
       data-is-recurring="{{ event.is_recurring }}"
+      data-calendar-href="{{ event.calendar_href }}"
       {% if !event.recurrence_json.is_empty() %}data-recurrence='{{ event.recurrence_json }}'{% endif %}>
       <header>{{ event.time_range }}{% if !event.color.is_empty() %} <span class="dot" style="background-color: {{ event.color }};"></span>{% endif %}</header>
       <p>{{ event.summary }}</p>

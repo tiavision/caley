@@ -7,7 +7,7 @@ mod settings;
 
 use axum::error_handling::HandleErrorLayer;
 use axum::response::{IntoResponse, Redirect};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use axum_oidc::error::MiddlewareError;
 use axum_oidc::{EmptyAdditionalClaims, OidcAuthLayer, OidcLoginLayer};
@@ -84,6 +84,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/user", get(oidc::user_info))
         .route("/api/settings/form", get(settings::settings_form))
         .route("/api/settings", post(settings::save_settings))
+        .route("/api/event", post(calendar::save_event))
+        .route("/api/event", delete(calendar::delete_event))
         .route("/logout", get(oidc::logout_handler))
         .with_state(state)
         .fallback_service(ServeDir::new(

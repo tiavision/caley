@@ -7,6 +7,7 @@ use reqwest::Client;
 use rrule::RRuleSet;
 use serde::Serialize;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 #[derive(Serialize)]
 pub struct Calendar {
@@ -301,6 +302,102 @@ impl CalDavClient {
             return Ok(text);
         }
         bail!("too many redirects for REPORT")
+    }
+
+    pub async fn put_event(
+        &self,
+        calendar_href: &str,
+        uid: &str,
+        ical_data: &str,
+    ) -> anyhow::Result<()> {
+        let url = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
+        let mut url = url;
+        for _ in 0..5 {
+            let mut headers = HeaderMap::new();
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/calendar; charset=utf-8"));
+
+            let resp = self
+                .client
+                .put(&url)
+                .headers(headers)
+                .basic_auth(&self.username, Some(&self.password))
+                .body(ical_data.to_string())
+                .send()
+                .await
+                .context("PUT request failed")?;
+
+            let status = resp.status();
+            if status.is_redirection() {
+                if let Some(location) = resp.headers().get("location") {
+                    url = location.to_str()?.to_string();
+                    continue;
+                }
+                bail!("PUT redirect without Location header");
+            }
+            if !status.is_success() {
+                let text = resp.text().await.unwrap_or_default();
+                bail!("PUT returned {status}: {text}");
+            }
+            return Ok(());
+        }
+        bail!("too many redirects for PUT")
+    }
+
+    pub async fn delete_event(&self, calendar_href: &str, uid: &str) -> anyhow::Result<()> {
+        let url = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
+        let mut url = url;
+        for _ in 0..5 {
+            let resp = self
+                .client
+                .delete(&url)
+                .basic_auth(&self.username, Some(&self.password))
+                .send()
+                .await
+                .context("DELETE request failed")?;
+
+            let status = resp.status();
+            if status.is_redirection() {
+                if let Some(location) = resp.headers().get("location") {
+                    url = location.to_str()?.to_string();
+                    continue;
+                }
+                bail!("DELETE redirect without Location header");
+            }
+            if !status.is_success() {
+                bail!("DELETE returned {status}");
+            }
+            return Ok(());
+        }
+        bail!("too many redirects for DELETE")
+    }
+
+    pub async fn get_event(&self, calendar_href: &str, uid: &str) -> anyhow::Result<String> {
+        let url = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
+        let mut url = url;
+        for _ in 0..5 {
+            let resp = self
+                .client
+                .get(&url)
+                .basic_auth(&self.username, Some(&self.password))
+                .send()
+                .await
+                .context("GET request failed")?;
+
+            let status = resp.status();
+            if status.is_redirection() {
+                if let Some(location) = resp.headers().get("location") {
+                    url = location.to_str()?.to_string();
+                    continue;
+                }
+                bail!("GET redirect without Location header");
+            }
+            if !status.is_success() {
+                bail!("GET returned {status}");
+            }
+            let text = resp.text().await.context("failed to read GET response")?;
+            return Ok(text);
+        }
+        bail!("too many redirects for GET")
     }
 }
 
@@ -1072,4 +1169,176 @@ fn parse_dtstart(raw: &str) -> Option<NaiveDateTime> {
                 .ok()
                 .map(|d| d.and_hms_opt(0, 0, 0).unwrap())
         })
+}
+
+pub fn generate_new_uid() -> String {
+    Uuid::new_v4().to_string()
+}
+
+fn escape_ical_text(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('\n', "\\n")
+        .replace(';', "\\;")
+        .replace(',', "\\,")
+}
+
+/// Generate a VCALENDAR with a single VEVENT.
+/// `recurrence_id` is set for "edit this instance" overrides.
+pub fn generate_ical_event(
+    uid: &str,
+    summary: &str,
+    description: &str,
+    location: &str,
+    date: &str,
+    start_time: Option<&str>,
+    end_time: Option<&str>,
+    tz: &str,
+    is_all_day: bool,
+    recurrence_id: Option<(&str, &str)>,
+) -> String {
+    let dtstart = if is_all_day {
+        date.replace('-', "")
+    } else {
+        let (d, t) = parse_datetime(date, start_time.unwrap_or("00:00"));
+        if tz.is_empty() || tz == "UTC" {
+            format!("{}T{}00Z", d, t)
+        } else {
+            format!("{}T{}00", d, t)
+        }
+    };
+
+    let dtend = if is_all_day {
+        // exclusive end: next day
+        let d = NaiveDate::parse_from_str(date, "%Y-%m-%d")
+            .unwrap_or_else(|_| chrono::Local::now().date_naive());
+        let next = d + TimeDelta::days(1);
+        next.format("%Y%m%d").to_string()
+    } else {
+        let (d, t) = parse_datetime(date, end_time.unwrap_or(start_time.unwrap_or("01:00")));
+        if tz.is_empty() || tz == "UTC" {
+            format!("{}T{}00Z", d, t)
+        } else {
+            format!("{}T{}00", d, t)
+        }
+    };
+
+    let mut ical = String::from(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Caley//Caley//EN\r\nBEGIN:VEVENT\r\n",
+    );
+
+    ical.push_str(&format!("UID:{}\r\n", uid));
+
+    if is_all_day {
+        ical.push_str(&format!("DTSTART;VALUE=DATE:{}\r\n", dtstart));
+        ical.push_str(&format!("DTEND;VALUE=DATE:{}\r\n", dtend));
+    } else if tz.is_empty() || tz == "UTC" {
+        ical.push_str(&format!("DTSTART:{}\r\n", dtstart));
+        ical.push_str(&format!("DTEND:{}\r\n", dtend));
+    } else {
+        ical.push_str(&format!("DTSTART;TZID={}:{}\r\n", tz, dtstart));
+        ical.push_str(&format!("DTEND;TZID={}:{}\r\n", tz, dtend));
+    }
+
+    if let Some((rid_date, rid_tz)) = recurrence_id {
+        let is_date = rid_date.len() <= 10;
+        let rid_ical = if is_date {
+            rid_date.replace('-', "")
+        } else {
+            if rid_tz.is_empty() || rid_tz == "UTC" {
+                format!("{}Z", rid_date.replace('-', "").replace(':', "").replace('T', "T"))
+            } else {
+                format!("{}", rid_date.replace('-', "").replace(':', "").replace('T', "T"))
+            }
+        };
+        if is_date {
+            ical.push_str(&format!("RECURRENCE-ID;VALUE=DATE:{}\r\n", rid_ical));
+        } else if rid_tz.is_empty() || rid_tz == "UTC" {
+            ical.push_str(&format!("RECURRENCE-ID:{}\r\n", rid_ical));
+        } else {
+            ical.push_str(&format!("RECURRENCE-ID;TZID={}:{}\r\n", rid_tz, rid_ical));
+        }
+    }
+
+    ical.push_str(&format!("SUMMARY:{}\r\n", escape_ical_text(summary)));
+    if !description.is_empty() {
+        ical.push_str(&format!("DESCRIPTION:{}\r\n", escape_ical_text(description)));
+    }
+    if !location.is_empty() {
+        ical.push_str(&format!("LOCATION:{}\r\n", escape_ical_text(location)));
+    }
+
+    ical.push_str("END:VEVENT\r\nEND:VCALENDAR\r\n");
+    ical
+}
+
+fn parse_datetime(date: &str, time: &str) -> (String, String) {
+    let d = date.replace('-', "");
+    if time.is_empty() {
+        (d, "0000".to_string())
+    } else {
+        let t = time.replace(':', "");
+        (d, t)
+    }
+}
+
+/// Inject or replace a RECURRENCE-ID override VEVENT into an existing iCal string.
+pub fn add_recurrence_override(
+    ical_data: &str,
+    override_vevent: &str,
+    recurrence_id_value: &str,
+) -> String {
+    let ical = ical_data.replace("\r\n", "\n");
+    let override_vevent = override_vevent.replace("\r\n", "\n");
+
+    let mut result = String::new();
+    let mut found = false;
+    let mut search_from = 0;
+
+    while let Some(start) = ical[search_from..].find("BEGIN:VEVENT") {
+        let abs_start = search_from + start;
+        result.push_str(&ical[search_from..abs_start]);
+
+        if let Some(end) = ical[abs_start..].find("\nEND:VEVENT") {
+            let abs_end = abs_start + end + 1 + 10;
+            let block = &ical[abs_start..abs_end];
+
+            let needs_replace = block.lines().any(|l| {
+                let t = l.trim();
+                (t.starts_with("RECURRENCE-ID:") || t.starts_with("RECURRENCE-ID;"))
+                    && t.contains(recurrence_id_value)
+            });
+
+            if needs_replace && !found {
+                result.push_str(&override_vevent);
+                if !override_vevent.ends_with('\n') {
+                    result.push('\n');
+                }
+                found = true;
+            } else {
+                result.push_str(block);
+                if !block.ends_with('\n') {
+                    result.push('\n');
+                }
+            }
+            search_from = abs_end;
+        } else {
+            result.push_str(&ical[search_from..]);
+            search_from = ical.len();
+            break;
+        }
+    }
+    result.push_str(&ical[search_from..]);
+
+    if !found {
+        if let Some(pos) = result.rfind("END:VCALENDAR") {
+            let before = &result[..pos];
+            let after = &result[pos..];
+            result = format!("{}{}{}", before, &override_vevent, after);
+            if !override_vevent.ends_with('\n') {
+                result.insert_str(pos, "\n");
+            }
+        }
+    }
+
+    result.replace('\n', "\r\n")
 }

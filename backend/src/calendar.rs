@@ -12,6 +12,7 @@ use url::form_urlencoded;
 
 use crate::oidc::{require_client, AppState};
 use crate::db;
+use crate::caldav::{generate_ical_event, add_recurrence_override, generate_new_uid};
 
 const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
 
@@ -49,6 +50,7 @@ struct EventView {
     description: String,
     is_recurring: bool,
     recurrence_json: String,
+    calendar_href: String,
 }
 
 #[derive(Template)]
@@ -95,7 +97,7 @@ pub async fn list_calendars(
         }
     };
 
-match client.calendars().await {
+    match client.calendars().await {
         Ok(calendars) => {
             let tpl = CalendarsTemplate { calendars, deactivated };
             match tpl.render() {
@@ -104,6 +106,164 @@ match client.calendars().await {
             }
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+fn parse_form_field<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+}
+
+fn parse_event_form(body: String) -> Vec<(String, String)> {
+    form_urlencoded::parse(body.as_bytes())
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect()
+}
+
+pub async fn save_event(
+    State(state): State<AppState>,
+    claims: OidcClaims<EmptyAdditionalClaims>,
+    body: String,
+) -> Response {
+    let client = match require_client(&state, &claims) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+
+    let form = parse_event_form(body);
+    let mut uid = match parse_form_field(&form, "uid") {
+        Some(u) => u.to_string(),
+        None => String::new(),
+    };
+    let is_create = uid.is_empty();
+    if is_create {
+        uid = generate_new_uid();
+    }
+    let summary = parse_form_field(&form, "summary").unwrap_or_default().to_string();
+    let description = parse_form_field(&form, "description").unwrap_or_default().to_string();
+    let location = parse_form_field(&form, "location").unwrap_or_default().to_string();
+    let date = parse_form_field(&form, "date").unwrap_or_default().to_string();
+    let start_time = parse_form_field(&form, "start_time");
+    let end_time = parse_form_field(&form, "end_time");
+    let tz = parse_form_field(&form, "tz").unwrap_or("UTC").to_string();
+    let is_all_day = parse_form_field(&form, "is_all_day") == Some("true");
+    let calendar_href = match parse_form_field(&form, "calendar_href") {
+        Some(h) => h.to_string(),
+        None => return (StatusCode::BAD_REQUEST, "Missing calendar_href").into_response(),
+    };
+    let scope = parse_form_field(&form, "scope").unwrap_or("series").to_string();
+    let original_dtstart = parse_form_field(&form, "original_dtstart");
+
+    if summary.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing summary").into_response();
+    }
+    if date.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing date").into_response();
+    }
+
+    if scope == "this_instance" {
+        match client.get_event(&calendar_href, &uid).await {
+            Ok(raw_ical) => {
+                let orig_dt = original_dtstart.unwrap_or("");
+                let rid_value = if is_all_day {
+                    orig_dt.split('T').next().unwrap_or(orig_dt)
+                } else {
+                    orig_dt
+                };
+                let override_ical = generate_ical_event(
+                    &uid, &summary, &description, &location,
+                    &date, start_time, end_time, &tz, is_all_day,
+                    Some((rid_value, &tz)),
+                );
+                let override_vevent = extract_vevent(&override_ical);
+                let modified = add_recurrence_override(&raw_ical, &override_vevent, rid_value);
+
+                match client.put_event(&calendar_href, &uid, &modified).await {
+                    Ok(_) => (
+                        StatusCode::OK,
+                        [("HX-Trigger", "calendarChange")],
+                        "OK",
+                    ).into_response(),
+                    Err(e) => {
+                        eprintln!("Failed to update event instance: {e}");
+                        (StatusCode::INTERNAL_SERVER_ERROR, format!("<p class='error'>Failed to save event: {e}</p>")).into_response()
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to fetch original event for override: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("<p class='error'>Failed to read original event</p>")).into_response()
+            }
+        }
+    } else {
+        let ical = generate_ical_event(
+            &uid, &summary, &description, &location,
+            &date, start_time, end_time, &tz, is_all_day, None,
+        );
+
+        match client.put_event(&calendar_href, &uid, &ical).await {
+            Ok(_) => (
+                StatusCode::OK,
+                [("HX-Trigger", "calendarChange")],
+                "OK",
+            ).into_response(),
+            Err(e) => {
+                eprintln!("Failed to update event: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("<p class='error'>Failed to save event: {e}</p>")).into_response()
+            }
+        }
+    }
+}
+
+fn extract_vevent(ical: &str) -> String {
+    let ical = ical.replace("\r\n", "\n");
+    if let Some(start) = ical.find("BEGIN:VEVENT") {
+        let from_start = &ical[start..];
+        if let Some(end) = from_start.find("\nEND:VEVENT") {
+            let vevent = &from_start[..end + 1 + 10];
+            return vevent.replace('\n', "\r\n");
+        }
+    }
+    ical.replace('\n', "\r\n")
+}
+
+pub async fn delete_event(
+    State(state): State<AppState>,
+    claims: OidcClaims<EmptyAdditionalClaims>,
+    RawQuery(raw_query): RawQuery,
+) -> Response {
+    let client = match require_client(&state, &claims) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+
+    let mut uid = String::new();
+    let mut calendar_href = String::new();
+    if let Some(query) = raw_query {
+        for (key, value) in form_urlencoded::parse(query.as_bytes()) {
+            match key.as_ref() {
+                "uid" => uid = value.into_owned(),
+                "calendar_href" => calendar_href = value.into_owned(),
+                _ => {}
+            }
+        }
+    }
+    if uid.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing uid").into_response();
+    }
+    if calendar_href.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing calendar_href").into_response();
+    }
+
+    match client.delete_event(&calendar_href, &uid).await {
+        Ok(_) => (
+            StatusCode::OK,
+            [("HX-Trigger", "calendarChange")],
+            "OK",
+        ).into_response(),
+        Err(e) => {
+            eprintln!("Failed to delete event: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("<p class='error'>Failed to delete event: {e}</p>")).into_response()
+        }
     }
 }
 
@@ -189,6 +349,7 @@ pub async fn list_events(
             Some((h, c)) => (h, c),
             None => (entry.as_str(), ""),
         };
+        let cal_href = href.to_string();
 
         match client.events(href, start, end).await {
             Ok(events) => {
@@ -226,6 +387,7 @@ pub async fn list_events(
                             description: event.description,
                             is_recurring: event.is_recurring,
                             recurrence_json,
+                            calendar_href: cal_href.clone(),
                         },
                     ));
                 }

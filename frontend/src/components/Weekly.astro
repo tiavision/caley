@@ -16,8 +16,15 @@
   <article>
     <header>
       <h3 id="event-detail-summary"></h3>
-      <button id="event-detail-close" class="close-btn" data-i18n-attr="aria-label:weekly.aria.close" aria-label="Close">&times;</button>
+      <div class="header-actions">
+        <button id="event-detail-edit" class="edit-btn" title="Edit" data-i18n-attr="title:event.edit">&#9998;</button>
+        <button id="event-detail-close" class="close-btn" data-i18n-attr="aria-label:weekly.aria.close" aria-label="Close">&times;</button>
+      </div>
     </header>
+    <div id="edit-choice-popover" class="edit-choice-popover" style="display:none">
+      <button id="edit-choice-series" data-i18n="event.editSeries">Edit the series</button>
+      <button id="edit-choice-instance" data-i18n="event.editInstance">Edit this instance</button>
+    </div>
     <div class="event-detail-body">
       <div class="event-detail-row" id="event-detail-time-row">
         <span class="event-detail-label" data-i18n="event.time">Time</span>
@@ -38,6 +45,69 @@
     </div>
   </article>
 </dialog>
+
+<dialog id="event-form">
+  <article>
+    <header>
+      <h3 id="event-form-title" data-i18n="event.create">New Event</h3>
+      <button id="event-form-close" class="close-btn" data-i18n-attr="aria-label:weekly.aria.close" aria-label="Close">&times;</button>
+    </header>
+    <div id="event-form-result"></div>
+    <form id="event-form-form" hx-post="/api/event" hx-target="#event-form-result" hx-swap="innerHTML">
+      <input type="hidden" name="uid" id="event-form-uid" value="">
+      <input type="hidden" name="original_dtstart" id="event-form-original-dtstart" value="">
+      <input type="hidden" name="scope" id="event-form-scope" value="series">
+      <input type="hidden" name="tz" id="event-form-tz" value="UTC">
+
+      <label>
+        <span data-i18n="event.summary">Summary</span>
+        <input type="text" name="summary" id="event-form-summary" required>
+      </label>
+      <label>
+        <span data-i18n="event.date">Date</span>
+        <input type="date" name="date" id="event-form-date" required>
+      </label>
+      <label class="all-day-label">
+        <input type="checkbox" name="is_all_day" id="event-form-all-day" value="true">
+        <span data-i18n="event.allDay">All day</span>
+      </label>
+      <div id="event-form-time-fields" class="time-fields">
+        <label>
+          <span data-i18n="event.startTime">Start time</span>
+          <input type="time" name="start_time" id="event-form-start-time">
+        </label>
+        <label>
+          <span data-i18n="event.endTime">End time</span>
+          <input type="time" name="end_time" id="event-form-end-time">
+        </label>
+      </div>
+      <label>
+        <span data-i18n="event.location">Location</span>
+        <input type="text" name="location" id="event-form-location">
+      </label>
+      <label>
+        <span data-i18n="event.description">Description</span>
+        <textarea name="description" id="event-form-description" rows="3"></textarea>
+      </label>
+      <label>
+        <span data-i18n="event.calendar">Calendar</span>
+        <select name="calendar_href" id="event-form-calendar-select"></select>
+      </label>
+      <div class="event-form-actions">
+        <button type="submit" data-i18n="event.save">Save</button>
+        <button type="button" class="secondary" id="event-form-cancel" data-i18n="event.cancel">Cancel</button>
+        <button type="button" class="contrast outline" id="event-form-delete" style="display:none" data-i18n="event.delete">Delete</button>
+      </div>
+    </form>
+  </article>
+</dialog>
+
+<button id="fab-new-event" class="fab" aria-label="New event" data-i18n-attr="aria-label:event.new" title="New event">
+  <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+    <line x1="12" y1="5" x2="12" y2="19"></line>
+    <line x1="5" y1="12" x2="19" y2="12"></line>
+  </svg>
+</button>
 
 <script>
 function formatRecurrence(r, locale) {
@@ -132,6 +202,7 @@ function openEventDetail(article) {
   descEl.textContent = description;
   document.getElementById('event-detail-description-row').style.display = description ? '' : 'none';
 
+  _currentEventArticle = article;
   dialog.showModal();
 }
 
@@ -156,6 +227,188 @@ document.getElementById('event-detail').addEventListener('click', (e) => {
 
 setupEventDetailListeners();
 document.addEventListener('htmx:afterSettle', setupEventDetailListeners);
+
+var _currentEventArticle = null;
+
+document.getElementById('event-detail-edit').addEventListener('click', function() {
+  var article = _currentEventArticle;
+  if (!article) return;
+  var isRecurring = article.getAttribute('data-is-recurring') === 'true';
+  if (isRecurring) {
+    var popover = document.getElementById('edit-choice-popover');
+    var rect = document.getElementById('event-detail-edit').getBoundingClientRect();
+    popover.style.top = (rect.bottom + 4) + 'px';
+    popover.style.left = rect.left + 'px';
+    popover.style.display = 'flex';
+  } else {
+    openEventForm(article, 'series');
+  }
+});
+
+document.addEventListener('click', function(e) {
+  var popover = document.getElementById('edit-choice-popover');
+  if (popover && popover.style.display !== 'none' && !popover.contains(e.target) && e.target.id !== 'event-detail-edit') {
+    popover.style.display = 'none';
+  }
+});
+
+document.getElementById('edit-choice-series').addEventListener('click', function() {
+  var article = _currentEventArticle;
+  document.getElementById('edit-choice-popover').style.display = 'none';
+  if (article) openEventForm(article, 'series');
+});
+
+document.getElementById('edit-choice-instance').addEventListener('click', function() {
+  var article = _currentEventArticle;
+  document.getElementById('edit-choice-popover').style.display = 'none';
+  if (article) openEventForm(article, 'this_instance');
+});
+
+function populateCalendarSelect() {
+  var select = document.getElementById('event-form-calendar-select');
+  if (!select) return;
+  select.innerHTML = '';
+  var container = document.getElementById('calendar-container');
+  if (!container) return;
+  container.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+    var raw = cb.value;
+    var href = raw.split('|')[0] || raw;
+    var label = container.querySelector('label[for="' + cb.id + '"]');
+    var name = label ? label.textContent.trim() : href;
+    var option = document.createElement('option');
+    option.value = href;
+    option.textContent = name;
+    select.appendChild(option);
+  });
+}
+
+function openEventForm(article, scope) {
+  var dialog = document.getElementById('event-form');
+  var isAllDay = article.getAttribute('data-is-all-day') === 'true';
+  var dtstart = article.getAttribute('data-dtstart') || '';
+  var dtend = article.getAttribute('data-dtend') || '';
+  var tz = article.getAttribute('data-tz') || 'UTC';
+
+  document.getElementById('event-form-uid').value = article.getAttribute('data-uid') || '';
+  document.getElementById('event-form-summary').value = article.getAttribute('data-summary') || '';
+  document.getElementById('event-form-location').value = article.getAttribute('data-location') || '';
+  document.getElementById('event-form-description').value = article.getAttribute('data-description') || '';
+  document.getElementById('event-form-tz').value = tz;
+  document.getElementById('event-form-scope').value = scope || 'series';
+  document.getElementById('event-form-original-dtstart').value = dtstart;
+
+  var datePart = dtstart.split('T')[0] || '';
+  document.getElementById('event-form-date').value = datePart;
+
+  if (isAllDay) {
+    document.getElementById('event-form-all-day').checked = true;
+    document.getElementById('event-form-time-fields').classList.add('hidden');
+    document.getElementById('event-form-start-time').value = '';
+    document.getElementById('event-form-end-time').value = '';
+  } else {
+    document.getElementById('event-form-all-day').checked = false;
+    document.getElementById('event-form-time-fields').classList.remove('hidden');
+    var startParts = dtstart.match(/T(\d{2}:\d{2})/);
+    document.getElementById('event-form-start-time').value = startParts ? startParts[1] : '';
+    if (dtend) {
+      var endParts = dtend.match(/T(\d{2}:\d{2})/);
+      document.getElementById('event-form-end-time').value = endParts ? endParts[1] : '';
+    }
+  }
+
+  document.getElementById('event-form').setAttribute('data-mode', 'edit');
+  document.getElementById('event-form-title').textContent = window.__i18n ? window.__i18n.t('event.edit') : 'Edit event';
+  document.getElementById('event-form-delete').style.display = '';
+  populateCalendarSelect();
+  document.getElementById('event-form-calendar-select').value = article.getAttribute('data-calendar-href') || '';
+
+  document.getElementById('event-detail').close();
+  document.getElementById('event-form-result').innerHTML = '';
+  dialog.showModal();
+}
+
+function openNewEventForm() {
+  var dialog = document.getElementById('event-form');
+  document.getElementById('event-form-uid').value = '';
+  document.getElementById('event-form-summary').value = '';
+  document.getElementById('event-form-location').value = '';
+  document.getElementById('event-form-description').value = '';
+  document.getElementById('event-form-tz').value = 'UTC';
+  document.getElementById('event-form-scope').value = 'series';
+  document.getElementById('event-form-original-dtstart').value = '';
+  document.getElementById('event-form-all-day').checked = false;
+  document.getElementById('event-form-time-fields').classList.remove('hidden');
+  document.getElementById('event-form-start-time').value = '';
+  document.getElementById('event-form-end-time').value = '';
+  document.getElementById('event-form-delete').style.display = 'none';
+
+  var startInput = document.getElementById('week-start-input');
+  var dateVal = '';
+  if (startInput && startInput.value) {
+    dateVal = startInput.value;
+  } else {
+    dateVal = new Date().toISOString().split('T')[0];
+  }
+  document.getElementById('event-form-date').value = dateVal;
+
+  document.getElementById('event-form-title').textContent = window.__i18n ? window.__i18n.t('event.create') : 'New event';
+  populateCalendarSelect();
+  var firstOpt = document.getElementById('event-form-calendar-select').options[0];
+  if (firstOpt) document.getElementById('event-form-calendar-select').value = firstOpt.value;
+
+  document.getElementById('event-form-result').innerHTML = '';
+  dialog.showModal();
+}
+
+document.getElementById('event-form-all-day').addEventListener('change', function() {
+  var fields = document.getElementById('event-form-time-fields');
+  if (this.checked) {
+    fields.classList.add('hidden');
+  } else {
+    fields.classList.remove('hidden');
+  }
+});
+
+document.getElementById('event-form-close').addEventListener('click', function() {
+  document.getElementById('event-form').close();
+});
+
+document.getElementById('event-form-cancel').addEventListener('click', function() {
+  document.getElementById('event-form').close();
+});
+
+document.getElementById('event-form').addEventListener('click', function(e) {
+  if (e.target === e.currentTarget) this.close();
+});
+
+document.addEventListener('htmx:afterRequest', function(evt) {
+  if (evt.detail.target && evt.detail.target.id === 'event-form-result') {
+    if (evt.detail.successful) {
+      document.getElementById('event-form').close();
+    }
+  }
+});
+
+document.getElementById('event-form-delete').addEventListener('click', function() {
+  var uid = document.getElementById('event-form-uid').value;
+  var href = document.getElementById('event-form-calendar-select').value;
+  if (!uid || !href) return;
+  var msg = window.__i18n ? window.__i18n.t('event.deleteConfirm') : 'Delete this event?';
+  if (!confirm(msg)) return;
+  var xhr = new XMLHttpRequest();
+  xhr.open('DELETE', '/api/event?uid=' + encodeURIComponent(uid) + '&calendar_href=' + encodeURIComponent(href), true);
+  xhr.onload = function() {
+    if (xhr.status >= 200 && xhr.status < 300) {
+      document.getElementById('event-form').close();
+      var body = document.body;
+      var event = new CustomEvent('calendarChange');
+      body.dispatchEvent(event);
+    }
+  };
+  xhr.send();
+});
+
+document.getElementById('fab-new-event').addEventListener('click', openNewEventForm);
 
 (function updateWeekRange() {
   var display = document.getElementById('week-range-display');
@@ -440,5 +693,143 @@ article {
   z-index: 1;
   font-style: italic;
   color: var(--pico-muted-color);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.edit-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  color: var(--pico-muted-color);
+  padding: 0.25rem;
+  line-height: 1;
+  transition: color 0.15s;
+}
+.edit-btn:hover {
+  color: var(--pico-primary-background);
+}
+
+.edit-choice-popover {
+  position: fixed;
+  z-index: 30;
+  background: var(--pico-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--pico-border-radius);
+  box-shadow: 0 0.25rem 1rem rgba(0,0,0,0.2);
+  padding: 0.25rem;
+  display: none;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+.edit-choice-popover button {
+  background: none;
+  border: none;
+  text-align: left;
+  font-size: 0.875rem;
+  cursor: pointer;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--pico-border-radius);
+  color: var(--pico-color);
+  white-space: nowrap;
+}
+.edit-choice-popover button:hover {
+  background: var(--pico-primary-background);
+  color: var(--pico-primary-inverse);
+}
+
+.fab {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  z-index: 20;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  border: none;
+  background: var(--pico-primary-background);
+  color: var(--pico-primary-inverse);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0.25rem 1rem rgba(0,0,0,0.25);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.fab:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0.35rem 1.25rem rgba(0,0,0,0.3);
+}
+
+#event-form {
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--pico-border-radius);
+  padding: 0;
+  max-width: 28rem;
+  width: 90vw;
+  background: var(--pico-background-color);
+  color: var(--pico-color);
+  box-shadow: 0 0.5rem 2rem rgba(0,0,0,0.25);
+}
+#event-form::backdrop {
+  background: rgba(0,0,0,0.4);
+}
+#event-form article {
+  margin: 0;
+  padding: 1.5rem;
+}
+#event-form article header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+#event-form article header h3 {
+  margin: 0;
+  flex: 1;
+  word-break: break-word;
+}
+#event-form form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  margin-bottom: 0.75rem;
+}
+#event-form form label.all-day-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+.time-fields {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.time-fields.hidden {
+  display: none;
+}
+.time-fields label {
+  flex: 1;
+}
+.event-form-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.event-form-actions .contrast.outline {
+  margin-left: auto;
+}
+#event-form-result {
+  margin-bottom: 0.75rem;
+}
+#event-form-result .error {
+  color: var(--pico-del-color);
+  font-size: 0.875rem;
 }
 </style>
