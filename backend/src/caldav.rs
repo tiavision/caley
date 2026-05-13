@@ -1349,7 +1349,7 @@ pub fn recurrence_info_to_rrule(info: &RecurrenceInfo, tz: &str, is_all_day: boo
     parts.join(";")
 }
 
-fn format_until(until: &str, tz: &str, is_all_day: bool) -> String {
+fn format_until(until: &str, _tz: &str, is_all_day: bool) -> String {
     if is_all_day {
         if let Ok(d) = NaiveDate::parse_from_str(until, "%Y-%m-%d") {
             d.format("%Y%m%d").to_string()
@@ -1357,17 +1357,9 @@ fn format_until(until: &str, tz: &str, is_all_day: bool) -> String {
             until.to_string()
         }
     } else if let Ok(dt) = NaiveDateTime::parse_from_str(until, "%Y-%m-%d %H:%M:%S") {
-        if tz.is_empty() || tz == "UTC" {
-            format!("{}T{}Z", dt.format("%Y%m%d"), dt.format("%H%M%S"))
-        } else {
-            format!("{}T{}", dt.format("%Y%m%d"), dt.format("%H%M%S"))
-        }
+        format!("{}T{}Z", dt.format("%Y%m%d"), dt.format("%H%M%S"))
     } else if let Ok(d) = NaiveDate::parse_from_str(until, "%Y-%m-%d") {
-        if tz.is_empty() || tz == "UTC" {
-            format!("{}T235959Z", d.format("%Y%m%d"))
-        } else {
-            format!("{}T235959", d.format("%Y%m%d"))
-        }
+        format!("{}T235959Z", d.format("%Y%m%d"))
     } else {
         until.to_string()
     }
