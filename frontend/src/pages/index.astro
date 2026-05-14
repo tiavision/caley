@@ -38,11 +38,12 @@ import Calendars from '../components/Calendars.astro';
 @media (min-width: 768px) {
     .layout {
         display: grid;
-        grid-template-columns: minmax(auto, 28rem) 1fr;
+        grid-template-columns: 22rem 1fr;
         grid-template-areas:
-            "picker list"
-            "weekly weekly";
+            "picker weekly"
+            "list   weekly";
         gap: 1rem;
+        align-items: start;
     }
 
     .calendar-picker {
@@ -57,6 +58,7 @@ import Calendars from '../components/Calendars.astro';
 
     .weekly {
         grid-area: weekly;
+        grid-row: 1 / -1;
         order: unset;
     }
 }

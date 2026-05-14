@@ -1108,6 +1108,46 @@ document.getElementById('event-form-form').addEventListener('htmx:configRequest'
 
 var tzInput = document.getElementById('event-form-tz');
 if (tzInput && !tzInput.value) tzInput.value = getUserTimezone();
+
+function markPastDays() {
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  document.querySelectorAll('#weekly-events .day').forEach(function(day) {
+    var dateStr = day.getAttribute('data-raw-date-aria');
+    if (!dateStr) return;
+    var parts = dateStr.split('-').map(Number);
+    var dayDate = new Date(parts[0], parts[1] - 1, parts[2]);
+    if (dayDate < today) {
+      day.classList.add('day-past');
+      var count = day.querySelectorAll('.appointment').length;
+      if (count === 0) {
+        day.classList.add('day-past-empty');
+      } else {
+        day.classList.remove('day-past-empty');
+        var h5 = day.querySelector('h5');
+        if (h5) {
+          if (!h5._pastToggle) {
+            h5._pastToggle = true;
+            h5.addEventListener('click', function() { day.classList.toggle('day-expanded'); });
+          }
+          var existing = h5.querySelector('.day-past-count');
+          if (existing) existing.remove();
+          var badge = document.createElement('span');
+          badge.className = 'day-past-count';
+          badge.textContent = count;
+          h5.appendChild(badge);
+        }
+      }
+    } else {
+      day.classList.remove('day-past');
+      day.classList.remove('day-past-empty');
+      day.classList.remove('day-expanded');
+    }
+  });
+}
+
+document.addEventListener('htmx:afterSettle', markPastDays);
+markPastDays();
 </script>
 
 
@@ -1270,6 +1310,63 @@ article {
 
 .week-loading {
   display: none;
+}
+
+.day.today {
+  border-top: 2px solid var(--pico-primary-background);
+}
+
+.day.today h5 {
+  color: var(--pico-primary-background);
+  font-weight: bold;
+}
+
+@media (max-width: 1024px) {
+  .day.day-past .appointments {
+    display: none;
+  }
+  .day.day-past.day-expanded .appointments {
+    display: block;
+  }
+  .day.day-past h5 {
+    cursor: pointer;
+    user-select: none;
+  }
+  .day.day-past h5::after {
+    content: ' ▸';
+    font-size: 0.7em;
+    color: var(--pico-muted-color);
+  }
+  .day.day-past.day-expanded h5::after {
+    content: ' ▾';
+  }
+  .day.day-past-empty {
+    display: none;
+  }
+  .day-past-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--pico-primary-background);
+    color: var(--pico-primary-inverse);
+    border-radius: 999px;
+    font-size: 0.65em;
+    font-weight: 700;
+    min-width: 1.4em;
+    height: 1.4em;
+    padding: 0 0.25em;
+    margin-left: 0.4em;
+    vertical-align: middle;
+  }
+  .day.day-past.day-expanded .day-past-count {
+    display: none;
+  }
+}
+
+@media (min-width: 1025px) {
+  .day.day-past {
+    opacity: 0.45;
+  }
 }
 
 .htmx-request .day {
