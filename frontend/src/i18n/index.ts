@@ -164,7 +164,7 @@ export function setLocale(locale: string) {
 export function createLocalePicker(): HTMLSelectElement {
   const select = document.createElement('select');
   select.className = 'locale-picker';
-  select.setAttribute('aria-label', t('cal.aria.month'));
+  select.setAttribute('aria-label', t('settings.language'));
 
   const opts = [
     { value: 'en', label: 'English' },

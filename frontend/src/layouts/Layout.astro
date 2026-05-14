@@ -21,26 +21,18 @@ import '../styles/main.scss';
 			}
 		</style>
 		<script>
-			import { initI18n, t, setLocale, getLang, createLocalePicker } from '../i18n/index.ts';
+			import { initI18n, t, setLocale, getLang } from '../i18n/index.ts';
 			initI18n();
 			window.__i18n = { t, setLocale, getLang };
-			if (document.readyState === 'loading') {
-				document.addEventListener('DOMContentLoaded', () => {
-					document.querySelector('.locale-picker-li')?.appendChild(createLocalePicker());
-				});
-			} else {
-				document.querySelector('.locale-picker-li')?.appendChild(createLocalePicker());
-			}
 		</script>
 	</head>
 	<body>
 		<header class="container">
 			<nav>
 				<ul><li><a href="/" class="brand"><strong data-i18n="app.brand">Caley</strong></a></li></ul>
-				<ul>
-					<li class="locale-picker-li"></li>
-					<li hx-get="/api/user" hx-trigger="load" hx-swap="innerHTML"><span data-i18n="nav.loading">Loading...</span></li>
-				</ul>
+			<ul>
+				<li hx-get="/api/user" hx-trigger="load" hx-swap="innerHTML"><span data-i18n="nav.loading">Loading...</span></li>
+			</ul>
 			</nav>
 		</header>
 		<main class="container">

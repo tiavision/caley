@@ -44,6 +44,7 @@
   "settings.password": "CalDAV Password",
   "settings.passwordPlaceholder": "your-password",
   "settings.passwordHint": "Leave blank to keep current password",
+  "settings.language": "Language",
   "settings.submit": "Save & Test Connection",
   "event.edit": "Edit event",
   "event.create": "New event",

@@ -44,6 +44,7 @@
   "settings.password": "CalDAV-Passwort",
   "settings.passwordPlaceholder": "dein-passwort",
   "settings.passwordHint": "Leer lassen, um das aktuelle Passwort zu behalten",
+  "settings.language": "Sprache",
   "settings.submit": "Speichern & Verbindung testen",
   "event.edit": "Termin bearbeiten",
   "event.create": "Neuer Termin",
