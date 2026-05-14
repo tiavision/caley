@@ -428,7 +428,7 @@ function populateCalendarSelect() {
   select.innerHTML = '';
   var container = document.getElementById('calendar-container');
   if (!container) return;
-  container.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+  container.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) {
     var raw = cb.value;
     var href = raw.split('|')[0] || raw;
     var label = cb.closest('label');
