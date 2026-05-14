@@ -7,3 +7,22 @@ body {
     height: 100%;
 }
 
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+main.container {
+    flex: 1;
+}
+
+@media (max-width: 767px) {
+    header.container {
+        order: 1;
+    }
+    main.container {
+        order: 0;
+    }
+}
+
