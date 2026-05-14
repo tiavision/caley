@@ -12,7 +12,8 @@ use url::form_urlencoded;
 
 use crate::oidc::{require_client, AppState};
 use crate::db;
-use crate::caldav::{generate_ical_event, add_recurrence_override, add_exdate, generate_new_uid, RecurrenceInfo};
+use crate::caldav::{generate_ical_event, add_recurrence_override, add_exdate, generate_new_uid, RecurrenceInfo, Alarm};
+use chrono::{NaiveDateTime, TimeZone as _, Utc};
 
 const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
 
@@ -52,6 +53,10 @@ struct EventView {
     recurrence_json: String,
     calendar_href: String,
     master_dtstart: String,
+    alarm_directions: String,
+    alarm_values: String,
+    alarm_units: String,
+    alarm_datetimes: String,
 }
 
 #[derive(Template)]
@@ -120,6 +125,47 @@ fn parse_event_form(body: String) -> Vec<(String, String)> {
         .collect()
 }
 
+fn alarm_to_form_fields(alarm: &Alarm) -> (String, String, String, String) {
+    if alarm.trigger_type == "absolute" {
+        return ("absolute".into(), String::new(), String::new(), alarm.datetime.clone().unwrap_or_default());
+    }
+    let mins = alarm.minutes.unwrap_or(0);
+    let direction = match (alarm.trigger_type.as_str(), mins < 0) {
+        ("start", true)  => "before-start",
+        ("start", false) => "after-start",
+        ("end",   true)  => "before-end",
+        _                => "after-end",
+    };
+    let abs = mins.unsigned_abs();
+    let (val, unit) = if abs % 1440 == 0 { (abs / 1440, 1440u64) }
+                      else if abs % 60 == 0 { (abs / 60, 60u64) }
+                      else { (abs, 1u64) };
+    (direction.into(), val.to_string(), unit.to_string(), String::new())
+}
+
+fn parse_alarm_from_fields(direction: &str, value: &str, unit: &str, datetime: &str, tz: &str) -> Option<Alarm> {
+    if direction == "absolute" {
+        if datetime.is_empty() { return None; }
+        let naive = NaiveDateTime::parse_from_str(datetime, "%Y-%m-%dT%H:%M").ok()?;
+        let event_tz: chrono_tz::Tz = tz.parse().ok()?;
+        let zoned = event_tz.from_local_datetime(&naive).single()?;
+        let utc = zoned.with_timezone(&Utc);
+        Some(Alarm { trigger_type: "absolute".into(), minutes: None, datetime: Some(utc.format("%Y%m%dT%H%M%SZ").to_string()) })
+    } else {
+        let val = value.parse::<i64>().ok().filter(|&v| v > 0)?;
+        let mult = unit.parse::<i64>().unwrap_or(1).max(1);
+        let total = val * mult;
+        let (trigger_type, sign): (&str, i64) = match direction {
+            "before-start" => ("start", -1),
+            "after-start"  => ("start",  1),
+            "before-end"   => ("end",   -1),
+            "after-end"    => ("end",    1),
+            _ => return None,
+        };
+        Some(Alarm { trigger_type: trigger_type.into(), minutes: Some(sign * total), datetime: None })
+    }
+}
+
 pub async fn save_event(
     State(state): State<AppState>,
     claims: OidcClaims<EmptyAdditionalClaims>,
@@ -156,6 +202,19 @@ pub async fn save_event(
     let recurrence: Option<RecurrenceInfo> = parse_form_field(&form, "recurrence")
         .filter(|r| !r.is_empty() && *r != "{}")
         .and_then(|r| serde_json::from_str(r).ok());
+    let alarm_dirs:  Vec<&str> = form.iter().filter(|(k, _)| k == "alarm_direction").map(|(_, v)| v.as_str()).collect();
+    let alarm_vals:  Vec<&str> = form.iter().filter(|(k, _)| k == "alarm_value").map(|(_, v)| v.as_str()).collect();
+    let alarm_units: Vec<&str> = form.iter().filter(|(k, _)| k == "alarm_unit").map(|(_, v)| v.as_str()).collect();
+    let alarm_dts:   Vec<&str> = form.iter().filter(|(k, _)| k == "alarm_datetime").map(|(_, v)| v.as_str()).collect();
+    let alarms: Vec<Alarm> = alarm_dirs.iter().enumerate()
+        .filter_map(|(i, dir)| parse_alarm_from_fields(
+            dir,
+            alarm_vals.get(i).copied().unwrap_or(""),
+            alarm_units.get(i).copied().unwrap_or("1"),
+            alarm_dts.get(i).copied().unwrap_or(""),
+            &tz,
+        ))
+        .collect();
 
     if summary.is_empty() {
         return (StatusCode::BAD_REQUEST, "<p class='error'>Missing summary</p>").into_response();
@@ -176,7 +235,7 @@ pub async fn save_event(
                 let override_ical = generate_ical_event(
                     &uid, &summary, &description, &location,
                     &date, start_time, end_time, &tz, is_all_day,
-                    Some((rid_value, &tz)), None,
+                    Some((rid_value, &tz)), None, &alarms,
                 );
                 let override_vevent = extract_vevent(&override_ical);
                 let modified = add_recurrence_override(&raw_ical, &override_vevent, rid_value);
@@ -202,7 +261,7 @@ pub async fn save_event(
         let ical = generate_ical_event(
             &uid, &summary, &description, &location,
             &date, start_time, end_time, &tz, is_all_day, None,
-            recurrence.as_ref(),
+            recurrence.as_ref(), &alarms,
         );
 
         match client.put_event(&calendar_href, &uid, &ical).await {
@@ -416,6 +475,14 @@ pub async fn list_events(
                     } else {
                         String::new()
                     };
+                    let mut dirs = Vec::new();
+                    let mut vals = Vec::new();
+                    let mut units = Vec::new();
+                    let mut dts = Vec::new();
+                    for alarm in &event.alarms {
+                        let (d, v, u, dt) = alarm_to_form_fields(alarm);
+                        dirs.push(d); vals.push(v); units.push(u); dts.push(dt);
+                    }
                     all_events.push((
                         event.date,
                         EventView {
@@ -433,6 +500,10 @@ pub async fn list_events(
                             recurrence_json,
                             calendar_href: cal_href.clone(),
                             master_dtstart: event.master_dtstart,
+                            alarm_directions: dirs.join("|"),
+                            alarm_values:     vals.join("|"),
+                            alarm_units:      units.join("|"),
+                            alarm_datetimes:  dts.join("|"),
                         },
                     ));
                 }

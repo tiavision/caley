@@ -16,6 +16,13 @@ pub struct Calendar {
     pub color: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Alarm {
+    pub trigger_type: String,    // "start" | "end" | "absolute"
+    pub minutes: Option<i64>,    // for relative: negative = before, positive = after
+    pub datetime: Option<String>, // for absolute: UTC ISO 8601 (e.g. "20260514T090000Z")
+}
+
 #[derive(Serialize)]
 pub struct Event {
     pub uid: String,
@@ -32,6 +39,7 @@ pub struct Event {
     pub is_recurring: bool,
     pub recurrence: Option<RecurrenceInfo>,
     pub master_dtstart: String,
+    pub alarms: Vec<Alarm>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -65,6 +73,7 @@ struct RawIcalEvent {
     exdates: Vec<DateProperty>,
     recurrence_id: Option<NaiveDateTime>,
     recurrence_id_tzid: Option<String>,
+    alarms: Vec<Alarm>,
 }
 
 #[derive(Clone)]
@@ -800,6 +809,35 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
 
         let recurrence_id = recurrence_id_value.as_ref().and_then(|v| parse_dtstart(v));
 
+        let mut alarms: Vec<Alarm> = Vec::new();
+        for alarm in &event.alarms {
+            let Some(trigger) = alarm.properties.iter().find(|p| p.name == "TRIGGER") else { continue };
+            let Some(ref value) = trigger.value else { continue };
+
+            let mut is_absolute = false;
+            let mut is_end_relative = false;
+            if let Some(params) = &trigger.params {
+                for (key, vals) in params {
+                    if key == "VALUE" && vals.iter().any(|v| v == "DATE-TIME") {
+                        is_absolute = true;
+                    }
+                    if key == "RELATED" && vals.iter().any(|v| v == "END") {
+                        is_end_relative = true;
+                    }
+                }
+            }
+
+            if is_absolute {
+                alarms.push(Alarm { trigger_type: "absolute".to_string(), minutes: None, datetime: Some(value.clone()) });
+            } else if let Some(mins) = parse_relative_trigger(value) {
+                alarms.push(Alarm {
+                    trigger_type: if is_end_relative { "end".to_string() } else { "start".to_string() },
+                    minutes: Some(mins),
+                    datetime: None,
+                });
+            }
+        }
+
         results.push(RawIcalEvent {
             uid,
             summary,
@@ -814,10 +852,26 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
             exdates,
             recurrence_id,
             recurrence_id_tzid,
+            alarms,
         });
     }
 
     results
+}
+
+fn parse_relative_trigger(s: &str) -> Option<i64> {
+    let negative = s.starts_with('-');
+    let s = s.trim_start_matches(['+', '-']);
+    let s = s.strip_prefix('P')?;
+    let minutes = if let Some(rest) = s.strip_prefix('T') {
+        if let Some(h) = rest.strip_suffix('H') { h.parse::<i64>().ok()? * 60 }
+        else if let Some(m) = rest.strip_suffix('M') { m.parse::<i64>().ok()? }
+        else if let Some(sec) = rest.strip_suffix('S') { sec.parse::<i64>().ok()? / 60 }
+        else { return None; }
+    } else if let Some(d) = s.strip_suffix('D') {
+        d.parse::<i64>().ok()? * 1440
+    } else { return None; };
+    Some(if negative { -minutes } else { minutes })
 }
 
 fn parse_ical_duration(s: &str) -> Option<TimeDelta> {
@@ -926,6 +980,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                         true,
                         recurrence.clone(),
                         master_dtstart_str.clone(),
+                        override_event.alarms.clone(),
                     ));
                 } else {
                     events.push(create_event(
@@ -941,6 +996,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                         true,
                         recurrence.clone(),
                         master_dtstart_str.clone(),
+                        master.alarms.clone(),
                     ));
                 }
             }
@@ -958,6 +1014,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                 false,
                 None,
                 String::new(),
+                master.alarms.clone(),
             ));
         }
     }
@@ -1070,6 +1127,7 @@ fn create_event(
     is_recurring: bool,
     recurrence: Option<RecurrenceInfo>,
     master_dtstart: String,
+    alarms: Vec<Alarm>,
 ) -> Event {
     let dtstart_str = if dtstart_is_date {
         dtstart.format("%Y-%m-%d").to_string()
@@ -1116,6 +1174,7 @@ fn create_event(
         is_recurring,
         recurrence,
         master_dtstart,
+        alarms,
     }
 }
 
@@ -1231,6 +1290,7 @@ pub fn generate_ical_event(
     is_all_day: bool,
     recurrence_id: Option<(&str, &str)>,
     recurrence: Option<&RecurrenceInfo>,
+    alarms: &[Alarm],
 ) -> String {
     let dtstart = if is_all_day {
         date.replace('-', "")
@@ -1316,6 +1376,30 @@ pub fn generate_ical_event(
     }
     if !location.is_empty() {
         ical.push_str(&format!("LOCATION:{}\r\n", escape_ical_text(location)));
+    }
+
+    for alarm in alarms {
+        ical.push_str("BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Reminder\r\n");
+        match alarm.trigger_type.as_str() {
+            "absolute" => {
+                if let Some(ref dt) = alarm.datetime {
+                    ical.push_str(&format!("TRIGGER;VALUE=DATE-TIME:{}\r\n", dt));
+                }
+            }
+            "end" => {
+                if let Some(mins) = alarm.minutes {
+                    let sign = if mins < 0 { "-" } else { "" };
+                    ical.push_str(&format!("TRIGGER;RELATED=END:{}PT{}M\r\n", sign, mins.unsigned_abs()));
+                }
+            }
+            _ => {
+                if let Some(mins) = alarm.minutes {
+                    let sign = if mins < 0 { "-" } else { "" };
+                    ical.push_str(&format!("TRIGGER:{}PT{}M\r\n", sign, mins.unsigned_abs()));
+                }
+            }
+        }
+        ical.push_str("END:VALARM\r\n");
     }
 
     ical.push_str("END:VEVENT\r\nEND:VCALENDAR\r\n");

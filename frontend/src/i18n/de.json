@@ -93,5 +93,17 @@
   "event.monthlyPos2": "2.",
   "event.monthlyPos3": "3.",
   "event.monthlyPos4": "4.",
-  "event.monthlyPosLast": "letzten"
+  "event.monthlyPosLast": "letzten",
+  "event.reminder": "Erinnerungen",
+  "event.reminderAdd": "Erinnerung hinzufügen",
+  "event.reminderBeforeStart": "vor Beginn",
+  "event.reminderBeforeEnd": "vor Ende",
+  "event.reminderAfterStart": "nach Beginn",
+  "event.reminderAfterEnd": "nach Ende",
+  "event.reminderAtTime": "Zu bestimmter Zeit",
+  "event.reminderMin": "Min.",
+  "event.reminderHour": "Stunde",
+  "event.reminderHours": "Stunden",
+  "event.reminderDay": "Tag",
+  "event.reminderDays": "Tage"
 }

@@ -93,5 +93,17 @@
   "event.monthlyPos2": "2nd",
   "event.monthlyPos3": "3rd",
   "event.monthlyPos4": "4th",
-  "event.monthlyPosLast": "last"
+  "event.monthlyPosLast": "last",
+  "event.reminder": "Reminders",
+  "event.reminderAdd": "Add reminder",
+  "event.reminderBeforeStart": "before start",
+  "event.reminderBeforeEnd": "before end",
+  "event.reminderAfterStart": "after start",
+  "event.reminderAfterEnd": "after end",
+  "event.reminderAtTime": "At specific time",
+  "event.reminderMin": "min",
+  "event.reminderHour": "hour",
+  "event.reminderHours": "hours",
+  "event.reminderDay": "day",
+  "event.reminderDays": "days"
 }

@@ -42,6 +42,10 @@
         <span class="event-detail-label" data-i18n="event.description">Description</span>
         <p id="event-detail-description"></p>
       </div>
+      <div class="event-detail-row" id="event-detail-alarms-row">
+        <span class="event-detail-label" data-i18n="event.reminder">Reminders</span>
+        <div id="event-detail-alarms"></div>
+      </div>
     </div>
   </article>
 </dialog>
@@ -89,6 +93,12 @@
         <span data-i18n="event.description">Description</span>
         <textarea name="description" id="event-form-description" rows="3"></textarea>
       </label>
+
+      <fieldset id="event-form-alarms-section">
+        <legend data-i18n="event.reminder">Reminders</legend>
+        <ul id="event-form-alarms-list" class="alarm-list"></ul>
+        <button type="button" id="event-form-add-alarm" class="outline small" data-i18n="event.reminderAdd">Add reminder</button>
+      </fieldset>
 
       <label>
         <span data-i18n="event.repeat">Repeat</span>
@@ -240,6 +250,45 @@ function formatRecurrence(r, locale) {
   return text;
 }
 
+function getEventAlarms(article) {
+  var dirs = (article.dataset.alarmDirections || '').split('|').filter(Boolean);
+  if (!dirs.length) return [];
+  var vals = (article.dataset.alarmValues || '').split('|');
+  var units = (article.dataset.alarmUnits || '').split('|');
+  var dts = (article.dataset.alarmDatetimes || '').split('|');
+  return dirs.map(function(dir, i) {
+    return { direction: dir, value: vals[i] || '', unit: units[i] || '1', datetime: dts[i] || '' };
+  });
+}
+
+function formatAlarm(alarm, locale) {
+  var t = window.__i18n ? window.__i18n.t : function(k) { return k; };
+  if (alarm.direction === 'absolute') {
+    if (!alarm.datetime) return '';
+    var isoStr = alarm.datetime.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/, '$1-$2-$3T$4:$5:$6Z');
+    var d = new Date(isoStr);
+    return isNaN(d.getTime()) ? alarm.datetime : d.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+  var absMinutes = parseInt(alarm.value || '15') * parseInt(alarm.unit || '1');
+  var valueStr;
+  if (absMinutes % 1440 === 0) {
+    var days = absMinutes / 1440;
+    valueStr = days + ' ' + (days === 1 ? t('event.reminderDay') : t('event.reminderDays'));
+  } else if (absMinutes % 60 === 0) {
+    var hours = absMinutes / 60;
+    valueStr = hours + ' ' + (hours === 1 ? t('event.reminderHour') : t('event.reminderHours'));
+  } else {
+    valueStr = absMinutes + ' ' + t('event.reminderMin');
+  }
+  var anchorKey = {
+    'before-start': 'event.reminderBeforeStart',
+    'after-start': 'event.reminderAfterStart',
+    'before-end': 'event.reminderBeforeEnd',
+    'after-end': 'event.reminderAfterEnd'
+  }[alarm.direction] || 'event.reminderBeforeStart';
+  return valueStr + ' ' + t(anchorKey);
+}
+
 function openEventDetail(article) {
   const dialog = document.getElementById('event-detail');
   const locale = navigator.language || 'en';
@@ -293,6 +342,16 @@ function openEventDetail(article) {
   const descEl = document.getElementById('event-detail-description');
   descEl.textContent = description;
   document.getElementById('event-detail-description-row').style.display = description ? '' : 'none';
+
+  var alarms = getEventAlarms(article);
+  var alarmsEl = document.getElementById('event-detail-alarms');
+  alarmsEl.innerHTML = '';
+  alarms.forEach(function(alarm) {
+    var div = document.createElement('div');
+    div.textContent = formatAlarm(alarm, locale);
+    alarmsEl.appendChild(div);
+  });
+  document.getElementById('event-detail-alarms-row').style.display = alarms.length > 0 ? '' : 'none';
 
   _currentEventArticle = article;
   dialog.showModal();
@@ -446,6 +505,8 @@ function openEventForm(article, scope) {
     document.getElementById('event-form-calendar-select').disabled = false;
   }
 
+  renderAlarmList(getEventAlarms(article));
+
   document.getElementById('event-detail').close();
   document.getElementById('event-form-result').innerHTML = '';
   dialog.showModal();
@@ -482,6 +543,7 @@ function openNewEventForm() {
   document.getElementById('event-form-date').value = dateVal;
 
   resetRecurrenceFields();
+  renderAlarmList([]);
   document.getElementById('event-form-freq').disabled = false;
   document.getElementById('event-form-title').textContent = window.__i18n ? window.__i18n.t('event.create') : 'New event';
   populateCalendarSelect();
@@ -569,6 +631,172 @@ document.getElementById('event-form-delete').addEventListener('click', function(
 });
 
 document.getElementById('fab-new-event').addEventListener('click', openNewEventForm);
+
+// ── Alarm helpers ──
+
+
+function renderAlarmRow(alarm) {
+  var t = window.__i18n ? window.__i18n.t : function(k) { return k; };
+  var li = document.createElement('li');
+  li.className = 'alarm-row';
+
+  var direction = alarm.direction || 'before-start';
+
+  var dirSelect = document.createElement('select');
+  dirSelect.className = 'alarm-direction';
+  dirSelect.name = 'alarm_direction';
+  [
+    ['before-start', t('event.reminderBeforeStart')],
+    ['before-end', t('event.reminderBeforeEnd')],
+    ['after-start', t('event.reminderAfterStart')],
+    ['after-end', t('event.reminderAfterEnd')],
+    ['absolute', t('event.reminderAtTime')],
+  ].forEach(function(pair) {
+    var opt = document.createElement('option');
+    opt.value = pair[0];
+    opt.textContent = pair[1];
+    if (pair[0] === direction) opt.selected = true;
+    dirSelect.appendChild(opt);
+  });
+
+  var relDiv = document.createElement('div');
+  relDiv.className = 'alarm-relative-fields';
+
+  var valInput = document.createElement('input');
+  valInput.type = 'number';
+  valInput.className = 'alarm-value';
+  valInput.name = 'alarm_value';
+  valInput.min = '1';
+  valInput.value = alarm.value || '15';
+  valInput.style.width = '4rem';
+
+  var unitSelect = document.createElement('select');
+  unitSelect.className = 'alarm-unit';
+  unitSelect.name = 'alarm_unit';
+  [
+    ['1', t('event.reminderMin')],
+    ['60', t('event.reminderHours')],
+    ['1440', t('event.reminderDays')],
+  ].forEach(function(pair) {
+    var opt = document.createElement('option');
+    opt.value = pair[0];
+    opt.textContent = pair[1];
+    if (pair[0] === (alarm.unit || '1')) opt.selected = true;
+    unitSelect.appendChild(opt);
+  });
+
+  relDiv.appendChild(valInput);
+  relDiv.appendChild(unitSelect);
+
+  var absDiv = document.createElement('div');
+  absDiv.className = 'alarm-absolute-fields';
+
+  var dtInput = document.createElement('input');
+  dtInput.type = 'datetime-local';
+  dtInput.className = 'alarm-datetime';
+  dtInput.name = 'alarm_datetime';
+  if (alarm.datetime) {
+    var isoStr = alarm.datetime.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/, '$1-$2-$3T$4:$5:$6Z');
+    var d = new Date(isoStr);
+    if (!isNaN(d.getTime())) {
+      dtInput.value = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    }
+  }
+  absDiv.appendChild(dtInput);
+
+  var removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'alarm-remove outline';
+  removeBtn.setAttribute('aria-label', 'Remove reminder');
+  removeBtn.textContent = '×';
+
+  li.appendChild(dirSelect);
+  li.appendChild(relDiv);
+  li.appendChild(absDiv);
+  li.appendChild(removeBtn);
+
+  function updateVisibility() {
+    var isAbs = dirSelect.value === 'absolute';
+    relDiv.style.display = isAbs ? 'none' : '';
+    absDiv.style.display = isAbs ? '' : 'none';
+  }
+  updateVisibility();
+
+  dirSelect.addEventListener('change', updateVisibility);
+  removeBtn.addEventListener('click', function() { li.remove(); });
+
+  return li;
+}
+
+function renderAlarmList(alarms) {
+  var list = document.getElementById('event-form-alarms-list');
+  list.innerHTML = '';
+  alarms.forEach(function(alarm) { list.appendChild(renderAlarmRow(alarm)); });
+}
+
+document.getElementById('event-form-add-alarm').addEventListener('click', function() {
+  var list = document.getElementById('event-form-alarms-list');
+  list.appendChild(renderAlarmRow({ direction: 'before-start', value: '15', unit: '1', datetime: '' }));
+});
+
+// ── Browser notifications ──
+
+var _reminderTimeouts = [];
+
+function scheduleReminders() {
+  _reminderTimeouts.forEach(function(id) { clearTimeout(id); });
+  _reminderTimeouts = [];
+
+  if (typeof Notification === 'undefined') return;
+
+  var articles = document.querySelectorAll('.event-trigger');
+  var alarmedArticles = Array.from(articles).filter(function(a) {
+    return !!a.dataset.alarmDirections;
+  });
+  if (alarmedArticles.length === 0) return;
+
+  function proceed() {
+    var now = Date.now();
+    var horizon = now + 24 * 60 * 60 * 1000;
+    alarmedArticles.forEach(function(article) {
+      var summary = article.getAttribute('data-summary') || '';
+      var dtstart = article.getAttribute('data-dtstart') || '';
+      var dtend = article.getAttribute('data-dtend') || '';
+      var header = article.querySelector('header');
+      var timeRange = header ? header.textContent.trim() : '';
+      var startMs = dtstart ? new Date(dtstart.includes('Z') || dtstart.includes('+') ? dtstart : dtstart + 'Z').getTime() : NaN;
+      var endMs = dtend ? new Date(dtend.includes('Z') || dtend.includes('+') ? dtend : dtend + 'Z').getTime() : NaN;
+      getEventAlarms(article).forEach(function(alarm) {
+        var fireMs;
+        if (alarm.direction === 'absolute') {
+          if (!alarm.datetime) return;
+          var isoStr = alarm.datetime.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/, '$1-$2-$3T$4:$5:$6Z');
+          fireMs = new Date(isoStr).getTime();
+        } else {
+          var baseMs = (alarm.direction === 'before-end' || alarm.direction === 'after-end') ? endMs : startMs;
+          if (isNaN(baseMs)) return;
+          var sign = (alarm.direction === 'before-start' || alarm.direction === 'before-end') ? -1 : 1;
+          fireMs = baseMs + sign * parseInt(alarm.value || '0') * parseInt(alarm.unit || '1') * 60000;
+        }
+        if (isNaN(fireMs)) return;
+        var delay = fireMs - now;
+        if (delay <= 0 || fireMs > horizon) return;
+        var tid = setTimeout(function() {
+          if (Notification.permission === 'granted') new Notification(summary, { body: timeRange });
+        }, delay);
+        _reminderTimeouts.push(tid);
+      });
+    });
+  }
+
+  if (Notification.permission === 'granted') {
+    proceed();
+  } else if (Notification.permission === 'default') {
+    Notification.requestPermission().then(function(perm) { if (perm === 'granted') proceed(); });
+  }
+}
+
+document.addEventListener('htmx:afterSettle', scheduleReminders);
 
 // ── Recurrence helpers ──
 
@@ -1171,6 +1399,56 @@ article {
 #event-form-freq:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+#event-form-alarms-section {
+  border: none;
+  padding: 0;
+  margin: 0 0 0.75rem;
+}
+#event-form-alarms-section legend {
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+.alarm-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.alarm-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.alarm-row select,
+.alarm-row input[type="number"] {
+  margin-bottom: 0;
+}
+.alarm-row .alarm-direction {
+  flex: 1;
+  min-width: 8rem;
+}
+.alarm-row .alarm-relative-fields {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.alarm-row .alarm-absolute-fields input {
+  flex: 1;
+}
+button.alarm-remove {
+  font-size: 1rem;
+  line-height: 1;
+  margin-bottom: 0;
+}
+button.small {
+  font-size: 0.875rem;
+  padding: 0.25rem 0.75rem;
 }
 
 .fab {
