@@ -100,7 +100,7 @@
         <button type="button" id="event-form-add-alarm" class="outline small" data-i18n="event.reminderAdd">Add reminder</button>
       </fieldset>
 
-      <label>
+      <label id="event-form-repeat-label">
         <span data-i18n="event.repeat">Repeat</span>
         <select id="event-form-freq">
           <option value="" data-i18n="event.repeatNone">No repeat</option>
@@ -110,73 +110,80 @@
           <option value="YEARLY" data-i18n="event.repeatYearly">Yearly</option>
         </select>
       </label>
+      <p id="event-form-repeat-instance-note" class="repeat-instance-note" style="display:none" data-i18n="event.repeatInstanceNote">Repeat settings apply to the whole series.</p>
 
-      <div id="event-form-rrule-options" style="display:none">
-        <div class="rrule-header-row">
-          <label class="rrule-interval-label">
-            <span data-i18n="event.repeatEvery">Every</span>
-            <input type="number" id="event-form-interval" min="1" value="1" style="width:4rem">
-            <span id="event-form-interval-unit"></span>
-          </label>
-
-          <div class="rrule-end-row">
-            <span data-i18n="event.repeatEnd">Ends</span>
-            <div class="rrule-end-controls">
-              <select id="event-form-end-type">
-                <option value="never" data-i18n="event.repeatEndNever">Never</option>
-                <option value="count" data-i18n="event.repeatEndAfter">After</option>
-                <option value="until" data-i18n="event.repeatEndOn">On date</option>
-              </select>
-              <div id="event-form-end-count" style="display:none">
-                <input type="number" id="event-form-count" min="1" value="1" style="width:4rem">
-                <span data-i18n="event.repeatEndAfterN">occurrences</span>
-              </div>
-              <div id="event-form-end-until" style="display:none">
-                <input type="date" id="event-form-until">
-              </div>
-            </div>
+      <div id="event-form-rrule-options" class="rrule-options" style="display:none">
+        <div class="rrule-row">
+          <span class="rrule-label" data-i18n="event.repeatEvery">Every</span>
+          <div class="rrule-controls">
+            <input type="number" id="event-form-interval" min="1" value="1" class="rrule-num-input">
+            <span id="event-form-interval-unit" class="rrule-unit"></span>
           </div>
         </div>
 
-        <fieldset id="event-form-byday-field" style="display:none">
-          <span class="fieldset-label" data-i18n="event.repeatOn">On days</span>
-          <div class="weekday-checks">
-            <label><input type="checkbox" value="MO"> <span data-i18n="event.dayMo">Mon</span></label>
-            <label><input type="checkbox" value="TU"> <span data-i18n="event.dayTu">Tue</span></label>
-            <label><input type="checkbox" value="WE"> <span data-i18n="event.dayWe">Wed</span></label>
-            <label><input type="checkbox" value="TH"> <span data-i18n="event.dayTh">Thu</span></label>
-            <label><input type="checkbox" value="FR"> <span data-i18n="event.dayFr">Fri</span></label>
-            <label><input type="checkbox" value="SA"> <span data-i18n="event.daySa">Sat</span></label>
-            <label><input type="checkbox" value="SU"> <span data-i18n="event.daySu">Sun</span></label>
+        <fieldset id="event-form-byday-field" class="rrule-row" style="display:none">
+          <span class="rrule-label" data-i18n="event.repeatOn">On</span>
+          <div class="weekday-toggles">
+            <label class="day-toggle"><input type="checkbox" value="MO"><span data-i18n="event.dayMo">Mo</span></label>
+            <label class="day-toggle"><input type="checkbox" value="TU"><span data-i18n="event.dayTu">Tu</span></label>
+            <label class="day-toggle"><input type="checkbox" value="WE"><span data-i18n="event.dayWe">We</span></label>
+            <label class="day-toggle"><input type="checkbox" value="TH"><span data-i18n="event.dayTh">Th</span></label>
+            <label class="day-toggle"><input type="checkbox" value="FR"><span data-i18n="event.dayFr">Fr</span></label>
+            <label class="day-toggle"><input type="checkbox" value="SA"><span data-i18n="event.daySa">Sa</span></label>
+            <label class="day-toggle"><input type="checkbox" value="SU"><span data-i18n="event.daySu">Su</span></label>
           </div>
         </fieldset>
 
-        <div id="event-form-monthly-field" style="display:none">
-          <label class="monthly-mode-label">
-            <input type="radio" name="monthly_mode" value="by_day" checked>
-            <span data-i18n="event.monthlyByDay">On day</span>
-            <input type="number" id="event-form-monthday" min="1" max="31" value="1" style="width:4rem">
-          </label>
-          <label class="monthly-mode-label">
-            <input type="radio" name="monthly_mode" value="by_setpos">
-            <span data-i18n="event.monthlyByPos">On the</span>
-            <select id="event-form-setpos">
-              <option value="1" data-i18n="event.monthlyPos1">1st</option>
-              <option value="2" data-i18n="event.monthlyPos2">2nd</option>
-              <option value="3" data-i18n="event.monthlyPos3">3rd</option>
-              <option value="4" data-i18n="event.monthlyPos4">4th</option>
-              <option value="-1" data-i18n="event.monthlyPosLast">last</option>
-            </select>
-            <select id="event-form-setpos-day">
-              <option value="MO" data-i18n="event.dayMo">Monday</option>
-              <option value="TU" data-i18n="event.dayTu">Tuesday</option>
-              <option value="WE" data-i18n="event.dayWe">Wednesday</option>
-              <option value="TH" data-i18n="event.dayTh">Thursday</option>
-              <option value="FR" data-i18n="event.dayFr">Friday</option>
-              <option value="SA" data-i18n="event.daySa">Saturday</option>
-              <option value="SU" data-i18n="event.daySu">Sunday</option>
-            </select>
-          </label>
+        <div id="event-form-monthly-field" class="rrule-row" style="display:none">
+          <span class="rrule-label" data-i18n="event.repeatOn">On</span>
+          <div class="monthly-options">
+            <label class="monthly-option">
+              <input type="radio" name="monthly_mode" value="by_day" checked>
+              <span data-i18n="event.monthlyByDay">Day</span>
+              <input type="number" id="event-form-monthday" min="1" max="31" value="1" class="rrule-num-input">
+            </label>
+            <label class="monthly-option">
+              <input type="radio" name="monthly_mode" value="by_setpos">
+              <span data-i18n="event.monthlyByPos">The</span>
+              <select id="event-form-setpos">
+                <option value="1" data-i18n="event.monthlyPos1">1st</option>
+                <option value="2" data-i18n="event.monthlyPos2">2nd</option>
+                <option value="3" data-i18n="event.monthlyPos3">3rd</option>
+                <option value="4" data-i18n="event.monthlyPos4">4th</option>
+                <option value="-1" data-i18n="event.monthlyPosLast">last</option>
+              </select>
+              <select id="event-form-setpos-day">
+                <option value="MO" data-i18n="event.dayMo">Monday</option>
+                <option value="TU" data-i18n="event.dayTu">Tuesday</option>
+                <option value="WE" data-i18n="event.dayWe">Wednesday</option>
+                <option value="TH" data-i18n="event.dayTh">Thursday</option>
+                <option value="FR" data-i18n="event.dayFr">Friday</option>
+                <option value="SA" data-i18n="event.daySa">Saturday</option>
+                <option value="SU" data-i18n="event.daySu">Sunday</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="rrule-row">
+          <span class="rrule-label" data-i18n="event.repeatEnd">Ends</span>
+          <div class="rrule-end-options">
+            <label class="rrule-end-option">
+              <input type="radio" name="rrule_end_type" value="never" checked>
+              <span data-i18n="event.repeatEndNever">Never</span>
+            </label>
+            <label class="rrule-end-option">
+              <input type="radio" name="rrule_end_type" value="count">
+              <span data-i18n="event.repeatEndAfter">After</span>
+              <input type="number" id="event-form-count" min="1" value="1" class="rrule-num-input" disabled>
+              <span data-i18n="event.repeatEndAfterN">occurrences</span>
+            </label>
+            <label class="rrule-end-option">
+              <input type="radio" name="rrule_end_type" value="until">
+              <span data-i18n="event.repeatEndOn">On date</span>
+              <input type="date" id="event-form-until" disabled>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -497,10 +504,13 @@ function openEventForm(article, scope) {
     resetRecurrenceFields();
   }
   if (scope === 'this_instance') {
-    document.getElementById('event-form-freq').disabled = true;
+    document.getElementById('event-form-repeat-label').style.display = 'none';
+    document.getElementById('event-form-repeat-instance-note').style.display = '';
     document.getElementById('event-form-rrule-options').style.display = 'none';
     document.getElementById('event-form-calendar-select').disabled = true;
   } else {
+    document.getElementById('event-form-repeat-label').style.display = '';
+    document.getElementById('event-form-repeat-instance-note').style.display = 'none';
     document.getElementById('event-form-freq').disabled = false;
     document.getElementById('event-form-calendar-select').disabled = false;
   }
@@ -812,11 +822,11 @@ function resetRecurrenceFields() {
   document.getElementById('event-form-monthday').value = '1';
   document.getElementById('event-form-setpos').value = '1';
   document.getElementById('event-form-setpos-day').value = 'MO';
-  document.getElementById('event-form-end-type').value = 'never';
+  document.querySelectorAll('input[name="rrule_end_type"]').forEach(function(r) { r.checked = r.value === 'never'; });
   document.getElementById('event-form-count').value = '1';
+  document.getElementById('event-form-count').disabled = true;
   document.getElementById('event-form-until').value = '';
-  document.getElementById('event-form-end-count').style.display = 'none';
-  document.getElementById('event-form-end-until').style.display = 'none';
+  document.getElementById('event-form-until').disabled = true;
   document.getElementById('event-form-recurrence').value = '';
 }
 
@@ -829,9 +839,10 @@ function updateIntervalUnit() {
 }
 
 function updateEndFields() {
-  var et = document.getElementById('event-form-end-type').value;
-  document.getElementById('event-form-end-count').style.display = et === 'count' ? '' : 'none';
-  document.getElementById('event-form-end-until').style.display = et === 'until' ? '' : 'none';
+  var checked = document.querySelector('input[name="rrule_end_type"]:checked');
+  var et = checked ? checked.value : 'never';
+  document.getElementById('event-form-count').disabled = et !== 'count';
+  document.getElementById('event-form-until').disabled = et !== 'until';
 }
 
 function updateRecurrenceVisibility() {
@@ -873,7 +884,8 @@ function buildRecurrenceJson() {
       if (d) obj.by_month_day = [d];
     }
   }
-  var et = document.getElementById('event-form-end-type').value;
+  var etEl = document.querySelector('input[name="rrule_end_type"]:checked');
+  var et = etEl ? etEl.value : 'never';
   if (et === 'count') {
     var c = parseInt(document.getElementById('event-form-count').value);
     if (c) obj.count = c;
@@ -916,15 +928,17 @@ function populateRecurrenceFields(jsonStr) {
     document.getElementById('event-form-monthly-field').style.display = 'none';
   }
   // End condition
+  var endType = 'never';
   if (rec.count) {
-    document.getElementById('event-form-end-type').value = 'count';
+    endType = 'count';
     document.getElementById('event-form-count').value = rec.count;
   } else if (rec.until) {
-    document.getElementById('event-form-end-type').value = 'until';
+    endType = 'until';
     document.getElementById('event-form-until').value = rec.until.split(' ')[0];
-  } else {
-    document.getElementById('event-form-end-type').value = 'never';
   }
+  document.querySelectorAll('input[name="rrule_end_type"]').forEach(function(r) {
+    r.checked = r.value === endType;
+  });
   updateEndFields();
   document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
 }
@@ -964,9 +978,11 @@ document.getElementById('event-form-setpos-day').addEventListener('change', func
   document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
 });
 
-document.getElementById('event-form-end-type').addEventListener('change', function() {
-  updateEndFields();
-  document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
+document.querySelectorAll('input[name="rrule_end_type"]').forEach(function(r) {
+  r.addEventListener('change', function() {
+    updateEndFields();
+    document.getElementById('event-form-recurrence').value = buildRecurrenceJson();
+  });
 });
 
 document.getElementById('event-form-count').addEventListener('input', function() {
@@ -1317,85 +1333,182 @@ article {
   color: var(--pico-primary-inverse);
 }
 
-#event-form-rrule-options {
+.rrule-options {
+  border-left: 3px solid var(--pico-primary-background);
+  padding-left: 0.75rem;
   margin-bottom: 0.75rem;
-}
-.rrule-header-row {
   display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.5rem;
+  flex-direction: column;
+  gap: 0.625rem;
 }
-#event-form-rrule-options label.rrule-interval-label {
+
+.rrule-row {
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0;
+  align-items: flex-start;
+  gap: 0.75rem;
 }
+
 #event-form-rrule-options fieldset {
   border: none;
   padding: 0;
-  margin: 0 0 0.5rem;
+  margin: 0;
 }
-#event-form-rrule-options .fieldset-label {
-  font-size: 0.75rem;
+
+.rrule-label {
+  font-size: 0.8125rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   color: var(--pico-muted-color);
   font-weight: 600;
-  display: block;
-  margin-bottom: 0.25rem;
+  width: 3.25rem;
+  flex-shrink: 0;
+  padding-top: 0.45rem;
 }
-.weekday-checks {
+
+.rrule-controls {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
 }
-.weekday-checks label {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.875rem;
+
+.rrule-num-input {
+  width: 4rem !important;
   margin-bottom: 0 !important;
-  flex-direction: row;
 }
-#event-form-rrule-options label.monthly-mode-label {
+
+.rrule-unit {
+  font-size: 0.9375rem;
+}
+
+.weekday-toggles {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  padding-top: 0.1rem;
+}
+
+.day-toggle {
+  position: relative;
+  margin-bottom: 0 !important;
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+}
+
+.day-toggle input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.day-toggle span {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-  flex-direction: row;
+  justify-content: center;
+  width: 2.125rem;
+  height: 2.125rem;
+  border-radius: 50%;
+  border: 1.5px solid var(--pico-muted-border-color);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  color: var(--pico-color);
+  background: transparent;
+  letter-spacing: 0;
 }
-#event-form-rrule-options label.monthly-mode-label input[type="radio"] {
+
+.day-toggle input[type="checkbox"]:checked + span {
+  background: var(--pico-primary-background);
+  border-color: var(--pico-primary-background);
+  color: var(--pico-primary-inverse);
+}
+
+.day-toggle span:hover {
+  border-color: var(--pico-primary-background);
+  color: var(--pico-primary-background);
+}
+
+.day-toggle input[type="checkbox"]:checked + span:hover {
+  color: var(--pico-primary-inverse);
+}
+
+.day-toggle input[type="checkbox"]:focus-visible + span {
+  outline: 2px solid var(--pico-primary-background);
+  outline-offset: 2px;
+}
+
+.monthly-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.monthly-option {
+  display: flex !important;
+  align-items: center !important;
+  flex-direction: row !important;
+  gap: 0.4rem;
+  margin-bottom: 0 !important;
+  flex-wrap: wrap;
+}
+
+.monthly-option input[type="radio"] {
   flex-shrink: 0;
+  margin: 0;
 }
-#event-form-monthly-field {
-  margin-bottom: 0.75rem;
+
+.monthly-option select,
+.monthly-option .rrule-num-input {
+  margin-bottom: 0 !important;
 }
-.rrule-end-row {
+
+.rrule-end-options {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.375rem;
 }
-.rrule-end-row .fieldset-label {
-  margin-bottom: 0;
+
+.rrule-end-option {
+  display: flex !important;
+  align-items: center !important;
+  flex-direction: row !important;
+  gap: 0.4rem;
+  margin-bottom: 0 !important;
 }
-.rrule-end-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+
+.rrule-end-option input[type="radio"] {
+  flex-shrink: 0;
+  margin: 0;
 }
-#event-form-end-count {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+
+.rrule-end-option input[type="number"] {
+  width: 4rem !important;
+  margin-bottom: 0 !important;
 }
-#event-form-end-until {
-  display: flex;
-  align-items: center;
+
+.rrule-end-option input[type="date"] {
+  flex: 1;
+  min-width: 8rem;
+  margin-bottom: 0 !important;
 }
+
+.rrule-end-option input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.repeat-instance-note {
+  font-size: 0.8125rem;
+  color: var(--pico-muted-color);
+  margin: 0 0 0.75rem;
+  font-style: italic;
+}
+
 #event-form-freq:disabled {
   opacity: 0.5;
   cursor: not-allowed;

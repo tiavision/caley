@@ -105,5 +105,6 @@
   "event.reminderHour": "Stunde",
   "event.reminderHours": "Stunden",
   "event.reminderDay": "Tag",
-  "event.reminderDays": "Tage"
+  "event.reminderDays": "Tage",
+  "event.repeatInstanceNote": "Wiederholungseinstellungen gelten für die gesamte Serie."
 }

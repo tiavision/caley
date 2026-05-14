@@ -105,5 +105,6 @@
   "event.reminderHour": "hour",
   "event.reminderHours": "hours",
   "event.reminderDay": "day",
-  "event.reminderDays": "days"
+  "event.reminderDays": "days",
+  "event.repeatInstanceNote": "Repeat settings apply to the whole series."
 }
