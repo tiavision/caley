@@ -96,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
             ServiceBuilder::new()
                 .layer(HandleErrorLayer::new(|session: Session, err: MiddlewareError| async move {
                     match err {
-                        MiddlewareError::RequestToken(_) => {
+                        MiddlewareError::RequestToken(_) | MiddlewareError::ClaimsVerification(_) => {
                             session.remove_value("axum-oidc").await.unwrap_or_default();
                             Redirect::to("/").into_response()
                         }
