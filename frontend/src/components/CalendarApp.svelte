@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
-  import { t, initI18n, getLocale } from '../i18n/index.ts';
+  import { m } from '../paraglide/messages.js';
+  import { initI18n, getLocale } from '../lib/i18n.ts';
 
   // ── Types ──────────────────────────────────────────────────────────────────
   interface AlarmFields { direction: string; value: string; unit: string; datetime: string; }
@@ -25,7 +26,7 @@
 
   // ── i18n ───────────────────────────────────────────────────────────────────
   let locale = 'en';
-  $: tl = (() => { locale; return (key: string, params?: Record<string, string | number>) => t(key, params); })();
+  $: tl = (() => { locale; return (key: string, params?: Record<string, string | number>) => { const fn = (m as Record<string, Function>)[key]; return typeof fn === 'function' ? fn(params) : key; }; })();
 
   // ── App state ──────────────────────────────────────────────────────────────
   let calendars: CalendarJson[] = [];
@@ -59,7 +60,7 @@
 
   $: weekRangeText = (() => {
     locale;
-    const loc = navigator.language || 'en';
+    const loc = locale;
     const start = selectedWeekStart;
     const end = weekEnd;
     const today = new Date();
@@ -73,7 +74,7 @@
 
   $: monthNames = (() => {
     locale;
-    const loc = navigator.language || 'en';
+    const loc = locale;
     return Array.from({ length: 12 }, (_, i) =>
       new Date(2024, i, 1).toLocaleDateString(loc, { month: 'long' })
     );
@@ -81,7 +82,7 @@
 
   $: dayOfWeekShort = (() => {
     locale;
-    const loc = navigator.language || 'en';
+    const loc = locale;
     // Jan 1 2024 is Monday
     return Array.from({ length: 7 }, (_, i) =>
       new Date(2024, 0, 1 + i).toLocaleDateString(loc, { weekday: 'short' })
@@ -232,9 +233,9 @@
     if (ev.is_all_day) {
       if (ev.dtstart) {
         const [y, m, d] = ev.dtstart.split('T')[0].split('-').map(Number);
-        return t('event.allDay') + ' · ' + new Date(y, m - 1, d).toLocaleDateString(loc, { dateStyle: 'long' });
+        return m.event_allDay() + ' · ' + new Date(y, m - 1, d).toLocaleDateString(loc, { dateStyle: 'long' });
       }
-      return t('event.allDay');
+      return m.event_allDay();
     }
     if (!ev.dtstart) return '';
     const s = new Date(ev.dtstart.includes('Z') || ev.dtstart.includes('+') ? ev.dtstart : ev.dtstart + 'Z');
@@ -255,23 +256,23 @@
 
   function formatRecurrence(r: RecurrenceInfo | null): string {
     if (!r?.freq) return '';
-    const loc = navigator.language || 'en';
-    const singular: Record<string, string> = { DAILY: 'rec.everyDay', WEEKLY: 'rec.everyWeek', MONTHLY: 'rec.everyMonth', YEARLY: 'rec.everyYear' };
-    const plural: Record<string, string> = { DAILY: 'rec.everyNDays', WEEKLY: 'rec.everyNWeeks', MONTHLY: 'rec.everyNMonths', YEARLY: 'rec.everyNYears' };
+    const loc = locale;
+    const singular: Record<string, () => string> = { DAILY: m.rec_everyDay, WEEKLY: m.rec_everyWeek, MONTHLY: m.rec_everyMonth, YEARLY: m.rec_everyYear };
+    const plural: Record<string, (p: Record<string, string | number>) => string> = { DAILY: m.rec_everyNDays, WEEKLY: m.rec_everyNWeeks, MONTHLY: m.rec_everyNMonths, YEARLY: m.rec_everyNYears };
     const dayMap: Record<string, number> = { MO: 0, TU: 1, WE: 2, TH: 3, FR: 4, SA: 5, SU: 6 };
     const interval = r.interval && r.interval > 1 ? r.interval : 1;
-    let text = interval === 1 ? t(singular[r.freq]) : t(plural[r.freq]).replace('{n}', String(interval));
+    let text = interval === 1 ? singular[r.freq]() : plural[r.freq]({ n: interval });
     if (r.by_day?.length && r.freq === 'WEEKLY') {
       const dtf = new Intl.DateTimeFormat(loc, { weekday: 'long' });
       const ref = new Date(2024, 0, 1);
-      text += t('rec.on') + r.by_day.map(c => { ref.setDate(1 + (dayMap[c] ?? 0)); return dtf.format(ref); }).join(', ');
+      text += m.rec_on() + r.by_day.map(c => { ref.setDate(1 + (dayMap[c] ?? 0)); return dtf.format(ref); }).join(', ');
     }
-    if (r.by_month_day?.length && r.freq === 'MONTHLY') text += t('rec.onDay') + r.by_month_day.join(', ');
-    if (r.count) text += ', ' + r.count + t('rec.times');
+    if (r.by_month_day?.length && r.freq === 'MONTHLY') text += m.rec_onDay() + r.by_month_day.join(', ');
+    if (r.count) text += ', ' + r.count + m.rec_times();
     else if (r.until) {
       const parts = r.until.split(' ')[0].split('-').map(Number);
       const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(r.until + 'T00:00:00');
-      if (!isNaN(d.getTime())) text += t('rec.until') + d.toLocaleDateString(loc, { dateStyle: 'long' });
+      if (!isNaN(d.getTime())) text += m.rec_until() + d.toLocaleDateString(loc, { dateStyle: 'long' });
     }
     return text;
   }
@@ -286,11 +287,11 @@
     }
     const abs = parseInt(alarm.value || '15') * parseInt(alarm.unit || '1');
     let vs = '';
-    if (abs % 1440 === 0) { const n = abs / 1440; vs = n + ' ' + t(n === 1 ? 'event.reminderDay' : 'event.reminderDays'); }
-    else if (abs % 60 === 0) { const n = abs / 60; vs = n + ' ' + t(n === 1 ? 'event.reminderHour' : 'event.reminderHours'); }
-    else vs = abs + ' ' + t('event.reminderMin');
-    const amap: Record<string, string> = { 'before-start': 'event.reminderBeforeStart', 'after-start': 'event.reminderAfterStart', 'before-end': 'event.reminderBeforeEnd', 'after-end': 'event.reminderAfterEnd' };
-    return vs + ' ' + t(amap[alarm.direction] || 'event.reminderBeforeStart');
+    if (abs % 1440 === 0) { const n = abs / 1440; vs = n + ' ' + (n === 1 ? m.event_reminderDay() : m.event_reminderDays()); }
+    else if (abs % 60 === 0) { const n = abs / 60; vs = n + ' ' + (n === 1 ? m.event_reminderHour() : m.event_reminderHours()); }
+    else vs = abs + ' ' + m.event_reminderMin();
+    const amap: Record<string, string> = { 'before-start': 'event_reminderBeforeStart', 'after-start': 'event_reminderAfterStart', 'before-end': 'event_reminderBeforeEnd', 'after-end': 'event_reminderAfterEnd' };
+    return vs + ' ' + (m as Record<string, Function>)[amap[alarm.direction] || 'event_reminderBeforeStart']();
   }
 
   // ── Event form ─────────────────────────────────────────────────────────────
@@ -328,8 +329,8 @@
   })();
 
   $: intervalUnit = (() => {
-    const m: Record<string, string> = { DAILY: t('event.repeatUnitDaily'), WEEKLY: t('event.repeatUnitWeekly'), MONTHLY: t('event.repeatUnitMonthly'), YEARLY: t('event.repeatUnitYearly') };
-    return m[fFreq] || '';
+    const unitMap: Record<string, string> = { DAILY: m.event_repeatUnitDaily(), WEEKLY: m.event_repeatUnitWeekly(), MONTHLY: m.event_repeatUnitMonthly(), YEARLY: m.event_repeatUnitYearly() };
+    return unitMap[fFreq] || '';
   })();
 
   function resetRecurrence() {
@@ -428,15 +429,15 @@
         formDialogEl?.close();
         fetchEvents(); fetchMonthGrid();
       } else {
-        formError = (await res.text()) || t('event.error');
+        formError = (await res.text()) || m.event_error();
       }
-    } catch { formError = t('event.error'); }
+    } catch { formError = m.event_error(); }
     formSaving = false;
   }
 
   async function deleteEvent() {
     if (!fUid || !fCalendarHref) return;
-    if (!confirm(t('event.deleteConfirm'))) return;
+    if (!confirm(m.event_deleteConfirm())) return;
     formSaving = true;
     let url = `/api/event?uid=${encodeURIComponent(fUid)}&calendar_href=${encodeURIComponent(fCalendarHref)}`;
     if (formScope === 'this_instance' && fOriginalDtstart)
@@ -593,7 +594,7 @@
 
   <!-- Month grid -->
   <div class="calendar-picker">
-    <article class="card contrast" aria-label={tl('cal.monthlyView')}>
+    <article class="card contrast" aria-label={tl('cal_monthlyView')}>
       {#if monthGrid}
         <div style="position:relative">
           <header>
@@ -601,13 +602,13 @@
             <h2>
               <button
                 class="nav-btn"
-                aria-label={tl('cal.aria.prevMonth')}
+                aria-label={tl('cal_aria.prevMonth')}
                 on:click={() => navigateToMonth(monthGrid!.prev_month)}
               ><span class="arrow">‹</span></button>
 
               <span class="month-picker">
                 <select
-                  aria-label={tl('cal.aria.month')}
+                  aria-label={tl('cal_aria.month')}
                   value={gridMonthNum}
                   on:change={(e) => onMonthSelectChange('month', +(e.target as HTMLSelectElement).value)}
                 >
@@ -616,7 +617,7 @@
                   {/each}
                 </select>
                 <select
-                  aria-label={tl('cal.aria.year')}
+                  aria-label={tl('cal_aria.year')}
                   value={gridYear}
                   on:change={(e) => onMonthSelectChange('year', +(e.target as HTMLSelectElement).value)}
                 >
@@ -628,11 +629,11 @@
 
               <button
                 class="nav-btn"
-                aria-label={tl('cal.aria.nextMonth')}
+                aria-label={tl('cal_aria.nextMonth')}
                 on:click={() => navigateToMonth(monthGrid!.next_month)}
               ><span class="arrow">›</span></button>
             </h2>
-            <p>{tl('cal.monthlyView')}</p>
+            <p>{tl('cal_monthlyView')}</p>
           </hgroup>
           </header>
 
@@ -669,14 +670,14 @@
           </div>
         </div>
       {:else}
-        <div class="calendar-loading">{tl('cal.loadingCalendar')}</div>
+        <div class="calendar-loading">{tl('cal_loadingCalendar')}</div>
       {/if}
     </article>
   </div>
 
   <!-- Calendar list -->
   <div class="calendar-list-section">
-    <h2>{tl('cal.heading')}</h2>
+    <h2>{tl('cal_heading')}</h2>
     <ul class="calendar-list">
       {#each calendars as cal}
         <li>
@@ -699,7 +700,7 @@
   <!-- Weekly view -->
   <div class="weekly">
     <div class="weekly-header">
-      <h2>{tl('weekly.heading')}</h2>
+      <h2>{tl('weekly_heading')}</h2>
       <span class="week-range">{weekRangeText}</span>
     </div>
 
@@ -712,7 +713,7 @@
       on:keydown={handleGridKeydown}
     >
       {#if eventsLoading}
-        <div class="week-loading">{tl('weekly.loading')}</div>
+        <div class="week-loading">{tl('weekly_loading')}</div>
       {/if}
 
       {#each days as day (day.date_iso)}
@@ -727,7 +728,7 @@
           data-date={day.date_iso}
         >
           <h5 on:click={() => { if (past && day.events.length > 0) togglePastDay(day.date_iso); }}>
-            {day.day_name}
+            {new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { weekday: 'long' })}
             {#if past && day.events.length > 0 && !expanded}
               <span class="day-past-count">{day.events.length}</span>
             {/if}
@@ -767,24 +768,24 @@
         {#if detailEvent}
           <button
             class="edit-btn"
-            title={tl('event.edit')}
+            title={tl('event_edit')}
             on:click={() => {
               if (detailEvent?.is_recurring) detailEditPopoverOpen = !detailEditPopoverOpen;
               else if (detailEvent) openEditForm(detailEvent, 'series');
             }}
           >&#9998;</button>
         {/if}
-        <button class="close-btn" aria-label={tl('weekly.aria.close')} on:click={closeDetail}></button>
+        <button class="close-btn" aria-label={tl('weekly_aria.close')} on:click={closeDetail}></button>
       </div>
     </header>
 
     {#if detailEditPopoverOpen && detailEvent}
       <div class="edit-choice-popover" style="display:flex">
         <button on:click={() => { detailEditPopoverOpen = false; if (detailEvent) openEditForm(detailEvent, 'series'); }}>
-          {tl('event.editSeries')}
+          {tl('event_editSeries')}
         </button>
         <button on:click={() => { detailEditPopoverOpen = false; if (detailEvent) openEditForm(detailEvent, 'this_instance'); }}>
-          {tl('event.editInstance')}
+          {tl('event_editInstance')}
         </button>
       </div>
     {/if}
@@ -793,31 +794,31 @@
       <div class="event-detail-body">
         {#if detailTimeText}
           <div class="event-detail-row">
-            <span class="event-detail-label">{tl('event.time')}</span>
+            <span class="event-detail-label">{tl('event_time')}</span>
             <span>{detailTimeText}</span>
           </div>
         {/if}
         {#if detailEvent.location}
           <div class="event-detail-row">
-            <span class="event-detail-label">{tl('event.location')}</span>
+            <span class="event-detail-label">{tl('event_location')}</span>
             <span>{detailEvent.location}</span>
           </div>
         {/if}
         {#if detailRecText}
           <div class="event-detail-row">
-            <span class="event-detail-label">{tl('event.repeats')}</span>
+            <span class="event-detail-label">{tl('event_repeats')}</span>
             <span>{detailRecText}</span>
           </div>
         {/if}
         {#if detailEvent.description}
           <div>
-            <span class="event-detail-label">{tl('event.description')}</span>
+            <span class="event-detail-label">{tl('event_description')}</span>
             <p style="margin:0.25rem 0 0;white-space:pre-wrap;word-break:break-word">{detailEvent.description}</p>
           </div>
         {/if}
         {#if detailEvent.alarms.length > 0}
           <div class="event-detail-row">
-            <span class="event-detail-label">{tl('event.reminder')}</span>
+            <span class="event-detail-label">{tl('event_reminder')}</span>
             <div>
               {#each detailEvent.alarms as alarm}
                 <div>{formatAlarm(alarm)}</div>
@@ -839,8 +840,8 @@
 >
   <article>
     <header>
-      <h3>{formMode === 'edit' ? tl('event.edit') : tl('event.create')}</h3>
-      <button class="close-btn" aria-label={tl('weekly.aria.close')} on:click={() => formDialogEl?.close()}></button>
+      <h3>{formMode === 'edit' ? tl('event_edit') : tl('event_create')}</h3>
+      <button class="close-btn" aria-label={tl('weekly_aria.close')} on:click={() => formDialogEl?.close()}></button>
     </header>
 
     {#if formError}
@@ -849,29 +850,29 @@
 
     <form on:submit|preventDefault={submitEventForm}>
       <label>
-        <span>{tl('event.summary')}</span>
+        <span>{tl('event_summary')}</span>
         <input type="text" bind:value={fSummary} required />
       </label>
 
       <div class="event-datetime-group">
         <div class="datetime-header">
           <label>
-            <span>{tl('event.date')}</span>
+            <span>{tl('event_date')}</span>
             <input type="date" bind:value={fDate} required />
           </label>
           <label class="all-day-label">
             <input type="checkbox" bind:checked={fIsAllDay} />
-            <span>{tl('event.allDay')}</span>
+            <span>{tl('event_allDay')}</span>
           </label>
         </div>
         {#if !fIsAllDay}
           <div class="time-fields">
             <label>
-              <span>{tl('event.startTime')}</span>
+              <span>{tl('event_startTime')}</span>
               <input type="time" bind:value={fStartTime} on:change={autoFillEndTime} />
             </label>
             <label>
-              <span>{tl('event.endTime')}</span>
+              <span>{tl('event_endTime')}</span>
               <input type="time" bind:value={fEndTime} />
             </label>
           </div>
@@ -879,18 +880,18 @@
       </div>
 
       <label>
-        <span>{tl('event.location')}</span>
+        <span>{tl('event_location')}</span>
         <input type="text" bind:value={fLocation} />
       </label>
 
       <label>
-        <span>{tl('event.description')}</span>
+        <span>{tl('event_description')}</span>
         <textarea bind:value={fDescription} rows="3"></textarea>
       </label>
 
       <!-- Alarms -->
       <fieldset class="alarm-section">
-        <legend>{tl('event.reminder')}</legend>
+        <legend>{tl('event_reminder')}</legend>
         <ul class="alarm-list">
           {#each formAlarms as alarm, i}
             <li class="alarm-row">
@@ -904,9 +905,9 @@
                     value={alarm.unit} style="margin-bottom:0"
                     on:change={(e) => { formAlarms[i] = { ...alarm, unit: (e.target as HTMLSelectElement).value }; formAlarms = formAlarms; }}
                   >
-                    <option value="1">{tl('event.reminderMin')}</option>
-                    <option value="60">{tl('event.reminderHours')}</option>
-                    <option value="1440">{tl('event.reminderDays')}</option>
+                    <option value="1">{tl('event_reminderMin')}</option>
+                    <option value="60">{tl('event_reminderHours')}</option>
+                    <option value="1440">{tl('event_reminderDays')}</option>
                   </select>
                 </div>
               {:else}
@@ -921,41 +922,41 @@
                 class="alarm-direction" value={alarm.direction} style="margin-bottom:0"
                 on:change={(e) => { formAlarms[i] = { ...alarm, direction: (e.target as HTMLSelectElement).value }; formAlarms = formAlarms; }}
               >
-                <option value="before-start">{tl('event.reminderBeforeStart')}</option>
-                <option value="before-end">{tl('event.reminderBeforeEnd')}</option>
-                <option value="after-start">{tl('event.reminderAfterStart')}</option>
-                <option value="after-end">{tl('event.reminderAfterEnd')}</option>
-                <option value="absolute">{tl('event.reminderAtTime')}</option>
+                <option value="before-start">{tl('event_reminderBeforeStart')}</option>
+                <option value="before-end">{tl('event_reminderBeforeEnd')}</option>
+                <option value="after-start">{tl('event_reminderAfterStart')}</option>
+                <option value="after-end">{tl('event_reminderAfterEnd')}</option>
+                <option value="absolute">{tl('event_reminderAtTime')}</option>
               </select>
               <button type="button" class="alarm-remove outline" aria-label="Remove" on:click={() => { formAlarms = formAlarms.filter((_, j) => j !== i); }}>×</button>
             </li>
           {/each}
         </ul>
         <button type="button" class="outline small" on:click={() => { formAlarms = [...formAlarms, { direction: 'before-start', value: '15', unit: '1', datetime: '' }]; }}>
-          {tl('event.reminderAdd')}
+          {tl('event_reminderAdd')}
         </button>
       </fieldset>
 
       <!-- Recurrence -->
       {#if formScope !== 'this_instance'}
         <label>
-          <span>{tl('event.repeat')}</span>
+          <span>{tl('event_repeat')}</span>
           <select bind:value={fFreq}>
-            <option value="">{tl('event.repeatNone')}</option>
-            <option value="DAILY">{tl('event.repeatDaily')}</option>
-            <option value="WEEKLY">{tl('event.repeatWeekly')}</option>
-            <option value="MONTHLY">{tl('event.repeatMonthly')}</option>
-            <option value="YEARLY">{tl('event.repeatYearly')}</option>
+            <option value="">{tl('event_repeatNone')}</option>
+            <option value="DAILY">{tl('event_repeatDaily')}</option>
+            <option value="WEEKLY">{tl('event_repeatWeekly')}</option>
+            <option value="MONTHLY">{tl('event_repeatMonthly')}</option>
+            <option value="YEARLY">{tl('event_repeatYearly')}</option>
           </select>
         </label>
       {:else}
-        <p class="repeat-instance-note">{tl('event.repeatInstanceNote')}</p>
+        <p class="repeat-instance-note">{tl('event_repeatInstanceNote')}</p>
       {/if}
 
       {#if fFreq}
         <div class="rrule-options">
           <div class="rrule-row">
-            <span class="rrule-label">{tl('event.repeatEvery')}</span>
+            <span class="rrule-label">{tl('event_repeatEvery')}</span>
             <div class="rrule-controls">
               <input type="number" min="1" bind:value={fInterval} class="rrule-num-input" />
               <span class="rrule-unit">{intervalUnit}</span>
@@ -964,9 +965,9 @@
 
           {#if fFreq === 'WEEKLY'}
             <div class="rrule-row">
-              <span class="rrule-label">{tl('event.repeatOn')}</span>
+              <span class="rrule-label">{tl('event_repeatOn')}</span>
               <div class="weekday-toggles">
-                {#each [['MO','event.dayMo'],['TU','event.dayTu'],['WE','event.dayWe'],['TH','event.dayTh'],['FR','event.dayFr'],['SA','event.daySa'],['SU','event.daySu']] as [code, lk]}
+                {#each [['MO','event_dayMo'],['TU','event_dayTu'],['WE','event_dayWe'],['TH','event_dayTh'],['FR','event_dayFr'],['SA','event_daySa'],['SU','event_daySu']] as [code, lk]}
                   <label class="day-toggle">
                     <input
                       type="checkbox" value={code} checked={fByDay.includes(code)}
@@ -984,25 +985,25 @@
 
           {#if fFreq === 'MONTHLY'}
             <div class="rrule-row">
-              <span class="rrule-label">{tl('event.repeatOn')}</span>
+              <span class="rrule-label">{tl('event_repeatOn')}</span>
               <div class="monthly-options">
                 <label class="monthly-option">
                   <input type="radio" name="monthly_mode" value="by_day" bind:group={fMonthlyMode} />
-                  <span>{tl('event.monthlyByDay')}</span>
+                  <span>{tl('event_monthlyByDay')}</span>
                   <input type="number" min="1" max="31" bind:value={fMonthday} class="rrule-num-input" disabled={fMonthlyMode !== 'by_day'} />
                 </label>
                 <label class="monthly-option">
                   <input type="radio" name="monthly_mode" value="by_setpos" bind:group={fMonthlyMode} />
-                  <span>{tl('event.monthlyByPos')}</span>
+                  <span>{tl('event_monthlyByPos')}</span>
                   <select bind:value={fSetpos} disabled={fMonthlyMode !== 'by_setpos'}>
-                    <option value={1}>{tl('event.monthlyPos1')}</option>
-                    <option value={2}>{tl('event.monthlyPos2')}</option>
-                    <option value={3}>{tl('event.monthlyPos3')}</option>
-                    <option value={4}>{tl('event.monthlyPos4')}</option>
-                    <option value={-1}>{tl('event.monthlyPosLast')}</option>
+                    <option value={1}>{tl('event_monthlyPos1')}</option>
+                    <option value={2}>{tl('event_monthlyPos2')}</option>
+                    <option value={3}>{tl('event_monthlyPos3')}</option>
+                    <option value={4}>{tl('event_monthlyPos4')}</option>
+                    <option value={-1}>{tl('event_monthlyPosLast')}</option>
                   </select>
                   <select bind:value={fSetposDay} disabled={fMonthlyMode !== 'by_setpos'}>
-                    {#each [['MO','event.dayMo'],['TU','event.dayTu'],['WE','event.dayWe'],['TH','event.dayTh'],['FR','event.dayFr'],['SA','event.daySa'],['SU','event.daySu']] as [code, lk]}
+                    {#each [['MO','event_dayMo'],['TU','event_dayTu'],['WE','event_dayWe'],['TH','event_dayTh'],['FR','event_dayFr'],['SA','event_daySa'],['SU','event_daySu']] as [code, lk]}
                       <option value={code}>{tl(lk)}</option>
                     {/each}
                   </select>
@@ -1012,21 +1013,21 @@
           {/if}
 
           <div class="rrule-row">
-            <span class="rrule-label">{tl('event.repeatEnd')}</span>
+            <span class="rrule-label">{tl('event_repeatEnd')}</span>
             <div class="rrule-end-options">
               <label class="rrule-end-option">
                 <input type="radio" name="rrule_end_type" value="never" bind:group={fEndType} />
-                <span>{tl('event.repeatEndNever')}</span>
+                <span>{tl('event_repeatEndNever')}</span>
               </label>
               <label class="rrule-end-option">
                 <input type="radio" name="rrule_end_type" value="count" bind:group={fEndType} />
-                <span>{tl('event.repeatEndAfter')}</span>
+                <span>{tl('event_repeatEndAfter')}</span>
                 <input type="number" min="1" bind:value={fCount} class="rrule-num-input" disabled={fEndType !== 'count'} />
-                <span>{tl('event.repeatEndAfterN')}</span>
+                <span>{tl('event_repeatEndAfterN')}</span>
               </label>
               <label class="rrule-end-option">
                 <input type="radio" name="rrule_end_type" value="until" bind:group={fEndType} />
-                <span>{tl('event.repeatEndOn')}</span>
+                <span>{tl('event_repeatEndOn')}</span>
                 <input type="date" bind:value={fUntil} disabled={fEndType !== 'until'} />
               </label>
             </div>
@@ -1035,7 +1036,7 @@
       {/if}
 
       <label>
-        <span>{tl('event.calendar')}</span>
+        <span>{tl('event_calendar')}</span>
         <select bind:value={fCalendarHref} disabled={formScope === 'this_instance'}>
           {#each calendars as cal}
             <option value={cal.href}>{cal.name}</option>
@@ -1044,10 +1045,10 @@
       </label>
 
       <div class="event-form-actions">
-        <button type="submit" disabled={formSaving}>{tl('event.save')}</button>
-        <button type="button" class="secondary" disabled={formSaving} on:click={() => formDialogEl?.close()}>{tl('event.cancel')}</button>
+        <button type="submit" disabled={formSaving}>{tl('event_save')}</button>
+        <button type="button" class="secondary" disabled={formSaving} on:click={() => formDialogEl?.close()}>{tl('event_cancel')}</button>
         {#if formMode === 'edit'}
-          <button type="button" class="contrast outline" disabled={formSaving} on:click={deleteEvent}>{tl('event.delete')}</button>
+          <button type="button" class="contrast outline" disabled={formSaving} on:click={deleteEvent}>{tl('event_delete')}</button>
         {/if}
       </div>
     </form>
@@ -1055,7 +1056,7 @@
 </dialog>
 
 <!-- FAB -->
-<button class="fab" aria-label={tl('event.new')} title={tl('event.new')} on:click={openNewEventForm}>
+<button class="fab" aria-label={tl('event_new')} title={tl('event_new')} on:click={openNewEventForm}>
   <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
     <line x1="12" y1="5" x2="12" y2="19"></line>
     <line x1="5" y1="12" x2="19" y2="12"></line>

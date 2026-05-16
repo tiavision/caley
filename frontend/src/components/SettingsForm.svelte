@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t, initI18n, getLocale, setLocale } from '../i18n/index.ts';
+  import { m } from '../paraglide/messages.js';
+  import { initI18n, getLocale, setLocale } from '../lib/i18n.ts';
 
   let locale = 'en';
-  $: tl = (() => { locale; return (key: string) => t(key); })();
+  $: tl = (() => { locale; return (key: string, params?: Record<string, string | number>) => { const fn = (m as Record<string, Function>)[key]; return typeof fn === 'function' ? fn(params) : key; }; })();
 
   let caldavBaseUrl = '';
   let caldavUsername = '';
@@ -64,10 +65,10 @@
       if (res.ok && data.status === 'ok') {
         window.location.href = '/';
       } else {
-        errorMsg = data.error || tl('event.error');
+        errorMsg = data.error || tl('event_error');
       }
     } catch {
-      errorMsg = tl('event.error');
+      errorMsg = tl('event_error');
     }
     saving = false;
   }
@@ -75,10 +76,10 @@
 
 <div class="settings-form">
   <div class="settings-header">
-    <h2>{tl('settings.heading')}</h2>
+    <h2>{tl('settings_heading')}</h2>
     <select
       class="locale-picker"
-      aria-label={tl('settings.language')}
+      aria-label={tl('settings_language')}
       bind:value={selectedLocale}
       on:change={onLocaleChange}
     >
@@ -88,37 +89,37 @@
     </select>
   </div>
 
-  <p>{tl('settings.subtitle')}</p>
+  <p>{tl('settings_subtitle')}</p>
 
   {#if loading}
-    <p>{tl('settings.subtitle')}</p>
+    <p>{tl('settings_subtitle')}</p>
   {:else}
     <form on:submit|preventDefault={onSubmit}>
       <label>
-        <span>{tl('settings.baseUrl')}</span>
+        <span>{tl('settings_baseUrl')}</span>
         <input
           type="url"
-          placeholder={tl('settings.baseUrlPlaceholder')}
+          placeholder={tl('settings_baseUrlPlaceholder')}
           bind:value={caldavBaseUrl}
           required
         />
       </label>
 
       <label>
-        <span>{tl('settings.username')}</span>
+        <span>{tl('settings_username')}</span>
         <input
           type="text"
-          placeholder={tl('settings.usernamePlaceholder')}
+          placeholder={tl('settings_usernamePlaceholder')}
           bind:value={caldavUsername}
           required
         />
       </label>
 
       <label>
-        <span>{tl('settings.password')}</span>
+        <span>{tl('settings_password')}</span>
         <input
           type="password"
-          placeholder={hasPassword ? tl('settings.passwordHint') : tl('settings.passwordPlaceholder')}
+          placeholder={hasPassword ? tl('settings_passwordHint') : tl('settings_passwordPlaceholder')}
           bind:value={caldavPassword}
         />
       </label>
@@ -131,7 +132,7 @@
       {/if}
 
       <button type="submit" disabled={saving} aria-busy={saving}>
-        {tl('settings.submit')}
+        {tl('settings_submit')}
       </button>
     </form>
   {/if}

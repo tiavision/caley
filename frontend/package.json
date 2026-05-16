@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@astrojs/svelte": "^8.0.0",
+    "@inlang/paraglide-js": "^2.18.0",
     "@picocss/pico": "^2.1.1",
     "astro": "6.2.2",
     "svelte": "^5.43.6"

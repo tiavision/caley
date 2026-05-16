@@ -1,5 +1,7 @@
 ---
 import '../styles/main.scss';
+import { m } from '../paraglide/messages.js';
+import { initI18n } from '../lib/i18n.ts';
 ---
 
 <!doctype html>
@@ -9,7 +11,7 @@ import '../styles/main.scss';
 		<meta name="viewport" content="width=device-width" />
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<meta name="generator" content={Astro.generator} />
-		<title data-i18n="app.title">Caley</title>
+		<title>{m.app_title()}</title>
 		<style is:global>
 			a.brand {
 				color: inherit;
@@ -29,11 +31,10 @@ import '../styles/main.scss';
 			}
 		</style>
 		<script>
-			import { initI18n, t } from '../i18n/index.ts';
+			import { m } from '../paraglide/messages.js';
+			import { initI18n } from '../lib/i18n.ts';
 
 			initI18n();
-			// expose for nav script (same module singleton)
-			window.__i18n = { t };
 
 			async function loadNavUser() {
 				try {
@@ -43,13 +44,13 @@ import '../styles/main.scss';
 					const list = document.getElementById('nav-user-list');
 					if (!list) return;
 					const items: string[] = [];
-					if (user.display_name) items.push(`<li>${user.display_name}</li>`);
 					if (!user.has_settings) {
-						items.push(`<li><a href="/settings">${t('nav.setup')}</a></li>`);
+						items.push(`<li><a href="/settings">${m.nav_setup()}</a></li>`);
 					} else {
-						items.push(`<li><a href="/settings">${t('nav.settings')}</a></li>`);
+						items.push(`<li><a href="/settings">${m.nav_settings()}</a></li>`);
 					}
-					items.push(`<li><a href="/logout">${t('nav.logout')}</a></li>`);
+					if (user.display_name) items.push(`<li>${user.display_name}</li>`);
+					items.push(`<li><a href="/logout">${m.nav_logout()}</a></li>`);
 					list.innerHTML = items.join('');
 				} catch {}
 			}
@@ -64,9 +65,9 @@ import '../styles/main.scss';
 	<body>
 		<header class="container">
 			<nav>
-				<ul><li><a href="/" class="brand"><strong data-i18n="app.brand">Caley</strong></a></li></ul>
+				<ul><li>			<a href="/" class="brand"><strong>{m.app_brand()}</strong></a></li></ul>
 				<ul id="nav-user-list">
-					<li><span data-i18n="nav.loading">Loading...</span></li>
+					<li><span>{m.nav_loading()}</span></li>
 				</ul>
 			</nav>
 		</header>
