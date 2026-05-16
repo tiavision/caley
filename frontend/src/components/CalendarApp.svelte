@@ -744,7 +744,6 @@
               >
                 <header>{event.time_range}</header>
                 <p>{event.summary}</p>
-                {#if event.location}<p>{event.location}</p>{/if}
               </article>
             {/each}
           </div>
