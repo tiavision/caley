@@ -216,15 +216,17 @@
   let detailEditPopoverOpen = false;
   let detailDialogEl: HTMLDialogElement;
 
-  function openDetail(event: EventJson) {
+  async function openDetail(event: EventJson) {
     detailEvent = event;
     detailEditPopoverOpen = false;
     detailOpen = true;
+    await tick();
     detailDialogEl?.showModal();
   }
 
   function closeDetail() {
     detailOpen = false;
+    detailEvent = null;
     detailDialogEl?.close();
   }
 
@@ -759,6 +761,8 @@
   bind:this={detailDialogEl}
   id="event-detail"
   on:click={(e) => { if (e.target === e.currentTarget) closeDetail(); }}
+  on:close={closeDetail}
+  on:cancel={(e) => { e.preventDefault(); closeDetail(); }}
 >
   <article>
     <header>
