@@ -1324,11 +1324,16 @@ article {
 }
 
 @media (max-width: 1024px) {
+  .appointments {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
   .day.day-past .appointments {
     display: none;
   }
   .day.day-past.day-expanded .appointments {
-    display: block;
+    display: grid;
   }
   .day.day-past h5 {
     cursor: pointer;
@@ -1363,11 +1368,26 @@ article {
   .day.day-past.day-expanded .day-past-count {
     display: none;
   }
+  article.appointment:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  article.appointment p {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 }
 
 @media (min-width: 1025px) {
   .day.day-past {
     opacity: 0.45;
+  }
+  article.appointment p {
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 }
 
