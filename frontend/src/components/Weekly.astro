@@ -1176,12 +1176,6 @@ markPastDays();
   color: var(--pico-muted-color);
 }
 
-.dot {
-  border-radius: 50%;
-  width: 10px;
-  height:10px;
-  display:inline-block
-}
 </style>
 
 <style is:global>
@@ -1190,11 +1184,19 @@ article {
   font-size: medium;
 
   &.appointment {
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.08);
     p {
       margin-bottom: 0.125rem;
     }
     header {
       font-size: small;
+      color: var(--pico-muted-color);
+    }
+  }
+
+  @media (prefers-color-scheme: dark) {
+    &.appointment {
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08);
     }
   }
 }
