@@ -1,12 +1,13 @@
 use axum::{
     body::Body,
-    extract::State,
-    http::{Request, StatusCode},
-    response::{Html, IntoResponse, Redirect, Response},
+    extract::{FromRequestParts, State},
+    http::{request::Parts, Request, StatusCode},
+    response::{IntoResponse, Json, Redirect, Response},
 };
 use axum_oidc::{ClearSessionFlag, EmptyAdditionalClaims, OidcClaims, OidcRpInitiatedLogout};
 use clap::ValueEnum;
 use futures_util::future::BoxFuture;
+use serde_json::json;
 use std::{
     sync::Arc,
     task::{Context, Poll},
@@ -16,7 +17,6 @@ use tower_sessions::Session;
 use crate::caldav::CalDavClient;
 use crate::db;
 use crate::db::Db;
-use crate::settings::html_escape;
 
 #[derive(Clone, Debug, ValueEnum)]
 pub enum UserIdClaim {
@@ -32,6 +32,8 @@ pub struct AppState {
     pub do_oidc_logout: bool,
     pub oidc_user_id_claim: UserIdClaim,
     pub encryption_key: [u8; 32],
+    pub sync_manager: Arc<crate::sync::SyncManager>,
+    pub sse_broadcaster: Arc<crate::sse::SseBroadcaster>,
 }
 
 pub fn extract_user_id(claims: &OidcClaims<EmptyAdditionalClaims>, claim: &UserIdClaim) -> Option<String> {
@@ -47,16 +49,47 @@ pub fn extract_user_id(claims: &OidcClaims<EmptyAdditionalClaims>, claim: &UserI
     }
 }
 
+/// Axum extractor that resolves the current user ID from OIDC claims.
+/// Used by SSE and other handlers that don't need a CalDAV client.
+pub struct ExtractUserId(pub String);
+
+impl FromRequestParts<AppState> for ExtractUserId {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let claims = parts
+            .extensions
+            .get::<OidcClaims<EmptyAdditionalClaims>>()
+            .ok_or_else(|| {
+                (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
+            })?;
+        let user_id = extract_user_id(claims, &state.oidc_user_id_claim)
+            .ok_or_else(|| {
+                (StatusCode::INTERNAL_SERVER_ERROR, "Cannot determine user ID from OIDC claims")
+                    .into_response()
+            })?;
+        Ok(ExtractUserId(user_id))
+    }
+}
+
+/// Build a CalDAV client for the current user. Returns an error response if
+/// credentials are missing or the client cannot be constructed.
 pub fn require_client(
     state: &AppState,
     claims: &OidcClaims<EmptyAdditionalClaims>,
-) -> Result<CalDavClient, Response> {
+) -> Result<(String, CalDavClient), Response> {
     let user_id = match extract_user_id(claims, &state.oidc_user_id_claim) {
         Some(id) => id,
         None => {
             return Err((StatusCode::INTERNAL_SERVER_ERROR, "Could not determine user ID from OIDC claims").into_response());
         }
     };
+
+    // Make sure the background sync task is alive
+    state.sync_manager.ensure_task_for(&user_id);
 
     let db = state.db.lock().unwrap();
     let settings = match db::get_settings(&db, &user_id, &state.encryption_key) {
@@ -68,16 +101,15 @@ pub fn require_client(
     };
 
     match settings {
-        Some(s) => CalDavClient::new(s.caldav_base_url, s.caldav_username, s.caldav_password)
-            .map_err(|e| {
-                eprintln!("CalDAV client error: {e}");
-                (StatusCode::INTERNAL_SERVER_ERROR, "CalDAV configuration error").into_response()
-            }),
-        None => {
-            let mut response = (StatusCode::OK, "Redirecting to settings\u{2026}").into_response();
-            response.headers_mut().insert("HX-Redirect", "/settings".parse().unwrap());
-            Err(response)
+        Some(s) => {
+            let client = CalDavClient::new(s.caldav_base_url, s.caldav_username, s.caldav_password)
+                .map_err(|e| {
+                    eprintln!("CalDAV client error: {e}");
+                    (StatusCode::INTERNAL_SERVER_ERROR, "CalDAV configuration error").into_response()
+                })?;
+            Ok((user_id, client))
         }
+        None => Err((StatusCode::PRECONDITION_FAILED, "CalDAV credentials not configured").into_response()),
     }
 }
 
@@ -92,28 +124,27 @@ pub async fn user_info(
         .or_else(|| Some(claims.subject().as_str().to_owned()))
         .unwrap_or_default();
 
-    let has_settings = {
-        let user_id = extract_user_id(&claims, &state.oidc_user_id_claim);
-        match user_id {
-            Some(uid) => {
-                let db = state.db.lock().unwrap();
-                db::get_settings(&db, &uid, &state.encryption_key).ok().flatten().is_some()
-            }
-            None => false,
+    let user_id = extract_user_id(&claims, &state.oidc_user_id_claim);
+    let has_settings = match &user_id {
+        Some(uid) => {
+            let db = state.db.lock().unwrap();
+            db::get_settings(&db, uid, &state.encryption_key)
+                .ok()
+                .flatten()
+                .is_some()
         }
+        None => false,
     };
 
-    let settings_link = if has_settings {
-        r#" | <a href="/settings" data-i18n="nav.settings">Settings</a>"#
-    } else {
-        r#" | <a href="/settings" data-i18n="nav.setup">Set up CalDAV</a>"#
-    };
+    // Ensure the background sync task is running on every page load
+    if let Some(uid) = &user_id {
+        state.sync_manager.ensure_task_for(uid);
+    }
 
-    Html(format!(
-        r#"<span>{}</span>{} | <a href="/logout" data-i18n="nav.logout">Logout</a>"#,
-        html_escape(&display_name),
-        settings_link,
-    ))
+    Json(json!({
+        "display_name": display_name,
+        "has_settings": has_settings,
+    }))
 }
 
 pub async fn logout_handler(
@@ -189,9 +220,7 @@ where
     }
 }
 
-pub async fn auth_callback_handler(
-    session: Session,
-) -> impl IntoResponse {
+pub async fn auth_callback_handler(session: Session) -> impl IntoResponse {
     let target: Option<String> = session.get("auth_target").await.ok().flatten();
     let _ = session.remove_value("auth_target").await;
     Redirect::to(target.as_deref().unwrap_or("/"))

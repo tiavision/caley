@@ -4,6 +4,8 @@ mod crypto;
 mod db;
 mod oidc;
 mod settings;
+mod sse;
+mod sync;
 
 use axum::error_handling::HandleErrorLayer;
 use axum::response::{IntoResponse, Redirect};
@@ -53,11 +55,20 @@ async fn main() -> anyhow::Result<()> {
 
     let encryption_key = crypto::derive_key(&args.encryption_key);
 
+    let sse_broadcaster = Arc::new(sse::SseBroadcaster::new());
+    let sync_manager = sync::SyncManager::new(
+        Arc::clone(&db),
+        encryption_key,
+        Arc::clone(&sse_broadcaster),
+    );
+
     let state = AppState {
         db,
         do_oidc_logout: args.oidc_logout,
         oidc_user_id_claim: args.oidc_user_id_claim,
         encryption_key,
+        sync_manager,
+        sse_broadcaster,
     };
 
     let app_base_uri = args.app_base_url.parse()?;
@@ -75,11 +86,14 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
+    // Push webhook is outside the auth middleware so CalDAV servers can reach it
     let app = Router::new()
+        .route("/api/push/webhook", post(sse::push_webhook))
         .route("/auth/callback", get(oidc::auth_callback_handler))
         .route("/api/calendars", get(calendar::list_calendars))
         .route("/api/calendar/toggle", post(calendar::toggle_calendar))
         .route("/api/events", get(calendar::list_events))
+        .route("/api/events/stream", get(sse::events_stream))
         .route("/api/calendar", get(calendar::list_calendar))
         .route("/api/user", get(oidc::user_info))
         .route("/api/settings/form", get(settings::settings_form))

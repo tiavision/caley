@@ -1,35 +1,20 @@
-use askama::Template;
 use axum::{
     extract::{Form, State},
     http::StatusCode,
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Json, Response},
 };
 use axum_oidc::{EmptyAdditionalClaims, OidcClaims};
+use serde_json::json;
+
 use crate::db::UserSettings;
-
 use crate::oidc::{extract_user_id, AppState};
-
-#[derive(Template)]
-#[template(path = "settings_form.html", whitespace = "minimize")]
-struct SettingsFormTemplate {
-    base_url: String,
-    username: String,
-    has_password: bool,
-}
+use crate::sync::SyncTrigger;
 
 #[derive(serde::Deserialize)]
 pub(crate) struct SettingsForm {
     caldav_base_url: String,
     caldav_username: String,
     caldav_password: String,
-}
-
-pub fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
 }
 
 pub async fn settings_form(
@@ -39,7 +24,8 @@ pub async fn settings_form(
     let user_id = match extract_user_id(&claims, &state.oidc_user_id_claim) {
         Some(id) => id,
         None => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Could not determine user ID").into_response();
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Could not determine user ID")
+                .into_response()
         }
     };
 
@@ -57,15 +43,12 @@ pub async fn settings_form(
         None => (String::new(), String::new(), false),
     };
 
-    let tpl = SettingsFormTemplate {
-        base_url,
-        username,
-        has_password,
-    };
-    match tpl.render() {
-        Ok(html) => Html(html).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    Json(json!({
+        "caldav_base_url": base_url,
+        "caldav_username": username,
+        "has_password": has_password,
+    }))
+    .into_response()
 }
 
 pub async fn save_settings(
@@ -76,7 +59,8 @@ pub async fn save_settings(
     let user_id = match extract_user_id(&claims, &state.oidc_user_id_claim) {
         Some(id) => id,
         None => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Could not determine user ID").into_response();
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Could not determine user ID")
+                .into_response()
         }
     };
 
@@ -85,7 +69,11 @@ pub async fn save_settings(
         match crate::db::get_settings(&db, &user_id, &state.encryption_key) {
             Ok(Some(s)) => s.caldav_password,
             _ => {
-                return r#"<div class="error-msg">Password is required for new connections.</div>"#.into_response();
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "Password is required for new connections."})),
+                )
+                    .into_response()
             }
         }
     } else {
@@ -105,32 +93,36 @@ pub async fn save_settings(
     ) {
         Ok(c) => c,
         Err(e) => {
-            return format!(
-                r#"<div class="error-msg">Connection failed: {}</div>"#,
-                html_escape(&e.to_string()),
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": format!("Connection failed: {e}")})),
             )
-            .into_response();
+                .into_response()
         }
     };
 
-    match client.calendars().await {
-        Ok(_) => {}
-        Err(e) => {
-            return format!(
-                r#"<div class="error-msg">Connection test failed: {}</div>"#,
-                html_escape(&e.to_string()),
-            )
+    if let Err(e) = client.calendars().await {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("Connection test failed: {e}")})),
+        )
             .into_response();
+    }
+
+    {
+        let db = state.db.lock().unwrap();
+        if let Err(e) = crate::db::clear_user_cache(&db, &user_id) {
+            eprintln!("Cache clear error: {e}");
+        }
+        if let Err(e) = crate::db::upsert_settings(&db, &user_id, &settings, &state.encryption_key) {
+            eprintln!("Database error saving settings: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save settings").into_response();
         }
     }
 
-    let db = state.db.lock().unwrap();
-    if let Err(e) = crate::db::upsert_settings(&db, &user_id, &settings, &state.encryption_key) {
-        eprintln!("Database error: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save settings").into_response();
-    }
+    // Kick off a full sync with the new credentials
+    state.sync_manager.ensure_task_for(&user_id);
+    state.sync_manager.trigger(&user_id, SyncTrigger::Full);
 
-    let mut response = Html(r#"<div class="success-msg">Settings saved! Redirecting...</div>"#).into_response();
-    response.headers_mut().insert("HX-Redirect", "/".parse().unwrap());
-    response
+    Json(json!({"status": "ok"})).into_response()
 }

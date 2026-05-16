@@ -140,15 +140,6 @@ export async function initI18n() {
     setLangAttr();
     applyTranslations();
   });
-
-  document.addEventListener('htmx:afterSwap', (e: Event) => {
-    const detail = (e as CustomEvent).detail;
-    if (detail?.target) {
-      applyTranslations(detail.target);
-    } else {
-      applyTranslations();
-    }
-  });
 }
 
 export function setLocale(locale: string) {

@@ -54,6 +54,12 @@ pub struct RecurrenceInfo {
     pub by_set_pos: Vec<i32>,
 }
 
+pub struct SyncResult {
+    pub new_token: String,
+    pub changed: Vec<(String, String, String)>, // (href, etag, raw_ical)
+    pub deleted: Vec<String>,
+}
+
 struct DateProperty {
     value: String,
     tzid: Option<String>,
@@ -415,6 +421,64 @@ impl CalDavClient {
             return Ok(text);
         }
         bail!("too many redirects for GET")
+    }
+
+    /// Expand raw iCalendar text into `Event` structs for a date range.
+    /// Used by the sync worker to convert cached blobs without touching CalDAV.
+    pub fn events_from_raw_ical(raw_ical: &str, start: NaiveDate, end: NaiveDate) -> Vec<Event> {
+        expand_events(parse_raw_events(raw_ical), start, end)
+    }
+
+    /// Fetch all VEVENTs from a calendar without a time-range filter.
+    /// Returns `(href, etag, raw_ical)` tuples for cache population.
+    pub async fn fetch_all_raw(&self, calendar_href: &str) -> anyhow::Result<Vec<(String, String, String)>> {
+        let body = r#"<?xml version="1.0" encoding="utf-8"?>
+<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop>
+    <d:getetag/>
+    <c:calendar-data/>
+  </d:prop>
+  <c:filter>
+    <c:comp-filter name="VCALENDAR">
+      <c:comp-filter name="VEVENT"/>
+    </c:comp-filter>
+  </c:filter>
+</c:calendar-query>"#;
+        let xml = self.report(calendar_href, body).await?;
+        extract_events_with_hrefs(&xml, calendar_href)
+    }
+
+    /// PROPFIND for `getctag` (Apple) and `sync-token` (RFC 6578).
+    /// Returns `(ctag, sync_token)` — either or both may be `None`.
+    pub async fn get_ctag_and_token(&self, calendar_href: &str) -> anyhow::Result<(Option<String>, Option<String>)> {
+        let body = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">
+  <d:prop>
+    <cs:getctag/>
+    <d:sync-token/>
+  </d:prop>
+</d:propfind>"#;
+        let xml = self.propfind(calendar_href, "0", body).await?;
+        Ok(extract_ctag_and_token(&xml))
+    }
+
+    /// RFC 6578 sync-collection REPORT.
+    /// Pass `sync_token = None` for the initial sync (returns everything).
+    pub async fn sync_collection(&self, calendar_href: &str, sync_token: Option<&str>) -> anyhow::Result<SyncResult> {
+        let token_val = sync_token.unwrap_or("");
+        let body = format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<d:sync-collection xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:sync-token>{token_val}</d:sync-token>
+  <d:sync-level>1</d:sync-level>
+  <d:prop>
+    <d:getetag/>
+    <c:calendar-data/>
+  </d:prop>
+</d:sync-collection>"#
+        );
+        let xml = self.report(calendar_href, &body).await?;
+        extract_sync_result(&xml, calendar_href)
     }
 }
 
@@ -1457,6 +1521,208 @@ fn parse_datetime(date: &str, time: &str) -> (String, String) {
         let t = time.replace(':', "");
         (d, t)
     }
+}
+
+fn extract_events_with_hrefs(xml: &str, base_url: &str) -> anyhow::Result<Vec<(String, String, String)>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut results = Vec::new();
+    let mut in_response = false;
+    let mut in_href = false;
+    let mut in_etag = false;
+    let mut in_calendar_data = false;
+    let mut current_href = String::new();
+    let mut current_etag = String::new();
+    let mut current_ical = String::new();
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            XmlEvent::Start(e) => {
+                let lname = e.local_name();
+                let local = std::str::from_utf8(lname.as_ref())?;
+                match local {
+                    "response" => {
+                        in_response = true;
+                        current_href.clear();
+                        current_etag.clear();
+                        current_ical.clear();
+                    }
+                    "href" if in_response => in_href = true,
+                    "getetag" => in_etag = true,
+                    "calendar-data" => {
+                        in_calendar_data = true;
+                        current_ical.clear();
+                    }
+                    _ => {}
+                }
+            }
+            XmlEvent::Text(e) => {
+                let text = e.unescape()?;
+                if in_calendar_data { current_ical.push_str(&text); }
+                else if in_href { current_href.push_str(&text); }
+                else if in_etag { current_etag.push_str(&text); }
+            }
+            XmlEvent::End(e) => {
+                let lname = e.local_name();
+                let local = std::str::from_utf8(lname.as_ref())?;
+                match local {
+                    "href" => in_href = false,
+                    "getetag" => in_etag = false,
+                    "calendar-data" => in_calendar_data = false,
+                    "response" => {
+                        if !current_href.is_empty() && !current_ical.is_empty() {
+                            results.push((
+                                resolve_url(base_url, current_href.trim()),
+                                current_etag.trim().trim_matches('"').to_string(),
+                                current_ical.clone(),
+                            ));
+                        }
+                        in_response = false;
+                    }
+                    _ => {}
+                }
+            }
+            XmlEvent::Eof => break,
+            _ => {}
+        }
+    }
+    Ok(results)
+}
+
+fn extract_sync_result(xml: &str, base_url: &str) -> anyhow::Result<SyncResult> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut new_token = String::new();
+    let mut changed = Vec::new();
+    let mut deleted = Vec::new();
+
+    let mut depth: usize = 0;
+    let mut in_response = false;
+    let mut in_sync_token_top = false;
+    let mut in_href = false;
+    let mut in_etag = false;
+    let mut in_calendar_data = false;
+    let mut in_status = false;
+
+    let mut current_href = String::new();
+    let mut current_etag = String::new();
+    let mut current_ical = String::new();
+    let mut current_status = String::new();
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            XmlEvent::Start(e) => {
+                depth += 1;
+                let lname = e.local_name();
+                let local = std::str::from_utf8(lname.as_ref())?;
+                match local {
+                    "sync-token" if depth == 2 => in_sync_token_top = true,
+                    "response" => {
+                        in_response = true;
+                        current_href.clear();
+                        current_etag.clear();
+                        current_ical.clear();
+                        current_status.clear();
+                    }
+                    "href" if in_response => in_href = true,
+                    "getetag" => in_etag = true,
+                    "calendar-data" => {
+                        in_calendar_data = true;
+                        current_ical.clear();
+                    }
+                    "status" => in_status = true,
+                    _ => {}
+                }
+            }
+            XmlEvent::Text(e) => {
+                let text = e.unescape()?;
+                if in_sync_token_top { new_token.push_str(&text); }
+                else if in_calendar_data { current_ical.push_str(&text); }
+                else if in_href { current_href.push_str(&text); }
+                else if in_etag { current_etag.push_str(&text); }
+                else if in_status { current_status.push_str(&text); }
+            }
+            XmlEvent::End(e) => {
+                let lname = e.local_name();
+                let local = std::str::from_utf8(lname.as_ref())?;
+                match local {
+                    "sync-token" => in_sync_token_top = false,
+                    "href" => in_href = false,
+                    "getetag" => in_etag = false,
+                    "calendar-data" => in_calendar_data = false,
+                    "status" => in_status = false,
+                    "response" => {
+                        let href = resolve_url(base_url, current_href.trim());
+                        if current_status.contains("404") {
+                            deleted.push(href);
+                        } else if !current_ical.is_empty() {
+                            changed.push((
+                                href,
+                                current_etag.trim().trim_matches('"').to_string(),
+                                current_ical.clone(),
+                            ));
+                        }
+                        in_response = false;
+                    }
+                    _ => {}
+                }
+                depth = depth.saturating_sub(1);
+            }
+            XmlEvent::Eof => break,
+            _ => {}
+        }
+    }
+    Ok(SyncResult { new_token, changed, deleted })
+}
+
+fn extract_ctag_and_token(xml: &str) -> (Option<String>, Option<String>) {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut ctag: Option<String> = None;
+    let mut sync_token: Option<String> = None;
+    let mut in_ctag = false;
+    let mut in_token = false;
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(XmlEvent::Start(e)) => {
+                let lname = e.local_name();
+                let local = std::str::from_utf8(lname.as_ref()).unwrap_or("");
+                match local {
+                    "getctag" => in_ctag = true,
+                    "sync-token" => in_token = true,
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::Text(e)) => {
+                if let Ok(text) = e.unescape() {
+                    let text = text.trim().to_string();
+                    if !text.is_empty() {
+                        if in_ctag { ctag = Some(text); }
+                        else if in_token { sync_token = Some(text); }
+                    }
+                }
+            }
+            Ok(XmlEvent::End(e)) => {
+                let lname = e.local_name();
+                let local = std::str::from_utf8(lname.as_ref()).unwrap_or("");
+                match local {
+                    "getctag" => in_ctag = false,
+                    "sync-token" => in_token = false,
+                    _ => {}
+                }
+            }
+            Ok(XmlEvent::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+    (ctag, sync_token)
 }
 
 /// Inject or replace a RECURRENCE-ID override VEVENT into an existing iCal string.
