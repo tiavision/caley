@@ -1081,7 +1081,32 @@
   .weekly { order: 1; }
   .calendar-list-section { order: 3; }
 
-  @media (min-width: 768px) {
+  @media (min-width: 600px) and (max-width: 959px) {
+    .layout {
+      display: grid;
+      grid-template-columns: 22rem 1fr;
+      grid-template-areas: "picker weekly" "list weekly";
+      gap: 1rem;
+      align-items: start;
+    }
+    .calendar-picker { grid-area: picker; order: unset; }
+    .calendar-list-section { grid-area: list; order: unset; }
+    .weekly { grid-area: weekly; grid-row: 1 / -1; order: unset; }
+  }
+
+  @media (min-width: 960px) and (max-width: 1399px) {
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-areas: "weekly weekly" "picker list";
+      gap: 1rem;
+    }
+    .calendar-picker { grid-area: picker; order: unset; }
+    .calendar-list-section { grid-area: list; order: unset; }
+    .weekly { grid-area: weekly; order: unset; }
+  }
+
+  @media (min-width: 1400px) {
     .layout {
       display: grid;
       grid-template-columns: 22rem 1fr;
@@ -1196,7 +1221,7 @@
     grid-template-columns: repeat(7, 1fr);
     gap: 0.5rem;
   }
-  @media (max-width: 1024px) { .calendar { grid-template-columns: 1fr; } }
+  @media (max-width: 959px) { .calendar { grid-template-columns: 1fr; } }
 
   .week-loading {
     position: absolute;
@@ -1218,7 +1243,7 @@
 
   .day-past-count { display: none; }
 
-  @media (max-width: 1024px) {
+  @media (max-width: 959px) {
     :global(.appointments) { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
     :global(.day.day-past .appointments) { display: none; }
     :global(.day.day-past.day-expanded .appointments) { display: grid; }
@@ -1236,7 +1261,7 @@
     :global(article.appointment:last-child:nth-child(odd)) { grid-column: 1 / -1; }
     :global(article.appointment p) { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   }
-  @media (min-width: 1025px) {
+  @media (min-width: 960px) {
     :global(.day.day-past) { opacity: 0.45; }
     :global(article.appointment p) { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
   }
