@@ -43,6 +43,8 @@ struct Cli {
     oidc_user_id_claim: UserIdClaim,
     #[arg(long, env = "ENCRYPTION_KEY")]
     encryption_key: String,
+    #[arg(long, env = "SYNC_INTERVAL_MINS", default_value = "5")]
+    sync_interval_mins: u64,
 }
 
 #[tokio::main]
@@ -61,6 +63,7 @@ async fn main() -> anyhow::Result<()> {
         encryption_key,
         Arc::clone(&sse_broadcaster),
         args.app_base_url.clone(),
+        args.sync_interval_mins,
     );
 
     let state = AppState {

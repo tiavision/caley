@@ -14,8 +14,6 @@ use crate::caldav::CalDavClient;
 use crate::db;
 use crate::sse::{SseBroadcaster, SseMessage};
 
-const SYNC_INTERVAL_SECS: u64 = 300;
-
 pub enum SyncTrigger {
     Full,
     Incremental,
@@ -26,6 +24,7 @@ pub struct SyncManager {
     encryption_key: [u8; 32],
     broadcaster: Arc<SseBroadcaster>,
     app_base_url: String,
+    sync_interval: Duration,
     tasks: Mutex<HashMap<String, mpsc::UnboundedSender<SyncTrigger>>>,
 }
 
@@ -35,12 +34,14 @@ impl SyncManager {
         encryption_key: [u8; 32],
         broadcaster: Arc<SseBroadcaster>,
         app_base_url: String,
+        sync_interval_mins: u64,
     ) -> Arc<Self> {
         Arc::new(Self {
             db,
             encryption_key,
             broadcaster,
             app_base_url,
+            sync_interval: Duration::from_secs(sync_interval_mins.saturating_mul(60)),
             tasks: Mutex::new(HashMap::new()),
         })
     }
@@ -79,7 +80,7 @@ impl SyncManager {
 
         loop {
             tokio::select! {
-                _ = sleep(Duration::from_secs(SYNC_INTERVAL_SECS)) => {
+                _ = sleep(self.sync_interval) => {
                     if let Err(e) = self.sync_user(&user_id, false).await {
                         eprintln!("[sync] periodic sync failed for {user_id}: {e}");
                     }
@@ -270,7 +271,7 @@ impl SyncManager {
         calendar_href: &str,
     ) {
         let now = chrono::Utc::now().timestamp();
-        let renew_threshold = now + SYNC_INTERVAL_SECS as i64 * 2;
+        let renew_threshold = now + self.sync_interval.as_secs() as i64 * 2;
 
         let existing = {
             let db = self.db.lock().unwrap();

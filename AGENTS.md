@@ -12,7 +12,7 @@ Two-package monorepo with no root-level tooling:
 - Run: `cargo run` from `backend/` → `localhost:3000`
 - Configuration is via environment variables. A `.env` file in `backend/` is also loaded automatically.
 - Required: `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `APP_BASE_URL`, `ENCRYPTION_KEY`
-- Optional: `CALDAV_PORT` (default: `3000`), `OIDC_LOGOUT` (default: `true`), `OIDC_USER_ID_CLAIM` (default: `sub`), `DATABASE_PATH` (default: `./data/caley.db`), `STATIC_DIR` (optional, defaults to `../frontend/dist`)
+- Optional: `CALDAV_PORT` (default: `3000`), `OIDC_LOGOUT` (default: `true`), `OIDC_USER_ID_CLAIM` (default: `sub`), `DATABASE_PATH` (default: `./data/caley.db`), `STATIC_DIR` (optional, defaults to `../frontend/dist`), `SYNC_INTERVAL_MINS` (default: `5`)
 - CalDAV credentials (base URL, username, password) are per-user settings stored encrypted in SQLite with AES-256-GCM
 - New users are redirected to `/settings` to configure their CalDAV connection; settings are tested before saving
 - Uses `dotenvy` to load `.env`; `clap` with derive + env feature for CLI args
