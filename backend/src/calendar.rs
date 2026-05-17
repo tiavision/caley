@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use url::form_urlencoded;
 
 use crate::caldav::{
-    add_exdate, add_recurrence_override, generate_ical_event, generate_new_uid, Alarm, Attendee,
-    CalDavClient, PartStat, RecurrenceInfo,
+    add_exdate, add_recurrence_override, generate_ical_event, generate_new_uid,
+    update_vcalendar_event, Alarm, Attendee, CalDavClient, PartStat, RecurrenceInfo,
 };
 use crate::db;
 use crate::oidc::{extract_user_id, require_client, AppState};
@@ -576,7 +576,9 @@ pub async fn save_event(
     };
 
     let form = parse_event_form(body);
-    let mut uid = parse_form_field(&form, "uid").unwrap_or("").to_string();
+    let raw_uid = parse_form_field(&form, "uid").unwrap_or("").to_string();
+    let is_edit = !raw_uid.is_empty();
+    let mut uid = raw_uid;
     if uid.is_empty() {
         uid = generate_new_uid();
     }
@@ -653,13 +655,24 @@ pub async fn save_event(
         } else {
             orig_dt
         };
-        let override_ical = generate_ical_event(
-            &uid, &summary, &description, &location, &date,
+        // Try non-destructive update of an existing override VEVENT first.
+        // Falls back to generating a fresh override when none exists yet.
+        let modified = match update_vcalendar_event(
+            &raw_ical, &summary, &description, &location, &date,
             start_time, end_time, &tz, is_all_day,
             Some((rid_value, &tz)), None, &alarms, &attendees,
-        );
-        let override_vevent = extract_vevent(&override_ical);
-        let modified = add_recurrence_override(&raw_ical, &override_vevent, rid_value);
+        ) {
+            Some(updated) => updated,
+            None => {
+                let override_ical = generate_ical_event(
+                    &uid, &summary, &description, &location, &date,
+                    start_time, end_time, &tz, is_all_day,
+                    Some((rid_value, &tz)), None, &alarms, &attendees,
+                );
+                let override_vevent = extract_vevent(&override_ical);
+                add_recurrence_override(&raw_ical, &override_vevent, rid_value)
+            }
+        };
 
         match client.put_event(&calendar_href, &uid, &modified).await {
             Ok(_) => {
@@ -673,11 +686,46 @@ pub async fn save_event(
             }
         }
     } else {
-        let ical = generate_ical_event(
-            &uid, &summary, &description, &location, &date,
-            start_time, end_time, &tz, is_all_day,
-            None, recurrence.as_ref(), &alarms, &attendees,
-        );
+        // For edits, fetch the original and update non-destructively to preserve
+        // unknown properties (ORGANIZER, CLASS, X-*, EXDATE, exception VEVENTs, …).
+        // New events skip the fetch and generate from scratch.
+        let fetch_href = original_calendar_href.as_deref().unwrap_or(&calendar_href);
+        let ical = if is_edit {
+            let original = client.get_event(fetch_href, &uid).await;
+            match original {
+                Ok(orig_ical) => {
+                    match update_vcalendar_event(
+                        &orig_ical, &summary, &description, &location, &date,
+                        start_time, end_time, &tz, is_all_day,
+                        None, recurrence.as_ref(), &alarms, &attendees,
+                    ) {
+                        Some(updated) => updated,
+                        None => {
+                            eprintln!("update_vcalendar_event: master VEVENT not found in {uid}, falling back");
+                            generate_ical_event(
+                                &uid, &summary, &description, &location, &date,
+                                start_time, end_time, &tz, is_all_day,
+                                None, recurrence.as_ref(), &alarms, &attendees,
+                            )
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to fetch original event {uid} for non-destructive update: {e}");
+                    generate_ical_event(
+                        &uid, &summary, &description, &location, &date,
+                        start_time, end_time, &tz, is_all_day,
+                        None, recurrence.as_ref(), &alarms, &attendees,
+                    )
+                }
+            }
+        } else {
+            generate_ical_event(
+                &uid, &summary, &description, &location, &date,
+                start_time, end_time, &tz, is_all_day,
+                None, recurrence.as_ref(), &alarms, &attendees,
+            )
+        };
 
         match client.put_event(&calendar_href, &uid, &ical).await {
             Ok(_) => {

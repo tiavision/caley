@@ -2038,3 +2038,409 @@ pub fn add_exdate(ical_data: &str, occurrence_dtstart: &str, tz: &str) -> String
     result.push_str(&ical[search_from..]);
     result.replace('\n', "\r\n")
 }
+
+// ── Non-destructive event update ──────────────────────────────────────────────
+
+/// Undo RFC 5545 line folding: join continuation lines (CRLF + whitespace).
+fn unfold_lines(ical: &str) -> String {
+    ical.replace("\r\n", "\n")
+        .replace("\n ", "")
+        .replace("\n\t", "")
+}
+
+/// Re-fold lines to ≤75 bytes each, using CRLF + SP continuation per RFC 5545.
+fn fold_lines(ical: &str) -> String {
+    let mut out = String::with_capacity(ical.len() + ical.len() / 32);
+    for line in ical.split('\n') {
+        if line.is_empty() {
+            out.push_str("\r\n");
+            continue;
+        }
+        let bytes = line.as_bytes();
+        if bytes.len() <= 75 {
+            out.push_str(line);
+            out.push_str("\r\n");
+            continue;
+        }
+        // First chunk: 75 bytes (walk back to UTF-8 boundary).
+        let mut pos = 75;
+        while !line.is_char_boundary(pos) {
+            pos -= 1;
+        }
+        out.push_str(&line[..pos]);
+        out.push_str("\r\n");
+        let mut rest = &line[pos..];
+        // Continuation chunks: 74 bytes of content + leading space.
+        while !rest.is_empty() {
+            out.push(' ');
+            let chunk = 74.min(rest.len());
+            let mut end = chunk;
+            while !rest.is_char_boundary(end) {
+                end -= 1;
+            }
+            out.push_str(&rest[..end]);
+            out.push_str("\r\n");
+            rest = &rest[end..];
+        }
+    }
+    out
+}
+
+/// Extract the property name from an unfolded iCal line (part before first `:` or `;`).
+fn prop_name(line: &str) -> &str {
+    let c = line.find(':').unwrap_or(line.len());
+    let s = line.find(';').unwrap_or(line.len());
+    &line[..c.min(s)]
+}
+
+/// Properties we replace when doing a non-destructive update.
+/// Everything else (ORGANIZER, CLASS, STATUS, TRANSP, CATEGORIES, ATTACH,
+/// RELATED-TO, RDATE, EXDATE, X-*, CREATED, …) is preserved from the original.
+const REPLACE_PROPS: &[&str] = &[
+    "DTSTAMP",
+    "LAST-MODIFIED",
+    "SEQUENCE",
+    "SUMMARY",
+    "DESCRIPTION",
+    "LOCATION",
+    "DTSTART",
+    "DTEND",
+    "DURATION",
+    "RRULE",
+    "RECURRENCE-ID",
+];
+
+/// Extract the email from an unfolded ATTENDEE line (the part after the last `:mailto:`).
+fn attendee_email(line: &str) -> Option<&str> {
+    line.rfind(":mailto:").map(|pos| &line[pos + 8..])
+}
+
+/// Return a copy of an ATTENDEE line with PARTSTAT set to `new_partstat`.
+/// If PARTSTAT is absent, it is appended before the `:mailto:` value.
+fn update_attendee_partstat(line: &str, new_partstat: &str) -> String {
+    let Some(value_start) = line.rfind(":mailto:") else {
+        return line.to_string();
+    };
+    let params = &line[..value_start];
+    let value = &line[value_start..];
+    let new_params = if let Some(ps) = params.find("PARTSTAT=") {
+        let after = &params[ps + 9..];
+        let end = after.find(';').unwrap_or(after.len());
+        format!("{}PARTSTAT={}{}", &params[..ps], new_partstat, &after[end..])
+    } else {
+        format!("{};PARTSTAT={}", params, new_partstat)
+    };
+    format!("{}{}", new_params, value)
+}
+
+/// Rebuild one VEVENT block (already unfolded, LF-separated), replacing the
+/// properties in REPLACE_PROPS and all VALARM sub-components with fresh values,
+/// while preserving every other property verbatim.
+fn rebuild_vevent(
+    block: &str,
+    summary: &str,
+    description: &str,
+    location: &str,
+    date: &str,
+    start_time: Option<&str>,
+    end_time: Option<&str>,
+    tz: &str,
+    is_all_day: bool,
+    new_sequence: u32,
+    target_recurrence_id: Option<(&str, &str)>,
+    recurrence: Option<&RecurrenceInfo>,
+    alarms: &[Alarm],
+    attendees: &[Attendee],
+) -> String {
+    let dtstart = if is_all_day {
+        date.replace('-', "")
+    } else {
+        let (d, t) = parse_datetime(date, start_time.unwrap_or("00:00"));
+        if tz.is_empty() || tz == "UTC" {
+            format!("{}T{}00Z", d, t)
+        } else {
+            format!("{}T{}00", d, t)
+        }
+    };
+
+    let dtend = if is_all_day {
+        let d = NaiveDate::parse_from_str(date, "%Y-%m-%d")
+            .unwrap_or_else(|_| chrono::Local::now().date_naive());
+        (d + TimeDelta::days(1)).format("%Y%m%d").to_string()
+    } else {
+        let (d, t) = parse_datetime(date, end_time.unwrap_or(start_time.unwrap_or("01:00")));
+        if tz.is_empty() || tz == "UTC" {
+            format!("{}T{}00Z", d, t)
+        } else {
+            format!("{}T{}00", d, t)
+        }
+    };
+
+    // Collect preserved lines, original ATTENDEE lines, and non-DISPLAY VALARM blocks.
+    let mut kept = String::new();
+    let mut original_attendee_lines: Vec<String> = Vec::new();
+    let mut preserved_valarns: Vec<String> = Vec::new();
+    let mut in_valarm = false;
+    let mut current_valarm: Vec<&str> = Vec::new();
+    for line in block.lines() {
+        if line == "BEGIN:VALARM" {
+            in_valarm = true;
+            current_valarm.clear();
+            continue;
+        }
+        if line == "END:VALARM" {
+            in_valarm = false;
+            // Preserve VALARMs whose ACTION is not DISPLAY — those are managed
+            // by other clients (EMAIL, AUDIO) and should survive our edits.
+            let is_display = current_valarm.iter()
+                .any(|l| l.trim().eq_ignore_ascii_case("ACTION:DISPLAY"));
+            if !is_display {
+                let mut blk = String::from("BEGIN:VALARM\n");
+                for vl in &current_valarm { blk.push_str(vl); blk.push('\n'); }
+                blk.push_str("END:VALARM\n");
+                preserved_valarns.push(blk);
+            }
+            continue;
+        }
+        if in_valarm {
+            current_valarm.push(line);
+            continue;
+        }
+        if line == "BEGIN:VEVENT" || line == "END:VEVENT" {
+            continue;
+        }
+        let pname = prop_name(line).to_ascii_uppercase();
+        if pname == "ATTENDEE" {
+            // Collect separately for smart merge below.
+            original_attendee_lines.push(line.to_string());
+            continue;
+        }
+        if REPLACE_PROPS.contains(&pname.as_str()) {
+            continue;
+        }
+        kept.push_str(line);
+        kept.push('\n');
+    }
+
+    // Build the new VEVENT.
+    let now = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    let mut out = String::from("BEGIN:VEVENT\n");
+    out.push_str(&kept);
+    out.push_str(&format!("DTSTAMP:{}\n", now));
+    out.push_str(&format!("LAST-MODIFIED:{}\n", now));
+    out.push_str(&format!("SEQUENCE:{}\n", new_sequence));
+
+    if is_all_day {
+        out.push_str(&format!("DTSTART;VALUE=DATE:{}\n", dtstart));
+        out.push_str(&format!("DTEND;VALUE=DATE:{}\n", dtend));
+    } else if tz.is_empty() || tz == "UTC" {
+        out.push_str(&format!("DTSTART:{}\n", dtstart));
+        out.push_str(&format!("DTEND:{}\n", dtend));
+    } else {
+        out.push_str(&format!("DTSTART;TZID={}:{}\n", tz, dtstart));
+        out.push_str(&format!("DTEND;TZID={}:{}\n", tz, dtend));
+    }
+
+    if let Some(rec) = recurrence {
+        if !rec.freq.is_empty() {
+            out.push_str(&format!("RRULE:{}\n", recurrence_info_to_rrule(rec, tz, is_all_day)));
+        }
+    }
+
+    if let Some((rid_date, rid_tz)) = target_recurrence_id {
+        let is_date = rid_date.len() <= 10;
+        let rid_ical = if is_date {
+            rid_date.replace('-', "")
+        } else if rid_tz.is_empty() || rid_tz == "UTC" {
+            format!("{}Z", rid_date.replace('-', "").replace(':', ""))
+        } else {
+            rid_date.replace('-', "").replace(':', "")
+        };
+        if is_date && is_all_day {
+            out.push_str(&format!("RECURRENCE-ID;VALUE=DATE:{}\n", rid_ical));
+        } else if is_date {
+            if rid_tz.is_empty() || rid_tz == "UTC" {
+                out.push_str(&format!("RECURRENCE-ID:{}T000000Z\n", rid_ical));
+            } else {
+                out.push_str(&format!("RECURRENCE-ID;TZID={}:{}T000000\n", rid_tz, rid_ical));
+            }
+        } else if rid_tz.is_empty() || rid_tz == "UTC" {
+            out.push_str(&format!("RECURRENCE-ID:{}\n", rid_ical));
+        } else {
+            out.push_str(&format!("RECURRENCE-ID;TZID={}:{}\n", rid_tz, rid_ical));
+        }
+    }
+
+    out.push_str(&format!("SUMMARY:{}\n", escape_ical_text(summary)));
+    if !description.is_empty() {
+        out.push_str(&format!("DESCRIPTION:{}\n", escape_ical_text(description)));
+    }
+    if !location.is_empty() {
+        out.push_str(&format!("LOCATION:{}\n", escape_ical_text(location)));
+    }
+
+    // Attendee smart merge: for known emails, preserve the original line and
+    // update only PARTSTAT; for new emails, generate a minimal line.
+    for att in attendees {
+        let email_lower = att.email.trim().to_lowercase();
+        let orig = original_attendee_lines.iter().find(|l| {
+            attendee_email(l)
+                .map(|e| e.trim().to_lowercase())
+                .as_deref()
+                == Some(email_lower.as_str())
+        });
+        if let Some(orig_line) = orig {
+            out.push_str(&update_attendee_partstat(orig_line, &att.partstat.to_ical()));
+        } else {
+            let cn = if !att.cn.is_empty() { format!(";CN={}", att.cn) } else { String::new() };
+            out.push_str(&format!("ATTENDEE{};PARTSTAT={}:mailto:{}", cn, att.partstat.to_ical(), att.email));
+        }
+        out.push('\n');
+    }
+
+    // Emit preserved non-DISPLAY VALARMs (EMAIL, AUDIO) before form-managed ones.
+    for valarm in &preserved_valarns {
+        out.push_str(valarm);
+    }
+    for alarm in alarms {
+        out.push_str("BEGIN:VALARM\nACTION:DISPLAY\nDESCRIPTION:Reminder\n");
+        match alarm.trigger_type.as_str() {
+            "absolute" => {
+                if let Some(ref dt) = alarm.datetime {
+                    out.push_str(&format!("TRIGGER;VALUE=DATE-TIME:{}\n", dt));
+                }
+            }
+            "end" => {
+                if let Some(mins) = alarm.minutes {
+                    let sign = if mins < 0 { "-" } else { "" };
+                    out.push_str(&format!("TRIGGER;RELATED=END:{}PT{}M\n", sign, mins.unsigned_abs()));
+                }
+            }
+            _ => {
+                if let Some(mins) = alarm.minutes {
+                    let sign = if mins < 0 { "-" } else { "" };
+                    out.push_str(&format!("TRIGGER:{}PT{}M\n", sign, mins.unsigned_abs()));
+                }
+            }
+        }
+        out.push_str("END:VALARM\n");
+    }
+
+    out.push_str("END:VEVENT");
+    out
+}
+
+/// Update an existing event in a VCALENDAR non-destructively.
+///
+/// Replaces only the properties the user can edit (dates, summary, recurrence,
+/// attendees, alarms) while preserving everything else (ORGANIZER, CLASS,
+/// STATUS, TRANSP, CATEGORIES, ATTACH, X-* extensions, EXDATE, RDATE, …).
+///
+/// `target_recurrence_id`: None = update the master VEVENT (series edit);
+///   Some((rid_value, tz)) = update the override VEVENT for that occurrence.
+///
+/// Returns None if the target VEVENT is not found (caller should fall back to
+/// generate_ical_event).
+pub fn update_vcalendar_event(
+    original_ical: &str,
+    summary: &str,
+    description: &str,
+    location: &str,
+    date: &str,
+    start_time: Option<&str>,
+    end_time: Option<&str>,
+    tz: &str,
+    is_all_day: bool,
+    target_recurrence_id: Option<(&str, &str)>,
+    recurrence: Option<&RecurrenceInfo>,
+    alarms: &[Alarm],
+    attendees: &[Attendee],
+) -> Option<String> {
+    let text = unfold_lines(original_ical);
+
+    let rid_date_prefix: Option<String> = target_recurrence_id
+        .map(|(rv, _)| rv.replace('-', "").chars().take(8).collect());
+
+    let mut result = String::new();
+    let mut search_from = 0;
+    let mut found_target = false;
+
+    while let Some(rel_start) = text[search_from..].find("BEGIN:VEVENT") {
+        let abs_start = search_from + rel_start;
+        result.push_str(&text[search_from..abs_start]);
+
+        let Some(rel_end) = text[abs_start..].find("\nEND:VEVENT") else {
+            result.push_str(&text[search_from..]);
+            search_from = text.len();
+            break;
+        };
+        let abs_end = abs_start + rel_end + 1 + 10; // '\n' + "END:VEVENT"
+        let block = &text[abs_start..abs_end];
+
+        // Determine if this is the target VEVENT.
+        let is_target = if !found_target {
+            match &rid_date_prefix {
+                None => {
+                    // Master VEVENT: no RECURRENCE-ID line present.
+                    !block.lines().any(|l| {
+                        l.starts_with("RECURRENCE-ID:") || l.starts_with("RECURRENCE-ID;")
+                    })
+                }
+                Some(rid_prefix) => {
+                    // Override VEVENT: RECURRENCE-ID value starts with this date.
+                    block.lines().any(|l| {
+                        if !l.starts_with("RECURRENCE-ID:") && !l.starts_with("RECURRENCE-ID;") {
+                            return false;
+                        }
+                        l.rsplit(':').next().map_or(false, |val| {
+                            val.chars().take(8).collect::<String>() == *rid_prefix
+                        })
+                    })
+                }
+            }
+        } else {
+            false
+        };
+
+        if is_target {
+            // Read SEQUENCE from original for incrementing.
+            let new_sequence = block
+                .lines()
+                .find(|l| l.starts_with("SEQUENCE:"))
+                .and_then(|l| l.trim_start_matches("SEQUENCE:").parse::<u32>().ok())
+                .unwrap_or(0)
+                .saturating_add(1);
+
+            let rebuilt = rebuild_vevent(
+                block,
+                summary,
+                description,
+                location,
+                date,
+                start_time,
+                end_time,
+                tz,
+                is_all_day,
+                new_sequence,
+                target_recurrence_id,
+                recurrence,
+                alarms,
+                attendees,
+            );
+            result.push_str(&rebuilt);
+            result.push('\n');
+            found_target = true;
+        } else {
+            result.push_str(block);
+            result.push('\n');
+        }
+        search_from = abs_end;
+    }
+    result.push_str(&text[search_from..]);
+
+    if !found_target {
+        return None;
+    }
+
+    Some(fold_lines(&result))
+}
