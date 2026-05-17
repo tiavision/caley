@@ -5,6 +5,8 @@
 
   // ── Types ──────────────────────────────────────────────────────────────────
   interface AlarmFields { direction: string; value: string; unit: string; datetime: string; }
+  type PartStat = 'NEEDS-ACTION' | 'ACCEPTED' | 'DECLINED' | 'TENTATIVE';
+  interface AttendeeFields { cn: string; email: string; partstat: PartStat; }
   interface RecurrenceInfo {
     freq: string; interval?: number; by_day?: string[]; by_month_day?: number[];
     by_month?: number[]; by_set_pos?: number[]; until?: string | null; count?: number | null;
@@ -14,7 +16,7 @@
     dtstart: string; dtend: string; is_all_day: boolean; tz: string;
     location: string; description: string; is_recurring: boolean;
     recurrence: RecurrenceInfo | null; calendar_href: string;
-    master_dtstart: string; alarms: AlarmFields[];
+    master_dtstart: string; alarms: AlarmFields[]; attendees: AttendeeFields[];
   }
   interface DayEventsJson { date_iso: string; day_name: string; is_today: boolean; events: EventJson[]; }
   interface CalendarJson { href: string; name: string; color: string | null; is_active: boolean; }
@@ -296,6 +298,14 @@
     return vs + ' ' + (m as Record<string, Function>)[amap[alarm.direction] || 'event_reminderBeforeStart']();
   }
 
+  const PARTSTAT_KEYS: Record<PartStat, string> = {
+    'NEEDS-ACTION': 'event_attendeeStatusNeedsAction',
+    'ACCEPTED': 'event_attendeeStatusAccepted',
+    'DECLINED': 'event_attendeeStatusDeclined',
+    'TENTATIVE': 'event_attendeeStatusTentative',
+  };
+  function partstatKey(ps: PartStat): string { return PARTSTAT_KEYS[ps] ?? 'event_attendeeStatusNeedsAction'; }
+
   // ── Event form ─────────────────────────────────────────────────────────────
   let formMode: 'create' | 'edit' = 'create';
   let formScope: 'series' | 'this_instance' = 'series';
@@ -309,6 +319,7 @@
   let fIsAllDay = false, fLocation = '', fDescription = '', fTz = '';
   let fOriginalDtstart = '', fOriginalCalendarHref = '', fCalendarHref = '';
   let formAlarms: AlarmFields[] = [];
+  let formAttendees: AttendeeFields[] = [];
 
   let fFreq = '', fInterval = 1, fByDay: string[] = [];
   let fMonthlyMode: 'by_day' | 'by_setpos' = 'by_day';
@@ -387,7 +398,7 @@
     const active = calendars.find(c => c.is_active);
     const fallback = active?.href || calendars[0]?.href || '';
     fCalendarHref = (stored && calendars.find(c => c.href === stored && c.is_active)) ? stored : fallback;
-    resetRecurrence(); formAlarms = []; formError = '';
+    resetRecurrence(); formAlarms = []; formAttendees = []; formError = '';
     timeSuggestions = []; timeSuggestionIdx = -1;
     setTimeout(() => {
       formDialogEl?.showModal();
@@ -414,7 +425,7 @@
     } else { fStartTime = ''; fEndTime = ''; }
     if (scope === 'series' && ev.is_recurring) populateRecurrence(ev.recurrence);
     else resetRecurrence();
-    formAlarms = [...ev.alarms]; formError = '';
+    formAlarms = [...ev.alarms]; formAttendees = [...ev.attendees]; formError = '';
     timeSuggestions = []; timeSuggestionIdx = -1;
     closeDetail();
     setTimeout(() => {
@@ -439,6 +450,11 @@
     for (const a of formAlarms) {
       p.append('alarm_direction', a.direction); p.append('alarm_value', a.value);
       p.append('alarm_unit', a.unit); p.append('alarm_datetime', a.datetime);
+    }
+    for (const a of formAttendees) {
+      p.append('attendee_cn', a.cn);
+      p.append('attendee_email', a.email);
+      p.append('attendee_partstat', a.partstat);
     }
     try {
       const res = await fetch('/api/event', {
@@ -920,6 +936,19 @@
             </div>
           </div>
         {/if}
+        {#if detailEvent.attendees.length > 0}
+          <div class="event-detail-row">
+            <span class="event-detail-label">{tl('event_attendees')}</span>
+            <div class="attendee-list-detail">
+              {#each detailEvent.attendees as att}
+                <div class="attendee-detail-row">
+                  <span class="attendee-badge attendee-badge--{att.partstat.toLowerCase()}">{tl(partstatKey(att.partstat))}</span>
+                  <span>{att.cn ? `${att.cn} <${att.email}>` : att.email}</span>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
       </div>
     {/if}
   </article>
@@ -1048,6 +1077,48 @@
         </ul>
         <button type="button" class="outline small" on:click={() => { formAlarms = [...formAlarms, { direction: 'before-start', value: '15', unit: '1', datetime: '' }]; }}>
           {tl('event_reminderAdd')}
+        </button>
+      </fieldset>
+
+      <!-- Attendees -->
+      <fieldset class="alarm-section">
+        <legend>{tl('event_attendees')}</legend>
+        <ul class="alarm-list">
+          {#each formAttendees as att, i}
+            <li class="alarm-row attendee-row">
+              <input
+                type="text"
+                placeholder={tl('event_attendeeName')}
+                value={att.cn}
+                style="flex:1;margin-bottom:0"
+                on:input={(e) => { formAttendees[i] = { ...att, cn: (e.target as HTMLInputElement).value }; formAttendees = formAttendees; }}
+              />
+              <input
+                type="email"
+                placeholder={tl('event_attendeeEmail')}
+                value={att.email}
+                style="flex:2;margin-bottom:0"
+                on:input={(e) => { formAttendees[i] = { ...att, email: (e.target as HTMLInputElement).value }; formAttendees = formAttendees; }}
+              />
+              <select
+                class="attendee-partstat-select"
+                value={att.partstat}
+                style="margin-bottom:0"
+                on:change={(e) => { formAttendees[i] = { ...att, partstat: (e.target as HTMLSelectElement).value as PartStat }; formAttendees = formAttendees; }}
+              >
+                <option value="NEEDS-ACTION">{tl('event_attendeeStatusNeedsAction')}</option>
+                <option value="ACCEPTED">{tl('event_attendeeStatusAccepted')}</option>
+                <option value="DECLINED">{tl('event_attendeeStatusDeclined')}</option>
+                <option value="TENTATIVE">{tl('event_attendeeStatusTentative')}</option>
+              </select>
+              <button type="button" class="alarm-remove outline" aria-label={tl('event_attendeeRemove')}
+                on:click={() => { formAttendees = formAttendees.filter((_, j) => j !== i); }}>×</button>
+            </li>
+          {/each}
+        </ul>
+        <button type="button" class="outline small"
+          on:click={() => { formAttendees = [...formAttendees, { cn: '', email: '', partstat: 'NEEDS-ACTION' as PartStat }]; }}>
+          {tl('event_attendeeAdd')}
         </button>
       </fieldset>
 
@@ -1499,6 +1570,16 @@
   :global(.alarm-section legend) { font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--pico-muted-color); margin-bottom: 0.375rem; }
   .alarm-list { list-style: none; padding: 0; margin: 0 0 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
   .alarm-row { display: flex; align-items: center; gap: 0.5rem; }
+  .attendee-row { flex-wrap: nowrap; }
+  .attendee-row input { min-width: 0; }
+  :global(.attendee-partstat-select) { flex: 0 0 auto; width: 7.5rem; margin-bottom: 0 !important; padding-left: 0.4rem; padding-right: 0.4rem; }
+  .attendee-list-detail { display: flex; flex-direction: column; gap: 0.25rem; }
+  .attendee-detail-row { display: flex; align-items: center; gap: 0.5rem; }
+  .attendee-badge { font-size: 0.75rem; font-weight: 600; padding: 0.1rem 0.45rem; border-radius: 999px; white-space: nowrap; }
+  .attendee-badge--accepted { background: #d1fae5; color: #065f46; }
+  .attendee-badge--declined { background: #fee2e2; color: #991b1b; }
+  .attendee-badge--tentative { background: #fef9c3; color: #854d0e; }
+  .attendee-badge--needs-action { background: var(--pico-secondary-background); color: var(--pico-secondary-inverse); opacity: 0.7; }
   .alarm-relative-fields { display: flex; align-items: center; gap: 0.25rem; }
   .alarm-absolute-fields { flex: 1; }
   :global(.alarm-direction) { flex: 1 1 0; min-width: 0; margin-bottom: 0 !important; }

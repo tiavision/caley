@@ -101,5 +101,14 @@
   "event_reminderHours": "Stunden",
   "event_reminderDay": "Tag",
   "event_reminderDays": "Tage",
-  "event_repeatInstanceNote": "Wiederholungseinstellungen gelten für die gesamte Serie."
+  "event_repeatInstanceNote": "Wiederholungseinstellungen gelten für die gesamte Serie.",
+  "event_attendees": "Teilnehmer",
+  "event_attendeeAdd": "Teilnehmer hinzufügen",
+  "event_attendeeName": "Name",
+  "event_attendeeEmail": "E-Mail",
+  "event_attendeeRemove": "Teilnehmer entfernen",
+  "event_attendeeStatusNeedsAction": "Ausstehend",
+  "event_attendeeStatusAccepted": "Zugesagt",
+  "event_attendeeStatusDeclined": "Abgesagt",
+  "event_attendeeStatusTentative": "Vorläufig"
 }

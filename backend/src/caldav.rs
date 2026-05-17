@@ -23,6 +23,43 @@ pub struct Alarm {
     pub datetime: Option<String>, // for absolute: UTC ISO 8601 (e.g. "20260514T090000Z")
 }
 
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq)]
+#[serde(rename_all = "SCREAMING-KEBAB-CASE")]
+pub enum PartStat {
+    #[default]
+    NeedsAction,
+    Accepted,
+    Declined,
+    Tentative,
+}
+
+impl PartStat {
+    pub fn from_ical(s: &str) -> Self {
+        match s {
+            "ACCEPTED" => Self::Accepted,
+            "DECLINED" => Self::Declined,
+            "TENTATIVE" => Self::Tentative,
+            _ => Self::NeedsAction,
+        }
+    }
+
+    pub fn to_ical(&self) -> &'static str {
+        match self {
+            Self::NeedsAction => "NEEDS-ACTION",
+            Self::Accepted => "ACCEPTED",
+            Self::Declined => "DECLINED",
+            Self::Tentative => "TENTATIVE",
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Attendee {
+    pub cn: String,
+    pub email: String,
+    pub partstat: PartStat,
+}
+
 #[derive(Serialize)]
 pub struct Event {
     pub uid: String,
@@ -40,6 +77,7 @@ pub struct Event {
     pub recurrence: Option<RecurrenceInfo>,
     pub master_dtstart: String,
     pub alarms: Vec<Alarm>,
+    pub attendees: Vec<Attendee>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -80,6 +118,7 @@ struct RawIcalEvent {
     recurrence_id: Option<NaiveDateTime>,
     recurrence_id_tzid: Option<String>,
     alarms: Vec<Alarm>,
+    attendees: Vec<Attendee>,
 }
 
 #[derive(Clone)]
@@ -716,6 +755,7 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
         let mut exdates: Vec<DateProperty> = Vec::new();
         let mut recurrence_id_value: Option<String> = None;
         let mut recurrence_id_tzid: Option<String> = None;
+        let mut attendees: Vec<Attendee> = Vec::new();
 
         for property in event.properties {
             match property.name.as_str() {
@@ -817,6 +857,24 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
                         }
                     }
                 }
+                "ATTENDEE" => {
+                    let raw = property.value.as_deref().unwrap_or("");
+                    let email = raw.strip_prefix("mailto:").unwrap_or(raw).to_string();
+                    if !email.is_empty() {
+                        let mut cn = String::new();
+                        let mut partstat = PartStat::default();
+                        if let Some(params) = &property.params {
+                            for (key, vals) in params {
+                                match key.as_str() {
+                                    "CN" => cn = vals.first().cloned().unwrap_or_default(),
+                                    "PARTSTAT" => partstat = PartStat::from_ical(vals.first().map(|s| s.as_str()).unwrap_or("")),
+                                    _ => {}
+                                }
+                            }
+                        }
+                        attendees.push(Attendee { cn, email, partstat });
+                    }
+                }
                 _ => {}
             }
         }
@@ -895,6 +953,7 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
             recurrence_id,
             recurrence_id_tzid,
             alarms,
+            attendees,
         });
     }
 
@@ -1023,6 +1082,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                         recurrence.clone(),
                         master_dtstart_str.clone(),
                         override_event.alarms.clone(),
+                        override_event.attendees.clone(),
                     ));
                 } else {
                     events.push(create_event(
@@ -1039,6 +1099,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                         recurrence.clone(),
                         master_dtstart_str.clone(),
                         master.alarms.clone(),
+                        master.attendees.clone(),
                     ));
                 }
             }
@@ -1057,6 +1118,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                 None,
                 String::new(),
                 master.alarms.clone(),
+                master.attendees.clone(),
             ));
         }
     }
@@ -1170,6 +1232,7 @@ fn create_event(
     recurrence: Option<RecurrenceInfo>,
     master_dtstart: String,
     alarms: Vec<Alarm>,
+    attendees: Vec<Attendee>,
 ) -> Event {
     let dtstart_str = if dtstart_is_date {
         dtstart.format("%Y-%m-%d").to_string()
@@ -1217,6 +1280,7 @@ fn create_event(
         recurrence,
         master_dtstart,
         alarms,
+        attendees,
     }
 }
 
@@ -1333,6 +1397,7 @@ pub fn generate_ical_event(
     recurrence_id: Option<(&str, &str)>,
     recurrence: Option<&RecurrenceInfo>,
     alarms: &[Alarm],
+    attendees: &[Attendee],
 ) -> String {
     let dtstart = if is_all_day {
         date.replace('-', "")
@@ -1418,6 +1483,20 @@ pub fn generate_ical_event(
     }
     if !location.is_empty() {
         ical.push_str(&format!("LOCATION:{}\r\n", escape_ical_text(location)));
+    }
+
+    for attendee in attendees {
+        let cn_param = if !attendee.cn.is_empty() {
+            format!(";CN={}", attendee.cn)
+        } else {
+            String::new()
+        };
+        ical.push_str(&format!(
+            "ATTENDEE{};PARTSTAT={}:mailto:{}\r\n",
+            cn_param,
+            attendee.partstat.to_ical(),
+            attendee.email
+        ));
     }
 
     for alarm in alarms {

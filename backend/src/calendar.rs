@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use url::form_urlencoded;
 
 use crate::caldav::{
-    add_exdate, add_recurrence_override, generate_ical_event, generate_new_uid, Alarm,
-    CalDavClient, RecurrenceInfo,
+    add_exdate, add_recurrence_override, generate_ical_event, generate_new_uid, Alarm, Attendee,
+    CalDavClient, PartStat, RecurrenceInfo,
 };
 use crate::db;
 use crate::oidc::{extract_user_id, require_client, AppState};
@@ -38,6 +38,13 @@ pub struct AlarmFields {
 }
 
 #[derive(Serialize, Clone)]
+pub struct AttendeeFields {
+    pub cn: String,
+    pub email: String,
+    pub partstat: PartStat,
+}
+
+#[derive(Serialize, Clone)]
 pub struct EventJson {
     pub uid: String,
     pub time_range: String,
@@ -54,6 +61,7 @@ pub struct EventJson {
     pub calendar_href: String,
     pub master_dtstart: String,
     pub alarms: Vec<AlarmFields>,
+    pub attendees: Vec<AttendeeFields>,
 }
 
 #[derive(Serialize)]
@@ -198,6 +206,11 @@ fn build_event_json(
         color.to_string()
     };
     let alarms = event.alarms.iter().map(alarm_to_fields).collect();
+    let attendees = event.attendees.iter().map(|a| AttendeeFields {
+        cn: a.cn.clone(),
+        email: a.email.clone(),
+        partstat: a.partstat.clone(),
+    }).collect();
     EventJson {
         uid: event.uid.clone(),
         time_range,
@@ -214,6 +227,7 @@ fn build_event_json(
         calendar_href: calendar_href.to_string(),
         master_dtstart: event.master_dtstart.clone(),
         alarms,
+        attendees,
     }
 }
 
@@ -603,6 +617,19 @@ pub async fn save_event(
         })
         .collect();
 
+    let att_cns: Vec<&str> = form.iter().filter(|(k, _)| k == "attendee_cn").map(|(_, v)| v.as_str()).collect();
+    let att_emails: Vec<&str> = form.iter().filter(|(k, _)| k == "attendee_email").map(|(_, v)| v.as_str()).collect();
+    let att_partstats: Vec<&str> = form.iter().filter(|(k, _)| k == "attendee_partstat").map(|(_, v)| v.as_str()).collect();
+    let attendees: Vec<Attendee> = att_emails.iter().enumerate().filter_map(|(i, email)| {
+        let email = email.trim();
+        if email.is_empty() { return None; }
+        Some(Attendee {
+            cn: att_cns.get(i).copied().unwrap_or("").to_string(),
+            email: email.to_string(),
+            partstat: PartStat::from_ical(att_partstats.get(i).copied().unwrap_or("")),
+        })
+    }).collect();
+
     if summary.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing summary").into_response();
     }
@@ -629,7 +656,7 @@ pub async fn save_event(
         let override_ical = generate_ical_event(
             &uid, &summary, &description, &location, &date,
             start_time, end_time, &tz, is_all_day,
-            Some((rid_value, &tz)), None, &alarms,
+            Some((rid_value, &tz)), None, &alarms, &attendees,
         );
         let override_vevent = extract_vevent(&override_ical);
         let modified = add_recurrence_override(&raw_ical, &override_vevent, rid_value);
@@ -649,7 +676,7 @@ pub async fn save_event(
         let ical = generate_ical_event(
             &uid, &summary, &description, &location, &date,
             start_time, end_time, &tz, is_all_day,
-            None, recurrence.as_ref(), &alarms,
+            None, recurrence.as_ref(), &alarms, &attendees,
         );
 
         match client.put_event(&calendar_href, &uid, &ical).await {

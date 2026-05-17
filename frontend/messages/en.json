@@ -101,5 +101,14 @@
   "event_reminderHours": "hours",
   "event_reminderDay": "day",
   "event_reminderDays": "days",
-  "event_repeatInstanceNote": "Repeat settings apply to the whole series."
+  "event_repeatInstanceNote": "Repeat settings apply to the whole series.",
+  "event_attendees": "Attendees",
+  "event_attendeeAdd": "Add attendee",
+  "event_attendeeName": "Name",
+  "event_attendeeEmail": "Email",
+  "event_attendeeRemove": "Remove attendee",
+  "event_attendeeStatusNeedsAction": "Pending",
+  "event_attendeeStatusAccepted": "Accepted",
+  "event_attendeeStatusDeclined": "Declined",
+  "event_attendeeStatusTentative": "Tentative"
 }
