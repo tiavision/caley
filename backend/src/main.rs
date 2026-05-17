@@ -87,9 +87,13 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
-    // Push webhook is outside the auth middleware so CalDAV servers can reach it
-    let app = Router::new()
+    // Public — CalDAV servers POST here without a session cookie
+    let public = Router::new()
         .route("/api/push/webhook", post(sse::push_webhook))
+        .with_state(state.clone());
+
+    // All routes that require OIDC authentication
+    let private = Router::new()
         .route("/auth/callback", get(oidc::auth_callback_handler))
         .route("/api/calendars", get(calendar::list_calendars))
         .route("/api/calendar/toggle", post(calendar::toggle_calendar))
@@ -123,7 +127,11 @@ async fn main() -> anyhow::Result<()> {
                 .layer(oidc::RequireAuthLayer)
                 .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new())
                 .into_inner(),
-        )
+        );
+
+    let app = Router::new()
+        .merge(public)
+        .merge(private)
         .layer(session_layer);
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port)).await?;

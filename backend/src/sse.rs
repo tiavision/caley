@@ -86,8 +86,13 @@ pub async fn push_webhook(
 
     let token = match params.get("token") {
         Some(t) => t.clone(),
-        None => return (axum::http::StatusCode::BAD_REQUEST, "missing token").into_response(),
+        None => {
+            eprintln!("[push] webhook called with no token");
+            return (axum::http::StatusCode::BAD_REQUEST, "missing token").into_response();
+        }
     };
+
+    eprintln!("[push] webhook called with token {token}");
 
     // Look up which user+calendar this token belongs to
     let db = state.db.lock().unwrap();
@@ -100,9 +105,13 @@ pub async fn push_webhook(
 
     match result {
         Ok(user_id) => {
+            eprintln!("[push] webhook matched user {user_id}, triggering incremental sync");
             state.sync_manager.trigger(&user_id, SyncTrigger::Incremental);
             axum::http::StatusCode::CREATED.into_response()
         }
-        Err(_) => (axum::http::StatusCode::UNAUTHORIZED, "unknown token").into_response(),
+        Err(_) => {
+            eprintln!("[push] webhook token not found in push_subscriptions");
+            (axum::http::StatusCode::UNAUTHORIZED, "unknown token").into_response()
+        }
     }
 }

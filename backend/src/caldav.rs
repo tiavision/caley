@@ -497,27 +497,30 @@ impl CalDavClient {
         auth: &str,
     ) -> anyhow::Result<Option<i64>> {
         let expires_at_default = chrono::Utc::now().timestamp() + 86400;
+        // IMF-fixdate as required by the BitFire WebDAV Push spec
         let expires_str = chrono::DateTime::from_timestamp(expires_at_default, 0)
             .unwrap()
-            .format("%Y-%m-%dT%H:%M:%SZ")
+            .format("%a, %d %b %Y %H:%M:%S GMT")
             .to_string();
 
         let body = format!(
-            r#"<?xml version="1.0" encoding="utf-8"?>
-<push:push-register xmlns:push="https://bitfire.at/webdav-push" xmlns:d="DAV:">
-  <push:subscription>
-    <push:web-push-subscription>
-      <push:push-resource>{callback_url}</push:push-resource>
-      <push:content-encoding>aes128gcm</push:content-encoding>
-      <push:subscription-public-key push:type="p256dh">{p256dh}</push:subscription-public-key>
-      <push:auth-secret>{auth}</push:auth-secret>
-    </push:web-push-subscription>
-  </push:subscription>
-  <push:trigger>
-    <push:content-update d:depth="1"/>
-  </push:trigger>
-  <push:expires>{expires_str}</push:expires>
-</push:push-register>"#
+            r#"<?xml version="1.0" encoding="utf-8" ?>
+<push-register xmlns="https://bitfire.at/webdav-push" xmlns:D="DAV:">
+  <subscription>
+    <web-push-subscription>
+      <push-resource>{callback_url}</push-resource>
+      <content-encoding>aes128gcm</content-encoding>
+      <subscription-public-key type="p256dh">{p256dh}</subscription-public-key>
+      <auth-secret>{auth}</auth-secret>
+    </web-push-subscription>
+  </subscription>
+  <trigger>
+    <content-update>
+      <D:depth>infinity</D:depth>
+    </content-update>
+  </trigger>
+  <expires>{expires_str}</expires>
+</push-register>"#
         );
 
         let resp = self
@@ -531,8 +534,12 @@ impl CalDavClient {
             .context("push-register POST failed")?;
 
         let status = resp.status();
-        if status.is_client_error() {
+        if status.as_u16() == 405 || status.as_u16() == 501 || status.as_u16() == 404 {
             return Ok(None);
+        }
+        if status.is_client_error() {
+            let body_text = resp.text().await.unwrap_or_default();
+            bail!("push-register rejected ({status}): {body_text}");
         }
         if !status.is_success() && status.as_u16() != 201 {
             bail!("push-register returned {status}");
@@ -1840,8 +1847,13 @@ fn extract_push_expiry(xml: &str) -> Option<i64> {
         return Some(now + seconds);
     }
 
-    // Absolute datetime: try parsing as RFC 3339 / ISO 8601
+    // Absolute datetime: try RFC 3339 / ISO 8601
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(text) {
+        return Some(dt.timestamp());
+    }
+
+    // IMF-fixdate: "Sat, 17 May 2026 11:00:00 GMT" (used by BitFire/Rustical)
+    if let Ok(dt) = chrono::DateTime::parse_from_str(text, "%a, %d %b %Y %H:%M:%S GMT") {
         return Some(dt.timestamp());
     }
 
