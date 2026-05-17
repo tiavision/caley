@@ -13,7 +13,6 @@
   let loading = true;
   let saving = false;
   let errorMsg = '';
-  let successMsg = '';
 
   const localeOptions = [
     { value: 'en', label: 'English' },
@@ -50,7 +49,6 @@
   async function onSubmit() {
     saving = true;
     errorMsg = '';
-    successMsg = '';
     const params = new URLSearchParams();
     params.append('caldav_base_url', caldavBaseUrl);
     params.append('caldav_username', caldavUsername);
@@ -127,9 +125,6 @@
       {#if errorMsg}
         <p class="error-msg">{errorMsg}</p>
       {/if}
-      {#if successMsg}
-        <p class="success-msg">{successMsg}</p>
-      {/if}
 
       <button type="submit" disabled={saving} aria-busy={saving}>
         {tl('settings_submit')}
@@ -167,7 +162,4 @@
     color: var(--pico-del-color);
   }
 
-  .success-msg {
-    color: var(--pico-ins-color);
-  }
 </style>

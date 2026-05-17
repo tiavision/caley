@@ -234,8 +234,8 @@
     const loc = navigator.language || 'en';
     if (ev.is_all_day) {
       if (ev.dtstart) {
-        const [y, m, d] = ev.dtstart.split('T')[0].split('-').map(Number);
-        return m.event_allDay() + ' · ' + new Date(y, m - 1, d).toLocaleDateString(loc, { dateStyle: 'long' });
+        const [y, monthNum, d] = ev.dtstart.split('T')[0].split('-').map(Number);
+        return m.event_allDay() + ' · ' + new Date(y, monthNum - 1, d).toLocaleDateString(loc, { dateStyle: 'long' });
       }
       return m.event_allDay();
     }
@@ -604,13 +604,13 @@
             <h2>
               <button
                 class="nav-btn"
-                aria-label={tl('cal_aria.prevMonth')}
+                aria-label={tl('cal_aria_prevMonth')}
                 on:click={() => navigateToMonth(monthGrid!.prev_month)}
               ><span class="arrow">‹</span></button>
 
               <span class="month-picker">
                 <select
-                  aria-label={tl('cal_aria.month')}
+                  aria-label={tl('cal_aria_month')}
                   value={gridMonthNum}
                   on:change={(e) => onMonthSelectChange('month', +(e.target as HTMLSelectElement).value)}
                 >
@@ -619,7 +619,7 @@
                   {/each}
                 </select>
                 <select
-                  aria-label={tl('cal_aria.year')}
+                  aria-label={tl('cal_aria_year')}
                   value={gridYear}
                   on:change={(e) => onMonthSelectChange('year', +(e.target as HTMLSelectElement).value)}
                 >
@@ -631,7 +631,7 @@
 
               <button
                 class="nav-btn"
-                aria-label={tl('cal_aria.nextMonth')}
+                aria-label={tl('cal_aria_nextMonth')}
                 on:click={() => navigateToMonth(monthGrid!.next_month)}
               ><span class="arrow">›</span></button>
             </h2>
@@ -778,7 +778,7 @@
             }}
           >&#9998;</button>
         {/if}
-        <button class="close-btn" aria-label={tl('weekly_aria.close')} on:click={closeDetail}></button>
+        <button class="close-btn" aria-label={tl('weekly_aria_close')} on:click={closeDetail}></button>
       </div>
     </header>
 
@@ -844,7 +844,7 @@
   <article>
     <header>
       <h3>{formMode === 'edit' ? tl('event_edit') : tl('event_create')}</h3>
-      <button class="close-btn" aria-label={tl('weekly_aria.close')} on:click={() => formDialogEl?.close()}></button>
+      <button class="close-btn" aria-label={tl('weekly_aria_close')} on:click={() => formDialogEl?.close()}></button>
     </header>
 
     {#if formError}
