@@ -16,7 +16,6 @@ use tower::{Layer, Service};
 use tower_sessions::Session;
 use crate::caldav::CalDavClient;
 use crate::db;
-use crate::db::Db;
 
 #[derive(Clone, Debug, ValueEnum)]
 pub enum UserIdClaim {
@@ -28,7 +27,7 @@ pub enum UserIdClaim {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: Arc<Db>,
+    pub db: db::Db,
     pub do_oidc_logout: bool,
     pub oidc_user_id_claim: UserIdClaim,
     pub encryption_key: [u8; 32],
@@ -77,7 +76,7 @@ impl FromRequestParts<AppState> for ExtractUserId {
 
 /// Build a CalDAV client for the current user. Returns an error response if
 /// credentials are missing or the client cannot be constructed.
-pub fn require_client(
+pub async fn require_client(
     state: &AppState,
     claims: &OidcClaims<EmptyAdditionalClaims>,
 ) -> Result<(String, CalDavClient), Response> {
@@ -91,8 +90,7 @@ pub fn require_client(
     // Make sure the background sync task is alive
     state.sync_manager.ensure_task_for(&user_id);
 
-    let db = state.db.lock().unwrap();
-    let settings = match db::get_settings(&db, &user_id, &state.encryption_key) {
+    let settings = match db::get_settings(&state.db, &user_id, &state.encryption_key).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Database error: {e}");
@@ -127,8 +125,8 @@ pub async fn user_info(
     let user_id = extract_user_id(&claims, &state.oidc_user_id_claim);
     let has_settings = match &user_id {
         Some(uid) => {
-            let db = state.db.lock().unwrap();
-            db::get_settings(&db, uid, &state.encryption_key)
+            db::get_settings(&state.db, uid, &state.encryption_key)
+                .await
                 .ok()
                 .flatten()
                 .is_some()

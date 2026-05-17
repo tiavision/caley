@@ -7,6 +7,7 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt as _;
 
+use crate::db;
 use crate::oidc::{AppState, ExtractUserId};
 
 const CHANNEL_CAPACITY: usize = 64;
@@ -94,22 +95,14 @@ pub async fn push_webhook(
 
     eprintln!("[push] webhook called with token {token}");
 
-    // Look up which user+calendar this token belongs to
-    let db = state.db.lock().unwrap();
-    let result = db.query_row(
-        "SELECT user_id FROM push_subscriptions WHERE webhook_token = ?1",
-        rusqlite::params![token],
-        |row| row.get::<_, String>(0),
-    );
-    drop(db);
-
-    match result {
-        Ok(user_id) => {
+    // Look up which user this token belongs to
+    match db::get_user_id_from_push_token(&state.db, &token).await {
+        Ok(Some(user_id)) => {
             eprintln!("[push] webhook matched user {user_id}, triggering incremental sync");
             state.sync_manager.trigger(&user_id, SyncTrigger::Incremental);
             axum::http::StatusCode::CREATED.into_response()
         }
-        Err(_) => {
+        _ => {
             eprintln!("[push] webhook token not found in push_subscriptions");
             (axum::http::StatusCode::UNAUTHORIZED, "unknown token").into_response()
         }

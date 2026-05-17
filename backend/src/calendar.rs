@@ -244,17 +244,16 @@ pub async fn list_calendars(
         }
     };
 
-    let db = state.db.lock().unwrap();
-    let calendars = match db::get_cached_calendars(&db, &user_id) {
+    let calendars = match db::get_cached_calendars(&state.db, &user_id).await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("DB error listing calendars: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
         }
     };
-    let deactivated = db::get_deactivated_calendars(&db, &user_id, &state.encryption_key)
+    let deactivated = db::get_deactivated_calendars(&state.db, &user_id, &state.encryption_key)
+        .await
         .unwrap_or_default();
-    drop(db);
 
     let result: Vec<CalendarJson> = calendars
         .into_iter()
@@ -302,13 +301,10 @@ pub async fn list_events(
     let start = start.unwrap_or(week_start);
     let end = end.unwrap_or(week_start + chrono::TimeDelta::days(6));
 
-    let (calendars, deactivated) = {
-        let db = state.db.lock().unwrap();
-        let cals = db::get_cached_calendars(&db, &user_id).unwrap_or_default();
-        let deact = db::get_deactivated_calendars(&db, &user_id, &state.encryption_key)
-            .unwrap_or_default();
-        (cals, deact)
-    };
+    let calendars = db::get_cached_calendars(&state.db, &user_id).await.unwrap_or_default();
+    let deactivated = db::get_deactivated_calendars(&state.db, &user_id, &state.encryption_key)
+        .await
+        .unwrap_or_default();
 
     let color_map: HashMap<String, String> = calendars
         .iter()
@@ -324,11 +320,10 @@ pub async fn list_events(
     let start_str = start.format("%Y-%m-%d").to_string();
     let end_str = end.format("%Y-%m-%d").to_string();
 
-    let raw_pairs = {
-        let db = state.db.lock().unwrap();
-        db::get_raw_events(&db, &user_id, &active_hrefs, &start_str, &end_str)
-            .unwrap_or_default()
-    };
+    let raw_pairs =
+        db::get_raw_events(&state.db, &user_id, &active_hrefs, &start_str, &end_str)
+            .await
+            .unwrap_or_default();
 
     let mut all_events: Vec<(NaiveDate, EventJson)> = Vec::new();
     for (calendar_href, raw_ical) in raw_pairs {
@@ -410,13 +405,10 @@ pub async fn list_calendar(
         NaiveDate::from_ymd_opt(first_day.year(), first_day.month() - 1, 1).unwrap()
     };
 
-    let (calendars, deactivated) = {
-        let db = state.db.lock().unwrap();
-        let cals = db::get_cached_calendars(&db, &user_id).unwrap_or_default();
-        let deact = db::get_deactivated_calendars(&db, &user_id, &state.encryption_key)
-            .unwrap_or_default();
-        (cals, deact)
-    };
+    let calendars = db::get_cached_calendars(&state.db, &user_id).await.unwrap_or_default();
+    let deactivated = db::get_deactivated_calendars(&state.db, &user_id, &state.encryption_key)
+        .await
+        .unwrap_or_default();
 
     let color_map: HashMap<String, String> = calendars
         .iter()
@@ -435,45 +427,44 @@ pub async fn list_calendar(
     // Build color dot map: date → colors (non-recurring events in range)
     let mut colors_map: HashMap<NaiveDate, Vec<String>> = HashMap::new();
 
-    {
-        let db = state.db.lock().unwrap();
-        // Non-recurring events directly in range
-        let non_recurring = db::get_event_dates_for_month(
-            &db,
-            &user_id,
-            &active_hrefs,
-            &month_start_str,
-            &month_end_str,
-        )
-        .unwrap_or_default();
-        for (calendar_href, dtstart_str) in non_recurring {
-            if let Ok(date) = NaiveDate::parse_from_str(&dtstart_str, "%Y-%m-%d") {
-                let color = color_map.get(&calendar_href).map(|s| s.as_str()).unwrap_or("");
-                let dot_color = if color.is_empty() {
-                    NEUTRAL_DOT_COLOR.to_string()
-                } else {
-                    color.to_string()
-                };
-                colors_map.entry(date).or_default().push(dot_color);
-            }
-        }
-
-        // Recurring events need expansion
-        let recurring_raw = db::get_recurring_raw_events(&db, &user_id, &active_hrefs)
-            .unwrap_or_default();
-        for (calendar_href, raw_ical) in recurring_raw {
+    // Non-recurring events directly in range
+    let non_recurring = db::get_event_dates_for_month(
+        &state.db,
+        &user_id,
+        &active_hrefs,
+        &month_start_str,
+        &month_end_str,
+    )
+    .await
+    .unwrap_or_default();
+    for (calendar_href, dtstart_str) in non_recurring {
+        if let Ok(date) = NaiveDate::parse_from_str(&dtstart_str, "%Y-%m-%d") {
             let color = color_map.get(&calendar_href).map(|s| s.as_str()).unwrap_or("");
             let dot_color = if color.is_empty() {
                 NEUTRAL_DOT_COLOR.to_string()
             } else {
                 color.to_string()
             };
-            for event in CalDavClient::events_from_raw_ical(&raw_ical, first_day, last_day) {
-                colors_map
-                    .entry(event.date)
-                    .or_default()
-                    .push(dot_color.clone());
-            }
+            colors_map.entry(date).or_default().push(dot_color);
+        }
+    }
+
+    // Recurring events need expansion
+    let recurring_raw = db::get_recurring_raw_events(&state.db, &user_id, &active_hrefs)
+        .await
+        .unwrap_or_default();
+    for (calendar_href, raw_ical) in recurring_raw {
+        let color = color_map.get(&calendar_href).map(|s| s.as_str()).unwrap_or("");
+        let dot_color = if color.is_empty() {
+            NEUTRAL_DOT_COLOR.to_string()
+        } else {
+            color.to_string()
+        };
+        for event in CalDavClient::events_from_raw_ical(&raw_ical, first_day, last_day) {
+            colors_map
+                .entry(event.date)
+                .or_default()
+                .push(dot_color.clone());
         }
     }
 
@@ -542,13 +533,11 @@ pub async fn toggle_calendar(
         return (StatusCode::BAD_REQUEST, "Missing href parameter").into_response();
     }
 
-    let db = state.db.lock().unwrap();
     let result = if active {
-        db::activate_calendar(&db, &user_id, &href, &state.encryption_key)
+        db::activate_calendar(&state.db, &user_id, &href, &state.encryption_key).await
     } else {
-        db::deactivate_calendar(&db, &user_id, &href, &state.encryption_key)
+        db::deactivate_calendar(&state.db, &user_id, &href, &state.encryption_key).await
     };
-    drop(db);
 
     match result {
         Ok(_) => {
@@ -570,7 +559,7 @@ pub async fn save_event(
     claims: OidcClaims<EmptyAdditionalClaims>,
     body: String,
 ) -> Response {
-    let (user_id, client) = match require_client(&state, &claims) {
+    let (user_id, client) = match require_client(&state, &claims).await {
         Ok(pair) => pair,
         Err(r) => return r,
     };
@@ -676,7 +665,7 @@ pub async fn save_event(
 
         match client.put_event(&calendar_href, &uid, &modified).await {
             Ok(_) => {
-                optimistic_upsert(&state, &user_id, &calendar_href, &event_href, &modified);
+                optimistic_upsert(&state, &user_id, &calendar_href, &event_href, &modified).await;
                 state.sync_manager.trigger(&user_id, SyncTrigger::Incremental);
                 StatusCode::OK.into_response()
             }
@@ -735,12 +724,11 @@ pub async fn save_event(
                             eprintln!("Failed to delete event from old calendar: {e}");
                         } else {
                             let old_href = format!("{}/{}.ics", orig.trim_end_matches('/'), uid);
-                            let db = state.db.lock().unwrap();
-                            let _ = db::delete_event_by_href(&db, &user_id, orig, &old_href);
+                            let _ = db::delete_event_by_href(&state.db, &user_id, orig, &old_href).await;
                         }
                     }
                 }
-                optimistic_upsert(&state, &user_id, &calendar_href, &event_href, &ical);
+                optimistic_upsert(&state, &user_id, &calendar_href, &event_href, &ical).await;
                 state.sync_manager.trigger(&user_id, SyncTrigger::Incremental);
                 StatusCode::OK.into_response()
             }
@@ -757,7 +745,7 @@ pub async fn delete_event(
     claims: OidcClaims<EmptyAdditionalClaims>,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    let (user_id, client) = match require_client(&state, &claims) {
+    let (user_id, client) = match require_client(&state, &claims).await {
         Ok(pair) => pair,
         Err(r) => return r,
     };
@@ -799,7 +787,7 @@ pub async fn delete_event(
         return match client.put_event(&calendar_href, &uid, &modified).await {
             Ok(_) => {
                 let event_href = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
-                optimistic_upsert(&state, &user_id, &calendar_href, &event_href, &modified);
+                optimistic_upsert(&state, &user_id, &calendar_href, &event_href, &modified).await;
                 state.sync_manager.trigger(&user_id, SyncTrigger::Incremental);
                 StatusCode::OK.into_response()
             }
@@ -812,10 +800,7 @@ pub async fn delete_event(
 
     match client.delete_event(&calendar_href, &uid).await {
         Ok(_) => {
-            {
-                let db = state.db.lock().unwrap();
-                let _ = db::delete_cached_event(&db, &user_id, &calendar_href, &uid);
-            }
+            let _ = db::delete_cached_event(&state.db, &user_id, &calendar_href, &uid).await;
             state.sse_broadcaster.send(
                 &user_id,
                 crate::sse::SseMessage::EventRemoved {
@@ -835,17 +820,15 @@ pub async fn delete_event(
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-fn optimistic_upsert(
+async fn optimistic_upsert(
     state: &AppState,
     user_id: &str,
     calendar_href: &str,
     event_href: &str,
     raw_ical: &str,
 ) {
-    let db = state.db.lock().unwrap();
-    if let Err(e) = db::upsert_cached_event_raw(&db, user_id, calendar_href, event_href, "", raw_ical) {
+    if let Err(e) = db::upsert_cached_event_raw(&state.db, user_id, calendar_href, event_href, "", raw_ical).await {
         eprintln!("Optimistic cache update failed: {e}");
     }
-    drop(db);
     state.sse_broadcaster.send(user_id, crate::sse::SseMessage::EventsRefetch);
 }

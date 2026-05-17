@@ -29,8 +29,7 @@ pub async fn settings_form(
         }
     };
 
-    let db = state.db.lock().unwrap();
-    let existing = match crate::db::get_settings(&db, &user_id, &state.encryption_key) {
+    let existing = match crate::db::get_settings(&state.db, &user_id, &state.encryption_key).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Database error: {e}");
@@ -65,8 +64,7 @@ pub async fn save_settings(
     };
 
     let password = if form.caldav_password.is_empty() {
-        let db = state.db.lock().unwrap();
-        match crate::db::get_settings(&db, &user_id, &state.encryption_key) {
+        match crate::db::get_settings(&state.db, &user_id, &state.encryption_key).await {
             Ok(Some(s)) => s.caldav_password,
             _ => {
                 return (
@@ -109,15 +107,12 @@ pub async fn save_settings(
             .into_response();
     }
 
-    {
-        let db = state.db.lock().unwrap();
-        if let Err(e) = crate::db::clear_user_cache(&db, &user_id) {
-            eprintln!("Cache clear error: {e}");
-        }
-        if let Err(e) = crate::db::upsert_settings(&db, &user_id, &settings, &state.encryption_key) {
-            eprintln!("Database error saving settings: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save settings").into_response();
-        }
+    if let Err(e) = crate::db::clear_user_cache(&state.db, &user_id).await {
+        eprintln!("Cache clear error: {e}");
+    }
+    if let Err(e) = crate::db::upsert_settings(&state.db, &user_id, &settings, &state.encryption_key).await {
+        eprintln!("Database error saving settings: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save settings").into_response();
     }
 
     // Kick off a full sync with the new credentials

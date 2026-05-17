@@ -20,7 +20,7 @@ pub enum SyncTrigger {
 }
 
 pub struct SyncManager {
-    db: Arc<db::Db>,
+    db: db::Db,
     encryption_key: [u8; 32],
     broadcaster: Arc<SseBroadcaster>,
     app_base_url: String,
@@ -30,7 +30,7 @@ pub struct SyncManager {
 
 impl SyncManager {
     pub fn new(
-        db: Arc<db::Db>,
+        db: db::Db,
         encryption_key: [u8; 32],
         broadcaster: Arc<SseBroadcaster>,
         app_base_url: String,
@@ -109,10 +109,7 @@ impl SyncManager {
     }
 
     async fn sync_user(&self, user_id: &str, full: bool) -> anyhow::Result<()> {
-        let settings = {
-            let db = self.db.lock().unwrap();
-            db::get_settings(&db, user_id, &self.encryption_key)?
-        };
+        let settings = db::get_settings(&self.db, user_id, &self.encryption_key).await?;
         let Some(settings) = settings else {
             return Ok(()); // no CalDAV credentials configured yet
         };
@@ -126,8 +123,7 @@ impl SyncManager {
         // Determine whether we need to re-discover calendars.
         // Always do a full discovery when explicitly requested, or when the cache is empty.
         let cached_empty = if !full {
-            let db = self.db.lock().unwrap();
-            db::get_cached_calendars(&db, user_id)?.is_empty()
+            db::get_cached_calendars(&self.db, user_id).await?.is_empty()
         } else {
             false
         };
@@ -136,17 +132,15 @@ impl SyncManager {
         // On full sync, rediscover the calendar list from CalDAV
         let calendars: Vec<db::CachedCalendar> = if do_full {
             let fresh = client.calendars().await?;
-            {
-                let db = self.db.lock().unwrap();
-                for cal in &fresh {
-                    db::upsert_cached_calendar(
-                        &db,
-                        user_id,
-                        &cal.href,
-                        &cal.name,
-                        cal.color.as_deref(),
-                    )?;
-                }
+            for cal in &fresh {
+                db::upsert_cached_calendar(
+                    &self.db,
+                    user_id,
+                    &cal.href,
+                    &cal.name,
+                    cal.color.as_deref(),
+                )
+                .await?;
             }
             self.broadcaster.send(user_id, SseMessage::CalendarsChanged);
             fresh
@@ -158,8 +152,7 @@ impl SyncManager {
                 })
                 .collect()
         } else {
-            let db = self.db.lock().unwrap();
-            db::get_cached_calendars(&db, user_id)?
+            db::get_cached_calendars(&self.db, user_id).await?
         };
 
         for cal in &calendars {
@@ -176,10 +169,8 @@ impl SyncManager {
         user_id: &str,
         calendar_href: &str,
     ) -> anyhow::Result<()> {
-        let (stored_ctag, stored_token) = {
-            let db = self.db.lock().unwrap();
-            db::get_calendar_sync_state(&db, user_id, calendar_href)?
-        };
+        let (stored_ctag, stored_token) =
+            db::get_calendar_sync_state(&self.db, user_id, calendar_href).await?;
 
         // ── Try RFC 6578 incremental sync ───────────────────────────────────────
         if let Some(ref token) = stored_token {
@@ -187,29 +178,16 @@ impl SyncManager {
                 Ok(result) => {
                     let any_change =
                         !result.changed.is_empty() || !result.deleted.is_empty();
-                    {
-                        let db = self.db.lock().unwrap();
-                        for (href, etag, raw_ical) in result.changed {
-                            db::upsert_cached_event_raw(
-                                &db,
-                                user_id,
-                                calendar_href,
-                                &href,
-                                &etag,
-                                &raw_ical,
-                            )?;
-                        }
-                        for href in result.deleted {
-                            db::delete_event_by_href(&db, user_id, calendar_href, &href)?;
-                        }
-                        db::update_calendar_sync_state(
-                            &db,
-                            user_id,
-                            calendar_href,
-                            stored_ctag.as_deref(),
-                            Some(&result.new_token),
-                        )?;
-                    }
+                    db::apply_incremental_sync(
+                        &self.db,
+                        user_id,
+                        calendar_href,
+                        result.changed,
+                        result.deleted,
+                        &result.new_token,
+                        stored_ctag.as_deref(),
+                    )
+                    .await?;
                     if any_change {
                         self.broadcaster.send(user_id, SseMessage::EventsRefetch);
                     }
@@ -236,27 +214,15 @@ impl SyncManager {
 
         if need_full_fetch {
             let all_raw = client.fetch_all_raw(calendar_href).await?;
-            {
-                let db = self.db.lock().unwrap();
-                db::clear_calendar_events(&db, user_id, calendar_href)?;
-                for (href, etag, raw_ical) in all_raw {
-                    db::upsert_cached_event_raw(
-                        &db,
-                        user_id,
-                        calendar_href,
-                        &href,
-                        &etag,
-                        &raw_ical,
-                    )?;
-                }
-                db::update_calendar_sync_state(
-                    &db,
-                    user_id,
-                    calendar_href,
-                    new_ctag.as_deref(),
-                    new_token.as_deref(),
-                )?;
-            }
+            db::replace_calendar_events(
+                &self.db,
+                user_id,
+                calendar_href,
+                all_raw,
+                new_ctag.as_deref(),
+                new_token.as_deref(),
+            )
+            .await?;
             self.broadcaster.send(user_id, SseMessage::EventsRefetch);
         }
 
@@ -273,10 +239,10 @@ impl SyncManager {
         let now = chrono::Utc::now().timestamp();
         let renew_threshold = now + self.sync_interval.as_secs() as i64 * 2;
 
-        let existing = {
-            let db = self.db.lock().unwrap();
-            db::get_push_subscription(&db, user_id, calendar_href).ok().flatten()
-        };
+        let existing = db::get_push_subscription(&self.db, user_id, calendar_href)
+            .await
+            .ok()
+            .flatten();
         if let Some((_, expires_at)) = existing {
             if expires_at > renew_threshold {
                 return;
@@ -300,10 +266,9 @@ impl SyncManager {
 
         match client.register_push(calendar_href, &callback_url, &p256dh, &auth).await {
             Ok(Some(expires_at)) => {
-                let db = self.db.lock().unwrap();
                 if let Err(e) = db::upsert_push_subscription(
-                    &db, user_id, calendar_href, &token, "web-push", expires_at,
-                ) {
+                    &self.db, user_id, calendar_href, &token, "web-push", expires_at,
+                ).await {
                     eprintln!("[push] failed to store subscription for {calendar_href}: {e}");
                 }
             }

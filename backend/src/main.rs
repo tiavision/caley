@@ -16,7 +16,7 @@ use axum_oidc::{EmptyAdditionalClaims, OidcAuthLayer, OidcLoginLayer};
 use clap::Parser;
 use dotenvy::dotenv;
 use oidc::{AppState, UserIdClaim};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
 use tower_sessions::{cookie::SameSite, MemoryStore, Session, SessionManagerLayer};
@@ -52,14 +52,13 @@ async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     let args = Cli::parse();
 
-    let db_conn = db::init_db(&args.database_path)?;
-    let db = Arc::new(Mutex::new(db_conn));
+    let db = db::init_db(&args.database_path).await?;
 
     let encryption_key = crypto::derive_key(&args.encryption_key);
 
     let sse_broadcaster = Arc::new(sse::SseBroadcaster::new());
     let sync_manager = sync::SyncManager::new(
-        Arc::clone(&db),
+        db.clone(),
         encryption_key,
         Arc::clone(&sse_broadcaster),
         args.app_base_url.clone(),
