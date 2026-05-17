@@ -892,7 +892,7 @@
         {#if detailEvent.location}
           <div class="event-detail-row">
             <span class="event-detail-label">{tl('event_location')}</span>
-            <span>{detailEvent.location}</span>
+            <a href="https://www.google.com/maps/search/?api=1&query={encodeURIComponent(detailEvent.location)}" target="_blank" rel="noopener noreferrer">{detailEvent.location}</a>
           </div>
         {/if}
         {#if detailRecText}
