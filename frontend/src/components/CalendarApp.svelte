@@ -305,6 +305,7 @@
   let formSaving = false;
 
   let fUid = '', fSummary = '', fDate = '', fStartTime = '', fEndTime = '';
+  let focusedEventDate = '';
   let fIsAllDay = false, fLocation = '', fDescription = '', fTz = '';
   let fOriginalDtstart = '', fOriginalCalendarHref = '', fCalendarHref = '';
   let formAlarms: AlarmFields[] = [];
@@ -378,7 +379,7 @@
 
   function openNewEventForm() {
     formMode = 'create'; formScope = 'series';
-    fUid = ''; fSummary = ''; fDate = fmtDate(selectedWeekStart);
+    fUid = ''; fSummary = ''; fDate = focusedEventDate || fmtDate(new Date());
     fIsAllDay = true; fStartTime = ''; fEndTime = '';
     fLocation = ''; fDescription = ''; fTz = getUserTz();
     fOriginalDtstart = ''; fOriginalCalendarHref = '';
@@ -577,6 +578,7 @@
     grid.querySelectorAll<HTMLElement>('.appointment.event-trigger').forEach(el => el.setAttribute('tabindex', '-1'));
     next.setAttribute('tabindex', '0');
     next.focus();
+    focusedEventDate = next.closest<HTMLElement>('.day')?.dataset.date ?? '';
   }
 
   // ── Browser notifications ──────────────────────────────────────────────────
