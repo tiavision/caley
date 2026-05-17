@@ -315,6 +315,9 @@
   let fEndType: 'never' | 'count' | 'until' = 'never';
   let fCount = 1, fUntil = '';
 
+  let timeSuggestions: { label: string; h: number; m: number; prefixLen: number }[] = [];
+  let timeSuggestionIdx = -1;
+
   $: rruleJson = (() => {
     if (!fFreq) return '';
     const obj: RecurrenceInfo & { by_set_pos?: number[] } = {
@@ -382,6 +385,7 @@
     const active = calendars.find(c => c.is_active);
     fCalendarHref = active?.href || calendars[0]?.href || '';
     resetRecurrence(); formAlarms = []; formError = '';
+    timeSuggestions = []; timeSuggestionIdx = -1;
     setTimeout(() => {
       formDialogEl?.showModal();
       formDialogEl.scrollTop = 0;
@@ -408,6 +412,7 @@
     if (scope === 'series' && ev.is_recurring) populateRecurrence(ev.recurrence);
     else resetRecurrence();
     formAlarms = [...ev.alarms]; formError = '';
+    timeSuggestions = []; timeSuggestionIdx = -1;
     closeDetail();
     setTimeout(() => {
       formDialogEl?.showModal();
@@ -460,6 +465,68 @@
       if (res.ok) { formDialogEl?.close(); fetchEvents(); fetchMonthGrid(); }
     } catch {}
     formSaving = false;
+  }
+
+  // ── Time prediction ────────────────────────────────────────────────────────
+  function parseTimeSuggestions(input: string) {
+    const match = input.match(/^(\d{1,2})(?::(\d{0,2}))?(?:[ \t]*(am|pm))?(?=[ \t]|$)/i);
+    if (!match) return [];
+    const prefixLen = match[0].length;
+    const h = parseInt(match[1], 10);
+    const minStr = match[2] ?? '';
+    const m = minStr ? parseInt(minStr.padEnd(2, '0'), 10) : 0;
+    const ampm = (match[3] ?? '').toLowerCase();
+    if (isNaN(h) || h > 23 || isNaN(m) || m > 59) return [];
+    const make = (hour: number, min: number) => ({
+      h: hour, m: min, prefixLen,
+      label: new Date(2024, 0, 1, hour, min).toLocaleTimeString(navigator.language || 'en', { hour: '2-digit', minute: '2-digit' }),
+    });
+    if (ampm === 'am') return h <= 12 ? [make(h === 12 ? 0 : h, m)] : [];
+    if (ampm === 'pm') return h <= 12 ? [make(h === 12 ? 12 : h + 12, m)] : [];
+    if (h > 12) return [make(h, m)];
+    if (h === 0 || h === 12) return [make(h, m)];
+    return [make(h, m), make(h + 12, m)];
+  }
+
+  function applyTimeSuggestion(s: { label: string; h: number; m: number; prefixLen: number }) {
+    fSummary = fSummary.slice(s.prefixLen).trimStart();
+    fIsAllDay = false;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    fStartTime = pad(s.h) + ':' + pad(s.m);
+    const end = s.h * 60 + s.m + 30;
+    fEndTime = pad(Math.floor(end / 60) % 24) + ':' + pad(end % 60);
+    timeSuggestions = [];
+    timeSuggestionIdx = -1;
+    tick().then(() => summaryInputEl?.focus());
+  }
+
+  function onSummaryInput() {
+    timeSuggestions = parseTimeSuggestions(fSummary);
+    timeSuggestionIdx = -1;
+  }
+
+  function onSummaryKeydown(e: KeyboardEvent) {
+    if (!timeSuggestions.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      timeSuggestionIdx = Math.min(timeSuggestionIdx + 1, timeSuggestions.length - 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      timeSuggestionIdx = Math.max(timeSuggestionIdx - 1, -1);
+    } else if (e.key === 'Enter' && timeSuggestionIdx >= 0) {
+      e.preventDefault();
+      applyTimeSuggestion(timeSuggestions[timeSuggestionIdx]);
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      applyTimeSuggestion(timeSuggestions[timeSuggestionIdx >= 0 ? timeSuggestionIdx : 0]);
+    } else if (e.key === 'Escape') {
+      timeSuggestions = [];
+      timeSuggestionIdx = -1;
+    }
+  }
+
+  function onSummaryBlur() {
+    setTimeout(() => { timeSuggestions = []; timeSuggestionIdx = -1; }, 150);
   }
 
   // ── Past days ──────────────────────────────────────────────────────────────
@@ -873,7 +940,27 @@
     <form on:submit|preventDefault={submitEventForm}>
       <label>
         <span>{tl('event_summary')}</span>
-        <input type="text" bind:value={fSummary} bind:this={summaryInputEl} required />
+        <div class="summary-wrap">
+          <input
+            type="text" bind:value={fSummary} bind:this={summaryInputEl} required
+            on:input={onSummaryInput}
+            on:keydown={onSummaryKeydown}
+            on:blur={onSummaryBlur}
+          />
+          {#if timeSuggestions.length > 0}
+            <ul class="time-suggestions" role="listbox">
+              {#each timeSuggestions as s, i}
+                <li role="option" aria-selected={i === timeSuggestionIdx}>
+                  <button
+                    type="button"
+                    class:active={i === timeSuggestionIdx}
+                    on:mousedown|preventDefault={() => applyTimeSuggestion(s)}
+                  >{s.label}</button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
       </label>
 
       <div class="event-datetime-group">
@@ -1362,6 +1449,28 @@
   .edit-choice-popover button:hover { background: var(--pico-primary-background); color: var(--pico-primary-inverse); }
 
   /* Event form */
+  .summary-wrap { position: relative; }
+  .time-suggestions {
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
+    margin: 0.125rem 0 0; padding: 0.25rem; list-style: none;
+    background: var(--pico-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    box-shadow: 0 0.25rem 0.75rem rgba(0,0,0,0.15);
+  }
+  .time-suggestions li { margin: 0; }
+  .time-suggestions button {
+    width: 100%; text-align: left; border: none; background: none; margin: 0;
+    padding: 0.375rem 0.75rem; cursor: pointer; font-size: 0.875rem;
+    border-radius: calc(var(--pico-border-radius, 0.25rem) - 0.125rem);
+    color: var(--pico-color); transition: background 0.1s;
+  }
+  .time-suggestions button:hover,
+  .time-suggestions button.active {
+    background: var(--pico-primary-background);
+    color: var(--pico-primary-inverse);
+  }
+
   :global(#event-form form label) { display: flex; flex-direction: column; gap: 0.125rem; margin-bottom: 0.75rem; }
   :global(#event-form form label.all-day-label) { flex-direction: row; align-items: center; gap: 0.5rem; }
   :global(#event-form input:not([type=checkbox],[type=radio])),
