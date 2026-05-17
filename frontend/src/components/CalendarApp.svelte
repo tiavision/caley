@@ -383,8 +383,10 @@
     fIsAllDay = true; fStartTime = ''; fEndTime = '';
     fLocation = ''; fDescription = ''; fTz = getUserTz();
     fOriginalDtstart = ''; fOriginalCalendarHref = '';
+    const stored = localStorage.getItem('defaultCalendar');
     const active = calendars.find(c => c.is_active);
-    fCalendarHref = active?.href || calendars[0]?.href || '';
+    const fallback = active?.href || calendars[0]?.href || '';
+    fCalendarHref = (stored && calendars.find(c => c.href === stored && c.is_active)) ? stored : fallback;
     resetRecurrence(); formAlarms = []; formError = '';
     timeSuggestions = []; timeSuggestionIdx = -1;
     setTimeout(() => {
@@ -445,6 +447,7 @@
         body: p.toString(),
       });
       if (res.ok) {
+        if (formMode === 'create') localStorage.setItem('defaultCalendar', fCalendarHref);
         formDialogEl?.close();
         fetchEvents(); fetchMonthGrid();
       } else {
@@ -1148,7 +1151,7 @@
 
       <label>
         <span>{tl('event_calendar')}</span>
-        <select bind:value={fCalendarHref} disabled={formScope === 'this_instance'}>
+        <select bind:value={fCalendarHref} disabled={formScope === 'this_instance'} on:change={() => localStorage.setItem('defaultCalendar', fCalendarHref)}>
           {#each calendars as cal}
             <option value={cal.href}>{cal.name}</option>
           {/each}
