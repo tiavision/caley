@@ -594,6 +594,9 @@
 <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
 <div class="layout">
 
+  <!-- Sidebar: month grid + calendar list -->
+  <div class="sidebar">
+
   <!-- Month grid -->
   <div class="calendar-picker">
     <article class="card contrast" aria-label={tl('cal_monthlyView')}>
@@ -698,6 +701,8 @@
         </li>
       {/each}
     </ul>
+  </div>
+
   </div>
 
   <!-- Weekly view -->
@@ -1077,46 +1082,44 @@
     flex-direction: column;
     gap: 1rem;
   }
-  .calendar-picker { order: 2; }
+  .sidebar { order: 2; }
   .weekly { order: 1; }
-  .calendar-list-section { order: 3; }
 
   @media (min-width: 600px) and (max-width: 959px) {
     .layout {
       display: grid;
       grid-template-columns: 22rem 1fr;
-      grid-template-areas: "picker weekly" "list weekly";
+      grid-template-areas: "sidebar weekly";
       gap: 1rem;
       align-items: start;
     }
-    .calendar-picker { grid-area: picker; order: unset; }
-    .calendar-list-section { grid-area: list; order: unset; }
-    .weekly { grid-area: weekly; grid-row: 1 / -1; order: unset; }
+    .sidebar { grid-area: sidebar; display: flex; flex-direction: column; gap: 1rem; }
+    .weekly { grid-area: weekly; }
   }
 
   @media (min-width: 960px) and (max-width: 1399px) {
     .layout {
       display: grid;
+      grid-template-areas: "weekly weekly" "sidebar sidebar";
       grid-template-columns: 1fr 1fr;
-      grid-template-areas: "weekly weekly" "picker list";
       gap: 1rem;
     }
-    .calendar-picker { grid-area: picker; order: unset; }
-    .calendar-list-section { grid-area: list; order: unset; }
-    .weekly { grid-area: weekly; order: unset; }
+    .sidebar { grid-area: sidebar; display: flex; gap: 1rem; }
+    .calendar-picker { flex: 1; }
+    .calendar-list-section { flex: 1; }
+    .weekly { grid-area: weekly; }
   }
 
   @media (min-width: 1400px) {
     .layout {
       display: grid;
       grid-template-columns: 22rem 1fr;
-      grid-template-areas: "picker weekly" "list weekly";
+      grid-template-areas: "sidebar weekly";
       gap: 1rem;
       align-items: start;
     }
-    .calendar-picker { grid-area: picker; order: unset; }
-    .calendar-list-section { grid-area: list; order: unset; }
-    .weekly { grid-area: weekly; grid-row: 1 / -1; order: unset; }
+    .sidebar { grid-area: sidebar; display: flex; flex-direction: column; gap: 1rem; }
+    .weekly { grid-area: weekly; }
   }
 
   /* Month grid */
