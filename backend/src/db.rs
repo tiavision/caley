@@ -182,6 +182,43 @@ pub fn clear_user_cache(db: &Connection, user_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn upsert_push_subscription(
+    db: &Connection,
+    user_id: &str,
+    calendar_href: &str,
+    webhook_token: &str,
+    transport: &str,
+    expires_at: i64,
+) -> anyhow::Result<()> {
+    db.execute(
+        "INSERT INTO push_subscriptions (user_id, calendar_href, webhook_token, transport, expires_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(user_id, calendar_href) DO UPDATE SET
+             webhook_token = excluded.webhook_token,
+             transport = excluded.transport,
+             expires_at = excluded.expires_at",
+        params![user_id, calendar_href, webhook_token, transport, expires_at],
+    )?;
+    Ok(())
+}
+
+pub fn get_push_subscription(
+    db: &Connection,
+    user_id: &str,
+    calendar_href: &str,
+) -> anyhow::Result<Option<(String, i64)>> {
+    let result = db.query_row(
+        "SELECT webhook_token, expires_at FROM push_subscriptions WHERE user_id = ?1 AND calendar_href = ?2",
+        params![user_id, calendar_href],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+    );
+    match result {
+        Ok(pair) => Ok(Some(pair)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 // ── Calendar cache ────────────────────────────────────────────────────────────
 
 pub fn upsert_cached_calendar(

@@ -101,7 +101,7 @@ pub async fn push_webhook(
     match result {
         Ok(user_id) => {
             state.sync_manager.trigger(&user_id, SyncTrigger::Incremental);
-            axum::http::StatusCode::OK.into_response()
+            axum::http::StatusCode::CREATED.into_response()
         }
         Err(_) => (axum::http::StatusCode::UNAUTHORIZED, "unknown token").into_response(),
     }

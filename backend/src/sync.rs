@@ -1,8 +1,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use hkdf::Hkdf;
+use p256::SecretKey;
+use p256::elliptic_curve::sec1::ToEncodedPoint;
+use sha2::Sha256;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
+use uuid::Uuid;
 
 use crate::caldav::CalDavClient;
 use crate::db;
@@ -19,6 +25,7 @@ pub struct SyncManager {
     db: Arc<db::Db>,
     encryption_key: [u8; 32],
     broadcaster: Arc<SseBroadcaster>,
+    app_base_url: String,
     tasks: Mutex<HashMap<String, mpsc::UnboundedSender<SyncTrigger>>>,
 }
 
@@ -27,11 +34,13 @@ impl SyncManager {
         db: Arc<db::Db>,
         encryption_key: [u8; 32],
         broadcaster: Arc<SseBroadcaster>,
+        app_base_url: String,
     ) -> Arc<Self> {
         Arc::new(Self {
             db,
             encryption_key,
             broadcaster,
+            app_base_url,
             tasks: Mutex::new(HashMap::new()),
         })
     }
@@ -250,6 +259,79 @@ impl SyncManager {
             self.broadcaster.send(user_id, SseMessage::EventsRefetch);
         }
 
+        self.try_subscribe_push(client, user_id, calendar_href).await;
         Ok(())
     }
+
+    async fn try_subscribe_push(
+        &self,
+        client: &CalDavClient,
+        user_id: &str,
+        calendar_href: &str,
+    ) {
+        let now = chrono::Utc::now().timestamp();
+        let renew_threshold = now + SYNC_INTERVAL_SECS as i64 * 2;
+
+        let existing = {
+            let db = self.db.lock().unwrap();
+            db::get_push_subscription(&db, user_id, calendar_href).ok().flatten()
+        };
+        if let Some((_, expires_at)) = existing {
+            if expires_at > renew_threshold {
+                return;
+            }
+        }
+
+        let (p256dh, auth) = match derive_push_keys(&self.encryption_key, user_id, calendar_href) {
+            Some(keys) => keys,
+            None => {
+                eprintln!("[push] key derivation failed for {calendar_href}");
+                return;
+            }
+        };
+
+        let token = Uuid::new_v4().to_string();
+        let callback_url = format!(
+            "{}/api/push/webhook?token={}",
+            self.app_base_url.trim_end_matches('/'),
+            token
+        );
+
+        match client.register_push(calendar_href, &callback_url, &p256dh, &auth).await {
+            Ok(Some(expires_at)) => {
+                let db = self.db.lock().unwrap();
+                if let Err(e) = db::upsert_push_subscription(
+                    &db, user_id, calendar_href, &token, "web-push", expires_at,
+                ) {
+                    eprintln!("[push] failed to store subscription for {calendar_href}: {e}");
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("[push] failed to register push for {calendar_href}: {e}");
+            }
+        }
+    }
+}
+
+/// Derive an EC P-256 key pair and auth secret deterministically from the encryption key.
+/// Returns `(p256dh_base64url, auth_base64url)` or `None` on failure (extremely unlikely).
+fn derive_push_keys(
+    encryption_key: &[u8; 32],
+    user_id: &str,
+    calendar_href: &str,
+) -> Option<(String, String)> {
+    let salt = format!("{user_id}{calendar_href}");
+    let hk = Hkdf::<Sha256>::new(Some(salt.as_bytes()), encryption_key);
+    let mut okm = [0u8; 48];
+    hk.expand(b"caley-push-ecdh-v1", &mut okm).ok()?;
+
+    let secret_key = SecretKey::from_bytes((&okm[..32]).into()).ok()?;
+    let public_key = secret_key.public_key();
+    // Uncompressed EC point: 04 || x || y = 65 bytes
+    let encoded = public_key.to_encoded_point(false);
+
+    let p256dh = URL_SAFE_NO_PAD.encode(encoded.as_bytes());
+    let auth = URL_SAFE_NO_PAD.encode(&okm[32..48]);
+    Some((p256dh, auth))
 }

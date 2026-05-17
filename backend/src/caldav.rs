@@ -480,6 +480,68 @@ impl CalDavClient {
         let xml = self.report(calendar_href, &body).await?;
         extract_sync_result(&xml, calendar_href)
     }
+
+    /// Register a BitFire WebDAV Push subscription (https://bitfire.at/webdav-push).
+    /// POSTs a push-register document to the calendar URL. The server will POST an encrypted
+    /// Web Push notification to `callback_url` when the calendar changes.
+    ///
+    /// `p256dh` — base64url-encoded EC P-256 uncompressed public key (65 bytes)
+    /// `auth`   — base64url-encoded 16-byte auth secret
+    ///
+    /// Returns the expiry Unix timestamp on success, `None` if push isn't supported.
+    pub async fn register_push(
+        &self,
+        calendar_href: &str,
+        callback_url: &str,
+        p256dh: &str,
+        auth: &str,
+    ) -> anyhow::Result<Option<i64>> {
+        let expires_at_default = chrono::Utc::now().timestamp() + 86400;
+        let expires_str = chrono::DateTime::from_timestamp(expires_at_default, 0)
+            .unwrap()
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string();
+
+        let body = format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<push:push-register xmlns:push="https://bitfire.at/webdav-push" xmlns:d="DAV:">
+  <push:subscription>
+    <push:web-push-subscription>
+      <push:push-resource>{callback_url}</push:push-resource>
+      <push:content-encoding>aes128gcm</push:content-encoding>
+      <push:subscription-public-key push:type="p256dh">{p256dh}</push:subscription-public-key>
+      <push:auth-secret>{auth}</push:auth-secret>
+    </push:web-push-subscription>
+  </push:subscription>
+  <push:trigger>
+    <push:content-update d:depth="1"/>
+  </push:trigger>
+  <push:expires>{expires_str}</push:expires>
+</push:push-register>"#
+        );
+
+        let resp = self
+            .client
+            .post(calendar_href)
+            .header(CONTENT_TYPE, "application/xml")
+            .basic_auth(&self.username, Some(&self.password))
+            .body(body)
+            .send()
+            .await
+            .context("push-register POST failed")?;
+
+        let status = resp.status();
+        if status.is_client_error() {
+            return Ok(None);
+        }
+        if !status.is_success() && status.as_u16() != 201 {
+            bail!("push-register returned {status}");
+        }
+
+        let xml = resp.text().await.unwrap_or_default();
+        let expires_at = extract_push_expiry(&xml).unwrap_or(expires_at_default);
+        Ok(Some(expires_at))
+    }
 }
 
 fn resolve_url(current_url: &str, href: &str) -> String {
@@ -1723,6 +1785,107 @@ fn extract_ctag_and_token(xml: &str) -> (Option<String>, Option<String>) {
         }
     }
     (ctag, sync_token)
+}
+
+/// Parse the expiry from a WebDAV push SUBSCRIBE response.
+/// Looks for `<expires>` text (ISO-8601 duration like "PT30M" or "PT1H", or a datetime).
+/// Returns a Unix timestamp, or None if the response body cannot be parsed.
+fn extract_push_expiry(xml: &str) -> Option<i64> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut in_expires = false;
+    let mut expires_text = String::new();
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(XmlEvent::Start(e)) => {
+                let lname = e.local_name();
+                let local = std::str::from_utf8(lname.as_ref()).unwrap_or("");
+                if local == "expires" {
+                    in_expires = true;
+                    expires_text.clear();
+                }
+            }
+            Ok(XmlEvent::Text(e)) => {
+                if in_expires {
+                    if let Ok(t) = e.unescape() {
+                        expires_text.push_str(t.as_ref());
+                    }
+                }
+            }
+            Ok(XmlEvent::End(e)) => {
+                let lname = e.local_name();
+                let local = std::str::from_utf8(lname.as_ref()).unwrap_or("");
+                if local == "expires" {
+                    in_expires = false;
+                }
+            }
+            Ok(XmlEvent::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+
+    let text = expires_text.trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    let now = chrono::Utc::now().timestamp();
+
+    // ISO-8601 duration: "PT30M", "PT1H", "P1D", etc.
+    if text.starts_with('P') {
+        let seconds = parse_iso_duration_secs(text)?;
+        return Some(now + seconds);
+    }
+
+    // Absolute datetime: try parsing as RFC 3339 / ISO 8601
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(text) {
+        return Some(dt.timestamp());
+    }
+
+    None
+}
+
+fn parse_iso_duration_secs(s: &str) -> Option<i64> {
+    // Handles simple cases: PT30M, PT1H, P1D, PT1H30M, etc.
+    let s = s.strip_prefix('P')?;
+    let (date_part, time_part) = if let Some(t) = s.split_once('T') {
+        (t.0, t.1)
+    } else {
+        (s, "")
+    };
+
+    let mut total: i64 = 0;
+
+    // Parse date part: D
+    let mut rest = date_part;
+    if let Some(pos) = rest.find('D') {
+        let days: i64 = rest[..pos].parse().ok()?;
+        total += days * 86400;
+        rest = &rest[pos + 1..];
+    }
+    let _ = rest;
+
+    // Parse time part: H, M, S
+    let mut rest = time_part;
+    if let Some(pos) = rest.find('H') {
+        let hours: i64 = rest[..pos].parse().ok()?;
+        total += hours * 3600;
+        rest = &rest[pos + 1..];
+    }
+    if let Some(pos) = rest.find('M') {
+        let mins: i64 = rest[..pos].parse().ok()?;
+        total += mins * 60;
+        rest = &rest[pos + 1..];
+    }
+    if let Some(pos) = rest.find('S') {
+        let secs: i64 = rest[..pos].parse().ok()?;
+        total += secs;
+    }
+
+    if total > 0 { Some(total) } else { None }
 }
 
 /// Inject or replace a RECURRENCE-ID override VEVENT into an existing iCal string.

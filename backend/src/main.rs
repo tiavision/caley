@@ -60,6 +60,7 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&db),
         encryption_key,
         Arc::clone(&sse_broadcaster),
+        args.app_base_url.clone(),
     );
 
     let state = AppState {
