@@ -18,8 +18,8 @@ main.container-fluid {
     flex: 1;
 }
 
-@media (max-width: 767px) {
-    header.container {
+@media (max-width: 599px) {
+    header.container-fluid {
         order: 1;
     }
     main.container-fluid {
