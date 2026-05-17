@@ -1,0 +1,17 @@
+{
+  "name": "Caley",
+  "short_name": "Caley",
+  "description": "CalDAV calendar viewer",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#0172ad",
+  "background_color": "#0172ad",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

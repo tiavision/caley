@@ -16,6 +16,7 @@ COPY backend/Cargo.toml backend/Cargo.lock ./
 RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build --release --target x86_64-unknown-linux-musl && rm -rf src
 
 COPY backend/src/ src/
+COPY backend/migrations migrations/
 RUN touch src/main.rs && cargo build --release --target x86_64-unknown-linux-musl
 
 FROM scratch
