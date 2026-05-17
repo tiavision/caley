@@ -1,1 +1,3 @@
 src/paraglide/
+dist/
+node_modules/

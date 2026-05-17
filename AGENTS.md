@@ -5,7 +5,7 @@
 Two-package monorepo with no root-level tooling:
 
 - **`backend/`** — Rust binary crate (edition 2024). CalDAV client that fetches and parses iCal events. Axum web server.
-- **`frontend/`** — Astro 6 static site. Pico CSS + HTMX + Sass. Calendar UI wired to the backend.
+- **`frontend/`** — Vite + Svelte 5 static site. Pico CSS + Sass. Calendar UI wired to the backend.
 
 ## Backend
 
@@ -26,14 +26,14 @@ Two-package monorepo with no root-level tooling:
 ## Frontend
 
 - Install: `npm install` from `frontend/`
-- Dev server: `npm run dev` → `localhost:4321`
+- Dev server: `npm run dev` → `localhost:5173`
 - Build: `npm run build` → `frontend/dist/`
-- TypeScript strict mode (extends `astro/tsconfigs/strict`)
+- TypeScript strict mode
 - SCSS via `sass-embedded` (not dart-sass)
-- HTMX integrated into components and backend templates for dynamic loading, calendar navigation, and user info
+- i18n via `@inlang/paraglide-js` (compile-time message generation)
 
 ## Notes
 
 - No CI, no linter, no formatter, no test runner configured in either package
 - No root `package.json` or workspace config — each package is independent
-- OIDC authentication protects all endpoints; username shown in top-right via HTMX
+- OIDC authentication protects all endpoints; username shown in top-right

@@ -3,19 +3,18 @@
   "type": "module",
   "version": "0.0.1",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
-    "preview": "astro preview",
-    "astro": "astro"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@astrojs/svelte": "^8.0.0",
     "@inlang/paraglide-js": "^2.18.0",
     "@picocss/pico": "^2.1.1",
-    "astro": "6.2.2",
     "svelte": "^5.43.6"
   },
   "devDependencies": {
-    "sass-embedded": "^1.97.2"
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "sass-embedded": "^1.97.2",
+    "vite": "^6.3.5"
   }
 }

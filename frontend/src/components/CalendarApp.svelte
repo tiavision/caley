@@ -645,13 +645,14 @@
             {/each}
           </div>
 
-          <div class="date-grid">
+          <div class="date-grid" role="grid">
             {#each monthGrid.days as day (day.date_str)}
               {#if day.is_current_month}
                 <div
                   class="date-cell"
                   class:selected-week={selectedWeekDates.has(day.date_str)}
                   data-date={day.date_str}
+                  role="gridcell"
                   tabindex="0"
                   on:click={() => selectDay(day.date_str)}
                   on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectDay(day.date_str); } }}
@@ -711,6 +712,7 @@
       class:events-loading={eventsLoading}
       role="grid"
       aria-label="Weekly calendar"
+      tabindex="0"
       style="position:relative"
       on:keydown={handleGridKeydown}
     >
@@ -729,14 +731,15 @@
           class:day-expanded={expanded}
           data-date={day.date_iso}
         >
-          <h5 on:click={() => { if (past && day.events.length > 0) togglePastDay(day.date_iso); }}>
+          <button type="button" class="day-heading" on:click={() => { if (past && day.events.length > 0) togglePastDay(day.date_iso); }}>
             {new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { weekday: 'long' })}
             {#if past && day.events.length > 0 && !expanded}
               <span class="day-past-count">{day.events.length}</span>
             {/if}
-          </h5>
+          </button>
           <div class="appointments">
             {#each day.events as event (event.uid + event.dtstart)}
+                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                 <article
                   class="appointment event-trigger"
                   style="border-left: 3px solid {event.color}"
@@ -1130,6 +1133,12 @@
     font-weight: 600;
   }
   .date-cell.empty { background: transparent; cursor: default; }
+  .day-heading {
+    background: none; border: none; margin: 0; padding: 0;
+    color: inherit; font: inherit; text-align: inherit; cursor: pointer;
+    font-size: 1.125rem; font-weight: 700; line-height: 1.225;
+    width: 100%; display: block;
+  }
   .event-dots { display: flex; justify-content: center; gap: 3px; margin-top: 3px; }
   .event-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
   .calendar-loading { padding: 2rem; text-align: center; font-style: italic; color: var(--pico-muted-color); }
@@ -1205,7 +1214,7 @@
 
   /* Day columns */
   :global(.day.today) { border-top: 2px solid var(--pico-primary-background); }
-  :global(.day.today h5) { color: var(--pico-primary-background); font-weight: bold; }
+  :global(.day.today .day-heading) { color: var(--pico-primary-background); font-weight: bold; }
 
   .day-past-count { display: none; }
 
@@ -1213,9 +1222,9 @@
     :global(.appointments) { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
     :global(.day.day-past .appointments) { display: none; }
     :global(.day.day-past.day-expanded .appointments) { display: grid; }
-    :global(.day.day-past h5) { cursor: pointer; user-select: none; }
-    :global(.day.day-past h5::after) { content: ' ▸'; font-size: 0.7em; color: var(--pico-muted-color); }
-    :global(.day.day-past.day-expanded h5::after) { content: ' ▾'; }
+    :global(.day.day-past .day-heading) { cursor: pointer; user-select: none; }
+    :global(.day.day-past .day-heading::after) { content: ' ▸'; font-size: 0.7em; color: var(--pico-muted-color); }
+    :global(.day.day-past.day-expanded .day-heading::after) { content: ' ▾'; }
     :global(.day.day-past-empty) { display: none; }
     .day-past-count {
       display: inline-flex; align-items: center; justify-content: center;
