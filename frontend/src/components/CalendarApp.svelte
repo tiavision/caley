@@ -300,6 +300,7 @@
   let formMode: 'create' | 'edit' = 'create';
   let formScope: 'series' | 'this_instance' = 'series';
   let formDialogEl: HTMLDialogElement;
+  let summaryInputEl: HTMLInputElement;
   let formError = '';
   let formSaving = false;
 
@@ -375,13 +376,18 @@
   function openNewEventForm() {
     formMode = 'create'; formScope = 'series';
     fUid = ''; fSummary = ''; fDate = fmtDate(selectedWeekStart);
-    fIsAllDay = false; fStartTime = ''; fEndTime = '';
+    fIsAllDay = true; fStartTime = ''; fEndTime = '';
     fLocation = ''; fDescription = ''; fTz = getUserTz();
     fOriginalDtstart = ''; fOriginalCalendarHref = '';
     const active = calendars.find(c => c.is_active);
     fCalendarHref = active?.href || calendars[0]?.href || '';
     resetRecurrence(); formAlarms = []; formError = '';
-    setTimeout(() => formDialogEl?.showModal(), 0);
+    setTimeout(() => {
+      formDialogEl?.showModal();
+      formDialogEl.scrollTop = 0;
+      summaryInputEl?.focus();
+      summaryInputEl?.select();
+    }, 0);
   }
 
   function openEditForm(ev: EventJson, scope: 'series' | 'this_instance') {
@@ -403,7 +409,12 @@
     else resetRecurrence();
     formAlarms = [...ev.alarms]; formError = '';
     closeDetail();
-    setTimeout(() => formDialogEl?.showModal(), 0);
+    setTimeout(() => {
+      formDialogEl?.showModal();
+      formDialogEl.scrollTop = 0;
+      summaryInputEl?.focus();
+      summaryInputEl?.select();
+    }, 0);
   }
 
   async function submitEventForm() {
@@ -862,7 +873,7 @@
     <form on:submit|preventDefault={submitEventForm}>
       <label>
         <span>{tl('event_summary')}</span>
-        <input type="text" bind:value={fSummary} required />
+        <input type="text" bind:value={fSummary} bind:this={summaryInputEl} required />
       </label>
 
       <div class="event-datetime-group">
