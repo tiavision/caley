@@ -116,16 +116,6 @@ impl CalDavClient {
         Ok(all)
     }
 
-    pub async fn events(
-        &self,
-        href: &str,
-        start: NaiveDate,
-        end: NaiveDate,
-    ) -> anyhow::Result<Vec<Event>> {
-        let raw_events = self.fetch_events(href, start, end).await?;
-        Ok(expand_events(raw_events, start, end))
-    }
-
     async fn start_url(&self) -> String {
         self.discover_caldav_endpoint()
             .await
@@ -213,35 +203,6 @@ impl CalDavClient {
 
         let xml = self.propfind(home_set_url, "1", body).await?;
         parse_all_calendars(&xml, home_set_url)
-    }
-
-    async fn fetch_events(
-        &self,
-        calendar_url: &str,
-        start: NaiveDate,
-        end: NaiveDate,
-    ) -> anyhow::Result<Vec<RawIcalEvent>> {
-        let start_str = format!("{}T000000Z", start.format("%Y%m%d"));
-        let end_str = format!("{}T235959Z", end.format("%Y%m%d"));
-
-        let body = format!(
-            r#"<?xml version="1.0" encoding="utf-8"?>
-<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
-  <d:prop>
-    <c:calendar-data/>
-  </d:prop>
-  <c:filter>
-    <c:comp-filter name="VCALENDAR">
-      <c:comp-filter name="VEVENT">
-        <c:time-range start="{start_str}" end="{end_str}"/>
-      </c:comp-filter>
-    </c:comp-filter>
-  </c:filter>
-</c:calendar-query>"#
-        );
-
-        let xml = self.report(calendar_url, &body).await?;
-        extract_raw_events(&xml)
     }
 
     async fn propfind(
@@ -696,48 +657,6 @@ fn parse_all_calendars(xml: &str, base_url: &str) -> anyhow::Result<Vec<Calendar
     Ok(calendars)
 }
 
-fn extract_raw_events(xml: &str) -> anyhow::Result<Vec<RawIcalEvent>> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
-
-    let mut events = Vec::new();
-    let mut in_calendar_data = false;
-    let mut current_ical = String::new();
-    let mut buf = Vec::new();
-
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            XmlEvent::Start(e) => {
-                let local = e.local_name();
-                let local = std::str::from_utf8(local.as_ref())?;
-                if local == "calendar-data" {
-                    in_calendar_data = true;
-                    current_ical.clear();
-                }
-            }
-            XmlEvent::Text(e) => {
-                if in_calendar_data {
-                    current_ical.push_str(&e.unescape()?);
-                }
-            }
-            XmlEvent::End(e) => {
-                let local = e.local_name();
-                let local = std::str::from_utf8(local.as_ref())?;
-                if local == "calendar-data" {
-                    in_calendar_data = false;
-                    if !current_ical.is_empty() {
-                        events.extend(parse_raw_events(&current_ical));
-                    }
-                }
-            }
-            XmlEvent::Eof => break,
-            _ => {}
-        }
-    }
-
-    Ok(events)
-}
-
 fn unescape_ical_text(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let chars: Vec<char> = s.chars().collect();
@@ -791,7 +710,6 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
         let mut dtstart_tzid: Option<String> = None;
         let mut dtstart_is_date = false;
         let mut dtend_value: Option<String> = None;
-        let mut _dtend_tzid: Option<String> = None;
         let mut duration_str: Option<String> = None;
         let mut rrule: Option<String> = None;
         let mut rdates: Vec<DateProperty> = Vec::new();
@@ -838,15 +756,6 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
                 }
                 "DTEND" => {
                     dtend_value = property.value;
-                    if let Some(params) = property.params {
-                        for (key, vals) in params {
-                            if key == "TZID" {
-                                if let Some(first_val) = vals.first() {
-                                    _dtend_tzid = Some(first_val.clone());
-                                }
-                            }
-                        }
-                    }
                 }
                 "DURATION" => duration_str = property.value,
                 "RRULE" => rrule = property.value,
