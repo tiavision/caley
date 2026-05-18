@@ -9,6 +9,7 @@ use url::Url;
 
 use crate::db::UserSettings;
 use crate::oidc::{AppState, AuthMode, CurrentUser};
+use crate::sync::SyncTrigger;
 
 #[derive(serde::Deserialize)]
 pub struct LoginForm {
@@ -83,6 +84,7 @@ pub async fn handle_login(
     }
 
     state.sync_manager.ensure_task_for(&user_id);
+    state.sync_manager.trigger(&user_id, SyncTrigger::Incremental);
 
     Json(json!({"status": "ok"})).into_response()
 }

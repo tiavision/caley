@@ -60,14 +60,18 @@ pub async fn events_stream(
     // Ensure the sync task is running. If there is no cached data yet (first
     // login or failed initial sync), kick off a full sync immediately so the
     // UI fills up as soon as possible.
+    // Always trigger a sync when the main page opens.
+    // No cached data → full sync (first login or failed previous sync).
+    // Cached data → incremental sync (re-login or page reload — picks up recent changes cheaply).
     state.sync_manager.ensure_task_for(&user.user_id);
     let has_cached = db::get_cached_calendars(&state.db, &user.user_id)
         .await
         .map(|v| !v.is_empty())
         .unwrap_or(false);
-    if !has_cached {
-        state.sync_manager.trigger(&user.user_id, SyncTrigger::Full);
-    }
+    state.sync_manager.trigger(
+        &user.user_id,
+        if has_cached { SyncTrigger::Incremental } else { SyncTrigger::Full },
+    );
     let stream = BroadcastStream::new(rx).filter_map(|msg| {
         let event: Option<Event> = match msg {
             Ok(SseMessage::EventsRefetch) => {
