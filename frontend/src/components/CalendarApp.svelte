@@ -1285,7 +1285,7 @@
       gap: 1rem;
       align-items: start;
     }
-    .sidebar { grid-area: sidebar; display: flex; flex-direction: column; gap: 1rem; }
+    .sidebar { grid-area: sidebar; display: flex; flex-direction: column; gap: 1rem; position: sticky; top: 0; }
     .weekly { grid-area: weekly; }
   }
 
@@ -1310,7 +1310,7 @@
       gap: 1rem;
       align-items: start;
     }
-    .sidebar { grid-area: sidebar; display: flex; flex-direction: column; gap: 1rem; }
+    .sidebar { grid-area: sidebar; display: flex; flex-direction: column; gap: 1rem; position: sticky; top: 0; }
     .weekly { grid-area: weekly; }
   }
 
