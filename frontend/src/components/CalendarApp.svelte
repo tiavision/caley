@@ -945,10 +945,10 @@
   /* Weekly grid */
   .calendar {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 0.5rem;
   }
-  @media (max-width: 959px) { .calendar { grid-template-columns: 1fr; } }
+  @media (max-width: 959px) { .calendar { grid-template-columns: minmax(0, 1fr); } }
 
   .week-loading {
     position: absolute;
@@ -965,6 +965,7 @@
   .events-loading :global(.day) { opacity: 0.3; transition: opacity 200ms ease-in; }
 
   /* Day columns */
+  :global(.day) { min-width: 0; }
   :global(.day.today) { border-top: 2px solid var(--pico-primary-background); }
   :global(.day.today .day-heading) { color: var(--pico-primary-background); font-weight: bold; }
 
@@ -992,7 +993,7 @@
       color: var(--pico-muted-color);
       display: inline;
     }
-    :global(.appointments) { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    :global(.appointments) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.5rem; }
     :global(.day.day-past .appointments) { display: none; }
     :global(.day.day-past.day-expanded .appointments) { display: grid; }
     :global(.day.day-past .day-heading) { cursor: pointer; user-select: none; }
@@ -1017,13 +1018,15 @@
   /* Appointments */
   :global(article.appointment) {
     margin: 0 0 0.5rem 0 !important;
+    min-width: 0;
     font-size: medium;
     box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.08);
   }
-  :global(article.appointment p) { margin-bottom: 0.125rem; }
+  :global(article.appointment p) { margin-bottom: 0.125rem; overflow-wrap: anywhere; }
   :global(article.appointment > header) {
     font-size: small;
     color: var(--pico-muted-color);
+    overflow-wrap: anywhere;
   }
   @media (prefers-color-scheme: dark) {
     :global(article.appointment) { box-shadow: 0 1px 3px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08); }
