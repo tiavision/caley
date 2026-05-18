@@ -133,6 +133,7 @@
 
   function setupSSE() {
     sseSource = new EventSource('/api/events/stream');
+    sseSource.onopen = () => { fetchCalendars(); fetchEvents(); fetchMonthGrid(); };
     sseSource.addEventListener('events_refetch', () => { fetchEvents(); fetchMonthGrid(); });
     sseSource.addEventListener('calendars_changed', () => { fetchCalendars(); fetchMonthGrid(); });
     sseSource.addEventListener('event_removed', (e: MessageEvent) => {
@@ -688,8 +689,8 @@
     });
     window.addEventListener('keydown', handleKeydown);
 
-    await Promise.all([fetchCalendars(), fetchEvents(), fetchMonthGrid()]);
     setupSSE();
+    await Promise.all([fetchCalendars(), fetchEvents(), fetchMonthGrid()]);
   });
 
   onDestroy(() => {

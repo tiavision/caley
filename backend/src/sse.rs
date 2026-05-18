@@ -9,6 +9,7 @@ use tokio_stream::StreamExt as _;
 
 use crate::db;
 use crate::oidc::{AppState, CurrentUser};
+use crate::sync::SyncTrigger;
 
 const CHANNEL_CAPACITY: usize = 64;
 
@@ -53,7 +54,20 @@ pub async fn events_stream(
     axum::extract::State(state): axum::extract::State<AppState>,
     user: CurrentUser,
 ) -> impl IntoResponse {
+    // Subscribe before triggering sync so we never miss the completion event.
     let rx = state.sse_broadcaster.subscribe(&user.user_id);
+
+    // Ensure the sync task is running. If there is no cached data yet (first
+    // login or failed initial sync), kick off a full sync immediately so the
+    // UI fills up as soon as possible.
+    state.sync_manager.ensure_task_for(&user.user_id);
+    let has_cached = db::get_cached_calendars(&state.db, &user.user_id)
+        .await
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
+    if !has_cached {
+        state.sync_manager.trigger(&user.user_id, SyncTrigger::Full);
+    }
     let stream = BroadcastStream::new(rx).filter_map(|msg| {
         let event: Option<Event> = match msg {
             Ok(SseMessage::EventsRefetch) => {
