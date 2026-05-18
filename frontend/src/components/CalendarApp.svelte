@@ -56,6 +56,7 @@
 
   let selectedWeekStart: Date = getMonday(new Date());
   let gridMonth: string = fmtYM(selectedWeekStart);
+  const todayStr: string = fmtDate(new Date());
 
   $: weekEnd = (() => { const d = new Date(selectedWeekStart); d.setDate(d.getDate() + 6); return d; })();
   $: [gridYear, gridMonthNum] = gridMonth.split('-').map(Number);
@@ -171,6 +172,14 @@
   function navigateToMonth(month: string) {
     gridMonth = month;
     fetchMonthGrid(month);
+  }
+
+  function navigateToday() {
+    const today = new Date();
+    selectedWeekStart = getMonday(today);
+    fetchEvents();
+    const nm = fmtYM(today);
+    if (nm !== gridMonth) { gridMonth = nm; fetchMonthGrid(nm); }
   }
 
   function onMonthSelectChange(field: 'month' | 'year', val: number) {
@@ -657,7 +666,8 @@
       }
       return;
     }
-    if (e.key === 'n') { e.preventDefault(); navigateWeek(7); }
+    if (e.key === 't') { e.preventDefault(); navigateToday(); }
+    else if (e.key === 'n') { e.preventDefault(); navigateWeek(7); }
     else if (e.key === 'N') { e.preventDefault(); navigateWeek(28); }
     else if (e.key === 'p') { e.preventDefault(); navigateWeek(-7); }
     else if (e.key === 'P') { e.preventDefault(); navigateWeek(-28); }
@@ -698,7 +708,7 @@
 
   <!-- Month grid -->
   <div class="calendar-picker">
-    <article class="card contrast" aria-label={tl('cal_monthlyView')}>
+    <article class="card contrast">
       {#if monthGrid}
         <div style="position:relative">
           <header>
@@ -737,7 +747,6 @@
                 on:click={() => navigateToMonth(monthGrid!.next_month)}
               ><span class="arrow">›</span></button>
             </h2>
-            <p>{tl('cal_monthlyView')}</p>
           </hgroup>
           </header>
 
@@ -753,13 +762,14 @@
                 <div
                   class="date-cell"
                   class:selected-week={selectedWeekDates.has(day.date_str)}
+                  class:is-today={day.date_str === todayStr}
                   data-date={day.date_str}
                   role="gridcell"
                   tabindex="0"
                   on:click={() => selectDay(day.date_str)}
                   on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectDay(day.date_str); } }}
                 >
-                  {day.day_number}
+                  <span class="day-number">{day.day_number}</span>
                   {#if day.event_colors.length > 0}
                     <div class="event-dots">
                       {#each day.event_colors.slice(0, 3) as color}
@@ -782,8 +792,7 @@
 
   <!-- Calendar list -->
   <div class="calendar-list-section">
-    <h2>{tl('cal_heading')}</h2>
-    <ul class="calendar-list">
+<ul class="calendar-list">
       {#each calendars as cal}
         <li>
           <label>
@@ -807,8 +816,10 @@
   <!-- Weekly view -->
   <div class="weekly">
     <div class="weekly-header">
-      <h2>{tl('weekly_heading')}</h2>
+      <button class="nav-btn" aria-label="Previous week" on:click={() => navigateWeek(-7)}><span class="arrow">‹</span></button>
       <span class="week-range">{weekRangeText}</span>
+      <button class="nav-btn" aria-label="Next week" on:click={() => navigateWeek(7)}><span class="arrow">›</span></button>
+      <button class="today-btn" on:click={navigateToday}>{tl('cal_today')}</button>
     </div>
 
     <div
@@ -835,11 +846,17 @@
           class:day-expanded={expanded}
           data-date={day.date_iso}
         >
-          <button type="button" class="day-heading" on:click={() => { if (past && day.events.length > 0) togglePastDay(day.date_iso); }}>
+          <button type="button" class="day-heading"
+            title={new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { dateStyle: 'long' })}
+            on:click={() => { if (past && day.events.length > 0) togglePastDay(day.date_iso); }}>
             {new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { weekday: 'long' })}
             {#if past && day.events.length > 0 && !expanded}
               <span class="day-past-count">{day.events.length}</span>
             {/if}
+            {#if past && day.events.length > 0}
+              <span class="day-expand-icon" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+            {/if}
+            <span class="day-date">{new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { month: 'short', day: 'numeric' })}</span>
           </button>
           <div class="appointments">
             {#each day.events as event (event.uid + event.dtstart)}
@@ -1312,11 +1329,12 @@
     letter-spacing: 0.04em;
   }
   .date-cell {
-    padding: 0.75rem 0.25rem;
+    padding: 0 0.25rem;
     text-align: center;
     border-bottom: var(--pico-border-width) solid var(--pico-muted-border-color);
     border-right: var(--pico-border-width) solid var(--pico-muted-border-color);
-    min-height: 3rem;
+    aspect-ratio: 1;
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -1335,13 +1353,40 @@
     font-weight: 600;
   }
   .date-cell.empty { background: transparent; cursor: default; }
+  .date-cell.is-today .day-number {
+    position: relative;
+    z-index: 0;
+    display: block;
+    width: 1.5rem;
+    line-height: 1.5rem;
+    text-align: center;
+    color: var(--pico-primary-inverse);
+    font-weight: 700;
+    margin: 0 auto;
+  }
+  .date-cell.is-today .day-number::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: var(--pico-primary-background);
+    z-index: -1;
+  }
+  .date-cell.selected-week.is-today .day-number {
+    color: var(--pico-primary-background);
+  }
+  .date-cell.selected-week.is-today .day-number::before {
+    background: var(--pico-primary-inverse);
+  }
   .day-heading {
     background: none; border: none; margin: 0; padding: 0;
     color: inherit; font: inherit; text-align: inherit; cursor: pointer;
     font-size: 1.125rem; font-weight: 700; line-height: 1.225;
     width: 100%; display: block;
   }
-  .event-dots { display: flex; justify-content: center; gap: 3px; margin-top: 3px; }
+  .day-heading:focus:not(:focus-visible) { outline: none; }
+  .calendar:focus:not(:focus-visible) { outline: none; }
+  .event-dots { position: absolute; bottom: 0.3rem; left: 0; right: 0; display: flex; justify-content: center; gap: 3px; }
   .event-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
   .calendar-loading { padding: 2rem; text-align: center; font-style: italic; color: var(--pico-muted-color); }
 
@@ -1351,6 +1396,7 @@
     justify-content: space-between;
     gap: 0.5rem;
     margin: 0 0 0.5rem;
+    font-size: 0.9rem;
   }
   .nav-btn {
     display: flex;
@@ -1376,7 +1422,7 @@
   .month-picker select {
     font: inherit;
     cursor: pointer;
-    padding: 0.2rem 1.5rem 0.2rem 0.5rem;
+    padding: 0.15rem 1.25rem 0.15rem 0.4rem;
     line-height: 1.4;
     margin: 0;
   }
@@ -1389,8 +1435,26 @@
   :global(.dot) { border-radius: 50%; width: 10px; height: 10px; display: inline-block; }
 
   /* Weekly header */
-  .weekly-header { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+  .weekly-header { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
   .week-range { font-size: 0.875rem; color: var(--pico-muted-color); }
+  .today-btn {
+    margin-left: auto;
+    font-size: 0.75rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: var(--pico-border-radius);
+    border: var(--pico-border-width) solid var(--pico-primary-border);
+    background: transparent;
+    color: var(--pico-primary);
+    cursor: pointer;
+    line-height: 1.4;
+    margin-bottom: 0;
+    transition: background 0.15s, color 0.15s;
+  }
+  .today-btn:hover {
+    background: var(--pico-primary-background);
+    color: var(--pico-primary-inverse);
+    border-color: var(--pico-primary-background);
+  }
 
   /* Weekly grid */
   .calendar {
@@ -1418,15 +1482,36 @@
   :global(.day.today) { border-top: 2px solid var(--pico-primary-background); }
   :global(.day.today .day-heading) { color: var(--pico-primary-background); font-weight: bold; }
 
+  .day-date { display: none; }
+  .day-expand-icon { display: none; }
   .day-past-count { display: none; }
+  :global(.appointments) { margin-top: 0.4rem; }
 
   @media (max-width: 959px) {
+    .day-heading {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    .day-date {
+      display: block;
+      margin-left: auto;
+      font-size: 0.8125rem;
+      font-weight: 400;
+      color: var(--pico-muted-color);
+      flex-shrink: 0;
+    }
+    .day-expand-icon {
+      font-size: 0.7em;
+      color: var(--pico-muted-color);
+      display: inline;
+    }
     :global(.appointments) { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
     :global(.day.day-past .appointments) { display: none; }
     :global(.day.day-past.day-expanded .appointments) { display: grid; }
     :global(.day.day-past .day-heading) { cursor: pointer; user-select: none; }
-    :global(.day.day-past .day-heading::after) { content: ' ▸'; font-size: 0.7em; color: var(--pico-muted-color); }
-    :global(.day.day-past.day-expanded .day-heading::after) { content: ' ▾'; }
+    :global(.day.day-past .day-heading::after) { content: none; }
+    :global(.day.day-past.day-expanded .day-heading::after) { content: none; }
     :global(.day.day-past-empty) { display: none; }
     .day-past-count {
       display: inline-flex; align-items: center; justify-content: center;
