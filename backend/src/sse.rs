@@ -75,10 +75,10 @@ pub async fn events_stream(
     let stream = BroadcastStream::new(rx).filter_map(|msg| {
         let event: Option<Event> = match msg {
             Ok(SseMessage::EventsRefetch) => {
-                Some(Event::default().event("events_refetch").data(""))
+                Some(Event::default().event("events_refetch").data("1"))
             }
             Ok(SseMessage::CalendarsChanged) => {
-                Some(Event::default().event("calendars_changed").data(""))
+                Some(Event::default().event("calendars_changed").data("1"))
             }
             Ok(SseMessage::EventRemoved { uid, calendar_href }) => {
                 Some(Event::default().event("event_removed").data(format!("{uid}|{calendar_href}")))
