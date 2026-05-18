@@ -25,6 +25,12 @@ pub enum UserIdClaim {
     Name,
 }
 
+#[derive(Clone, Debug)]
+pub enum AuthMode {
+    Oidc,
+    Local,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: db::Db,
@@ -33,6 +39,56 @@ pub struct AppState {
     pub encryption_key: [u8; 32],
     pub sync_manager: Arc<crate::sync::SyncManager>,
     pub sse_broadcaster: Arc<crate::sse::SseBroadcaster>,
+    pub auth_mode: AuthMode,
+}
+
+pub struct CurrentUser {
+    pub user_id: String,
+    pub display_name: Option<String>,
+}
+
+impl FromRequestParts<AppState> for CurrentUser {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        match state.auth_mode {
+            AuthMode::Oidc => {
+                let claims = parts
+                    .extensions
+                    .get::<OidcClaims<EmptyAdditionalClaims>>()
+                    .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized").into_response())?;
+                let user_id = extract_user_id(claims, &state.oidc_user_id_claim)
+                    .ok_or_else(|| {
+                        (StatusCode::INTERNAL_SERVER_ERROR, "Cannot determine user ID from OIDC claims")
+                            .into_response()
+                    })?;
+                let display_name = claims
+                    .name()
+                    .and_then(|n| n.get(None).map(|s| s.as_str().to_owned()))
+                    .or_else(|| claims.preferred_username().map(|u| u.as_str().to_owned()))
+                    .or_else(|| Some(claims.subject().as_str().to_owned()));
+                Ok(CurrentUser { user_id, display_name })
+            }
+            AuthMode::Local => {
+                let session = parts
+                    .extensions
+                    .get::<Session>()
+                    .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized").into_response())?
+                    .clone();
+                let user_id = session
+                    .get::<String>("user_id")
+                    .await
+                    .ok()
+                    .flatten()
+                    .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized").into_response())?;
+                let display_name = session.get::<String>("display_name").await.ok().flatten();
+                Ok(CurrentUser { user_id, display_name })
+            }
+        }
+    }
 }
 
 pub fn extract_user_id(claims: &OidcClaims<EmptyAdditionalClaims>, claim: &UserIdClaim) -> Option<String> {
@@ -48,49 +104,15 @@ pub fn extract_user_id(claims: &OidcClaims<EmptyAdditionalClaims>, claim: &UserI
     }
 }
 
-/// Axum extractor that resolves the current user ID from OIDC claims.
-/// Used by SSE and other handlers that don't need a CalDAV client.
-pub struct ExtractUserId(pub String);
-
-impl FromRequestParts<AppState> for ExtractUserId {
-    type Rejection = Response;
-
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &AppState,
-    ) -> Result<Self, Self::Rejection> {
-        let claims = parts
-            .extensions
-            .get::<OidcClaims<EmptyAdditionalClaims>>()
-            .ok_or_else(|| {
-                (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
-            })?;
-        let user_id = extract_user_id(claims, &state.oidc_user_id_claim)
-            .ok_or_else(|| {
-                (StatusCode::INTERNAL_SERVER_ERROR, "Cannot determine user ID from OIDC claims")
-                    .into_response()
-            })?;
-        Ok(ExtractUserId(user_id))
-    }
-}
-
 /// Build a CalDAV client for the current user. Returns an error response if
 /// credentials are missing or the client cannot be constructed.
 pub async fn require_client(
     state: &AppState,
-    claims: &OidcClaims<EmptyAdditionalClaims>,
-) -> Result<(String, CalDavClient), Response> {
-    let user_id = match extract_user_id(claims, &state.oidc_user_id_claim) {
-        Some(id) => id,
-        None => {
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Could not determine user ID from OIDC claims").into_response());
-        }
-    };
+    user: &CurrentUser,
+) -> Result<CalDavClient, Response> {
+    state.sync_manager.ensure_task_for(&user.user_id);
 
-    // Make sure the background sync task is alive
-    state.sync_manager.ensure_task_for(&user_id);
-
-    let settings = match db::get_settings(&state.db, &user_id, &state.encryption_key).await {
+    let settings = match db::get_settings(&state.db, &user.user_id, &state.encryption_key).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Database error: {e}");
@@ -105,7 +127,7 @@ pub async fn require_client(
                     eprintln!("CalDAV client error: {e}");
                     (StatusCode::INTERNAL_SERVER_ERROR, "CalDAV configuration error").into_response()
                 })?;
-            Ok((user_id, client))
+            Ok(client)
         }
         None => Err((StatusCode::PRECONDITION_FAILED, "CalDAV credentials not configured").into_response()),
     }
@@ -113,35 +135,27 @@ pub async fn require_client(
 
 pub async fn user_info(
     State(state): State<AppState>,
-    claims: OidcClaims<EmptyAdditionalClaims>,
+    user: CurrentUser,
 ) -> impl IntoResponse {
-    let display_name = claims
-        .name()
-        .and_then(|n| n.get(None).map(|s| s.as_str().to_owned()))
-        .or_else(|| claims.preferred_username().map(|u| u.as_str().to_owned()))
-        .or_else(|| Some(claims.subject().as_str().to_owned()))
-        .unwrap_or_default();
+    let display_name = user.display_name.unwrap_or_else(|| user.user_id.clone());
 
-    let user_id = extract_user_id(&claims, &state.oidc_user_id_claim);
-    let has_settings = match &user_id {
-        Some(uid) => {
-            db::get_settings(&state.db, uid, &state.encryption_key)
-                .await
-                .ok()
-                .flatten()
-                .is_some()
-        }
-        None => false,
+    let has_settings = db::get_settings(&state.db, &user.user_id, &state.encryption_key)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+
+    state.sync_manager.ensure_task_for(&user.user_id);
+
+    let auth_mode = match state.auth_mode {
+        AuthMode::Oidc => "oidc",
+        AuthMode::Local => "local",
     };
-
-    // Ensure the background sync task is running on every page load
-    if let Some(uid) = &user_id {
-        state.sync_manager.ensure_task_for(uid);
-    }
 
     Json(json!({
         "display_name": display_name,
         "has_settings": has_settings,
+        "auth_mode": auth_mode,
     }))
 }
 
@@ -165,20 +179,29 @@ pub async fn logout_handler(
     response
 }
 
+pub async fn auth_callback_handler(session: Session) -> impl IntoResponse {
+    let target: Option<String> = session.get("auth_target").await.ok().flatten();
+    let _ = session.remove_value("auth_target").await;
+    Redirect::to(target.as_deref().unwrap_or("/"))
+}
+
 #[derive(Clone)]
-pub struct RequireAuthLayer;
+pub struct RequireAuthLayer {
+    pub auth_mode: AuthMode,
+}
 
 impl<S> Layer<S> for RequireAuthLayer {
     type Service = RequireAuthService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        RequireAuthService { inner }
+        RequireAuthService { inner, auth_mode: self.auth_mode.clone() }
     }
 }
 
 #[derive(Clone)]
 pub struct RequireAuthService<S> {
     inner: S,
+    auth_mode: AuthMode,
 }
 
 impl<S> Service<Request<Body>> for RequireAuthService<S>
@@ -197,29 +220,53 @@ where
     fn call(&mut self, request: Request<Body>) -> Self::Future {
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
+        let auth_mode = self.auth_mode.clone();
 
-        if request.extensions().get::<OidcClaims<EmptyAdditionalClaims>>().is_some() {
-            return Box::pin(async move { inner.call(request).await });
-        }
-
-        if request.uri().path() == "/auth/callback" {
-            return Box::pin(async move { inner.call(request).await });
-        }
-
-        let session = request.extensions().get::<Session>().cloned();
-        let target = request.uri().to_string();
-
-        Box::pin(async move {
-            if let Some(session) = session {
-                let _ = session.insert("auth_target", target).await;
+        match auth_mode {
+            AuthMode::Oidc => {
+                if request.extensions().get::<OidcClaims<EmptyAdditionalClaims>>().is_some() {
+                    return Box::pin(async move { inner.call(request).await });
+                }
+                if request.uri().path() == "/auth/callback" {
+                    return Box::pin(async move { inner.call(request).await });
+                }
+                let session = request.extensions().get::<Session>().cloned();
+                let target = request.uri().to_string();
+                Box::pin(async move {
+                    if let Some(session) = session {
+                        let _ = session.insert("auth_target", target).await;
+                    }
+                    Ok(Redirect::temporary("/auth/callback").into_response())
+                })
             }
-            Ok(Redirect::temporary("/auth/callback").into_response())
-        })
+            AuthMode::Local => {
+                let path = request.uri().path().to_string();
+                // Allow the settings page (login form) and static assets through
+                let is_settings = path.starts_with("/settings");
+                let is_static = path.starts_with("/assets/")
+                    || path.rsplit('/').next().map_or(false, |f| f.contains('.'));
+                if path == "/auth/login" || is_settings || is_static {
+                    return Box::pin(async move { inner.call(request).await });
+                }
+                let session = request.extensions().get::<Session>().cloned();
+                Box::pin(async move {
+                    let authenticated = if let Some(ref session) = session {
+                        session.get::<String>("user_id").await.ok().flatten().is_some()
+                    } else {
+                        false
+                    };
+                    if authenticated {
+                        return inner.call(request).await;
+                    }
+                    if path.starts_with("/api/") {
+                        return Ok((
+                            StatusCode::UNAUTHORIZED,
+                            Json(serde_json::json!({"error": "Unauthorized"})),
+                        ).into_response());
+                    }
+                    Ok(Redirect::temporary("/settings/").into_response())
+                })
+            }
+        }
     }
-}
-
-pub async fn auth_callback_handler(session: Session) -> impl IntoResponse {
-    let target: Option<String> = session.get("auth_target").await.ok().flatten();
-    let _ = session.remove_value("auth_target").await;
-    Redirect::to(target.as_deref().unwrap_or("/"))
 }

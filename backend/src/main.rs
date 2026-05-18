@@ -2,6 +2,7 @@ mod calendar;
 mod caldav;
 mod crypto;
 mod db;
+mod local_auth;
 mod oidc;
 mod settings;
 mod sse;
@@ -15,7 +16,7 @@ use axum_oidc::error::MiddlewareError;
 use axum_oidc::{EmptyAdditionalClaims, OidcAuthLayer, OidcLoginLayer};
 use clap::Parser;
 use dotenvy::dotenv;
-use oidc::{AppState, UserIdClaim};
+use oidc::{AppState, AuthMode, UserIdClaim};
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
@@ -26,11 +27,11 @@ struct Cli {
     #[arg(env = "CALDAV_PORT", default_value = "3000")]
     port: u16,
     #[arg(long, env = "OIDC_ISSUER")]
-    oidc_issuer: String,
+    oidc_issuer: Option<String>,
     #[arg(long, env = "OIDC_CLIENT_ID")]
-    oidc_client_id: String,
+    oidc_client_id: Option<String>,
     #[arg(long, env = "OIDC_CLIENT_SECRET")]
-    oidc_client_secret: String,
+    oidc_client_secret: Option<String>,
     #[arg(long, env = "APP_BASE_URL")]
     app_base_url: String,
     #[arg(long, env = "OIDC_LOGOUT", default_value = "true")]
@@ -57,6 +58,13 @@ async fn main() -> anyhow::Result<()> {
     let encryption_key = crypto::derive_key(&args.encryption_key);
 
     let sse_broadcaster = Arc::new(sse::SseBroadcaster::new());
+
+    let use_oidc = args.oidc_issuer.is_some()
+        && args.oidc_client_id.is_some()
+        && args.oidc_client_secret.is_some();
+
+    let auth_mode = if use_oidc { AuthMode::Oidc } else { AuthMode::Local };
+
     let sync_manager = sync::SyncManager::new(
         db.clone(),
         encryption_key,
@@ -72,31 +80,23 @@ async fn main() -> anyhow::Result<()> {
         encryption_key,
         sync_manager,
         sse_broadcaster,
+        auth_mode: auth_mode.clone(),
     };
 
-    let app_base_uri = args.app_base_url.parse()?;
+    let static_dir = args.static_dir
+        .unwrap_or_else(|| concat!(env!("CARGO_MANIFEST_DIR"), "/../frontend/dist").to_string());
 
     let session_store = MemoryStore::default();
     let session_layer = SessionManagerLayer::new(session_store)
         .with_same_site(SameSite::Lax);
-
-    let oidc_auth_layer = OidcAuthLayer::<EmptyAdditionalClaims>::discover_client(
-        app_base_uri,
-        args.oidc_issuer,
-        args.oidc_client_id,
-        Some(args.oidc_client_secret),
-        vec!["openid".into(), "profile".into()],
-    )
-    .await?;
 
     // Public — CalDAV servers POST here without a session cookie
     let public = Router::new()
         .route("/api/push/webhook", post(sse::push_webhook))
         .with_state(state.clone());
 
-    // All routes that require OIDC authentication
-    let private = Router::new()
-        .route("/auth/callback", get(oidc::auth_callback_handler))
+    // Shared private routes (both auth modes)
+    let shared_private = Router::new()
         .route("/api/calendars", get(calendar::list_calendars))
         .route("/api/calendar/toggle", post(calendar::toggle_calendar))
         .route("/api/events", get(calendar::list_events))
@@ -107,34 +107,65 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/settings", post(settings::save_settings))
         .route("/api/event", post(calendar::save_event))
         .route("/api/event", delete(calendar::delete_event))
-        .route("/logout", get(oidc::logout_handler))
-        .with_state(state)
-        .fallback_service(ServeDir::new(
-            args.static_dir
-                .unwrap_or_else(|| concat!(env!("CARGO_MANIFEST_DIR"), "/../frontend/dist").to_string()),
-        ))
-        .layer(
-            ServiceBuilder::new()
-                .layer(HandleErrorLayer::new(|session: Session, err: MiddlewareError| async move {
-                    match err {
-                        MiddlewareError::RequestToken(_) | MiddlewareError::ClaimsVerification(_) => {
-                            session.remove_value("axum-oidc").await.unwrap_or_default();
-                            Redirect::to("/").into_response()
-                        }
-                        _ => err.into_response(),
-                    }
-                }))
-                .layer(oidc_auth_layer)
-                .layer(HandleErrorLayer::new(|e| async { e }))
-                .layer(oidc::RequireAuthLayer)
-                .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new())
-                .into_inner(),
-        );
+        .route("/api/account", delete(local_auth::delete_account));
 
-    let app = Router::new()
-        .merge(public)
-        .merge(private)
-        .layer(session_layer);
+    let app = if use_oidc {
+        let oidc_issuer = args.oidc_issuer.unwrap();
+        let oidc_client_id = args.oidc_client_id.unwrap();
+        let oidc_client_secret = args.oidc_client_secret.unwrap();
+        let app_base_uri = args.app_base_url.parse()?;
+
+        let oidc_auth_layer = OidcAuthLayer::<EmptyAdditionalClaims>::discover_client(
+            app_base_uri,
+            oidc_issuer,
+            oidc_client_id,
+            Some(oidc_client_secret),
+            vec!["openid".into(), "profile".into()],
+        )
+        .await?;
+
+        let private = shared_private
+            .route("/auth/callback", get(oidc::auth_callback_handler))
+            .route("/logout", get(oidc::logout_handler))
+            .with_state(state)
+            .fallback_service(ServeDir::new(&static_dir))
+            .layer(
+                ServiceBuilder::new()
+                    .layer(HandleErrorLayer::new(|session: Session, err: MiddlewareError| async move {
+                        match err {
+                            MiddlewareError::RequestToken(_) | MiddlewareError::ClaimsVerification(_) => {
+                                session.remove_value("axum-oidc").await.unwrap_or_default();
+                                Redirect::to("/").into_response()
+                            }
+                            _ => err.into_response(),
+                        }
+                    }))
+                    .layer(oidc_auth_layer)
+                    .layer(HandleErrorLayer::new(|e| async { e }))
+                    .layer(oidc::RequireAuthLayer { auth_mode: AuthMode::Oidc })
+                    .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new())
+                    .into_inner(),
+            );
+
+        println!("Auth mode: OIDC");
+        Router::new()
+            .merge(public)
+            .merge(private)
+            .layer(session_layer)
+    } else {
+        let private = shared_private
+            .route("/auth/login", post(local_auth::handle_login))
+            .route("/logout", get(local_auth::logout_handler))
+            .with_state(state)
+            .fallback_service(ServeDir::new(&static_dir))
+            .layer(oidc::RequireAuthLayer { auth_mode: AuthMode::Local });
+
+        println!("Auth mode: local CalDAV login (no OIDC configured)");
+        Router::new()
+            .merge(public)
+            .merge(private)
+            .layer(session_layer)
+    };
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port)).await?;
     println!("Listening on {}", listener.local_addr()?);

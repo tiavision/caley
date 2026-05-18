@@ -8,7 +8,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt as _;
 
 use crate::db;
-use crate::oidc::{AppState, ExtractUserId};
+use crate::oidc::{AppState, CurrentUser};
 
 const CHANNEL_CAPACITY: usize = 64;
 
@@ -51,9 +51,9 @@ impl SseBroadcaster {
 
 pub async fn events_stream(
     axum::extract::State(state): axum::extract::State<AppState>,
-    ExtractUserId(user_id): ExtractUserId,
+    user: CurrentUser,
 ) -> impl IntoResponse {
-    let rx = state.sse_broadcaster.subscribe(&user_id);
+    let rx = state.sse_broadcaster.subscribe(&user.user_id);
     let stream = BroadcastStream::new(rx).filter_map(|msg| {
         let event: Option<Event> = match msg {
             Ok(SseMessage::EventsRefetch) => {

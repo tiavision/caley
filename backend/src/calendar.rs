@@ -3,7 +3,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json, Response},
 };
-use axum_oidc::{EmptyAdditionalClaims, OidcClaims};
 use chrono::{Datelike, NaiveDate, NaiveDateTime, TimeZone as _, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -14,7 +13,7 @@ use crate::caldav::{
     update_vcalendar_event, Alarm, Attendee, CalDavClient, PartStat, RecurrenceInfo,
 };
 use crate::db;
-use crate::oidc::{extract_user_id, require_client, AppState};
+use crate::oidc::{require_client, AppState, CurrentUser};
 use crate::sync::SyncTrigger;
 
 const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
@@ -235,23 +234,16 @@ fn build_event_json(
 
 pub async fn list_calendars(
     State(state): State<AppState>,
-    claims: OidcClaims<EmptyAdditionalClaims>,
+    user: CurrentUser,
 ) -> Response {
-    let user_id = match extract_user_id(&claims, &state.oidc_user_id_claim) {
-        Some(id) => id,
-        None => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Cannot determine user ID").into_response()
-        }
-    };
-
-    let calendars = match db::get_cached_calendars(&state.db, &user_id).await {
+    let calendars = match db::get_cached_calendars(&state.db, &user.user_id).await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("DB error listing calendars: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
         }
     };
-    let deactivated = db::get_deactivated_calendars(&state.db, &user_id, &state.encryption_key)
+    let deactivated = db::get_deactivated_calendars(&state.db, &user.user_id, &state.encryption_key)
         .await
         .unwrap_or_default();
 
@@ -273,15 +265,9 @@ pub async fn list_calendars(
 
 pub async fn list_events(
     State(state): State<AppState>,
-    claims: OidcClaims<EmptyAdditionalClaims>,
+    user: CurrentUser,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    let user_id = match extract_user_id(&claims, &state.oidc_user_id_claim) {
-        Some(id) => id,
-        None => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Cannot determine user ID").into_response()
-        }
-    };
 
     let today = chrono::Local::now().date_naive();
     let weekday = today.weekday().num_days_from_monday();
@@ -301,8 +287,8 @@ pub async fn list_events(
     let start = start.unwrap_or(week_start);
     let end = end.unwrap_or(week_start + chrono::TimeDelta::days(6));
 
-    let calendars = db::get_cached_calendars(&state.db, &user_id).await.unwrap_or_default();
-    let deactivated = db::get_deactivated_calendars(&state.db, &user_id, &state.encryption_key)
+    let calendars = db::get_cached_calendars(&state.db, &user.user_id).await.unwrap_or_default();
+    let deactivated = db::get_deactivated_calendars(&state.db, &user.user_id, &state.encryption_key)
         .await
         .unwrap_or_default();
 
@@ -321,7 +307,7 @@ pub async fn list_events(
     let end_str = end.format("%Y-%m-%d").to_string();
 
     let raw_pairs =
-        db::get_raw_events(&state.db, &user_id, &active_hrefs, &start_str, &end_str)
+        db::get_raw_events(&state.db, &user.user_id, &active_hrefs, &start_str, &end_str)
             .await
             .unwrap_or_default();
 
@@ -366,15 +352,9 @@ pub async fn list_events(
 
 pub async fn list_calendar(
     State(state): State<AppState>,
-    claims: OidcClaims<EmptyAdditionalClaims>,
+    user: CurrentUser,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    let user_id = match extract_user_id(&claims, &state.oidc_user_id_claim) {
-        Some(id) => id,
-        None => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Cannot determine user ID").into_response()
-        }
-    };
 
     let today = chrono::Local::now().date_naive();
     let mut month_param: Option<String> = None;
@@ -405,8 +385,8 @@ pub async fn list_calendar(
         NaiveDate::from_ymd_opt(first_day.year(), first_day.month() - 1, 1).unwrap()
     };
 
-    let calendars = db::get_cached_calendars(&state.db, &user_id).await.unwrap_or_default();
-    let deactivated = db::get_deactivated_calendars(&state.db, &user_id, &state.encryption_key)
+    let calendars = db::get_cached_calendars(&state.db, &user.user_id).await.unwrap_or_default();
+    let deactivated = db::get_deactivated_calendars(&state.db, &user.user_id, &state.encryption_key)
         .await
         .unwrap_or_default();
 
@@ -430,7 +410,7 @@ pub async fn list_calendar(
     // Non-recurring events directly in range
     let non_recurring = db::get_event_dates_for_month(
         &state.db,
-        &user_id,
+        &user.user_id,
         &active_hrefs,
         &month_start_str,
         &month_end_str,
@@ -450,7 +430,7 @@ pub async fn list_calendar(
     }
 
     // Recurring events need expansion
-    let recurring_raw = db::get_recurring_raw_events(&state.db, &user_id, &active_hrefs)
+    let recurring_raw = db::get_recurring_raw_events(&state.db, &user.user_id, &active_hrefs)
         .await
         .unwrap_or_default();
     for (calendar_href, raw_ical) in recurring_raw {
@@ -510,16 +490,9 @@ pub async fn list_calendar(
 
 pub async fn toggle_calendar(
     State(state): State<AppState>,
-    claims: OidcClaims<EmptyAdditionalClaims>,
+    user: CurrentUser,
     body: String,
 ) -> Response {
-    let user_id = match extract_user_id(&claims, &state.oidc_user_id_claim) {
-        Some(id) => id,
-        None => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Cannot determine user ID").into_response()
-        }
-    };
-
     let mut href = String::new();
     let mut active = true;
     for (key, value) in form_urlencoded::parse(body.as_bytes()) {
@@ -534,15 +507,15 @@ pub async fn toggle_calendar(
     }
 
     let result = if active {
-        db::activate_calendar(&state.db, &user_id, &href, &state.encryption_key).await
+        db::activate_calendar(&state.db, &user.user_id, &href, &state.encryption_key).await
     } else {
-        db::deactivate_calendar(&state.db, &user_id, &href, &state.encryption_key).await
+        db::deactivate_calendar(&state.db, &user.user_id, &href, &state.encryption_key).await
     };
 
     match result {
         Ok(_) => {
             state.sse_broadcaster.send(
-                &user_id,
+                &user.user_id,
                 crate::sse::SseMessage::CalendarsChanged,
             );
             StatusCode::OK.into_response()
@@ -556,11 +529,11 @@ pub async fn toggle_calendar(
 
 pub async fn save_event(
     State(state): State<AppState>,
-    claims: OidcClaims<EmptyAdditionalClaims>,
+    user: CurrentUser,
     body: String,
 ) -> Response {
-    let (user_id, client) = match require_client(&state, &claims).await {
-        Ok(pair) => pair,
+    let client = match require_client(&state, &user).await {
+        Ok(c) => c,
         Err(r) => return r,
     };
 
@@ -665,8 +638,8 @@ pub async fn save_event(
 
         match client.put_event(&calendar_href, &uid, &modified).await {
             Ok(_) => {
-                optimistic_upsert(&state, &user_id, &calendar_href, &event_href, &modified).await;
-                state.sync_manager.trigger(&user_id, SyncTrigger::Incremental);
+                optimistic_upsert(&state, &user.user_id, &calendar_href, &event_href, &modified).await;
+                state.sync_manager.trigger(&user.user_id, SyncTrigger::Incremental);
                 StatusCode::OK.into_response()
             }
             Err(e) => {
@@ -724,12 +697,12 @@ pub async fn save_event(
                             eprintln!("Failed to delete event from old calendar: {e}");
                         } else {
                             let old_href = format!("{}/{}.ics", orig.trim_end_matches('/'), uid);
-                            let _ = db::delete_event_by_href(&state.db, &user_id, orig, &old_href).await;
+                            let _ = db::delete_event_by_href(&state.db, &user.user_id, orig, &old_href).await;
                         }
                     }
                 }
-                optimistic_upsert(&state, &user_id, &calendar_href, &event_href, &ical).await;
-                state.sync_manager.trigger(&user_id, SyncTrigger::Incremental);
+                optimistic_upsert(&state, &user.user_id, &calendar_href, &event_href, &ical).await;
+                state.sync_manager.trigger(&user.user_id, SyncTrigger::Incremental);
                 StatusCode::OK.into_response()
             }
             Err(e) => {
@@ -742,11 +715,11 @@ pub async fn save_event(
 
 pub async fn delete_event(
     State(state): State<AppState>,
-    claims: OidcClaims<EmptyAdditionalClaims>,
+    user: CurrentUser,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    let (user_id, client) = match require_client(&state, &claims).await {
-        Ok(pair) => pair,
+    let client = match require_client(&state, &user).await {
+        Ok(c) => c,
         Err(r) => return r,
     };
 
@@ -787,8 +760,8 @@ pub async fn delete_event(
         return match client.put_event(&calendar_href, &uid, &modified).await {
             Ok(_) => {
                 let event_href = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
-                optimistic_upsert(&state, &user_id, &calendar_href, &event_href, &modified).await;
-                state.sync_manager.trigger(&user_id, SyncTrigger::Incremental);
+                optimistic_upsert(&state, &user.user_id, &calendar_href, &event_href, &modified).await;
+                state.sync_manager.trigger(&user.user_id, SyncTrigger::Incremental);
                 StatusCode::OK.into_response()
             }
             Err(e) => {
@@ -800,15 +773,15 @@ pub async fn delete_event(
 
     match client.delete_event(&calendar_href, &uid).await {
         Ok(_) => {
-            let _ = db::delete_cached_event(&state.db, &user_id, &calendar_href, &uid).await;
+            let _ = db::delete_cached_event(&state.db, &user.user_id, &calendar_href, &uid).await;
             state.sse_broadcaster.send(
-                &user_id,
+                &user.user_id,
                 crate::sse::SseMessage::EventRemoved {
                     uid: uid.clone(),
                     calendar_href: calendar_href.clone(),
                 },
             );
-            state.sync_manager.trigger(&user_id, SyncTrigger::Incremental);
+            state.sync_manager.trigger(&user.user_id, SyncTrigger::Incremental);
             StatusCode::OK.into_response()
         }
         Err(e) => {

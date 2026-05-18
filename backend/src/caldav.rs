@@ -155,6 +155,30 @@ impl CalDavClient {
         Ok(all)
     }
 
+    pub async fn get_display_name(&self) -> anyhow::Result<Option<String>> {
+        let start_url = self.start_url().await;
+        let principal_body = r#"<?xml version="1.0" encoding="utf-8"?>
+<propfind xmlns="DAV:">
+  <prop>
+    <current-user-principal/>
+  </prop>
+</propfind>"#;
+        let xml = self.propfind(&start_url, "0", principal_body).await?;
+        let principal_hrefs = extract_hrefs(&xml, "current-user-principal")?;
+        if principal_hrefs.is_empty() {
+            return Ok(None);
+        }
+        let principal_url = resolve_url(&start_url, &principal_hrefs[0]);
+        let display_body = r#"<?xml version="1.0" encoding="utf-8"?>
+<propfind xmlns="DAV:">
+  <prop>
+    <displayname/>
+  </prop>
+</propfind>"#;
+        let display_xml = self.propfind(&principal_url, "0", display_body).await?;
+        Ok(extract_text_prop(&display_xml, "displayname"))
+    }
+
     async fn start_url(&self) -> String {
         self.discover_caldav_endpoint()
             .await
@@ -616,6 +640,45 @@ fn extract_hrefs(xml: &str, element_local_name: &str) -> anyhow::Result<Vec<Stri
         bail!("element '{element_local_name}' not found in response")
     }
     Ok(hrefs)
+}
+
+fn extract_text_prop(xml: &str, prop_local_name: &str) -> Option<String> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut in_prop = false;
+    let mut text = String::new();
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf).ok()? {
+            XmlEvent::Start(e) => {
+                let local = std::str::from_utf8(e.local_name().as_ref()).ok()?.to_string();
+                if local == prop_local_name {
+                    in_prop = true;
+                    text.clear();
+                }
+            }
+            XmlEvent::Text(e) => {
+                if in_prop {
+                    if let Ok(s) = e.unescape() {
+                        text.push_str(&s);
+                    }
+                }
+            }
+            XmlEvent::End(e) => {
+                let local = std::str::from_utf8(e.local_name().as_ref()).ok()?.to_string();
+                if local == prop_local_name && in_prop {
+                    let trimmed = text.trim().to_string();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed);
+                    }
+                    in_prop = false;
+                }
+            }
+            XmlEvent::Eof => break,
+            _ => {}
+        }
+    }
+    None
 }
 
 fn parse_all_calendars(xml: &str, base_url: &str) -> anyhow::Result<Vec<Calendar>> {

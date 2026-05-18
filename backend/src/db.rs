@@ -576,6 +576,17 @@ pub async fn replace_calendar_events(
     Ok(())
 }
 
+pub async fn delete_user(pool: &SqlitePool, user_id: &str) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM user_settings WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM deactivated_calendars WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM cached_calendars WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM cached_events WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM push_subscriptions WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 /// Returns (calendar_href, raw_ical) pairs for events in the date range or recurring.
 pub async fn get_raw_events(
     pool: &SqlitePool,

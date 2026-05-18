@@ -1,11 +1,14 @@
 # Caley
 
-CalDAV calendar viewer with OIDC authentication.
+CalDAV calendar viewer. Supports two authentication modes:
+
+- **OIDC** — authenticate via an external OIDC provider (Pocket ID, Keycloak, Authelia, Authentik, …). Configure CalDAV credentials separately in the settings page after login.
+- **Local (CalDAV login)** — no OIDC required. Users log in directly with their CalDAV server URL, username, and password. The user ID is derived as `username@hostname` (e.g. `user@dav.myurl.tld`). The display name is fetched from the CalDAV server.
 
 ## Architecture
 
-- **backend/** — Rust (edition 2024) Axum server. Fetches events from a CalDAV server, renders HTML via Askama templates. All endpoints require OIDC authentication.
-- **frontend/** — Astro 6 static site. Pico CSS + HTMX + Sass. Built to `dist/` and served by the backend as a fallback.
+- **backend/** — Rust (edition 2024) Axum server. CalDAV client, iCalendar parser, SQLite cache. Serves the frontend as static files.
+- **frontend/** — Vite + Svelte 5 static site. Pico CSS + Sass. Calendar UI wired to the backend via fetch/SSE.
 
 ## Local Development
 
@@ -15,18 +18,21 @@ All configuration is via environment variables. A `.env` file in `backend/` is a
 
 | Variable | Description | Required? |
 |---|---|---|
-| `OIDC_ISSUER` | OIDC provider issuer URL | Yes |
-| `OIDC_CLIENT_ID` | OIDC client ID | Yes |
-| `OIDC_CLIENT_SECRET` | OIDC client secret | Yes |
 | `APP_BASE_URL` | Public URL of this app (e.g. `https://calendar.mydomain.ltd`) | Yes |
 | `ENCRYPTION_KEY` | Passphrase used to derive an AES-256-GCM key for encrypting stored CalDAV credentials | Yes |
+| `OIDC_ISSUER` | OIDC provider issuer URL | OIDC mode only |
+| `OIDC_CLIENT_ID` | OIDC client ID | OIDC mode only |
+| `OIDC_CLIENT_SECRET` | OIDC client secret | OIDC mode only |
 | `CALDAV_PORT` | Listen port (default: `3000`) | No |
 | `OIDC_LOGOUT` | Set to `false` to skip OIDC logout (default: `true`) | No |
 | `OIDC_USER_ID_CLAIM` | OIDC claim to use as user ID: `sub` (default), `preferred-username`, `email`, or `name` | No |
 | `DATABASE_PATH` | Path to SQLite database file (default: `./data/caley.db`) | No |
 | `STATIC_DIR` | Path to frontend dist directory (default: `../frontend/dist`) | No |
+| `SYNC_INTERVAL_MINS` | Background sync interval in minutes (default: `5`) | No |
 
-CalDAV credentials (base URL, username, password) are configured per-user through the settings page after login, not via environment variables. Credentials are encrypted at rest using a key derived from `ENCRYPTION_KEY`.
+If all three OIDC variables are set, OIDC mode is used. Otherwise the app starts in local CalDAV login mode — no OIDC provider needed.
+
+CalDAV credentials (base URL, username, password) are encrypted at rest using a key derived from `ENCRYPTION_KEY`.
 
 ### Frontend
 
@@ -48,11 +54,19 @@ docker build -t caley .
 ### Run
 
 ```bash
+# OIDC mode
 docker run -p 3000:3000 \
   -v caley-data:/data \
   -e OIDC_ISSUER=https://auth.mydomain.ltd \
   -e OIDC_CLIENT_ID=caley \
   -e OIDC_CLIENT_SECRET=secret \
+  -e APP_BASE_URL=http://localhost:3000 \
+  -e ENCRYPTION_KEY=your-passphrase \
+  caley
+
+# Local CalDAV login mode (no OIDC)
+docker run -p 3000:3000 \
+  -v caley-data:/data \
   -e APP_BASE_URL=http://localhost:3000 \
   -e ENCRYPTION_KEY=your-passphrase \
   caley
@@ -71,7 +85,7 @@ services:
     volumes:
       - caley-data:/data
     environment:
-      - OIDC_ISSUER=https://auth.example.com
+      - OIDC_ISSUER=https://auth.example.com   # omit all three OIDC_ vars for local login mode
       - OIDC_CLIENT_ID=caley
       - OIDC_CLIENT_SECRET=secret
       - APP_BASE_URL=https://calendar.example.com
@@ -86,7 +100,13 @@ Podman works as a drop-in replacement. Use `podman build` and `podman run` with 
 
 ## OIDC Provider
 
-The app requires an OIDC provider for authentication. [Pocket ID](https://pocket-id.org/) has been tested and confirmed working. Other providers implementing the OIDC standard (Keycloak, Authelia, Authentik, etc.) should work as well.
+When using OIDC mode, [Pocket ID](https://pocket-id.org/) has been tested and confirmed working. Other providers implementing the OIDC standard (Keycloak, Authelia, Authentik, etc.) should work as well.
+
+If no OIDC provider is available, omit the three `OIDC_*` variables entirely to use local CalDAV login instead.
+
+## Account Management
+
+Users can delete their account (all stored credentials and cached data) from the settings page. In local login mode this also ends the session and redirects back to the login form.
 
 ## Reverse Proxy
 

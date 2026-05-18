@@ -18,7 +18,10 @@ export function initNav() {
 async function loadNavUser() {
   try {
     const res = await fetch('/api/user');
-    if (!res.ok) return;
+    if (!res.ok) {
+      document.getElementById('nav-loading')!.textContent = '';
+      return;
+    }
     const user = await res.json();
     const list = document.getElementById('nav-user-list');
     if (!list) return;

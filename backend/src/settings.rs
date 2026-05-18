@@ -3,11 +3,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json, Response},
 };
-use axum_oidc::{EmptyAdditionalClaims, OidcClaims};
 use serde_json::json;
 
 use crate::db::UserSettings;
-use crate::oidc::{extract_user_id, AppState};
+use crate::oidc::{AppState, CurrentUser};
 use crate::sync::SyncTrigger;
 
 #[derive(serde::Deserialize)]
@@ -19,17 +18,9 @@ pub(crate) struct SettingsForm {
 
 pub async fn settings_form(
     State(state): State<AppState>,
-    claims: OidcClaims<EmptyAdditionalClaims>,
+    user: CurrentUser,
 ) -> Response {
-    let user_id = match extract_user_id(&claims, &state.oidc_user_id_claim) {
-        Some(id) => id,
-        None => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Could not determine user ID")
-                .into_response()
-        }
-    };
-
-    let existing = match crate::db::get_settings(&state.db, &user_id, &state.encryption_key).await {
+    let existing = match crate::db::get_settings(&state.db, &user.user_id, &state.encryption_key).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Database error: {e}");
@@ -52,19 +43,11 @@ pub async fn settings_form(
 
 pub async fn save_settings(
     State(state): State<AppState>,
-    claims: OidcClaims<EmptyAdditionalClaims>,
+    user: CurrentUser,
     Form(form): Form<SettingsForm>,
 ) -> Response {
-    let user_id = match extract_user_id(&claims, &state.oidc_user_id_claim) {
-        Some(id) => id,
-        None => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Could not determine user ID")
-                .into_response()
-        }
-    };
-
     let password = if form.caldav_password.is_empty() {
-        match crate::db::get_settings(&state.db, &user_id, &state.encryption_key).await {
+        match crate::db::get_settings(&state.db, &user.user_id, &state.encryption_key).await {
             Ok(Some(s)) => s.caldav_password,
             _ => {
                 return (
@@ -107,17 +90,16 @@ pub async fn save_settings(
             .into_response();
     }
 
-    if let Err(e) = crate::db::clear_user_cache(&state.db, &user_id).await {
+    if let Err(e) = crate::db::clear_user_cache(&state.db, &user.user_id).await {
         eprintln!("Cache clear error: {e}");
     }
-    if let Err(e) = crate::db::upsert_settings(&state.db, &user_id, &settings, &state.encryption_key).await {
+    if let Err(e) = crate::db::upsert_settings(&state.db, &user.user_id, &settings, &state.encryption_key).await {
         eprintln!("Database error saving settings: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save settings").into_response();
     }
 
-    // Kick off a full sync with the new credentials
-    state.sync_manager.ensure_task_for(&user_id);
-    state.sync_manager.trigger(&user_id, SyncTrigger::Full);
+    state.sync_manager.ensure_task_for(&user.user_id);
+    state.sync_manager.trigger(&user.user_id, SyncTrigger::Full);
 
     Json(json!({"status": "ok"})).into_response()
 }
