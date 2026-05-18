@@ -20,7 +20,8 @@ use oidc::{AppState, AuthMode, UserIdClaim};
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
-use tower_sessions::{cookie::SameSite, MemoryStore, Session, SessionManagerLayer};
+use tower_sessions::{cookie::SameSite, Expiry, Session, SessionManagerLayer};
+use tower_sessions_sqlx_store::SqliteStore;
 
 #[derive(clap::Parser, Debug)]
 struct Cli {
@@ -73,6 +74,9 @@ async fn main() -> anyhow::Result<()> {
         args.sync_interval_mins,
     );
 
+    let session_store = SqliteStore::new(db.clone());
+    session_store.migrate().await?;
+
     let state = AppState {
         db,
         do_oidc_logout: args.oidc_logout,
@@ -86,9 +90,9 @@ async fn main() -> anyhow::Result<()> {
     let static_dir = args.static_dir
         .unwrap_or_else(|| concat!(env!("CARGO_MANIFEST_DIR"), "/../frontend/dist").to_string());
 
-    let session_store = MemoryStore::default();
     let session_layer = SessionManagerLayer::new(session_store)
-        .with_same_site(SameSite::Lax);
+        .with_same_site(SameSite::Lax)
+        .with_expiry(Expiry::OnInactivity(time::Duration::days(7)));
 
     // Public — CalDAV servers POST here without a session cookie
     let public = Router::new()
