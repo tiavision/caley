@@ -37,6 +37,7 @@
     const userRes = await fetch('/api/user').catch(() => null);
     if (!userRes || userRes.status === 401) {
       isLoginMode = true;
+      caldavBaseUrl = localStorage.getItem('caldav_base_url') || '';
       loading = false;
       return;
     }
@@ -75,6 +76,9 @@
       });
       const data = await res.json();
       if (res.ok && data.status === 'ok') {
+        if (isLoginMode) {
+          localStorage.setItem('caldav_base_url', caldavBaseUrl);
+        }
         window.location.href = '/';
       } else {
         errorMsg = data.error || tl('event_error');

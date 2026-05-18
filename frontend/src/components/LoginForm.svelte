@@ -22,6 +22,7 @@
     await initI18n();
     locale = getLocale();
     selectedLocale = locale.slice(0, 2);
+    caldavBaseUrl = localStorage.getItem('caldav_base_url') || '';
 
     window.addEventListener('localeChange', (e) => {
       locale = (e as CustomEvent).detail?.locale?.slice(0, 2) || getLocale();
@@ -48,6 +49,7 @@
       });
       const data = await res.json();
       if (res.ok && data.status === 'ok') {
+        localStorage.setItem('caldav_base_url', caldavBaseUrl);
         window.location.href = '/';
       } else {
         errorMsg = data.error || tl('login_error');
