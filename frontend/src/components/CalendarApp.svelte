@@ -1403,10 +1403,10 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 1.5em;
-    height: 1.5em;
+    width: 1.5rem;
+    height: 1.5rem;
     border-radius: var(--pico-border-radius);
-    font-size: 1em;
+    font-size: 1rem;
     line-height: 1;
     border: var(--pico-border-width) solid var(--pico-primary-border);
     background: var(--pico-primary-background);
