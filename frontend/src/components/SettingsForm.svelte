@@ -178,6 +178,10 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
+
+    h2 {
+      margin: 0;
+    }
   }
 
   .delete-account-btn {
