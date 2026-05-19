@@ -357,7 +357,14 @@
       <button class="nav-btn" aria-label="Previous week" on:click={() => navigateWeek(-7)}><span class="arrow">‹</span></button>
       <span class="week-range">{weekRangeText}</span>
       <button class="nav-btn" aria-label="Next week" on:click={() => navigateWeek(7)}><span class="arrow">›</span></button>
-      <button class="today-btn" on:click={navigateToday}>{tl('cal_today')}</button>
+      <div class="header-actions">
+        <a href="/search" class="search-btn" aria-label={tl('nav_search')}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+        </a>
+        <button class="today-btn" on:click={navigateToday}>{tl('cal_today')}</button>
+      </div>
     </div>
 
     <div
@@ -512,8 +519,26 @@
     padding-top: 0.25rem;
   }
   .week-range { font-size: 0.875rem; color: var(--pico-muted-color); }
-  .today-btn {
+  .header-actions {
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .search-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.2rem 0.3rem;
+    color: var(--pico-primary);
+    text-decoration: none;
+    opacity: 0.8;
+  }
+  .search-btn:hover {
+    opacity: 1;
+  }
+  .today-btn {
+    margin-left: 0;
     font-size: 0.75rem;
     padding: 0.2rem 0.6rem;
     border-radius: var(--pico-border-radius);
