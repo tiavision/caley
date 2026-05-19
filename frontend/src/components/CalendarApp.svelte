@@ -293,7 +293,6 @@
     window.addEventListener('keydown', handleKeydown);
 
     setupSSE();
-    await Promise.all([fetchCalendars(), fetchEvents(), fetchMonthGrid()]);
   });
 
   onDestroy(() => {
