@@ -152,26 +152,6 @@
     margin: 0 0 0.5rem;
     font-size: 0.9rem;
   }
-  .nav-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.5rem;
-    height: 1.5rem;
-    border-radius: var(--pico-border-radius);
-    font-size: 1rem;
-    line-height: 1;
-    border: var(--pico-border-width) solid var(--pico-primary-border);
-    background: var(--pico-primary-background);
-    color: var(--pico-primary-inverse);
-    cursor: pointer;
-    padding: 0;
-    flex-shrink: 0;
-    transition: background 0.15s;
-    margin-bottom: 0;
-  }
-  .nav-btn:hover { background: var(--pico-primary-hover-background); color: var(--pico-primary-inverse); }
-  .arrow { display: inline-block; transform: translateY(-0.08em); }
   .month-picker { display: inline-flex; align-items: baseline; gap: 0.25rem; white-space: nowrap; flex: 1; justify-content: center; }
   .month-picker select {
     font: inherit;

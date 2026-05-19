@@ -36,5 +36,70 @@ dialog article header h3 { margin: 0; flex: 1; word-break: break-word; }
 .close-btn::after  { transform: translate(-50%, -50%) rotate(-45deg); }
 .close-btn:hover::before, .close-btn:hover::after { background-color: var(--pico-color, #333); }
 
+/* Dialog base */
+dialog {
+  border: 1px solid var(--pico-muted-border-color, #c8c8c8);
+  border-radius: var(--pico-border-radius, 0.25rem);
+  padding: 0;
+  max-width: 28rem;
+  width: 90vw;
+  background: var(--pico-background-color, #fff);
+  color: var(--pico-color, #333);
+  box-shadow: 0 0.5rem 2rem rgba(0,0,0,0.25);
+}
+dialog::backdrop { background: rgba(0,0,0,0.4); }
+dialog article { margin: 0; padding: 1.5rem; }
 
+/* Navigation buttons */
+.nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--pico-border-radius);
+  font-size: 1rem;
+  line-height: 1;
+  border: var(--pico-border-width) solid var(--pico-primary-border);
+  background: var(--pico-primary-background);
+  color: var(--pico-primary-inverse);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 0.15s;
+  margin-bottom: 0;
+}
+.nav-btn:hover { background: var(--pico-primary-hover-background); color: var(--pico-primary-inverse); }
+.arrow { display: inline-block; transform: translateY(-0.08em); }
+
+/* Shared form utilities */
+.locale-picker {
+  font-size: 0.875rem;
+  padding: 0.125rem 1.5rem 0.125rem 0.5rem;
+  margin: 0;
+  background-color: var(--pico-form-element-background-color);
+  color: var(--pico-form-element-color);
+  border: var(--pico-border-width) solid var(--pico-form-element-border-color);
+  border-radius: var(--pico-border-radius);
+  font-family: inherit;
+  cursor: pointer;
+}
+.error-msg { color: var(--pico-del-color); }
+
+/* Dialog form feedback and actions */
+.form-error {
+  color: var(--pico-color-red-500, #d32f2f);
+  margin-bottom: 0.5rem;
+  font-size: 0.9em;
+}
+.form-success {
+  color: var(--pico-color-green-500, #388e3c);
+  margin-bottom: 0.5rem;
+  font-size: 0.9em;
+}
+dialog footer {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
 

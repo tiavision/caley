@@ -138,21 +138,3 @@
     </form>
   </article>
 </dialog>
-
-<style>
-  .form-error {
-    color: var(--pico-color-red-500, #d32f2f);
-    margin-bottom: 0.5rem;
-    font-size: 0.9em;
-  }
-  .form-success {
-    color: var(--pico-color-green-500, #388e3c);
-    margin-bottom: 0.5rem;
-    font-size: 0.9em;
-  }
-  footer {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 1rem;
-  }
-</style>

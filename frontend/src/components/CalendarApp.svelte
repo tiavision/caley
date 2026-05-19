@@ -507,26 +507,6 @@
     padding-top: 0.25rem;
   }
   .week-range { font-size: 0.875rem; color: var(--pico-muted-color); }
-  .nav-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.5rem;
-    height: 1.5rem;
-    border-radius: var(--pico-border-radius);
-    font-size: 1rem;
-    line-height: 1;
-    border: var(--pico-border-width) solid var(--pico-primary-border);
-    background: var(--pico-primary-background);
-    color: var(--pico-primary-inverse);
-    cursor: pointer;
-    padding: 0;
-    flex-shrink: 0;
-    transition: background 0.15s;
-    margin-bottom: 0;
-  }
-  .nav-btn:hover { background: var(--pico-primary-hover-background); color: var(--pico-primary-inverse); }
-  .arrow { display: inline-block; transform: translateY(-0.08em); }
   .today-btn {
     margin-left: auto;
     font-size: 0.75rem;

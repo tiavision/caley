@@ -132,19 +132,4 @@
     gap: 1rem;
   }
 
-  .locale-picker {
-    font-size: 0.875rem;
-    padding: 0.125rem 1.5rem 0.125rem 0.5rem;
-    margin: 0;
-    background-color: var(--pico-form-element-background-color);
-    color: var(--pico-form-element-color);
-    border: var(--pico-border-width) solid var(--pico-form-element-border-color);
-    border-radius: var(--pico-border-radius);
-    font-family: inherit;
-    cursor: pointer;
-  }
-
-  .error-msg {
-    color: var(--pico-del-color);
-  }
 </style>

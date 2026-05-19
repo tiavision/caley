@@ -102,19 +102,9 @@
 </dialog>
 
 <style>
-  .form-error {
-    color: var(--pico-color-red-500, #d32f2f);
-    margin-bottom: 0.5rem;
-    font-size: 0.9em;
-  }
   .color-toggle {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-  }
-  footer {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 1rem;
   }
 </style>

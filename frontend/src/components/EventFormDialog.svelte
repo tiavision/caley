@@ -551,21 +551,6 @@
 </dialog>
 
 <style>
-  /* Dialog base */
-  dialog {
-    border: 1px solid var(--pico-muted-border-color, #c8c8c8);
-    border-radius: var(--pico-border-radius, 0.25rem);
-    padding: 0;
-    max-width: 28rem;
-    width: 90vw;
-    background: var(--pico-background-color, #fff);
-    color: var(--pico-color, #333);
-    box-shadow: 0 0.5rem 2rem rgba(0,0,0,0.25);
-  }
-  dialog::backdrop { background: rgba(0,0,0,0.4); }
-  article { margin: 0; padding: 1.5rem; }
-
-
   /* Event form */
   .summary-wrap { position: relative; }
   .time-suggestions {
