@@ -220,16 +220,16 @@ pub async fn get_push_subscription(
     Ok(row.map(|r| (r.get(0), r.get(1))))
 }
 
-pub async fn get_user_id_from_push_token(
+pub async fn get_user_and_calendar_from_push_token(
     pool: &SqlitePool,
     token: &str,
-) -> anyhow::Result<Option<String>> {
+) -> anyhow::Result<Option<(String, String)>> {
     let row =
-        sqlx::query("SELECT user_id FROM push_subscriptions WHERE webhook_token = ?")
+        sqlx::query("SELECT user_id, calendar_href FROM push_subscriptions WHERE webhook_token = ?")
             .bind(token)
             .fetch_optional(pool)
             .await?;
-    Ok(row.map(|r| r.get(0)))
+    Ok(row.map(|r| (r.get(0), r.get(1))))
 }
 
 // ── Calendar cache ────────────────────────────────────────────────────────────

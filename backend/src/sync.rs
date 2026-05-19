@@ -17,6 +17,8 @@ use crate::sse::{SseBroadcaster, SseMessage};
 pub enum SyncTrigger {
     Full,
     Incremental,
+    /// Sync only the single calendar at the given href (used by the push webhook).
+    Calendar(String),
 }
 
 pub struct SyncManager {
@@ -47,11 +49,11 @@ impl SyncManager {
     }
 
     /// Ensure a background sync task is running for this user.
-    /// Safe to call on every authenticated request — no-ops if already running.
-    pub fn ensure_task_for(self: &Arc<Self>, user_id: &str) {
+    /// Returns `true` if a new task was just started, `false` if one was already running.
+    pub fn ensure_task_for(self: &Arc<Self>, user_id: &str) -> bool {
         let mut tasks = self.tasks.lock().unwrap();
         if tasks.contains_key(user_id) {
-            return;
+            return false;
         }
         let (tx, rx) = mpsc::unbounded_channel();
         tasks.insert(user_id.to_string(), tx);
@@ -62,6 +64,7 @@ impl SyncManager {
         tokio::spawn(async move {
             mgr.run_user_loop(uid, rx).await;
         });
+        true
     }
 
     /// Send a trigger to an existing user task (no-op if task not running).
@@ -97,6 +100,11 @@ impl SyncManager {
                                 eprintln!("[sync] incremental sync failed for {user_id}: {e}");
                             }
                         }
+                        Some(SyncTrigger::Calendar(calendar_href)) => {
+                            if let Err(e) = self.sync_single_calendar(&user_id, &calendar_href).await {
+                                eprintln!("[sync] single-calendar sync failed for {calendar_href}: {e}");
+                            }
+                        }
                         None => break,
                     }
                 }
@@ -106,6 +114,19 @@ impl SyncManager {
         // Remove from task map so ensure_task_for can restart it
         let mut tasks = self.tasks.lock().unwrap();
         tasks.remove(&user_id);
+    }
+
+    /// Sync a single calendar by href — used by the push webhook so we don't
+    /// trigger ctag-fallback full-fetches on calendars that haven't changed.
+    async fn sync_single_calendar(&self, user_id: &str, calendar_href: &str) -> anyhow::Result<()> {
+        let settings = db::get_settings(&self.db, user_id, &self.encryption_key).await?;
+        let Some(settings) = settings else { return Ok(()); };
+        let client = CalDavClient::new(
+            settings.caldav_base_url,
+            settings.caldav_username,
+            settings.caldav_password,
+        )?;
+        self.sync_calendar(&client, user_id, calendar_href).await
     }
 
     async fn sync_user(&self, user_id: &str, full: bool) -> anyhow::Result<()> {
@@ -204,6 +225,7 @@ impl SyncManager {
                             });
                         }
                     }
+                    self.try_subscribe_push(client, user_id, calendar_href).await;
                     return Ok(());
                 }
                 Err(e) => {

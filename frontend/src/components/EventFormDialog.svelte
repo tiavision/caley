@@ -198,7 +198,8 @@
     try {
       const res = await fetch(url, { method: 'DELETE' });
       if (res.ok) { formDialogEl?.close(); dispatch('deleted'); }
-    } catch {}
+      else { formError = (await res.text()) || tl('event_error'); }
+    } catch { formError = tl('event_error'); }
     formSaving = false;
   }
 

@@ -110,7 +110,7 @@ pub async fn require_client(
     state: &AppState,
     user: &CurrentUser,
 ) -> Result<CalDavClient, Response> {
-    state.sync_manager.ensure_task_for(&user.user_id);
+    let _ = state.sync_manager.ensure_task_for(&user.user_id);
 
     let settings = match db::get_settings(&state.db, &user.user_id, &state.encryption_key).await {
         Ok(s) => s,
@@ -145,7 +145,7 @@ pub async fn user_info(
         .flatten()
         .is_some();
 
-    state.sync_manager.ensure_task_for(&user.user_id);
+    let _ = state.sync_manager.ensure_task_for(&user.user_id);
 
     let auth_mode = match state.auth_mode {
         AuthMode::Oidc => "oidc",
