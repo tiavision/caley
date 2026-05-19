@@ -106,6 +106,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/events", get(calendar::list_events))
         .route("/api/events/stream", get(sse::events_stream))
         .route("/api/calendar", get(calendar::list_calendar))
+        .route("/api/calendar", post(calendar::create_calendar_handler))
+        .route(
+            "/api/import",
+            post(calendar::import_ics)
+                .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
+        )
         .route("/api/user", get(oidc::user_info))
         .route("/api/settings/form", get(settings::settings_form))
         .route("/api/settings", post(settings::save_settings))

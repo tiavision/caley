@@ -573,6 +573,72 @@ impl CalDavClient {
         let expires_at = extract_push_expiry(&xml).unwrap_or(expires_at_default);
         Ok(Some(expires_at))
     }
+
+    pub async fn create_calendar(&self, name: &str, color: Option<&str>) -> anyhow::Result<String> {
+        let start = self.start_url().await;
+        let home_sets = self.discover_calendar_home_sets(&start).await?;
+        let home = home_sets
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("No calendar-home-set found"))?;
+
+        let raw_slug: String = name
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '-' })
+            .collect();
+        let raw_slug = raw_slug.trim_matches('-').to_string();
+        let suffix = &Uuid::new_v4().to_string()[..8];
+        let slug = if raw_slug.is_empty() {
+            suffix.to_string()
+        } else {
+            format!("{raw_slug}-{suffix}")
+        };
+
+        let calendar_url = format!("{}/{}/", home.trim_end_matches('/'), slug);
+
+        let color_prop = color
+            .map(|c| format!("      <APPLE:calendar-color>{c}</APPLE:calendar-color>\n"))
+            .unwrap_or_default();
+
+        let escaped_name = name.replace('<', "&lt;").replace('>', "&gt;").replace('&', "&amp;");
+        let body = format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"
+              xmlns:APPLE="http://apple.com/ns/ical/">
+  <D:set>
+    <D:prop>
+      <D:displayname>{escaped_name}</D:displayname>
+{color_prop}      <C:supported-calendar-component-set>
+        <C:comp name="VEVENT"/>
+      </C:supported-calendar-component-set>
+    </D:prop>
+  </D:set>
+</C:mkcalendar>"#
+        );
+
+        let method = reqwest::Method::from_bytes(b"MKCALENDAR")
+            .context("invalid method MKCALENDAR")?;
+        let resp = self
+            .client
+            .request(method, &calendar_url)
+            .header(CONTENT_TYPE, "application/xml; charset=utf-8")
+            .basic_auth(&self.username, Some(&self.password))
+            .body(body)
+            .send()
+            .await
+            .context("MKCALENDAR request failed")?;
+
+        match resp.status().as_u16() {
+            200 | 201 => Ok(calendar_url),
+            403 => bail!("Calendar creation forbidden — server does not allow MKCALENDAR"),
+            405 => bail!("Calendar creation not supported by this server (405)"),
+            s => {
+                let text = resp.text().await.unwrap_or_default();
+                bail!("MKCALENDAR returned {s}: {text}")
+            }
+        }
+    }
 }
 
 fn resolve_url(current_url: &str, href: &str) -> String {
@@ -1435,6 +1501,60 @@ fn parse_dtstart(raw: &str) -> Option<NaiveDateTime> {
 
 pub fn generate_new_uid() -> String {
     Uuid::new_v4().to_string()
+}
+
+/// Split a multi-VEVENT VCALENDAR blob into individual per-event (uid, vcalendar) pairs.
+/// VTIMEZONE blocks and other VCALENDAR-level properties are preserved in each wrapper.
+pub fn split_vcalendar_into_events(ical_content: &str) -> Vec<(String, String)> {
+    let normalised = ical_content.replace("\r\n", "\n");
+    let mut header_lines: Vec<&str> = Vec::new();
+    let mut vevent_blocks: Vec<String> = Vec::new();
+    let mut in_vevent = false;
+    let mut current_vevent: Vec<&str> = Vec::new();
+
+    for line in normalised.lines() {
+        if line == "BEGIN:VEVENT" {
+            in_vevent = true;
+            current_vevent.clear();
+            current_vevent.push(line);
+        } else if line == "END:VEVENT" {
+            current_vevent.push(line);
+            vevent_blocks.push(current_vevent.join("\r\n"));
+            current_vevent.clear();
+            in_vevent = false;
+        } else if in_vevent {
+            current_vevent.push(line);
+        } else if line != "BEGIN:VCALENDAR"
+            && line != "END:VCALENDAR"
+            && !line.starts_with("VERSION:")
+            && !line.starts_with("PRODID:")
+        {
+            header_lines.push(line);
+        }
+    }
+
+    let header = header_lines.join("\r\n");
+    vevent_blocks
+        .into_iter()
+        .map(|vevent_block| {
+            let uid = vevent_block
+                .lines()
+                .find(|l| l.starts_with("UID:"))
+                .map(|l| l[4..].trim().to_string())
+                .filter(|u| !u.is_empty())
+                .unwrap_or_else(generate_new_uid);
+
+            let header_section = if header.is_empty() {
+                String::new()
+            } else {
+                format!("{}\r\n", header)
+            };
+            let wrapped = format!(
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Caley//Caley//EN\r\n{header_section}{vevent_block}\r\nEND:VCALENDAR\r\n"
+            );
+            (uid, wrapped)
+        })
+        .collect()
 }
 
 fn escape_ical_text(s: &str) -> String {

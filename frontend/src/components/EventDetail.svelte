@@ -151,8 +151,6 @@
   }
   dialog::backdrop { background: rgba(0,0,0,0.4); }
   article { margin: 0; padding: 1.5rem; }
-  article header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
-  article header h3 { margin: 0; flex: 1; word-break: break-word; }
 
   .header-actions { display: flex; align-items: center; gap: 0.25rem; }
   .edit-btn {
@@ -161,21 +159,6 @@
     padding: 0.25rem; line-height: 1; transition: color 0.15s;
   }
   .edit-btn:hover { color: var(--pico-primary-background); }
-
-  .close-btn {
-    position: relative; background: none; border: none;
-    font-size: 1.5rem; line-height: 1; padding: 0;
-    width: 1.2em; height: 1.2em; cursor: pointer;
-    color: transparent; display: inline-flex; align-items: center; justify-content: center;
-  }
-  .close-btn::before, .close-btn::after {
-    content: ''; position: absolute; top: 50%; left: 50%;
-    width: 0.75em; height: 0.1em;
-    background-color: var(--pico-muted-color, #666); transition: background-color 0.15s;
-  }
-  .close-btn::before { transform: translate(-50%, -50%) rotate(45deg); }
-  .close-btn::after { transform: translate(-50%, -50%) rotate(-45deg); }
-  .close-btn:hover::before, .close-btn:hover::after { background-color: var(--pico-color, #333); }
 
   .event-detail-body { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
   .event-detail-row { display: flex; flex-direction: column; gap: 0.125rem; }

@@ -115,5 +115,21 @@
   "event_attendeeStatusNeedsAction": "Pending",
   "event_attendeeStatusAccepted": "Accepted",
   "event_attendeeStatusDeclined": "Declined",
-  "event_attendeeStatusTentative": "Tentative"
+  "event_attendeeStatusTentative": "Tentative",
+  "cal_calendars": "Calendars",
+  "cal_createCalendar": "New calendar",
+  "cal_createCalendarName": "Calendar name",
+  "cal_createCalendarColor": "Color",
+  "cal_createCalendarNoColor": "No color",
+  "cal_createCalendarSave": "Create",
+  "cal_createCalendarError": "Failed to create calendar",
+  "cal_import": "Import .ics",
+  "cal_importFile": "ICS file",
+  "cal_importCalendar": "Add to calendar",
+  "cal_importNewCalendar": "New calendar…",
+  "cal_importNewCalendarName": "New calendar name",
+  "cal_importSubmit": "Import",
+  "cal_importError": "Import failed",
+  "cal_importSuccess": "Imported {n} events",
+  "cal_importPartial": "{n} events failed to import"
 }

@@ -1,5 +1,5 @@
 use axum::{
-    extract::{RawQuery, State},
+    extract::{Multipart, RawQuery, State},
     http::StatusCode,
     response::{IntoResponse, Json, Response},
 };
@@ -10,7 +10,8 @@ use url::form_urlencoded;
 
 use crate::caldav::{
     add_exdate, add_recurrence_override, generate_ical_event, generate_new_uid,
-    update_vcalendar_event, Alarm, Attendee, CalDavClient, PartStat, RecurrenceInfo,
+    split_vcalendar_into_events, update_vcalendar_event, Alarm, Attendee, CalDavClient, PartStat,
+    RecurrenceInfo,
 };
 use crate::db;
 use crate::oidc::{require_client, AppState, CurrentUser};
@@ -827,4 +828,153 @@ async fn optimistic_upsert(
         calendar_href: calendar_href.to_string(),
         event_json,
     });
+}
+
+pub async fn create_calendar_handler(
+    State(state): State<crate::oidc::AppState>,
+    user: CurrentUser,
+    body: String,
+) -> Response {
+    let client = match require_client(&state, &user).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+
+    let mut name = String::new();
+    let mut color: Option<String> = None;
+    for (key, value) in form_urlencoded::parse(body.as_bytes()) {
+        match key.as_ref() {
+            "name" => name = value.into_owned(),
+            "color" => {
+                let v = value.into_owned();
+                if !v.is_empty() {
+                    color = Some(v);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing calendar name").into_response();
+    }
+
+    match client.create_calendar(&name, color.as_deref()).await {
+        Ok(href) => {
+            if let Err(e) =
+                db::upsert_cached_calendar(&state.db, &user.user_id, &href, &name, color.as_deref())
+                    .await
+            {
+                eprintln!("Failed to cache new calendar: {e}");
+            }
+            state
+                .sse_broadcaster
+                .send(&user.user_id, crate::sse::SseMessage::CalendarsChanged);
+            state
+                .sync_manager
+                .trigger(&user.user_id, SyncTrigger::Full);
+            Json(CalendarJson {
+                href,
+                name,
+                color,
+                is_active: true,
+            })
+            .into_response()
+        }
+        Err(e) => {
+            eprintln!("MKCALENDAR failed: {e}");
+            (StatusCode::BAD_GATEWAY, format!("{e}")).into_response()
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct ImportResult {
+    imported: usize,
+    errors: usize,
+}
+
+pub async fn import_ics(
+    State(state): State<crate::oidc::AppState>,
+    user: CurrentUser,
+    mut multipart: Multipart,
+) -> Response {
+    let client = match require_client(&state, &user).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+
+    let mut calendar_href = String::new();
+    let mut ics_content: Option<String> = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        match field.name() {
+            Some("calendar_href") => {
+                calendar_href = field.text().await.unwrap_or_default();
+            }
+            Some("file") => match field.text().await {
+                Ok(text) => ics_content = Some(text),
+                Err(e) => {
+                    return (StatusCode::BAD_REQUEST, format!("Failed to read file: {e}"))
+                        .into_response();
+                }
+            },
+            _ => {}
+        }
+    }
+
+    if calendar_href.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing calendar_href").into_response();
+    }
+    let ics = match ics_content {
+        Some(c) => c,
+        None => return (StatusCode::BAD_REQUEST, "Missing ICS file").into_response(),
+    };
+
+    let events = split_vcalendar_into_events(&ics);
+    if events.is_empty() {
+        return (StatusCode::BAD_REQUEST, "No events found in ICS file").into_response();
+    }
+
+    let mut imported = 0usize;
+    let mut errors = 0usize;
+
+    for (uid, wrapped_ical) in events {
+        match client.put_event(&calendar_href, &uid, &wrapped_ical).await {
+            Ok(_) => {
+                let event_href = format!(
+                    "{}/{}.ics",
+                    calendar_href.trim_end_matches('/'),
+                    uid
+                );
+                if let Err(e) = db::upsert_cached_event_raw(
+                    &state.db,
+                    &user.user_id,
+                    &calendar_href,
+                    &event_href,
+                    "",
+                    &wrapped_ical,
+                )
+                .await
+                {
+                    eprintln!("Cache insert failed for {uid}: {e}");
+                }
+                imported += 1;
+            }
+            Err(e) => {
+                eprintln!("PUT failed for {uid}: {e}");
+                errors += 1;
+            }
+        }
+    }
+
+    state
+        .sse_broadcaster
+        .send(&user.user_id, crate::sse::SseMessage::EventsRefetch);
+    state
+        .sync_manager
+        .trigger(&user.user_id, SyncTrigger::Incremental);
+
+    Json(ImportResult { imported, errors }).into_response()
 }

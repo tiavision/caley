@@ -115,5 +115,21 @@
   "event_attendeeStatusNeedsAction": "Ausstehend",
   "event_attendeeStatusAccepted": "Zugesagt",
   "event_attendeeStatusDeclined": "Abgesagt",
-  "event_attendeeStatusTentative": "Vorläufig"
+  "event_attendeeStatusTentative": "Vorläufig",
+  "cal_calendars": "Kalender",
+  "cal_createCalendar": "Neuer Kalender",
+  "cal_createCalendarName": "Kalendername",
+  "cal_createCalendarColor": "Farbe",
+  "cal_createCalendarNoColor": "Keine Farbe",
+  "cal_createCalendarSave": "Erstellen",
+  "cal_createCalendarError": "Kalender konnte nicht erstellt werden",
+  "cal_import": ".ics importieren",
+  "cal_importFile": "ICS-Datei",
+  "cal_importCalendar": "In Kalender importieren",
+  "cal_importNewCalendar": "Neuer Kalender…",
+  "cal_importNewCalendarName": "Neuer Kalendername",
+  "cal_importSubmit": "Importieren",
+  "cal_importError": "Import fehlgeschlagen",
+  "cal_importSuccess": "{n} Termine importiert",
+  "cal_importPartial": "{n} Termine konnten nicht importiert werden"
 }

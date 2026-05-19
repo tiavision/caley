@@ -6,6 +6,8 @@
   import MonthPicker from './MonthPicker.svelte';
   import CalendarList from './CalendarList.svelte';
   import EventDetail from './EventDetail.svelte';
+  import CreateCalendarDialog from './CreateCalendarDialog.svelte';
+  import ImportDialog from './ImportDialog.svelte';
   import type { EventJson, DayEventsJson, CalendarJson, MonthGridJson } from '../types/calendar.ts';
   import { getMonday, fmtDate, fmtYM } from '../lib/date.ts';
 
@@ -173,6 +175,18 @@
   let formDialog: EventFormDialog;
   let focusedEventDate = '';
 
+  // ── Calendar management ────────────────────────────────────────────────────
+  let createCalDialog: CreateCalendarDialog;
+  let importDialog: ImportDialog;
+
+  function handleCalendarCreated(e: CustomEvent<CalendarJson>) {
+    calendars = [...calendars, e.detail];
+  }
+
+  function handleImported() {
+    fetchEvents();
+  }
+
   // ── Past days ──────────────────────────────────────────────────────────────
   function isPastDay(dateStr: string): boolean {
     const [y, mo, d] = dateStr.split('-').map(Number);
@@ -320,10 +334,15 @@
       />
     </div>
     <div class="calendar-list-section">
+      <div class="section-header">
+        <span>{tl('cal_calendars')}</span>
+        <button class="icon-btn" title={tl('cal_createCalendar')} on:click={() => createCalDialog.open()}>+</button>
+      </div>
       <CalendarList
         {calendars}
         on:toggle={(e) => toggleCalendar(e.detail.href, e.detail.active)}
       />
+      <button class="sidebar-import-btn" on:click={() => importDialog.open()}>{tl('cal_import')}</button>
     </div>
   </div>
 
@@ -409,6 +428,19 @@
   {focusedEventDate}
   on:saved={() => { fetchEvents(); fetchMonthGrid(); }}
   on:deleted={() => { fetchEvents(); fetchMonthGrid(); }}
+/>
+
+<!-- ── Calendar management dialogs ────────────────────────────────────────── -->
+<CreateCalendarDialog
+  bind:this={createCalDialog}
+  {locale}
+  on:created={handleCalendarCreated}
+/>
+<ImportDialog
+  bind:this={importDialog}
+  {calendars}
+  {locale}
+  on:imported={handleImported}
 />
 
 <!-- FAB -->
@@ -614,6 +646,26 @@
   :global(.event-trigger) { cursor: pointer; transition: filter 0.15s ease; }
   :global(.event-trigger:hover) { filter: brightness(0.95); }
   :global(.event-trigger:focus-visible) { outline: 2px solid var(--pico-primary-background, #0074d9); outline-offset: 2px; }
+
+  /* Sidebar calendar management */
+  .section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 0.25rem;
+    font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
+    color: var(--pico-muted-color); letter-spacing: 0.05em;
+  }
+  .icon-btn {
+    background: none; border: none; cursor: pointer; padding: 0 0.25rem;
+    font-size: 1.1rem; line-height: 1; color: var(--pico-muted-color);
+  }
+  .icon-btn:hover { color: var(--pico-primary); }
+  .sidebar-import-btn {
+    width: 100%; margin-top: 0.5rem; padding: 0.35rem 0.5rem;
+    font-size: 0.8rem; background: none; border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius); cursor: pointer; color: var(--pico-muted-color);
+    text-align: left;
+  }
+  .sidebar-import-btn:hover { color: var(--pico-primary); border-color: var(--pico-primary); }
 
   /* FAB */
   .fab {
