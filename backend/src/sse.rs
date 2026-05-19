@@ -9,7 +9,6 @@ use tokio_stream::StreamExt as _;
 
 use crate::db;
 use crate::oidc::{AppState, CurrentUser};
-use crate::sync::SyncTrigger;
 
 const CHANNEL_CAPACITY: usize = 64;
 
@@ -60,22 +59,13 @@ pub async fn events_stream(
     let rx = state.sse_broadcaster.subscribe(&user.user_id);
 
     // Ensure the sync task is running.
-    // If the task was newly started it immediately runs an initial full sync
-    // in run_user_loop, so we must NOT also queue a trigger — that would
-    // cause two back-to-back syncs and duplicate events_refetch pushes.
-    // If the task was already running, queue an incremental (or full) sync
-    // so fresh changes are picked up on page reload.
-    let just_started = state.sync_manager.ensure_task_for(&user.user_id);
-    if !just_started {
-        let has_cached = db::get_cached_calendars(&state.db, &user.user_id)
-            .await
-            .map(|v| !v.is_empty())
-            .unwrap_or(false);
-        state.sync_manager.trigger(
-            &user.user_id,
-            if has_cached { SyncTrigger::Incremental } else { SyncTrigger::Full },
-        );
-    }
+    // On first login the task immediately runs an initial full sync (populates
+    // the cache and sends CalendarsChanged + EventsRefetch).
+    // On subsequent connects the cache is already populated; real-time updates
+    // come via WebDAV push, and the periodic sync keeps everything fresh.
+    // Triggering an extra sync here would cause spurious events_refetch for
+    // every calendar that falls back to ctag comparison.
+    state.sync_manager.ensure_task_for(&user.user_id);
     let stream = BroadcastStream::new(rx).filter_map(|msg| {
         let event: Option<Event> = match msg {
             Ok(SseMessage::EventsRefetch) => {
