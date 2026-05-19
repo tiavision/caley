@@ -60,6 +60,32 @@
         await tick();
         initRovingTabindex();
         scheduleReminders();
+        if (pendingFocusUid && pendingFocusDate) {
+          const uid = pendingFocusUid;
+          const dateStr = pendingFocusDate;
+          pendingFocusUid = null;
+          pendingFocusDate = null;
+          const targetDay = days.find(d => d.date_iso === dateStr);
+          if (targetDay) {
+            const s = new Set(expandedPastDays);
+            s.add(dateStr);
+            expandedPastDays = s;
+            await tick();
+            const eventIdx = Math.max(0, targetDay.events.findIndex(ev => ev.uid === uid));
+            const dayEl = document.querySelector<HTMLElement>(`.day[data-date="${dateStr}"]`);
+            if (dayEl) {
+              const eventEls = dayEl.querySelectorAll<HTMLElement>('.appointment.event-trigger');
+              const targetEl = eventEls[eventIdx] ?? eventEls[0];
+              if (targetEl) {
+                document.querySelectorAll<HTMLElement>('.appointment.event-trigger')
+                  .forEach(el => el.setAttribute('tabindex', '-1'));
+                targetEl.setAttribute('tabindex', '0');
+                targetEl.focus();
+                focusedEventDate = dateStr;
+              }
+            }
+          }
+        }
       }
     } catch {}
     eventsLoading = false;
@@ -195,6 +221,8 @@
   }
 
   let expandedPastDays = new Set<string>();
+  let pendingFocusUid: string | null = null;
+  let pendingFocusDate: string | null = null;
   function togglePastDay(dateStr: string) {
     const s = new Set(expandedPastDays);
     s.has(dateStr) ? s.delete(dateStr) : s.add(dateStr);
@@ -306,6 +334,11 @@
       if (y && mo && d) {
         selectedWeekStart = getMonday(new Date(y, mo - 1, d));
         gridMonth = fmtYM(selectedWeekStart);
+      }
+      const uidParam = new URLSearchParams(window.location.search).get('uid');
+      if (uidParam) {
+        pendingFocusUid = uidParam;
+        pendingFocusDate = dateParam;
       }
     }
 

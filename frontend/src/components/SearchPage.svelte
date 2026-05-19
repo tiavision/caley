@@ -91,7 +91,7 @@
   <ul class="search-results" aria-live="polite">
     {#each results as item (item.uid + item.dtstart)}
       <li>
-        <a href="/?date={item.dtstart}" class="search-result">
+        <a href="/?date={item.dtstart}&uid={encodeURIComponent(item.uid)}" class="search-result">
           <EventColorDot color={item.calendar_color} />
           <div class="result-body">
             <span class="result-summary">{item.summary}</span>
