@@ -21,6 +21,7 @@ export default defineConfig({
       input: {
         index: resolve(__dirname, 'index.html'),
         settings: resolve(__dirname, 'settings/index.html'),
+        search: resolve(__dirname, 'search/index.html'),
       },
     },
   },

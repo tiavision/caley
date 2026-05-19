@@ -300,6 +300,15 @@
     await initI18n();
     locale = getLocale();
 
+    const dateParam = new URLSearchParams(window.location.search).get('date');
+    if (dateParam) {
+      const [y, mo, d] = dateParam.split('-').map(Number);
+      if (y && mo && d) {
+        selectedWeekStart = getMonday(new Date(y, mo - 1, d));
+        gridMonth = fmtYM(selectedWeekStart);
+      }
+    }
+
     window.addEventListener('keydown', handleKeydown);
 
     setupSSE();

@@ -117,6 +117,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/settings", post(settings::save_settings))
         .route("/api/event", post(calendar::save_event))
         .route("/api/event", delete(calendar::delete_event))
+        .route("/api/search", get(calendar::search_events))
         .route("/api/account", delete(local_auth::delete_account));
 
     let app = if use_oidc {

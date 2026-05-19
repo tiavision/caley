@@ -29,6 +29,7 @@ async function loadNavUser() {
     if (!list) return;
     const items: string[] = [];
     if (user.display_name) items.push(`<li>${user.display_name}</li>`);
+    items.push(`<li><a href="/search">${m.nav_search()}</a></li>`);
     if (!user.has_settings) {
       items.push(`<li><a href="/settings">${m.nav_setup()}</a></li>`);
     } else {

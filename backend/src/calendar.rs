@@ -15,6 +15,7 @@ use crate::caldav::{
 };
 use crate::db;
 use crate::oidc::{require_client, AppState, CurrentUser};
+use sqlx::Row;
 use crate::sync::SyncTrigger;
 
 const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
@@ -977,4 +978,89 @@ pub async fn import_ics(
         .trigger(&user.user_id, SyncTrigger::Incremental);
 
     Json(ImportResult { imported, errors }).into_response()
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct SearchResultItem {
+    pub uid: String,
+    pub calendar_href: String,
+    pub summary: String,
+    pub description: String,
+    pub location: String,
+    pub dtstart: String,
+    pub calendar_name: String,
+    pub calendar_color: Option<String>,
+}
+
+fn build_fts_query(q: &str) -> String {
+    q.split_whitespace()
+        .map(|token| format!("\"{}\"*", token.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub async fn search_events(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    RawQuery(raw_query): RawQuery,
+) -> Response {
+    let mut q = String::new();
+    let mut start: Option<String> = None;
+    let mut end: Option<String> = None;
+
+    if let Some(query) = raw_query {
+        for (key, value) in form_urlencoded::parse(query.as_bytes()) {
+            match key.as_ref() {
+                "q" => q = value.into_owned(),
+                "start" => start = Some(value.into_owned()),
+                "end" => end = Some(value.into_owned()),
+                _ => {}
+            }
+        }
+    }
+
+    let q = q.trim().to_string();
+    if q.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing search query").into_response();
+    }
+    let q: String = q.chars().take(200).collect();
+
+    let fts = build_fts_query(&q);
+    let user_id = user.user_id.clone();
+
+    let mut sql = r#"SELECT e.uid, e.calendar_href, e.summary, e.description, e.location,
+           e.dtstart, c.name AS calendar_name, c.color AS calendar_color
+    FROM events_fts
+    JOIN cached_events e ON events_fts.rowid = e.rowid
+    JOIN cached_calendars c ON c.user_id = e.user_id AND c.href = e.calendar_href
+    WHERE events_fts MATCH ? AND e.user_id = ?"#.to_string();
+    if start.is_some() { sql.push_str(" AND e.dtstart >= ?"); }
+    if end.is_some() { sql.push_str(" AND e.dtstart <= ?"); }
+    sql.push_str(" ORDER BY e.dtstart DESC LIMIT 100");
+
+    let mut query = sqlx::query(&sql).bind(fts).bind(user_id);
+    if let Some(s) = start { query = query.bind(s); }
+    if let Some(e) = end { query = query.bind(e); }
+
+    match query.fetch_all(&state.db).await {
+        Ok(rows) => {
+            let results: Vec<SearchResultItem> = rows.iter().map(|r| SearchResultItem {
+                uid: r.get(0),
+                calendar_href: r.get(1),
+                summary: r.get(2),
+                description: r.get(3),
+                location: r.get(4),
+                dtstart: r.get(5),
+                calendar_name: r.get(6),
+                calendar_color: r.get(7),
+            }).collect();
+            Json(results).into_response()
+        }
+        Err(e) => {
+            eprintln!("Search query failed: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "Search failed").into_response()
+        }
+    }
 }

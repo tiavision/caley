@@ -131,5 +131,14 @@
   "cal_importSubmit": "Importieren",
   "cal_importError": "Import fehlgeschlagen",
   "cal_importSuccess": "{n} Termine importiert",
-  "cal_importPartial": "{n} Termine konnten nicht importiert werden"
+  "cal_importPartial": "{n} Termine konnten nicht importiert werden",
+  "nav_search": "Suchen",
+  "search_heading": "Termine suchen",
+  "search_placeholder": "Titel, Beschreibung, Ort…",
+  "search_submit": "Suchen",
+  "search_loading": "Wird gesucht…",
+  "search_noResults": "Keine Termine gefunden.",
+  "search_error": "Suche fehlgeschlagen.",
+  "search_from": "Von",
+  "search_to": "Bis"
 }

@@ -131,5 +131,14 @@
   "cal_importSubmit": "Import",
   "cal_importError": "Import failed",
   "cal_importSuccess": "Imported {n} events",
-  "cal_importPartial": "{n} events failed to import"
+  "cal_importPartial": "{n} events failed to import",
+  "nav_search": "Search",
+  "search_heading": "Search Events",
+  "search_placeholder": "Search by title, description, location…",
+  "search_submit": "Search",
+  "search_loading": "Searching…",
+  "search_noResults": "No events found.",
+  "search_error": "Search failed.",
+  "search_from": "From",
+  "search_to": "To"
 }

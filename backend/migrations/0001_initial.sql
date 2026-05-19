@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS cached_events (
     summary        TEXT,
     dtstart        TEXT,
     dtend          TEXT,
+    description    TEXT NOT NULL DEFAULT '',
+    location       TEXT NOT NULL DEFAULT '',
     is_all_day     INTEGER NOT NULL DEFAULT 0,
     is_recurring   INTEGER NOT NULL DEFAULT 0,
     last_modified  INTEGER,
@@ -40,6 +42,31 @@ CREATE TABLE IF NOT EXISTS cached_events (
 
 CREATE INDEX IF NOT EXISTS cached_events_date
     ON cached_events (user_id, dtstart, dtend);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
+    summary,
+    description,
+    location,
+    content='cached_events',
+    content_rowid='rowid'
+);
+
+CREATE TRIGGER IF NOT EXISTS events_fts_ai AFTER INSERT ON cached_events BEGIN
+    INSERT INTO events_fts(rowid, summary, description, location)
+    VALUES (new.rowid, new.summary, new.description, new.location);
+END;
+
+CREATE TRIGGER IF NOT EXISTS events_fts_ad AFTER DELETE ON cached_events BEGIN
+    INSERT INTO events_fts(events_fts, rowid, summary, description, location)
+    VALUES ('delete', old.rowid, old.summary, old.description, old.location);
+END;
+
+CREATE TRIGGER IF NOT EXISTS events_fts_au AFTER UPDATE ON cached_events BEGIN
+    INSERT INTO events_fts(events_fts, rowid, summary, description, location)
+    VALUES ('delete', old.rowid, old.summary, old.description, old.location);
+    INSERT INTO events_fts(rowid, summary, description, location)
+    VALUES (new.rowid, new.summary, new.description, new.location);
+END;
 
 CREATE TABLE IF NOT EXISTS push_subscriptions (
     user_id          TEXT NOT NULL,

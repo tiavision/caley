@@ -431,16 +431,18 @@ fn ical_dt_to_date_str(s: &str) -> String {
     }
 }
 
-fn extract_ical_metadata(raw_ical: &str) -> (String, String, String, String, bool, bool) {
+fn extract_ical_metadata(raw_ical: &str) -> (String, String, String, String, String, String, bool, bool) {
     let calendar = match ical::IcalParser::new(raw_ical.as_bytes()).next() {
         Some(Ok(c)) => c,
-        _ => return (String::new(), String::new(), String::new(), String::new(), false, false),
+        _ => return (String::new(), String::new(), String::new(), String::new(), String::new(), String::new(), false, false),
     };
 
     let mut uid = String::new();
     let mut summary = String::new();
     let mut dtstart_date = String::new();
     let mut dtend_date = String::new();
+    let mut description = String::new();
+    let mut location = String::new();
     let mut is_all_day = false;
     let mut is_recurring = false;
 
@@ -449,6 +451,8 @@ fn extract_ical_metadata(raw_ical: &str) -> (String, String, String, String, boo
             match prop.name.as_str() {
                 "UID" => uid = prop.value.clone().unwrap_or_default(),
                 "SUMMARY" => summary = prop.value.clone().unwrap_or_default(),
+                "DESCRIPTION" => description = prop.value.clone().unwrap_or_default(),
+                "LOCATION" => location = prop.value.clone().unwrap_or_default(),
                 "DTSTART" => {
                     if let Some(ref val) = prop.value {
                         dtstart_date = ical_dt_to_date_str(val);
@@ -476,7 +480,7 @@ fn extract_ical_metadata(raw_ical: &str) -> (String, String, String, String, boo
         dtend_date = dtstart_date.clone();
     }
 
-    (uid, summary, dtstart_date, dtend_date, is_all_day, is_recurring)
+    (uid, summary, dtstart_date, dtend_date, description, location, is_all_day, is_recurring)
 }
 
 pub async fn upsert_cached_event_raw(
@@ -487,7 +491,7 @@ pub async fn upsert_cached_event_raw(
     etag: &str,
     raw_ical: &str,
 ) -> anyhow::Result<()> {
-    let (uid, summary, dtstart, dtend, is_all_day, is_recurring) =
+    let (uid, summary, dtstart, dtend, description, location, is_all_day, is_recurring) =
         extract_ical_metadata(raw_ical);
     if uid.is_empty() {
         return Ok(());
@@ -495,8 +499,8 @@ pub async fn upsert_cached_event_raw(
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
         "INSERT INTO cached_events
-             (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, is_all_day, is_recurring, last_modified)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id, calendar_href, uid) DO UPDATE SET
              etag = excluded.etag,
              href = excluded.href,
@@ -504,6 +508,8 @@ pub async fn upsert_cached_event_raw(
              summary = excluded.summary,
              dtstart = excluded.dtstart,
              dtend = excluded.dtend,
+             description = excluded.description,
+             location = excluded.location,
              is_all_day = excluded.is_all_day,
              is_recurring = excluded.is_recurring,
              last_modified = excluded.last_modified",
@@ -517,6 +523,8 @@ pub async fn upsert_cached_event_raw(
     .bind(&summary)
     .bind(&dtstart)
     .bind(&dtend)
+    .bind(&description)
+    .bind(&location)
     .bind(is_all_day as i32)
     .bind(is_recurring as i32)
     .bind(now)
@@ -585,15 +593,15 @@ pub async fn apply_incremental_sync(
 
     let mut changed_result: Vec<EventRef> = Vec::new();
     for (href, etag, raw_ical) in changed {
-        let (uid, summary, dtstart, dtend, is_all_day, is_recurring) =
+        let (uid, summary, dtstart, dtend, description, location, is_all_day, is_recurring) =
             extract_ical_metadata(&raw_ical);
         if uid.is_empty() {
             continue;
         }
         sqlx::query(
             "INSERT INTO cached_events
-                 (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, is_all_day, is_recurring, last_modified)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(user_id, calendar_href, uid) DO UPDATE SET
                  etag = excluded.etag,
                  href = excluded.href,
@@ -601,6 +609,8 @@ pub async fn apply_incremental_sync(
                  summary = excluded.summary,
                  dtstart = excluded.dtstart,
                  dtend = excluded.dtend,
+                 description = excluded.description,
+                 location = excluded.location,
                  is_all_day = excluded.is_all_day,
                  is_recurring = excluded.is_recurring,
                  last_modified = excluded.last_modified",
@@ -614,6 +624,8 @@ pub async fn apply_incremental_sync(
         .bind(&summary)
         .bind(&dtstart)
         .bind(&dtend)
+        .bind(&description)
+        .bind(&location)
         .bind(is_all_day as i32)
         .bind(is_recurring as i32)
         .bind(now)
@@ -679,15 +691,15 @@ pub async fn replace_calendar_events(
         .await?;
 
     for (href, etag, raw_ical) in all_raw {
-        let (uid, summary, dtstart, dtend, is_all_day, is_recurring) =
+        let (uid, summary, dtstart, dtend, description, location, is_all_day, is_recurring) =
             extract_ical_metadata(&raw_ical);
         if uid.is_empty() {
             continue;
         }
         sqlx::query(
             "INSERT INTO cached_events
-                 (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, is_all_day, is_recurring, last_modified)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(user_id, calendar_href, uid) DO UPDATE SET
                  etag = excluded.etag,
                  href = excluded.href,
@@ -695,6 +707,8 @@ pub async fn replace_calendar_events(
                  summary = excluded.summary,
                  dtstart = excluded.dtstart,
                  dtend = excluded.dtend,
+                 description = excluded.description,
+                 location = excluded.location,
                  is_all_day = excluded.is_all_day,
                  is_recurring = excluded.is_recurring,
                  last_modified = excluded.last_modified",
@@ -708,6 +722,8 @@ pub async fn replace_calendar_events(
         .bind(&summary)
         .bind(&dtstart)
         .bind(&dtend)
+        .bind(&description)
+        .bind(&location)
         .bind(is_all_day as i32)
         .bind(is_recurring as i32)
         .bind(now)

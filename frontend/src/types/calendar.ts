@@ -64,6 +64,17 @@ export interface MonthDayJson {
   event_colors: string[];
 }
 
+export interface SearchResultItem {
+  uid: string;
+  calendar_href: string;
+  summary: string;
+  description: string;
+  location: string;
+  dtstart: string;
+  calendar_name: string;
+  calendar_color: string | null;
+}
+
 export interface MonthGridJson {
   month: string;
   month_name: string;
