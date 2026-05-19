@@ -3,29 +3,11 @@
   import { m } from '../paraglide/messages.js';
   import { initI18n, getLocale } from '../lib/i18n.ts';
   import EventFormDialog from './EventFormDialog.svelte';
-
-  // ── Types ──────────────────────────────────────────────────────────────────
-  interface AlarmFields { direction: string; value: string; unit: string; datetime: string; }
-  type PartStat = 'NEEDS-ACTION' | 'ACCEPTED' | 'DECLINED' | 'TENTATIVE';
-  interface AttendeeFields { cn: string; email: string; partstat: PartStat; }
-  interface RecurrenceInfo {
-    freq: string; interval?: number; by_day?: string[]; by_month_day?: number[];
-    by_month?: number[]; by_set_pos?: number[]; until?: string | null; count?: number | null;
-  }
-  interface EventJson {
-    uid: string; time_range: string; summary: string; color: string;
-    dtstart: string; dtend: string; is_all_day: boolean; tz: string;
-    location: string; description: string; is_recurring: boolean;
-    recurrence: RecurrenceInfo | null; calendar_href: string;
-    master_dtstart: string; alarms: AlarmFields[]; attendees: AttendeeFields[];
-  }
-  interface DayEventsJson { date_iso: string; day_name: string; is_today: boolean; events: EventJson[]; }
-  interface CalendarJson { href: string; name: string; color: string | null; is_active: boolean; }
-  interface MonthDayJson { day_number: number; date_str: string; is_current_month: boolean; event_colors: string[]; }
-  interface MonthGridJson {
-    month: string; month_name: string; month_number: number; year: number;
-    days: MonthDayJson[]; prev_month: string; next_month: string;
-  }
+  import MonthPicker from './MonthPicker.svelte';
+  import CalendarList from './CalendarList.svelte';
+  import EventDetail from './EventDetail.svelte';
+  import type { EventJson, DayEventsJson, CalendarJson, MonthGridJson } from '../types/calendar.ts';
+  import { getMonday, fmtDate, fmtYM } from '../lib/date.ts';
 
   // ── i18n ───────────────────────────────────────────────────────────────────
   let locale = 'en';
@@ -37,30 +19,11 @@
   let monthGrid: MonthGridJson | null = null;
   let eventsLoading = false;
 
-  function getMonday(d: Date): Date {
-    const date = new Date(d);
-    const day = date.getDay();
-    date.setDate(date.getDate() - day + (day === 0 ? -6 : 1));
-    date.setHours(0, 0, 0, 0);
-    return date;
-  }
-
-  function fmtDate(d: Date): string {
-    return d.getFullYear() + '-' +
-      String(d.getMonth() + 1).padStart(2, '0') + '-' +
-      String(d.getDate()).padStart(2, '0');
-  }
-
-  function fmtYM(d: Date): string {
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-  }
-
   let selectedWeekStart: Date = getMonday(new Date());
   let gridMonth: string = fmtYM(selectedWeekStart);
   const todayStr: string = fmtDate(new Date());
 
   $: weekEnd = (() => { const d = new Date(selectedWeekStart); d.setDate(d.getDate() + 6); return d; })();
-  $: [gridYear, gridMonthNum] = gridMonth.split('-').map(Number);
 
   $: weekRangeText = (() => {
     locale;
@@ -75,25 +38,6 @@
     if (end.getFullYear() !== cy || start.getFullYear() !== end.getFullYear()) eo.year = 'numeric';
     return start.toLocaleDateString(loc, so) + ' – ' + end.toLocaleDateString(loc, eo);
   })();
-
-  $: monthNames = (() => {
-    locale;
-    const loc = locale;
-    return Array.from({ length: 12 }, (_, i) =>
-      new Date(2024, i, 1).toLocaleDateString(loc, { month: 'long' })
-    );
-  })();
-
-  $: dayOfWeekShort = (() => {
-    locale;
-    const loc = locale;
-    // Jan 1 2024 is Monday
-    return Array.from({ length: 7 }, (_, i) =>
-      new Date(2024, 0, 1 + i).toLocaleDateString(loc, { weekday: 'short' })
-    );
-  })();
-
-  const yearRange = Array.from({ length: 101 }, (_, i) => new Date().getFullYear() - 50 + i);
 
   // ── Data fetching ──────────────────────────────────────────────────────────
   async function fetchCalendars() {
@@ -164,10 +108,10 @@
   }
 
   function selectDay(dateStr: string) {
-    const [y, m, dd] = dateStr.split('-').map(Number);
-    selectedWeekStart = getMonday(new Date(y, m - 1, dd));
+    const [y, mo, dd] = dateStr.split('-').map(Number);
+    selectedWeekStart = getMonday(new Date(y, mo - 1, dd));
     fetchEvents();
-    const nm = String(y) + '-' + String(m).padStart(2, '0');
+    const nm = String(y) + '-' + String(mo).padStart(2, '0');
     if (nm !== gridMonth) { gridMonth = nm; fetchMonthGrid(nm); }
   }
 
@@ -184,33 +128,6 @@
     if (nm !== gridMonth) { gridMonth = nm; fetchMonthGrid(nm); }
   }
 
-  function onMonthSelectChange(field: 'month' | 'year', val: number) {
-    if (field === 'month') {
-      navigateToMonth(String(gridYear) + '-' + String(val).padStart(2, '0'));
-    } else {
-      navigateToMonth(String(val) + '-' + String(gridMonthNum).padStart(2, '0'));
-    }
-  }
-
-  // Reactive: recalculate when week changes
-  $: selectedWeekDates = (() => {
-    selectedWeekStart; weekEnd;
-    const set = new Set<string>();
-    if (monthGrid) {
-      for (const day of monthGrid.days) {
-        if (day.is_current_month) {
-          const [y, m, d] = day.date_str.split('-').map(Number);
-          const dt = new Date(y, m - 1, d);
-          dt.setHours(0, 0, 0, 0);
-          if (dt.getTime() >= selectedWeekStart.getTime() && dt.getTime() <= weekEnd.getTime()) {
-            set.add(day.date_str);
-          }
-        }
-      }
-    }
-    return set;
-  })();
-
   // ── Calendar toggle ────────────────────────────────────────────────────────
   async function toggleCalendar(href: string, active: boolean) {
     calendars = calendars.map(c => c.href === href ? { ...c, is_active: active } : c);
@@ -224,98 +141,8 @@
   }
 
   // ── Event detail ───────────────────────────────────────────────────────────
-  let detailOpen = false;
-  let detailEvent: EventJson | null = null;
-  let detailEditPopoverOpen = false;
-  let detailDialogEl: HTMLDialogElement;
-
-  async function openDetail(event: EventJson) {
-    detailEvent = event;
-    detailEditPopoverOpen = false;
-    detailOpen = true;
-    await tick();
-    detailDialogEl?.showModal();
-  }
-
-  function closeDetail() {
-    detailOpen = false;
-    detailEvent = null;
-    detailDialogEl?.close();
-  }
-
-  function formatEventTime(ev: EventJson): string {
-    const loc = navigator.language || 'en';
-    if (ev.is_all_day) {
-      if (ev.dtstart) {
-        const [y, monthNum, d] = ev.dtstart.split('T')[0].split('-').map(Number);
-        return m.event_allDay() + ' · ' + new Date(y, monthNum - 1, d).toLocaleDateString(loc, { dateStyle: 'long' });
-      }
-      return m.event_allDay();
-    }
-    if (!ev.dtstart) return '';
-    const s = new Date(ev.dtstart.includes('Z') || ev.dtstart.includes('+') ? ev.dtstart : ev.dtstart + 'Z');
-    let text = s.toLocaleDateString(loc, { dateStyle: 'long' }) + ', ' +
-      s.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
-    if (ev.dtend) {
-      const e = new Date(ev.dtend.includes('Z') || ev.dtend.includes('+') ? ev.dtend : ev.dtend + 'Z');
-      if (s.toDateString() === e.toDateString()) {
-        text += ' – ' + e.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
-      } else {
-        text += ' – ' + e.toLocaleDateString(loc, { dateStyle: 'long' }) + ', ' +
-          e.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
-      }
-    }
-    if (ev.tz && ev.tz !== 'UTC') text += ' (' + ev.tz + ')';
-    return text;
-  }
-
-  function formatRecurrence(r: RecurrenceInfo | null): string {
-    if (!r?.freq) return '';
-    const loc = locale;
-    const singular: Record<string, () => string> = { DAILY: m.rec_everyDay, WEEKLY: m.rec_everyWeek, MONTHLY: m.rec_everyMonth, YEARLY: m.rec_everyYear };
-    const plural: Record<string, (p: Record<string, string | number>) => string> = { DAILY: m.rec_everyNDays, WEEKLY: m.rec_everyNWeeks, MONTHLY: m.rec_everyNMonths, YEARLY: m.rec_everyNYears };
-    const dayMap: Record<string, number> = { MO: 0, TU: 1, WE: 2, TH: 3, FR: 4, SA: 5, SU: 6 };
-    const interval = r.interval && r.interval > 1 ? r.interval : 1;
-    let text = interval === 1 ? singular[r.freq]() : plural[r.freq]({ n: interval });
-    if (r.by_day?.length && r.freq === 'WEEKLY') {
-      const dtf = new Intl.DateTimeFormat(loc, { weekday: 'long' });
-      const ref = new Date(2024, 0, 1);
-      text += m.rec_on() + r.by_day.map(c => { ref.setDate(1 + (dayMap[c] ?? 0)); return dtf.format(ref); }).join(', ');
-    }
-    if (r.by_month_day?.length && r.freq === 'MONTHLY') text += m.rec_onDay() + r.by_month_day.join(', ');
-    if (r.count) text += ', ' + r.count + m.rec_times();
-    else if (r.until) {
-      const parts = r.until.split(' ')[0].split('-').map(Number);
-      const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(r.until + 'T00:00:00');
-      if (!isNaN(d.getTime())) text += m.rec_until() + d.toLocaleDateString(loc, { dateStyle: 'long' });
-    }
-    return text;
-  }
-
-  function formatAlarm(alarm: AlarmFields): string {
-    const loc = navigator.language || 'en';
-    if (alarm.direction === 'absolute') {
-      if (!alarm.datetime) return '';
-      const iso = alarm.datetime.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/, '$1-$2-$3T$4:$5:$6Z');
-      const d = new Date(iso);
-      return isNaN(d.getTime()) ? alarm.datetime : d.toLocaleString(loc, { dateStyle: 'medium', timeStyle: 'short' });
-    }
-    const abs = parseInt(alarm.value || '15') * parseInt(alarm.unit || '1');
-    let vs = '';
-    if (abs % 1440 === 0) { const n = abs / 1440; vs = n + ' ' + (n === 1 ? m.event_reminderDay() : m.event_reminderDays()); }
-    else if (abs % 60 === 0) { const n = abs / 60; vs = n + ' ' + (n === 1 ? m.event_reminderHour() : m.event_reminderHours()); }
-    else vs = abs + ' ' + m.event_reminderMin();
-    const amap: Record<string, string> = { 'before-start': 'event_reminderBeforeStart', 'after-start': 'event_reminderAfterStart', 'before-end': 'event_reminderBeforeEnd', 'after-end': 'event_reminderAfterEnd' };
-    return vs + ' ' + (m as Record<string, Function>)[amap[alarm.direction] || 'event_reminderBeforeStart']();
-  }
-
-  const PARTSTAT_KEYS: Record<PartStat, string> = {
-    'NEEDS-ACTION': 'event_attendeeStatusNeedsAction',
-    'ACCEPTED': 'event_attendeeStatusAccepted',
-    'DECLINED': 'event_attendeeStatusDeclined',
-    'TENTATIVE': 'event_attendeeStatusTentative',
-  };
-  function partstatKey(ps: PartStat): string { return PARTSTAT_KEYS[ps] ?? 'event_attendeeStatusNeedsAction'; }
+  let eventDetail: EventDetail;
+  let detailIsOpen = false;
 
   // ── Event form ─────────────────────────────────────────────────────────────
   let formDialog: EventFormDialog;
@@ -323,8 +150,8 @@
 
   // ── Past days ──────────────────────────────────────────────────────────────
   function isPastDay(dateStr: string): boolean {
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const dt = new Date(y, m - 1, d);
+    const [y, mo, d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, mo - 1, d);
     const today = new Date(); today.setHours(0, 0, 0, 0);
     return dt < today;
   }
@@ -344,7 +171,7 @@
   }
 
   function handleGridKeydown(e: KeyboardEvent) {
-    if (detailOpen) return;
+    if (detailIsOpen) return;
     const target = e.target as HTMLElement;
     if (!target.classList?.contains('event-trigger')) return;
     const grid = e.currentTarget as HTMLElement;
@@ -419,14 +246,8 @@
     const active = document.activeElement as HTMLElement;
     const tag = active?.tagName?.toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select' || active?.isContentEditable) return;
-    if (detailOpen) {
-      if (e.key === 'e') {
-        e.preventDefault();
-        if (detailEvent) {
-          if (detailEvent.is_recurring) detailEditPopoverOpen = !detailEditPopoverOpen;
-          else { closeDetail(); formDialog.openEditForm(detailEvent, 'series'); }
-        }
-      }
+    if (detailIsOpen) {
+      if (e.key === 'e') { e.preventDefault(); eventDetail.triggerEdit(); }
       return;
     }
     if (e.key === 't') { e.preventDefault(); navigateToday(); }
@@ -435,11 +256,6 @@
     else if (e.key === 'p') { e.preventDefault(); navigateWeek(-7); }
     else if (e.key === 'P') { e.preventDefault(); navigateWeek(-28); }
   }
-
-  // ── Detail dialog computed values ─────────────────────────────────────────
-  $: detailTimeText = detailEvent ? formatEventTime(detailEvent) : '';
-  $: detailRecText = (detailEvent?.is_recurring && detailEvent?.recurrence)
-    ? formatRecurrence(detailEvent.recurrence) : '';
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
   onMount(async () => {
@@ -466,114 +282,25 @@
 <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
 <div class="layout">
 
-  <!-- Sidebar: month grid + calendar list -->
+  <!-- Sidebar: month picker + calendar list -->
   <div class="sidebar">
-
-  <!-- Month grid -->
-  <div class="calendar-picker">
-    <article class="card contrast">
-      {#if monthGrid}
-        <div style="position:relative">
-          <header>
-          <hgroup>
-            <h2>
-              <button
-                class="nav-btn"
-                aria-label={tl('cal_aria_prevMonth')}
-                on:click={() => navigateToMonth(monthGrid!.prev_month)}
-              ><span class="arrow">‹</span></button>
-
-              <span class="month-picker">
-                <select
-                  aria-label={tl('cal_aria_month')}
-                  value={gridMonthNum}
-                  on:change={(e) => onMonthSelectChange('month', +(e.target as HTMLSelectElement).value)}
-                >
-                  {#each monthNames as name, i}
-                    <option value={i + 1}>{name}</option>
-                  {/each}
-                </select>
-                <select
-                  aria-label={tl('cal_aria_year')}
-                  value={gridYear}
-                  on:change={(e) => onMonthSelectChange('year', +(e.target as HTMLSelectElement).value)}
-                >
-                  {#each yearRange as y}
-                    <option value={y}>{y}</option>
-                  {/each}
-                </select>
-              </span>
-
-              <button
-                class="nav-btn"
-                aria-label={tl('cal_aria_nextMonth')}
-                on:click={() => navigateToMonth(monthGrid!.next_month)}
-              ><span class="arrow">›</span></button>
-            </h2>
-          </hgroup>
-          </header>
-
-          <div class="date-grid">
-            {#each dayOfWeekShort as dayLabel}
-              <div class="date-header">{dayLabel}</div>
-            {/each}
-          </div>
-
-          <div class="date-grid" role="grid">
-            {#each monthGrid.days as day (day.date_str)}
-              {#if day.is_current_month}
-                <div
-                  class="date-cell"
-                  class:selected-week={selectedWeekDates.has(day.date_str)}
-                  class:is-today={day.date_str === todayStr}
-                  data-date={day.date_str}
-                  role="gridcell"
-                  tabindex="0"
-                  on:click={() => selectDay(day.date_str)}
-                  on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectDay(day.date_str); } }}
-                >
-                  <span class="day-number">{day.day_number}</span>
-                  {#if day.event_colors.length > 0}
-                    <div class="event-dots">
-                      {#each day.event_colors.slice(0, 3) as color}
-                        <span class="event-dot" style="background:{color}"></span>
-                      {/each}
-                    </div>
-                  {/if}
-                </div>
-              {:else}
-                <div class="date-cell empty"></div>
-              {/if}
-            {/each}
-          </div>
-        </div>
-      {:else}
-        <div class="calendar-loading">{tl('cal_loadingCalendar')}</div>
-      {/if}
-    </article>
-  </div>
-
-  <!-- Calendar list -->
-  <div class="calendar-list-section">
-<ul class="calendar-list">
-      {#each calendars as cal}
-        <li>
-          <label>
-            <input
-              type="checkbox"
-              checked={cal.is_active}
-              on:change={(e) => toggleCalendar(cal.href, (e.target as HTMLInputElement).checked)}
-            />
-            {#if cal.color}
-              <span class="dot" style="background:{cal.color}"></span>
-            {/if}
-            {cal.name}
-          </label>
-        </li>
-      {/each}
-    </ul>
-  </div>
-
+    <div class="calendar-picker">
+      <MonthPicker
+        {monthGrid}
+        weekStart={selectedWeekStart}
+        {weekEnd}
+        {todayStr}
+        {locale}
+        on:selectDay={(e) => selectDay(e.detail)}
+        on:navigateToMonth={(e) => navigateToMonth(e.detail)}
+      />
+    </div>
+    <div class="calendar-list-section">
+      <CalendarList
+        {calendars}
+        on:toggle={(e) => toggleCalendar(e.detail.href, e.detail.active)}
+      />
+    </div>
   </div>
 
   <!-- Weekly view -->
@@ -623,13 +350,13 @@
           </button>
           <div class="appointments">
             {#each day.events as event (event.uid + event.dtstart)}
-                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                <article
-                  class="appointment event-trigger"
-                  style="border-left: 3px solid {event.color}"
-                  tabindex="-1"
-                  on:click={() => openDetail(event)}
-                on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(event); } }}
+              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+              <article
+                class="appointment event-trigger"
+                style="border-left: 3px solid {event.color}"
+                tabindex="-1"
+                on:click={() => eventDetail.open(event)}
+                on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); eventDetail.open(event); } }}
               >
                 <header>{event.time_range}</header>
                 <p>{event.summary}</p>
@@ -643,97 +370,14 @@
 </div>
 
 <!-- ── Event detail dialog ────────────────────────────────────────────────── -->
-<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
-<dialog
-  bind:this={detailDialogEl}
-  id="event-detail"
-  on:click={(e) => { if (e.target === e.currentTarget) closeDetail(); }}
-  on:close={closeDetail}
-  on:cancel={(e) => { e.preventDefault(); closeDetail(); }}
->
-  <article>
-    <header>
-      <h3>{detailEvent?.summary || ''}</h3>
-      <div class="header-actions">
-        {#if detailEvent}
-          <button
-            class="edit-btn"
-            title={tl('event_edit')}
-            on:click={() => {
-              if (detailEvent?.is_recurring) detailEditPopoverOpen = !detailEditPopoverOpen;
-              else if (detailEvent) { closeDetail(); formDialog.openEditForm(detailEvent, 'series'); }
-            }}
-          >&#9998;</button>
-        {/if}
-        <button class="close-btn" aria-label={tl('weekly_aria_close')} on:click={closeDetail}></button>
-      </div>
-    </header>
+<EventDetail
+  bind:this={eventDetail}
+  bind:isOpen={detailIsOpen}
+  {locale}
+  on:edit={(e) => formDialog.openEditForm(e.detail.event, e.detail.scope)}
+/>
 
-    {#if detailEditPopoverOpen && detailEvent}
-      <div class="edit-choice-popover" style="display:flex">
-        <button on:click={() => { detailEditPopoverOpen = false; if (detailEvent) { closeDetail(); formDialog.openEditForm(detailEvent, 'series'); } }}>
-          {tl('event_editSeries')}
-        </button>
-        <button on:click={() => { detailEditPopoverOpen = false; if (detailEvent) { closeDetail(); formDialog.openEditForm(detailEvent, 'this_instance'); } }}>
-          {tl('event_editInstance')}
-        </button>
-      </div>
-    {/if}
-
-    {#if detailEvent}
-      <div class="event-detail-body">
-        {#if detailTimeText}
-          <div class="event-detail-row">
-            <span class="event-detail-label">{tl('event_time')}</span>
-            <span>{detailTimeText}</span>
-          </div>
-        {/if}
-        {#if detailEvent.location}
-          <div class="event-detail-row">
-            <span class="event-detail-label">{tl('event_location')}</span>
-            <a href="https://www.google.com/maps/search/?api=1&query={encodeURIComponent(detailEvent.location)}" target="_blank" rel="noopener noreferrer">{detailEvent.location}</a>
-          </div>
-        {/if}
-        {#if detailRecText}
-          <div class="event-detail-row">
-            <span class="event-detail-label">{tl('event_repeats')}</span>
-            <span>{detailRecText}</span>
-          </div>
-        {/if}
-        {#if detailEvent.description}
-          <div>
-            <span class="event-detail-label">{tl('event_description')}</span>
-            <p style="margin:0.25rem 0 0;white-space:pre-wrap;word-break:break-word">{detailEvent.description}</p>
-          </div>
-        {/if}
-        {#if detailEvent.alarms.length > 0}
-          <div class="event-detail-row">
-            <span class="event-detail-label">{tl('event_reminder')}</span>
-            <div>
-              {#each detailEvent.alarms as alarm}
-                <div>{formatAlarm(alarm)}</div>
-              {/each}
-            </div>
-          </div>
-        {/if}
-        {#if detailEvent.attendees.length > 0}
-          <div class="event-detail-row">
-            <span class="event-detail-label">{tl('event_attendees')}</span>
-            <div class="attendee-list-detail">
-              {#each detailEvent.attendees as att}
-                <div class="attendee-detail-row">
-                  <span class="attendee-badge attendee-badge--{att.partstat.toLowerCase()}">{tl(partstatKey(att.partstat))}</span>
-                  <span>{att.cn ? `${att.cn} <${att.email}>` : att.email}</span>
-                </div>
-              {/each}
-            </div>
-          </div>
-        {/if}
-      </div>
-    {/if}
-  </article>
-</dialog>
-
+<!-- ── Event form dialog ──────────────────────────────────────────────────── -->
 <EventFormDialog
   bind:this={formDialog}
   {calendars}
@@ -799,91 +443,9 @@
     .weekly { grid-area: weekly; }
   }
 
-  /* Month grid */
-  .date-grid {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    gap: 0;
-  }
-  .date-header {
-    text-align: center;
-    font-size: 0.75rem;
-    color: var(--pico-muted-color);
-    padding: 0.25rem 0;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .date-cell {
-    padding: 0 0.25rem;
-    text-align: center;
-    border-bottom: var(--pico-border-width) solid var(--pico-muted-border-color);
-    border-right: var(--pico-border-width) solid var(--pico-muted-border-color);
-    aspect-ratio: 1;
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 0.875rem;
-    transition: background 0.1s;
-    background: transparent;
-    color: inherit;
-  }
-  .date-cell:nth-child(7n) { border-right: none; }
-  .date-cell:nth-last-child(-n+7) { border-bottom: none; }
-  .date-cell.selected-week {
-    background: var(--pico-primary-background);
-    color: var(--pico-primary-inverse);
-    font-weight: 600;
-  }
-  .date-cell.empty { background: transparent; cursor: default; }
-  .date-cell.is-today .day-number {
-    position: relative;
-    z-index: 0;
-    display: block;
-    width: 1.5rem;
-    line-height: 1.5rem;
-    text-align: center;
-    color: var(--pico-primary-inverse);
-    font-weight: 700;
-    margin: 0 auto;
-  }
-  .date-cell.is-today .day-number::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    background: var(--pico-primary-background);
-    z-index: -1;
-  }
-  .date-cell.selected-week.is-today .day-number {
-    color: var(--pico-primary-background);
-  }
-  .date-cell.selected-week.is-today .day-number::before {
-    background: var(--pico-primary-inverse);
-  }
-  .day-heading {
-    background: none; border: none; margin: 0; padding: 0;
-    color: inherit; font: inherit; text-align: inherit; cursor: pointer;
-    font-size: 1.125rem; font-weight: 700; line-height: 1.225;
-    width: 100%; display: block;
-  }
-  .day-heading:focus:not(:focus-visible) { outline: none; }
-  .calendar:focus:not(:focus-visible) { outline: none; }
-  .event-dots { position: absolute; bottom: 0.3rem; left: 0; right: 0; display: flex; justify-content: center; gap: 3px; }
-  .event-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
-  .calendar-loading { padding: 2rem; text-align: center; font-style: italic; color: var(--pico-muted-color); }
-
-  hgroup h2 {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    margin: 0 0 0.5rem;
-    font-size: 0.9rem;
-  }
+  /* Weekly header */
+  .weekly-header { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+  .week-range { font-size: 0.875rem; color: var(--pico-muted-color); }
   .nav-btn {
     display: flex;
     align-items: center;
@@ -904,25 +466,6 @@
   }
   .nav-btn:hover { background: var(--pico-primary-hover-background); color: var(--pico-primary-inverse); }
   .arrow { display: inline-block; transform: translateY(-0.08em); }
-  .month-picker { display: inline-flex; align-items: baseline; gap: 0.25rem; white-space: nowrap; flex: 1; justify-content: center; }
-  .month-picker select {
-    font: inherit;
-    cursor: pointer;
-    padding: 0.15rem 1.25rem 0.15rem 0.4rem;
-    line-height: 1.4;
-    margin: 0;
-  }
-  .month-picker select:last-of-type { max-width: 7rem; }
-
-  /* Calendar list */
-  .calendar-list { padding: 0; }
-  :global(.calendar-list li) { list-style: none; }
-  :global(.calendar-list input[type="checkbox"]) { cursor: pointer; }
-  :global(.dot) { border-radius: 50%; width: 10px; height: 10px; display: inline-block; }
-
-  /* Weekly header */
-  .weekly-header { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
-  .week-range { font-size: 0.875rem; color: var(--pico-muted-color); }
   .today-btn {
     margin-left: auto;
     font-size: 0.75rem;
@@ -969,6 +512,14 @@
   :global(.day.today) { border-top: 2px solid var(--pico-primary-background); }
   :global(.day.today .day-heading) { color: var(--pico-primary-background); font-weight: bold; }
 
+  .day-heading {
+    background: none; border: none; margin: 0; padding: 0;
+    color: inherit; font: inherit; text-align: inherit; cursor: pointer;
+    font-size: 1.125rem; font-weight: 700; line-height: 1.225;
+    width: 100%; display: block;
+  }
+  .day-heading:focus:not(:focus-visible) { outline: none; }
+  .calendar:focus:not(:focus-visible) { outline: none; }
   .day-date { display: none; }
   .day-expand-icon { display: none; }
   .day-past-count { display: none; }
@@ -1034,78 +585,6 @@
   :global(.event-trigger) { cursor: pointer; transition: filter 0.15s ease; }
   :global(.event-trigger:hover) { filter: brightness(0.95); }
   :global(.event-trigger:focus-visible) { outline: 2px solid var(--pico-primary-background, #0074d9); outline-offset: 2px; }
-
-  /* Dialogs */
-  :global(#event-detail),
-  :global(#event-form) {
-    border: 1px solid var(--pico-muted-border-color, #c8c8c8);
-    border-radius: var(--pico-border-radius, 0.25rem);
-    padding: 0;
-    max-width: 28rem;
-    width: 90vw;
-    background: var(--pico-background-color, #fff);
-    color: var(--pico-color, #333);
-    box-shadow: 0 0.5rem 2rem rgba(0,0,0,0.25);
-  }
-  :global(#event-detail::backdrop),
-  :global(#event-form::backdrop) { background: rgba(0,0,0,0.4); }
-  :global(#event-detail article),
-  :global(#event-form article) { margin: 0; padding: 1.5rem; }
-  :global(#event-detail article header),
-  :global(#event-form article header) { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
-  :global(#event-detail article header h3),
-  :global(#event-form article header h3) { margin: 0; flex: 1; word-break: break-word; }
-
-  .header-actions { display: flex; align-items: center; gap: 0.25rem; }
-  .edit-btn {
-    background: none; border: none; cursor: pointer;
-    font-size: 1rem; color: var(--pico-muted-color);
-    padding: 0.25rem; line-height: 1; transition: color 0.15s;
-  }
-  .edit-btn:hover { color: var(--pico-primary-background); }
-
-  :global(.close-btn) {
-    position: relative; background: none; border: none;
-    font-size: 1.5rem; line-height: 1; padding: 0;
-    width: 1.2em; height: 1.2em; cursor: pointer;
-    color: transparent; display: inline-flex; align-items: center; justify-content: center;
-  }
-  :global(.close-btn::before), :global(.close-btn::after) {
-    content: ''; position: absolute; top: 50%; left: 50%;
-    width: 0.75em; height: 0.1em;
-    background-color: var(--pico-muted-color, #666); transition: background-color 0.15s;
-  }
-  :global(.close-btn::before) { transform: translate(-50%, -50%) rotate(45deg); }
-  :global(.close-btn::after) { transform: translate(-50%, -50%) rotate(-45deg); }
-  :global(.close-btn:hover::before), :global(.close-btn:hover::after) { background-color: var(--pico-color, #333); }
-
-  .event-detail-body { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
-  .event-detail-row { display: flex; flex-direction: column; gap: 0.125rem; }
-  .event-detail-label {
-    font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
-    color: var(--pico-muted-color, #666); font-weight: 600;
-  }
-
-  .edit-choice-popover {
-    background: var(--pico-background-color); border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius); box-shadow: 0 0.25rem 1rem rgba(0,0,0,0.2);
-    padding: 0.25rem; flex-direction: column; gap: 0.125rem; margin: 0.25rem 0;
-  }
-  .edit-choice-popover button {
-    background: none; border: none; text-align: left; font-size: 0.875rem;
-    cursor: pointer; padding: 0.5rem 0.75rem; border-radius: var(--pico-border-radius);
-    color: var(--pico-color); white-space: nowrap;
-  }
-  .edit-choice-popover button:hover { background: var(--pico-primary-background); color: var(--pico-primary-inverse); }
-
-  /* Detail attendees */
-  .attendee-list-detail { display: flex; flex-direction: column; gap: 0.25rem; }
-  .attendee-detail-row { display: flex; align-items: center; gap: 0.5rem; }
-  .attendee-badge { font-size: 0.75rem; font-weight: 600; padding: 0.1rem 0.45rem; border-radius: 999px; white-space: nowrap; }
-  .attendee-badge--accepted { background: #d1fae5; color: #065f46; }
-  .attendee-badge--declined { background: #fee2e2; color: #991b1b; }
-  .attendee-badge--tentative { background: #fef9c3; color: #854d0e; }
-  .attendee-badge--needs-action { background: var(--pico-secondary-background); color: var(--pico-secondary-inverse); opacity: 0.7; }
 
   /* FAB */
   .fab {

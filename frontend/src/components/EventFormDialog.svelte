@@ -2,22 +2,8 @@
   import { tick } from 'svelte';
   import { createEventDispatcher } from 'svelte';
   import { m } from '../paraglide/messages.js';
-
-  type PartStat = 'NEEDS-ACTION' | 'ACCEPTED' | 'DECLINED' | 'TENTATIVE';
-  interface AlarmFields { direction: string; value: string; unit: string; datetime: string; }
-  interface AttendeeFields { cn: string; email: string; partstat: PartStat; }
-  interface RecurrenceInfo {
-    freq: string; interval?: number; by_day?: string[]; by_month_day?: number[];
-    by_month?: number[]; by_set_pos?: number[]; until?: string | null; count?: number | null;
-  }
-  export interface EventJson {
-    uid: string; time_range: string; summary: string; color: string;
-    dtstart: string; dtend: string; is_all_day: boolean; tz: string;
-    location: string; description: string; is_recurring: boolean;
-    recurrence: RecurrenceInfo | null; calendar_href: string;
-    master_dtstart: string; alarms: AlarmFields[]; attendees: AttendeeFields[];
-  }
-  interface CalendarJson { href: string; name: string; color: string | null; is_active: boolean; }
+  import type { PartStat, AlarmFields, AttendeeFields, RecurrenceInfo, EventJson, CalendarJson } from '../types/calendar.ts';
+  import { fmtDate } from '../lib/date.ts';
 
   export let calendars: CalendarJson[] = [];
   export let locale: string = 'en';
@@ -80,12 +66,6 @@
     };
     return unitMap[fFreq] || '';
   })();
-
-  function fmtDate(d: Date): string {
-    return d.getFullYear() + '-' +
-      String(d.getMonth() + 1).padStart(2, '0') + '-' +
-      String(d.getDate()).padStart(2, '0');
-  }
 
   function resetRecurrence() {
     fFreq = ''; fInterval = 1; fByDay = []; fMonthlyMode = 'by_day';
@@ -570,6 +550,37 @@
 </dialog>
 
 <style>
+  /* Dialog base */
+  dialog {
+    border: 1px solid var(--pico-muted-border-color, #c8c8c8);
+    border-radius: var(--pico-border-radius, 0.25rem);
+    padding: 0;
+    max-width: 28rem;
+    width: 90vw;
+    background: var(--pico-background-color, #fff);
+    color: var(--pico-color, #333);
+    box-shadow: 0 0.5rem 2rem rgba(0,0,0,0.25);
+  }
+  dialog::backdrop { background: rgba(0,0,0,0.4); }
+  article { margin: 0; padding: 1.5rem; }
+  article header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
+  article header h3 { margin: 0; flex: 1; word-break: break-word; }
+
+  .close-btn {
+    position: relative; background: none; border: none;
+    font-size: 1.5rem; line-height: 1; padding: 0;
+    width: 1.2em; height: 1.2em; cursor: pointer;
+    color: transparent; display: inline-flex; align-items: center; justify-content: center;
+  }
+  .close-btn::before, .close-btn::after {
+    content: ''; position: absolute; top: 50%; left: 50%;
+    width: 0.75em; height: 0.1em;
+    background-color: var(--pico-muted-color, #666); transition: background-color 0.15s;
+  }
+  .close-btn::before { transform: translate(-50%, -50%) rotate(45deg); }
+  .close-btn::after { transform: translate(-50%, -50%) rotate(-45deg); }
+  .close-btn:hover::before, .close-btn:hover::after { background-color: var(--pico-color, #333); }
+
   /* Event form */
   .summary-wrap { position: relative; }
   .time-suggestions {
