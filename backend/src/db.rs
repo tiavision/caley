@@ -291,6 +291,135 @@ pub async fn get_calendar_sync_state(
     }
 }
 
+/// Remove cached data for calendars that no longer exist on the CalDAV server.
+pub async fn remove_stale_calendars(
+    pool: &SqlitePool,
+    user_id: &str,
+    fresh_hrefs: &HashSet<String>,
+    key: &[u8; 32],
+) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+
+    let placeholders = fresh_hrefs.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+
+    if !fresh_hrefs.is_empty() {
+        let sql = format!(
+            "DELETE FROM push_subscriptions WHERE user_id = ? AND calendar_href NOT IN ({placeholders})"
+        );
+        let mut q = sqlx::query(&sql).bind(user_id);
+        for h in fresh_hrefs {
+            q = q.bind(h.as_str());
+        }
+        q.execute(&mut *tx).await?;
+
+        let sql = format!(
+            "DELETE FROM cached_events WHERE user_id = ? AND calendar_href NOT IN ({placeholders})"
+        );
+        let mut q = sqlx::query(&sql).bind(user_id);
+        for h in fresh_hrefs {
+            q = q.bind(h.as_str());
+        }
+        q.execute(&mut *tx).await?;
+
+        let sql = format!(
+            "DELETE FROM cached_calendars WHERE user_id = ? AND href NOT IN ({placeholders})"
+        );
+        let mut q = sqlx::query(&sql).bind(user_id);
+        for h in fresh_hrefs {
+            q = q.bind(h.as_str());
+        }
+        q.execute(&mut *tx).await?;
+    } else {
+        sqlx::query("DELETE FROM push_subscriptions WHERE user_id = ?")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM cached_events WHERE user_id = ?")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM cached_calendars WHERE user_id = ?")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    // deactivated_calendars hrefs are encrypted with random nonces, so decrypt each to compare
+    let rows = sqlx::query(
+        "SELECT rowid, calendar_href FROM deactivated_calendars WHERE user_id = ?",
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    for row in rows {
+        let rowid: i64 = row.get(0);
+        let enc_href: String = row.get(1);
+        if let Ok(decrypted) = decrypt_field(&enc_href, key) {
+            if !fresh_hrefs.contains(&decrypted) {
+                sqlx::query("DELETE FROM deactivated_calendars WHERE rowid = ?")
+                    .bind(rowid)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Delete all cached data for a single calendar. Used when a calendar returns 404.
+pub async fn delete_calendar_cache(
+    pool: &SqlitePool,
+    user_id: &str,
+    calendar_href: &str,
+    key: &[u8; 32],
+) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("DELETE FROM push_subscriptions WHERE user_id = ? AND calendar_href = ?")
+        .bind(user_id)
+        .bind(calendar_href)
+        .execute(&mut *tx)
+        .await?;
+
+    sqlx::query("DELETE FROM cached_events WHERE user_id = ? AND calendar_href = ?")
+        .bind(user_id)
+        .bind(calendar_href)
+        .execute(&mut *tx)
+        .await?;
+
+    // deactivated_calendars hrefs are encrypted, so decrypt each to compare
+    let rows = sqlx::query(
+        "SELECT rowid, calendar_href FROM deactivated_calendars WHERE user_id = ?",
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    for row in rows {
+        let rowid: i64 = row.get(0);
+        let enc_href: String = row.get(1);
+        if let Ok(decrypted) = decrypt_field(&enc_href, key) {
+            if decrypted == calendar_href {
+                sqlx::query("DELETE FROM deactivated_calendars WHERE rowid = ?")
+                    .bind(rowid)
+                    .execute(&mut *tx)
+                    .await?;
+                break;
+            }
+        }
+    }
+
+    sqlx::query("DELETE FROM cached_calendars WHERE user_id = ? AND href = ?")
+        .bind(user_id)
+        .bind(calendar_href)
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
 // ── Event cache ───────────────────────────────────────────────────────────────
 
 fn ical_dt_to_date_str(s: &str) -> String {

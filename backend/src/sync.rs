@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -153,6 +153,7 @@ impl SyncManager {
         // On full sync, rediscover the calendar list from CalDAV
         let calendars: Vec<db::CachedCalendar> = if do_full {
             let fresh = client.calendars().await?;
+            let fresh_hrefs: HashSet<String> = fresh.iter().map(|c| c.href.clone()).collect();
             for cal in &fresh {
                 db::upsert_cached_calendar(
                     &self.db,
@@ -163,6 +164,7 @@ impl SyncManager {
                 )
                 .await?;
             }
+            db::remove_stale_calendars(&self.db, user_id, &fresh_hrefs, &self.encryption_key).await?;
             self.broadcaster.send(user_id, SseMessage::CalendarsChanged);
             fresh
                 .into_iter()
@@ -178,7 +180,18 @@ impl SyncManager {
 
         for cal in &calendars {
             if let Err(e) = self.sync_calendar(&client, user_id, &cal.href).await {
-                eprintln!("[sync] calendar {} failed: {e}", cal.href);
+                let err_str = e.to_string();
+                if err_str.contains("404") {
+                    eprintln!("[sync] calendar {} returned 404, removing from cache", cal.href);
+                    if let Err(remove_err) = db::delete_calendar_cache(
+                        &self.db, user_id, &cal.href, &self.encryption_key,
+                    ).await {
+                        eprintln!("[sync] failed to remove stale calendar {}: {remove_err}", cal.href);
+                    }
+                    self.broadcaster.send(user_id, SseMessage::CalendarsChanged);
+                } else {
+                    eprintln!("[sync] calendar {} failed: {e}", cal.href);
+                }
             }
         }
         Ok(())
