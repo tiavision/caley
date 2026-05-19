@@ -101,16 +101,19 @@
 <div class="settings-form">
   <div class="settings-header">
     <h2>{isLoginMode ? tl('login_heading') : tl('settings_heading')}</h2>
-    <select
-      class="locale-picker"
-      aria-label={tl('settings_language')}
-      bind:value={selectedLocale}
-      on:change={onLocaleChange}
-    >
-      {#each localeOptions as opt}
-        <option value={opt.value}>{opt.label}</option>
-      {/each}
-    </select>
+    <span class="locale-group">
+      🌐
+      <select
+        class="locale-picker"
+        aria-label={tl('settings_language')}
+        bind:value={selectedLocale}
+        on:change={onLocaleChange}
+      >
+        {#each localeOptions as opt}
+          <option value={opt.value}>{opt.label}</option>
+        {/each}
+      </select>
+    </span>
   </div>
 
   <p>{isLoginMode ? tl('login_subtitle') : tl('settings_subtitle')}</p>
@@ -182,6 +185,12 @@
     h2 {
       margin: 0;
     }
+  }
+
+  .locale-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
   }
 
   .delete-account-btn {
