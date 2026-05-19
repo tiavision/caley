@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { m } from '../paraglide/messages.js';
+  import { makeTl } from '../lib/i18n.ts';
   import type { CalendarJson } from '../types/calendar.ts';
 
   export let calendars: CalendarJson[] = [];
@@ -8,13 +8,7 @@
 
   const dispatch = createEventDispatcher<{ imported: { imported: number; errors: number } }>();
 
-  $: tl = (() => {
-    locale;
-    return (key: string, params?: Record<string, string | number>) => {
-      const fn = (m as Record<string, Function>)[key];
-      return typeof fn === 'function' ? fn(params) : key;
-    };
-  })();
+  $: tl = makeTl(locale);
 
   const NEW_CAL_SENTINEL = '__new__';
 

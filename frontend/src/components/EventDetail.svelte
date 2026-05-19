@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick, createEventDispatcher } from 'svelte';
-  import { m } from '../paraglide/messages.js';
+  import { makeTl } from '../lib/i18n.ts';
   import type { EventJson } from '../types/calendar.ts';
   import { formatEventTime, formatRecurrence, formatAlarm, partstatKey } from '../lib/format.ts';
 
@@ -9,7 +9,7 @@
 
   const dispatch = createEventDispatcher<{ edit: { event: EventJson; scope: 'series' | 'this_instance' } }>();
 
-  $: tl = (() => { locale; return (key: string, params?: Record<string, string | number>) => { const fn = (m as Record<string, Function>)[key]; return typeof fn === 'function' ? fn(params) : key; }; })();
+  $: tl = makeTl(locale);
 
   let detailEvent: EventJson | null = null;
   let detailEditPopoverOpen = false;

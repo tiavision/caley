@@ -1,10 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { m } from '../paraglide/messages.js';
-  import { initI18n, getLocale, setLocale } from '../lib/i18n.ts';
+  import { initI18n, getLocale, setLocale, makeTl } from '../lib/i18n.ts';
 
   let locale = 'en';
-  $: tl = (() => { locale; return (key: string, params?: Record<string, string | number>) => { const fn = (m as Record<string, Function>)[key]; return typeof fn === 'function' ? fn(params) : key; }; })();
+  $: tl = makeTl(locale);
 
   let caldavBaseUrl = '';
   let caldavUsername = '';
@@ -27,11 +26,6 @@
     await initI18n();
     locale = getLocale();
     selectedLocale = locale.slice(0, 2);
-
-    window.addEventListener('localeChange', (e) => {
-      locale = (e as CustomEvent).detail?.locale?.slice(0, 2) || getLocale();
-      selectedLocale = locale;
-    });
 
     // Detect auth state: 401 means we're not logged in → login mode
     const userRes = await fetch('/api/user').catch(() => null);
@@ -57,6 +51,7 @@
 
   function onLocaleChange() {
     setLocale(selectedLocale);
+    locale = selectedLocale;
   }
 
   async function onSubmit() {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { m } from '../paraglide/messages.js';
+  import { makeTl } from '../lib/i18n.ts';
   import type { MonthGridJson } from '../types/calendar.ts';
 
   export let monthGrid: MonthGridJson | null;
@@ -11,7 +11,7 @@
 
   const dispatch = createEventDispatcher<{ selectDay: string; navigateToMonth: string }>();
 
-  $: tl = (() => { locale; return (key: string, params?: Record<string, string | number>) => { const fn = (m as Record<string, Function>)[key]; return typeof fn === 'function' ? fn(params) : key; }; })();
+  $: tl = makeTl(locale);
 
   $: gridYear = monthGrid?.year ?? new Date().getFullYear();
   $: gridMonthNum = monthGrid?.month_number ?? (new Date().getMonth() + 1);

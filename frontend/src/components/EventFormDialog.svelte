@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { createEventDispatcher } from 'svelte';
-  import { m } from '../paraglide/messages.js';
+  import { makeTl } from '../lib/i18n.ts';
   import type { PartStat, AlarmFields, AttendeeFields, RecurrenceInfo, EventJson, CalendarJson } from '../types/calendar.ts';
   import { fmtDate } from '../lib/date.ts';
 
@@ -11,13 +11,7 @@
 
   const dispatch = createEventDispatcher<{ saved: void; deleted: void }>();
 
-  $: tl = (() => {
-    locale;
-    return (key: string, params?: Record<string, string | number>) => {
-      const fn = (m as Record<string, Function>)[key];
-      return typeof fn === 'function' ? fn(params) : key;
-    };
-  })();
+  $: tl = makeTl(locale);
 
   let formMode: 'create' | 'edit' = 'create';
   let formScope: 'series' | 'this_instance' = 'series';

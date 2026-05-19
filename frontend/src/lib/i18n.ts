@@ -1,6 +1,15 @@
 import { setLocale as paraglideSetLocale, getLocale } from '../paraglide/runtime.js';
+import { m } from '../paraglide/messages.js';
 
 export { getLocale };
+
+export function makeTl(locale: string): (key: string, params?: Record<string, string | number>) => string {
+  void locale;
+  return (key, params) => {
+    const fn = (m as Record<string, Function>)[key];
+    return typeof fn === 'function' ? fn(params) : key;
+  };
+}
 
 export function initI18n() {
   const stored = localStorage.getItem('locale');

@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
-  import { m } from '../paraglide/messages.js';
-  import { initI18n, getLocale } from '../lib/i18n.ts';
+  import { initI18n, getLocale, makeTl } from '../lib/i18n.ts';
   import EventFormDialog from './EventFormDialog.svelte';
   import MonthPicker from './MonthPicker.svelte';
   import CalendarList from './CalendarList.svelte';
@@ -13,7 +12,7 @@
 
   // ── i18n ───────────────────────────────────────────────────────────────────
   let locale = 'en';
-  $: tl = (() => { locale; return (key: string, params?: Record<string, string | number>) => { const fn = (m as Record<string, Function>)[key]; return typeof fn === 'function' ? fn(params) : key; }; })();
+  $: tl = makeTl(locale);
 
   // ── App state ──────────────────────────────────────────────────────────────
   let calendars: CalendarJson[] = [];
@@ -301,9 +300,6 @@
     await initI18n();
     locale = getLocale();
 
-    window.addEventListener('localeChange', (e) => {
-      locale = (e as CustomEvent).detail?.locale?.slice(0, 2) || getLocale();
-    });
     window.addEventListener('keydown', handleKeydown);
 
     setupSSE();

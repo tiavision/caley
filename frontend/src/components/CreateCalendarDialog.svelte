@@ -1,19 +1,13 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { m } from '../paraglide/messages.js';
+  import { makeTl } from '../lib/i18n.ts';
   import type { CalendarJson } from '../types/calendar.ts';
 
   export let locale: string = 'en';
 
   const dispatch = createEventDispatcher<{ created: CalendarJson }>();
 
-  $: tl = (() => {
-    locale;
-    return (key: string) => {
-      const fn = (m as Record<string, Function>)[key];
-      return typeof fn === 'function' ? fn() : key;
-    };
-  })();
+  $: tl = makeTl(locale);
 
   let dialogEl: HTMLDialogElement;
   let name = '';
