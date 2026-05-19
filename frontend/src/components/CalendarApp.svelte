@@ -81,6 +81,31 @@
     sseSource.onopen = () => { fetchCalendars(); fetchEvents(); fetchMonthGrid(); };
     sseSource.addEventListener('events_refetch', () => { fetchEvents(); fetchMonthGrid(); });
     sseSource.addEventListener('calendars_changed', () => { fetchCalendars(); fetchMonthGrid(); });
+    sseSource.addEventListener('event_updated', async (e: MessageEvent) => {
+      const payload: { uid: string; calendar_href: string; event?: EventJson } = JSON.parse(e.data);
+      const { uid } = payload;
+      if (payload.event) {
+        days = days.map(day => ({
+          ...day,
+          events: day.events.filter(ev => ev.uid !== uid),
+        }));
+        const dateIso = payload.event.dtstart.substring(0, 10);
+        days = days.map(day => {
+          if (day.date_iso !== dateIso) return day;
+          const events = [...day.events, payload.event!].sort((a, b) => {
+            const aDay = a.time_range === 'All day';
+            const bDay = b.time_range === 'All day';
+            if (aDay !== bDay) return bDay ? 1 : -1;
+            return a.time_range < b.time_range ? -1 : 1;
+          });
+          return { ...day, events };
+        });
+        fetchMonthGrid();
+      } else {
+        fetchEvents();
+        fetchMonthGrid();
+      }
+    });
     sseSource.addEventListener('event_removed', (e: MessageEvent) => {
       const [uid, calendar_href] = (e.data as string).split('|');
       days = days.map(day => ({

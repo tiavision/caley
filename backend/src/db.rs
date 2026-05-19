@@ -430,6 +430,16 @@ pub async fn delete_cached_event(
     Ok(())
 }
 
+pub struct EventRef {
+    pub uid: String,
+    pub calendar_href: String,
+}
+
+pub struct SyncApplyResult {
+    pub changed: Vec<EventRef>,
+    pub deleted: Vec<EventRef>,
+}
+
 /// Apply incremental sync results atomically: upsert changed events, delete removed
 /// events, and update the sync token — all in a single transaction.
 pub async fn apply_incremental_sync(
@@ -440,10 +450,11 @@ pub async fn apply_incremental_sync(
     deleted: Vec<String>,
     new_token: &str,
     stored_ctag: Option<&str>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<SyncApplyResult> {
     let mut tx = pool.begin().await?;
     let now = chrono::Utc::now().timestamp();
 
+    let mut changed_result: Vec<EventRef> = Vec::new();
     for (href, etag, raw_ical) in changed {
         let (uid, summary, dtstart, dtend, is_all_day, is_recurring) =
             extract_ical_metadata(&raw_ical);
@@ -479,9 +490,22 @@ pub async fn apply_incremental_sync(
         .bind(now)
         .execute(&mut *tx)
         .await?;
+        changed_result.push(EventRef { uid, calendar_href: calendar_href.to_string() });
     }
 
+    let mut deleted_result: Vec<EventRef> = Vec::new();
     for href in deleted {
+        let uid: Option<String> = sqlx::query_scalar(
+            "SELECT uid FROM cached_events WHERE user_id = ? AND calendar_href = ? AND href = ?",
+        )
+        .bind(user_id)
+        .bind(calendar_href)
+        .bind(&href)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(uid) = uid {
+            deleted_result.push(EventRef { uid, calendar_href: calendar_href.to_string() });
+        }
         sqlx::query(
             "DELETE FROM cached_events WHERE user_id = ? AND calendar_href = ? AND href = ?",
         )
@@ -503,7 +527,7 @@ pub async fn apply_incremental_sync(
     .await?;
 
     tx.commit().await?;
-    Ok(())
+    Ok(SyncApplyResult { changed: changed_result, deleted: deleted_result })
 }
 
 /// Replace all cached events for a calendar atomically: clear, insert all, update

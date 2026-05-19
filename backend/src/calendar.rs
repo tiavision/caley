@@ -638,7 +638,7 @@ pub async fn save_event(
 
         match client.put_event(&calendar_href, &uid, &modified).await {
             Ok(_) => {
-                optimistic_upsert(&state, &user.user_id, &calendar_href, &event_href, &modified).await;
+                optimistic_upsert(&state, &user.user_id, &calendar_href, &event_href, &modified, &uid).await;
                 state.sync_manager.trigger(&user.user_id, SyncTrigger::Incremental);
                 StatusCode::OK.into_response()
             }
@@ -701,7 +701,7 @@ pub async fn save_event(
                         }
                     }
                 }
-                optimistic_upsert(&state, &user.user_id, &calendar_href, &event_href, &ical).await;
+                optimistic_upsert(&state, &user.user_id, &calendar_href, &event_href, &ical, &uid).await;
                 state.sync_manager.trigger(&user.user_id, SyncTrigger::Incremental);
                 StatusCode::OK.into_response()
             }
@@ -760,7 +760,7 @@ pub async fn delete_event(
         return match client.put_event(&calendar_href, &uid, &modified).await {
             Ok(_) => {
                 let event_href = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
-                optimistic_upsert(&state, &user.user_id, &calendar_href, &event_href, &modified).await;
+                optimistic_upsert(&state, &user.user_id, &calendar_href, &event_href, &modified, &uid).await;
                 state.sync_manager.trigger(&user.user_id, SyncTrigger::Incremental);
                 StatusCode::OK.into_response()
             }
@@ -799,9 +799,32 @@ async fn optimistic_upsert(
     calendar_href: &str,
     event_href: &str,
     raw_ical: &str,
+    uid: &str,
 ) {
     if let Err(e) = db::upsert_cached_event_raw(&state.db, user_id, calendar_href, event_href, "", raw_ical).await {
         eprintln!("Optimistic cache update failed: {e}");
     }
-    state.sse_broadcaster.send(user_id, crate::sse::SseMessage::EventsRefetch);
+    // For non-recurring events embed the full EventJson so the frontend can patch without a round-trip.
+    let event_json = if !raw_ical.contains("RRULE:") {
+        let today = chrono::Local::now().date_naive();
+        let wide_start = today - chrono::TimeDelta::days(365);
+        let wide_end = today + chrono::TimeDelta::days(730);
+        let calendars = db::get_cached_calendars(&state.db, user_id).await.unwrap_or_default();
+        let color = calendars
+            .iter()
+            .find(|c| c.href == calendar_href)
+            .and_then(|c| c.color.as_deref())
+            .unwrap_or("");
+        CalDavClient::events_from_raw_ical(raw_ical, wide_start, wide_end)
+            .into_iter()
+            .next()
+            .and_then(|ev| serde_json::to_string(&build_event_json(&ev, color, calendar_href)).ok())
+    } else {
+        None
+    };
+    state.sse_broadcaster.send(user_id, crate::sse::SseMessage::EventUpdated {
+        uid: uid.to_string(),
+        calendar_href: calendar_href.to_string(),
+        event_json,
+    });
 }

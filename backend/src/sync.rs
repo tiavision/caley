@@ -176,9 +176,7 @@ impl SyncManager {
         if let Some(ref token) = stored_token {
             match client.sync_collection(calendar_href, Some(token)).await {
                 Ok(result) => {
-                    let any_change =
-                        !result.changed.is_empty() || !result.deleted.is_empty();
-                    db::apply_incremental_sync(
+                    let apply_result = db::apply_incremental_sync(
                         &self.db,
                         user_id,
                         calendar_href,
@@ -188,8 +186,23 @@ impl SyncManager {
                         stored_ctag.as_deref(),
                     )
                     .await?;
-                    if any_change {
+                    let total = apply_result.changed.len() + apply_result.deleted.len();
+                    if total > 5 {
                         self.broadcaster.send(user_id, SseMessage::EventsRefetch);
+                    } else {
+                        for ev in &apply_result.deleted {
+                            self.broadcaster.send(user_id, SseMessage::EventRemoved {
+                                uid: ev.uid.clone(),
+                                calendar_href: ev.calendar_href.clone(),
+                            });
+                        }
+                        for ev in &apply_result.changed {
+                            self.broadcaster.send(user_id, SseMessage::EventUpdated {
+                                uid: ev.uid.clone(),
+                                calendar_href: ev.calendar_href.clone(),
+                                event_json: None,
+                            });
+                        }
                     }
                     return Ok(());
                 }

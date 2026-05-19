@@ -21,6 +21,8 @@ pub enum SseMessage {
     CalendarsChanged,
     /// A single event was deleted
     EventRemoved { uid: String, calendar_href: String },
+    /// A single event was created or updated
+    EventUpdated { uid: String, calendar_href: String, event_json: Option<String> },
 }
 
 pub struct SseBroadcaster {
@@ -82,6 +84,17 @@ pub async fn events_stream(
             }
             Ok(SseMessage::EventRemoved { uid, calendar_href }) => {
                 Some(Event::default().event("event_removed").data(format!("{uid}|{calendar_href}")))
+            }
+            Ok(SseMessage::EventUpdated { uid, calendar_href, event_json }) => {
+                let data = if let Some(event) = event_json {
+                    let parsed: serde_json::Value =
+                        serde_json::from_str(&event).unwrap_or_default();
+                    serde_json::json!({ "uid": uid, "calendar_href": calendar_href, "event": parsed })
+                        .to_string()
+                } else {
+                    serde_json::json!({ "uid": uid, "calendar_href": calendar_href }).to_string()
+                };
+                Some(Event::default().event("event_updated").data(data))
             }
             Err(_) => None,
         };
