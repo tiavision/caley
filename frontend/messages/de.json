@@ -133,7 +133,7 @@
   "cal_importSuccess": "{n} Termine importiert",
   "cal_importPartial": "{n} Termine konnten nicht importiert werden",
   "nav_search": "Suchen",
-  "search_heading": "Termine suchen",
+  "search_heading": "Suchen",
   "search_placeholder": "Titel, Beschreibung, Ort…",
   "search_submit": "Suchen",
   "search_loading": "Wird gesucht…",

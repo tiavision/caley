@@ -133,7 +133,7 @@
   "cal_importSuccess": "Imported {n} events",
   "cal_importPartial": "{n} events failed to import",
   "nav_search": "Search",
-  "search_heading": "Search Events",
+  "search_heading": "Search",
   "search_placeholder": "Search by title, description, location…",
   "search_submit": "Search",
   "search_loading": "Searching…",

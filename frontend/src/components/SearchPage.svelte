@@ -55,19 +55,8 @@
   }
 </script>
 
-<h2>{tl('search_heading')}</h2>
-
-<form on:submit|preventDefault={doSearch} class="search-form">
-  <div class="search-row">
-    <input
-      type="search"
-      bind:value={query}
-      placeholder={tl('search_placeholder')}
-      autofocus
-      class="search-input"
-    />
-    <button type="submit">{tl('search_submit')}</button>
-  </div>
+<div class="search-header">
+  <h2>{tl('search_heading')}</h2>
   <div class="date-row">
     <label>
       {tl('search_from')}
@@ -77,6 +66,18 @@
       {tl('search_to')}
       <input type="date" bind:value={end} />
     </label>
+  </div>
+</div>
+
+<form on:submit|preventDefault={doSearch} class="search-form">
+  <div class="search-row">
+    <input
+      type="search"
+      bind:value={query}
+      placeholder={tl('search_placeholder')}
+      class="search-input"
+    />
+    <button type="submit">{tl('search_submit')}</button>
   </div>
 </form>
 
@@ -110,46 +111,78 @@
 {/if}
 
 <style>
-  .search-form {
+  .search-header {
     display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    width: 100%;
+    margin-bottom: 0.75rem;
+  }
+
+  .search-header h2 {
+    margin-bottom: 0;
+  }
+
+  .search-form {
+    width: 100%;
     margin-bottom: 1.5rem;
   }
 
   .search-row {
     display: flex;
     gap: 0.5rem;
+    align-items: center;
   }
 
   .search-input {
     flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
+  }
+
+  .search-row button {
+    width: auto;
+    flex-shrink: 0;
+    margin-bottom: 0;
   }
 
   .date-row {
     display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
   }
 
   .date-row label {
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    font-size: 0.9em;
+    font-size: 0.8em;
+    opacity: 0.7;
+    margin-bottom: 0;
   }
 
   .date-row input[type="date"] {
-    padding: 0.3rem 0.5rem;
-    font-size: 0.9em;
+    margin-bottom: 0;
+    font-size: 0.85em;
+    opacity: 0.65;
   }
 
   .search-results {
     list-style: none;
     padding: 0;
+    margin: 0;
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+  }
+
+  .search-results li {
+    list-style: none;
+  }
+
+  .search-result :global(.dot) {
+    margin-top: 0.5rem;
   }
 
   .search-result {
