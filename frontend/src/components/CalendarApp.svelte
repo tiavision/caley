@@ -391,6 +391,11 @@
       <span class="week-range">{weekRangeText}</span>
       <button class="nav-btn" aria-label="Next week" on:click={() => navigateWeek(7)}><span class="arrow">›</span></button>
       <div class="header-actions">
+        <a href="/contacts" class="contacts-btn" aria-label={tl('nav_contacts')}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </a>
         <a href="/search" class="search-btn" aria-label={tl('nav_search')}>
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -559,7 +564,8 @@
     align-items: center;
     gap: 0.4rem;
   }
-  .search-btn {
+  .search-btn,
+  .contacts-btn {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -568,7 +574,8 @@
     text-decoration: none;
     opacity: 0.8;
   }
-  .search-btn:hover {
+  .search-btn:hover,
+  .contacts-btn:hover {
     opacity: 1;
   }
   .today-btn {

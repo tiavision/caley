@@ -11,6 +11,8 @@ use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
 use crate::caldav::CalDavClient;
+use crate::carddav;
+use crate::contacts::ContactJson;
 use crate::db;
 use crate::search::SearchMode;
 use crate::sse::{SseBroadcaster, SseMessage};
@@ -20,6 +22,8 @@ pub enum SyncTrigger {
     Incremental,
     /// Sync only the single calendar at the given href (used by the push webhook).
     Calendar(String),
+    /// Sync only the single addressbook at the given href (used by the push webhook).
+    Addressbook(String),
 }
 
 pub struct SyncManager {
@@ -107,6 +111,11 @@ impl SyncManager {
                         Some(SyncTrigger::Calendar(calendar_href)) => {
                             if let Err(e) = self.sync_single_calendar(&user_id, &calendar_href).await {
                                 eprintln!("[sync] single-calendar sync failed for {calendar_href}: {e}");
+                            }
+                        }
+                        Some(SyncTrigger::Addressbook(addressbook_href)) => {
+                            if let Err(e) = self.sync_single_addressbook(&user_id, &addressbook_href).await {
+                                eprintln!("[sync] single-addressbook sync failed for {addressbook_href}: {e}");
                             }
                         }
                         None => break,
@@ -198,7 +207,215 @@ impl SyncManager {
                 }
             }
         }
+
+        // Sync contacts alongside calendars
+        if let Err(e) = self.sync_contacts(&client, user_id, do_full).await {
+            eprintln!("[sync] contact sync failed for {user_id}: {e}");
+        }
+
         Ok(())
+    }
+
+    async fn sync_contacts(
+        &self,
+        client: &CalDavClient,
+        user_id: &str,
+        full: bool,
+    ) -> anyhow::Result<()> {
+        let cached_empty = if !full {
+            db::get_cached_addressbooks(&self.db, user_id).await?.is_empty()
+        } else {
+            false
+        };
+        let do_full = full || cached_empty;
+
+        let addressbooks = if do_full {
+            match carddav::discover_addressbooks(client).await {
+                Ok(fresh) => {
+                    if fresh.is_empty() {
+                        eprintln!("[sync] discover_addressbooks returned empty for {user_id}, falling back to cache");
+                        db::get_cached_addressbooks(&self.db, user_id).await?
+                    } else {
+                        let fresh_hrefs: HashSet<String> = fresh.iter().map(|a| a.href.clone()).collect();
+                        for ab in &fresh {
+                            if let Err(e) = db::upsert_cached_addressbook(&self.db, user_id, &ab.href, &ab.name).await {
+                                eprintln!("[sync] upsert_cached_addressbook error: {e}");
+                            }
+                        }
+                        if let Err(e) = db::remove_stale_addressbooks(&self.db, user_id, &fresh_hrefs).await {
+                            eprintln!("[sync] remove_stale_addressbooks error: {e}");
+                        }
+                        fresh.into_iter().map(|a| db::CachedAddressbook { href: a.href, name: a.name }).collect()
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[sync] discover_addressbooks failed for {user_id}: {e}");
+                    db::get_cached_addressbooks(&self.db, user_id).await?
+                }
+            }
+        } else {
+            db::get_cached_addressbooks(&self.db, user_id).await?
+        };
+
+        for ab in &addressbooks {
+            if let Err(e) = self.sync_addressbook(client, user_id, &ab.href).await {
+                eprintln!("[sync] addressbook {} failed: {e}", ab.href);
+            }
+        }
+        Ok(())
+    }
+
+    async fn sync_single_addressbook(&self, user_id: &str, addressbook_href: &str) -> anyhow::Result<()> {
+        let settings = db::get_settings(&self.db, user_id, &self.encryption_key).await?;
+        let Some(settings) = settings else { return Ok(()); };
+        let client = CalDavClient::new(
+            settings.caldav_base_url,
+            settings.caldav_username,
+            settings.caldav_password,
+        )?;
+        self.sync_addressbook(&client, user_id, addressbook_href).await
+    }
+
+    async fn sync_addressbook(
+        &self,
+        client: &CalDavClient,
+        user_id: &str,
+        addressbook_href: &str,
+    ) -> anyhow::Result<()> {
+        let (stored_ctag, stored_token) =
+            db::get_addressbook_sync_state(&self.db, user_id, addressbook_href).await?;
+
+        // Try RFC 6578 incremental sync
+        if let Some(ref token) = stored_token {
+            match carddav::sync_addressbook_collection(client, addressbook_href, Some(token)).await {
+                Ok(result) => {
+                    let apply = db::apply_incremental_contact_sync(
+                        &self.db,
+                        user_id,
+                        addressbook_href,
+                        result.changed,
+                        result.deleted,
+                        &result.new_token,
+                        stored_ctag.as_deref(),
+                    ).await?;
+
+                    let total = apply.changed.len() + apply.deleted.len();
+                    if total > 5 {
+                        self.broadcaster.send(user_id, SseMessage::ContactsRefetch);
+                    } else {
+                        for cr in &apply.deleted {
+                            self.broadcaster.send(user_id, SseMessage::ContactRemoved {
+                                uid: cr.uid.clone(),
+                                addressbook_href: cr.addressbook_href.clone(),
+                            });
+                        }
+                        for cr in &apply.changed {
+                            let contact_json = self.load_contact_json(user_id, &cr.addressbook_href, &cr.uid).await;
+                            self.broadcaster.send(user_id, SseMessage::ContactUpdated {
+                                uid: cr.uid.clone(),
+                                addressbook_href: cr.addressbook_href.clone(),
+                                contact_json,
+                            });
+                        }
+                    }
+                    self.try_subscribe_push_contact(client, user_id, addressbook_href).await;
+                    return Ok(());
+                }
+                Err(e) => {
+                    eprintln!("[sync] contact sync-collection unsupported for {addressbook_href}: {e}, falling back to ctag");
+                }
+            }
+        }
+
+        // Fall back to ctag
+        let (new_ctag, new_token) = carddav::get_addressbook_ctag_and_token(client, addressbook_href)
+            .await
+            .unwrap_or((None, None));
+
+        let need_full = match (&stored_ctag, &new_ctag) {
+            (Some(old), Some(new)) => old != new,
+            _ => true,
+        };
+
+        if need_full {
+            let all_raw = carddav::fetch_all_raw_contacts(client, addressbook_href).await?;
+            db::replace_addressbook_contacts(
+                &self.db,
+                user_id,
+                addressbook_href,
+                all_raw,
+                new_ctag.as_deref(),
+                new_token.as_deref(),
+            ).await?;
+            self.broadcaster.send(user_id, SseMessage::ContactsRefetch);
+        }
+
+        self.try_subscribe_push_contact(client, user_id, addressbook_href).await;
+        Ok(())
+    }
+
+    async fn load_contact_json(&self, user_id: &str, addressbook_href: &str, uid: &str) -> Option<String> {
+        let contact = db::get_contact(&self.db, user_id, addressbook_href, uid).await.ok()??;
+        let emails: Vec<String> = serde_json::from_str(&contact.emails).unwrap_or_default();
+        let phones: Vec<String> = serde_json::from_str(&contact.phones).unwrap_or_default();
+        let cj = ContactJson {
+            uid: contact.uid,
+            addressbook_href: contact.addressbook_href,
+            fn_name: contact.fn_name,
+            emails,
+            phones,
+            org: contact.org,
+        };
+        serde_json::to_string(&cj).ok()
+    }
+
+    async fn try_subscribe_push_contact(
+        &self,
+        client: &CalDavClient,
+        user_id: &str,
+        addressbook_href: &str,
+    ) {
+        let now = chrono::Utc::now().timestamp();
+        let renew_threshold = now + self.sync_interval.as_secs() as i64 * 2;
+
+        let existing = db::get_contact_push_subscription(&self.db, user_id, addressbook_href)
+            .await
+            .ok()
+            .flatten();
+        if let Some((_, expires_at)) = existing {
+            if expires_at > renew_threshold {
+                return;
+            }
+        }
+
+        let (p256dh, auth) = match derive_push_keys(&self.encryption_key, user_id, addressbook_href) {
+            Some(keys) => keys,
+            None => {
+                eprintln!("[push] contact key derivation failed for {addressbook_href}");
+                return;
+            }
+        };
+
+        let token = Uuid::new_v4().to_string();
+        let callback_url = format!(
+            "{}/api/push/webhook?token={}",
+            self.app_base_url.trim_end_matches('/'),
+            token
+        );
+
+        match client.register_push(addressbook_href, &callback_url, &p256dh, &auth).await {
+            Ok(Some(expires_at)) => {
+                if let Err(e) = db::upsert_contact_push_subscription(
+                    &self.db, user_id, addressbook_href, &token, "web-push", expires_at,
+                ).await {
+                    eprintln!("[push] failed to store contact subscription for {addressbook_href}: {e}");
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("[push] failed to register contact push for {addressbook_href}: {e}");
+            }
+        }
     }
 
     async fn sync_calendar(

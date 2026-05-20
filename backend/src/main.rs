@@ -1,5 +1,7 @@
 mod calendar;
 mod caldav;
+mod carddav;
+mod contacts;
 mod crypto;
 mod db;
 mod local_auth;
@@ -130,6 +132,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/event", post(calendar::save_event))
         .route("/api/event", delete(calendar::delete_event))
         .route("/api/search", get(calendar::search_events))
+        .route("/api/contacts", get(contacts::list_contacts))
+        .route("/api/contact", post(contacts::save_contact))
+        .route("/api/contact", delete(contacts::delete_contact))
         .route("/api/account", delete(local_auth::delete_account));
 
     let app = if use_oidc {

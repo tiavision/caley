@@ -143,6 +143,11 @@ impl CalDavClient {
         })
     }
 
+    pub(crate) fn base_url(&self) -> &str { &self.base_url }
+    pub(crate) fn username(&self) -> &str { &self.username }
+    pub(crate) fn password(&self) -> &str { &self.password }
+    pub(crate) fn http_client(&self) -> &Client { &self.client }
+
     pub async fn calendars(&self) -> anyhow::Result<Vec<Calendar>> {
         let start_url = self.start_url().await;
         let home_sets = self.discover_calendar_home_sets(&start_url).await?;
@@ -268,7 +273,7 @@ impl CalDavClient {
         parse_all_calendars(&xml, home_set_url)
     }
 
-    async fn propfind(
+    pub(crate) async fn propfind(
         &self,
         url: &str,
         depth: &str,
@@ -312,7 +317,7 @@ impl CalDavClient {
         bail!("too many redirects for PROPFIND")
     }
 
-    async fn report(&self, url: &str, body: &str) -> anyhow::Result<String> {
+    pub(crate) async fn report(&self, url: &str, body: &str) -> anyhow::Result<String> {
         let mut url = url.to_string();
         for _ in 0..5 {
             let depth_hdr = HeaderName::from_static("depth");
@@ -641,7 +646,7 @@ impl CalDavClient {
     }
 }
 
-fn resolve_url(current_url: &str, href: &str) -> String {
+pub(crate) fn resolve_url(current_url: &str, href: &str) -> String {
     if href.starts_with("http://") || href.starts_with("https://") {
         href.to_string()
     } else if href.starts_with('/') {
@@ -657,7 +662,7 @@ fn resolve_url(current_url: &str, href: &str) -> String {
     }
 }
 
-fn extract_hrefs(xml: &str, element_local_name: &str) -> anyhow::Result<Vec<String>> {
+pub(crate) fn extract_hrefs(xml: &str, element_local_name: &str) -> anyhow::Result<Vec<String>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
@@ -708,7 +713,7 @@ fn extract_hrefs(xml: &str, element_local_name: &str) -> anyhow::Result<Vec<Stri
     Ok(hrefs)
 }
 
-fn extract_text_prop(xml: &str, prop_local_name: &str) -> Option<String> {
+pub(crate) fn extract_text_prop(xml: &str, prop_local_name: &str) -> Option<String> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
     let mut in_prop = false;
@@ -1919,7 +1924,7 @@ fn extract_sync_result(xml: &str, base_url: &str) -> anyhow::Result<SyncResult> 
     Ok(SyncResult { new_token, changed, deleted })
 }
 
-fn extract_ctag_and_token(xml: &str) -> (Option<String>, Option<String>) {
+pub(crate) fn extract_ctag_and_token(xml: &str) -> (Option<String>, Option<String>) {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 

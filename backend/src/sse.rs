@@ -22,6 +22,12 @@ pub enum SseMessage {
     EventRemoved { uid: String, calendar_href: String },
     /// A single event was created or updated
     EventUpdated { uid: String, calendar_href: String, event_json: Option<String> },
+    /// One or more contacts changed — client should re-fetch /api/contacts
+    ContactsRefetch,
+    /// A single contact was deleted
+    ContactRemoved { uid: String, addressbook_href: String },
+    /// A single contact was created or updated (contact_json is inline to avoid a roundtrip)
+    ContactUpdated { uid: String, addressbook_href: String, contact_json: Option<String> },
 }
 
 pub struct SseBroadcaster {
@@ -88,6 +94,24 @@ pub async fn events_stream(
                 };
                 Some(Event::default().event("event_updated").data(data))
             }
+            Ok(SseMessage::ContactsRefetch) => {
+                Some(Event::default().event("contacts_refetch").data("1"))
+            }
+            Ok(SseMessage::ContactRemoved { uid, addressbook_href }) => {
+                Some(Event::default().event("contact_removed").data(
+                    serde_json::json!({ "uid": uid, "addressbook_href": addressbook_href }).to_string()
+                ))
+            }
+            Ok(SseMessage::ContactUpdated { uid, addressbook_href, contact_json }) => {
+                let data = if let Some(contact) = contact_json {
+                    let parsed: serde_json::Value = serde_json::from_str(&contact).unwrap_or_default();
+                    serde_json::json!({ "uid": uid, "addressbook_href": addressbook_href, "contact": parsed })
+                        .to_string()
+                } else {
+                    serde_json::json!({ "uid": uid, "addressbook_href": addressbook_href }).to_string()
+                };
+                Some(Event::default().event("contact_updated").data(data))
+            }
             Err(_) => None,
         };
         event.map(Ok::<_, std::convert::Infallible>)
@@ -118,15 +142,26 @@ pub async fn push_webhook(
 
     eprintln!("[push] webhook called with token {token}");
 
-    // Look up which user+calendar this token belongs to
+    // Check calendar push subscriptions first
     match db::get_user_and_calendar_from_push_token(&state.db, &token).await {
         Ok(Some((user_id, calendar_href))) => {
             eprintln!("[push] webhook matched user {user_id} calendar {calendar_href}, triggering targeted sync");
             state.sync_manager.trigger(&user_id, SyncTrigger::Calendar(calendar_href));
+            return axum::http::StatusCode::CREATED.into_response();
+        }
+        Ok(None) => {}
+        Err(e) => eprintln!("[push] calendar token lookup error: {e}"),
+    }
+
+    // Check contact push subscriptions
+    match db::get_user_and_addressbook_from_push_token(&state.db, &token).await {
+        Ok(Some((user_id, addressbook_href))) => {
+            eprintln!("[push] webhook matched user {user_id} addressbook {addressbook_href}, triggering contact sync");
+            state.sync_manager.trigger(&user_id, SyncTrigger::Addressbook(addressbook_href));
             axum::http::StatusCode::CREATED.into_response()
         }
         _ => {
-            eprintln!("[push] webhook token not found in push_subscriptions");
+            eprintln!("[push] webhook token not found in any push_subscriptions table");
             (axum::http::StatusCode::UNAUTHORIZED, "unknown token").into_response()
         }
     }

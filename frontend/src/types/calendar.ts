@@ -75,6 +75,25 @@ export interface SearchResultItem {
   calendar_color: string | null;
 }
 
+export interface ContactJson {
+  uid: string;
+  addressbook_href: string;
+  fn_name: string;
+  emails: string[];
+  phones: string[];
+  org: string;
+}
+
+export interface AddressbookJson {
+  href: string;
+  name: string;
+}
+
+export interface ContactsResponse {
+  addressbooks: AddressbookJson[];
+  contacts: ContactJson[];
+}
+
 export interface MonthGridJson {
   month: string;
   month_name: string;
