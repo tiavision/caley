@@ -3,6 +3,8 @@ use sqlx::{Row, SqlitePool};
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::search::SearchMode;
+
 pub use sqlx::SqlitePool as Db;
 
 pub struct UserSettings {
@@ -490,17 +492,21 @@ pub async fn upsert_cached_event_raw(
     event_href: &str,
     etag: &str,
     raw_ical: &str,
+    mode: &SearchMode,
 ) -> anyhow::Result<()> {
     let (uid, summary, dtstart, dtend, description, location, is_all_day, is_recurring) =
         extract_ical_metadata(raw_ical);
     if uid.is_empty() {
         return Ok(());
     }
+    let summary_idx = mode.normalize_text(&summary);
+    let description_idx = mode.normalize_text(&description);
+    let location_idx = mode.normalize_text(&location);
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
         "INSERT INTO cached_events
-             (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified, summary_idx, description_idx, location_idx)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id, calendar_href, uid) DO UPDATE SET
              etag = excluded.etag,
              href = excluded.href,
@@ -512,7 +518,10 @@ pub async fn upsert_cached_event_raw(
              location = excluded.location,
              is_all_day = excluded.is_all_day,
              is_recurring = excluded.is_recurring,
-             last_modified = excluded.last_modified",
+             last_modified = excluded.last_modified,
+             summary_idx = excluded.summary_idx,
+             description_idx = excluded.description_idx,
+             location_idx = excluded.location_idx",
     )
     .bind(user_id)
     .bind(calendar_href)
@@ -528,6 +537,9 @@ pub async fn upsert_cached_event_raw(
     .bind(is_all_day as i32)
     .bind(is_recurring as i32)
     .bind(now)
+    .bind(&summary_idx)
+    .bind(&description_idx)
+    .bind(&location_idx)
     .execute(pool)
     .await?;
     Ok(())
@@ -587,6 +599,7 @@ pub async fn apply_incremental_sync(
     deleted: Vec<String>,
     new_token: &str,
     stored_ctag: Option<&str>,
+    mode: &SearchMode,
 ) -> anyhow::Result<SyncApplyResult> {
     let mut tx = pool.begin().await?;
     let now = chrono::Utc::now().timestamp();
@@ -598,10 +611,13 @@ pub async fn apply_incremental_sync(
         if uid.is_empty() {
             continue;
         }
+        let summary_idx = mode.normalize_text(&summary);
+        let description_idx = mode.normalize_text(&description);
+        let location_idx = mode.normalize_text(&location);
         sqlx::query(
             "INSERT INTO cached_events
-                 (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified, summary_idx, description_idx, location_idx)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(user_id, calendar_href, uid) DO UPDATE SET
                  etag = excluded.etag,
                  href = excluded.href,
@@ -613,7 +629,10 @@ pub async fn apply_incremental_sync(
                  location = excluded.location,
                  is_all_day = excluded.is_all_day,
                  is_recurring = excluded.is_recurring,
-                 last_modified = excluded.last_modified",
+                 last_modified = excluded.last_modified,
+                 summary_idx = excluded.summary_idx,
+                 description_idx = excluded.description_idx,
+                 location_idx = excluded.location_idx",
         )
         .bind(user_id)
         .bind(calendar_href)
@@ -629,6 +648,9 @@ pub async fn apply_incremental_sync(
         .bind(is_all_day as i32)
         .bind(is_recurring as i32)
         .bind(now)
+        .bind(&summary_idx)
+        .bind(&description_idx)
+        .bind(&location_idx)
         .execute(&mut *tx)
         .await?;
         changed_result.push(EventRef { uid, calendar_href: calendar_href.to_string() });
@@ -680,6 +702,7 @@ pub async fn replace_calendar_events(
     all_raw: Vec<(String, String, String)>,
     new_ctag: Option<&str>,
     new_token: Option<&str>,
+    mode: &SearchMode,
 ) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
     let now = chrono::Utc::now().timestamp();
@@ -696,10 +719,13 @@ pub async fn replace_calendar_events(
         if uid.is_empty() {
             continue;
         }
+        let summary_idx = mode.normalize_text(&summary);
+        let description_idx = mode.normalize_text(&description);
+        let location_idx = mode.normalize_text(&location);
         sqlx::query(
             "INSERT INTO cached_events
-                 (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified, summary_idx, description_idx, location_idx)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(user_id, calendar_href, uid) DO UPDATE SET
                  etag = excluded.etag,
                  href = excluded.href,
@@ -711,7 +737,10 @@ pub async fn replace_calendar_events(
                  location = excluded.location,
                  is_all_day = excluded.is_all_day,
                  is_recurring = excluded.is_recurring,
-                 last_modified = excluded.last_modified",
+                 last_modified = excluded.last_modified,
+                 summary_idx = excluded.summary_idx,
+                 description_idx = excluded.description_idx,
+                 location_idx = excluded.location_idx",
         )
         .bind(user_id)
         .bind(calendar_href)
@@ -727,6 +756,9 @@ pub async fn replace_calendar_events(
         .bind(is_all_day as i32)
         .bind(is_recurring as i32)
         .bind(now)
+        .bind(&summary_idx)
+        .bind(&description_idx)
+        .bind(&location_idx)
         .execute(&mut *tx)
         .await?;
     }
@@ -841,4 +873,110 @@ pub async fn get_recurring_raw_events(
     }
     let rows = q.fetch_all(pool).await?;
     Ok(rows.iter().map(|r| (r.get(0), r.get(1))).collect())
+}
+
+/// Check whether the active search mode matches the stored one and rebuild the FTS
+/// index if they differ. Recreates the FTS table when switching to/from trigram
+/// (different tokenizer), otherwise just re-indexes the `_idx` columns.
+pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::Result<()> {
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT value FROM app_config WHERE key = 'search_mode'")
+            .fetch_optional(pool)
+            .await?;
+
+    let mode_str = mode.as_str();
+    if stored.as_deref() == Some(mode_str.as_str()) {
+        return Ok(());
+    }
+
+    println!("[search] mode changed to '{mode_str}', rebuilding FTS index…");
+
+    let old_is_trigram = stored.as_deref() == Some("trigram");
+    let new_is_trigram = mode_str == "trigram";
+
+    if old_is_trigram != new_is_trigram {
+        // Tokenizer changes require a full table recreation.
+        let tokenizer = mode.fts_tokenizer();
+        sqlx::query("DROP TRIGGER IF EXISTS events_fts_ai").execute(pool).await?;
+        sqlx::query("DROP TRIGGER IF EXISTS events_fts_ad").execute(pool).await?;
+        sqlx::query("DROP TRIGGER IF EXISTS events_fts_au").execute(pool).await?;
+        sqlx::query("DROP TABLE IF EXISTS events_fts").execute(pool).await?;
+
+        sqlx::query(&format!(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
+                summary_idx, description_idx, location_idx,
+                content='cached_events',
+                content_rowid='rowid',
+                tokenize='{tokenizer}'
+            )"
+        ))
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TRIGGER IF NOT EXISTS events_fts_ai AFTER INSERT ON cached_events BEGIN
+                INSERT INTO events_fts(rowid, summary_idx, description_idx, location_idx)
+                VALUES (new.rowid, new.summary_idx, new.description_idx, new.location_idx);
+            END",
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TRIGGER IF NOT EXISTS events_fts_ad AFTER DELETE ON cached_events BEGIN
+                INSERT INTO events_fts(events_fts, rowid, summary_idx, description_idx, location_idx)
+                VALUES ('delete', old.rowid, old.summary_idx, old.description_idx, old.location_idx);
+            END",
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TRIGGER IF NOT EXISTS events_fts_au AFTER UPDATE ON cached_events BEGIN
+                INSERT INTO events_fts(events_fts, rowid, summary_idx, description_idx, location_idx)
+                VALUES ('delete', old.rowid, old.summary_idx, old.description_idx, old.location_idx);
+                INSERT INTO events_fts(rowid, summary_idx, description_idx, location_idx)
+                VALUES (new.rowid, new.summary_idx, new.description_idx, new.location_idx);
+            END",
+        )
+        .execute(pool)
+        .await?;
+    }
+
+    // Re-compute all _idx columns with the new mode.
+    let rows = sqlx::query("SELECT rowid, summary, description, location FROM cached_events")
+        .fetch_all(pool)
+        .await?;
+
+    for row in &rows {
+        let rowid: i64 = row.get(0);
+        let summary: String = row.get::<Option<String>, _>(1).unwrap_or_default();
+        let description: String = row.get::<Option<String>, _>(2).unwrap_or_default();
+        let location: String = row.get::<Option<String>, _>(3).unwrap_or_default();
+
+        sqlx::query(
+            "UPDATE cached_events SET summary_idx = ?, description_idx = ?, location_idx = ? WHERE rowid = ?",
+        )
+        .bind(mode.normalize_text(&summary))
+        .bind(mode.normalize_text(&description))
+        .bind(mode.normalize_text(&location))
+        .bind(rowid)
+        .execute(pool)
+        .await?;
+    }
+
+    sqlx::query("INSERT INTO events_fts(events_fts) VALUES('rebuild')")
+        .execute(pool)
+        .await?;
+
+    sqlx::query(
+        "INSERT INTO app_config(key, value) VALUES('search_mode', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(mode_str)
+    .execute(pool)
+    .await?;
+
+    println!("[search] FTS rebuild complete.");
+    Ok(())
 }

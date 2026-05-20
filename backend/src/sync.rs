@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::caldav::CalDavClient;
 use crate::db;
+use crate::search::SearchMode;
 use crate::sse::{SseBroadcaster, SseMessage};
 
 pub enum SyncTrigger {
@@ -27,6 +28,7 @@ pub struct SyncManager {
     broadcaster: Arc<SseBroadcaster>,
     app_base_url: String,
     sync_interval: Duration,
+    search_mode: SearchMode,
     tasks: Mutex<HashMap<String, mpsc::UnboundedSender<SyncTrigger>>>,
 }
 
@@ -37,6 +39,7 @@ impl SyncManager {
         broadcaster: Arc<SseBroadcaster>,
         app_base_url: String,
         sync_interval_mins: u64,
+        search_mode: SearchMode,
     ) -> Arc<Self> {
         Arc::new(Self {
             db,
@@ -44,6 +47,7 @@ impl SyncManager {
             broadcaster,
             app_base_url,
             sync_interval: Duration::from_secs(sync_interval_mins.saturating_mul(60)),
+            search_mode,
             tasks: Mutex::new(HashMap::new()),
         })
     }
@@ -218,6 +222,7 @@ impl SyncManager {
                         result.deleted,
                         &result.new_token,
                         stored_ctag.as_deref(),
+                        &self.search_mode,
                     )
                     .await?;
                     let total = apply_result.changed.len() + apply_result.deleted.len();
@@ -269,6 +274,7 @@ impl SyncManager {
                 all_raw,
                 new_ctag.as_deref(),
                 new_token.as_deref(),
+                &self.search_mode,
             )
             .await?;
             self.broadcaster.send(user_id, SseMessage::EventsRefetch);

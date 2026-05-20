@@ -43,6 +43,7 @@ The `CurrentUser` struct in `oidc.rs` is the unified extractor used by all handl
 
 **Key Modules**:
 - `main.rs`: Server setup, routing, conditional OIDC vs local auth middleware stack
+- `search.rs`: `SearchMode` enum (`Default`, `Trigram`, `Stemmed(Algorithm)`). Parsed from `SEARCH_MODE` env var via `FromStr` — `"German"` etc. deserialised into `rust_stemmers::Algorithm` using serde. `normalize_text()` applies Snowball stemming for `Stemmed` mode; passthrough for others. `build_fts_query()` builds the FTS5 MATCH expression (prefix wildcards for default/stemmed, raw terms for trigram). Used in `AppState`, `SyncManager`, and all db insert paths.
 - `oidc.rs`: `AuthMode` enum, `CurrentUser` extractor, `AppState`, `RequireAuthLayer`, OIDC-specific handlers (`user_info`, `logout_handler`, `auth_callback_handler`)
 - `local_auth.rs`: Local login handler (`handle_login`), logout, `delete_account`, `derive_user_id`
 - `caldav.rs`: CalDAV client implementation, iCalendar parsing, event/calendar operations, `get_display_name()`
@@ -56,8 +57,9 @@ The `CurrentUser` struct in `oidc.rs` is the unified extractor used by all handl
 **Database Schema**:
 - `user_settings`: Stores per-user CalDAV credentials (encrypted at rest)
 - `deactivated_calendars`: Tracks which calendars are hidden per user (encrypted hrefs)
-- `cached_calendars`, `cached_events`: Event/calendar cache for fast reads
+- `cached_calendars`, `cached_events`: Event/calendar cache for fast reads. `cached_events` has `summary_idx`, `description_idx`, `location_idx` columns that hold the FTS-indexed text (stemmed for `de`/`en`, raw otherwise). `events_fts` virtual table indexes these columns.
 - `push_subscriptions`: WebDAV Push notification subscriptions
+- `app_config`: Key/value store for app-level config (currently stores `search_mode` to detect tokenizer changes on restart)
 
 **Routing**:
 - `POST /auth/login` — Local mode login (validates CalDAV credentials, sets session)
@@ -111,6 +113,7 @@ cargo check                 # Check without building
 - `DATABASE_PATH` — SQLite database file (default: `./data/caley.db`)
 - `STATIC_DIR` — Frontend dist directory (default: `../frontend/dist`)
 - `SYNC_INTERVAL_MINS` — Background sync interval in minutes (default: `5`)
+- `SEARCH_MODE` — Full-text search strategy: `default` (unicode-aware prefix matching), `trigram` (SQLite trigram tokenizer, language-agnostic substring matching), or a Snowball algorithm name (e.g. `German`, `English`, `French` — full list: Arabic, Danish, Dutch, English, Finnish, French, German, Greek, Hungarian, Italian, Norwegian, Portuguese, Romanian, Russian, Spanish, Swedish, Tamil, Turkish). Parsed via serde — the string must match the `rust_stemmers::Algorithm` variant name exactly. Changing this rebuilds the FTS index on startup. (default: `default`)
 
 No linter, formatter, or test runner configured. No tests yet.
 

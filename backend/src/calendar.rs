@@ -803,7 +803,7 @@ async fn optimistic_upsert(
     raw_ical: &str,
     uid: &str,
 ) {
-    if let Err(e) = db::upsert_cached_event_raw(&state.db, user_id, calendar_href, event_href, "", raw_ical).await {
+    if let Err(e) = db::upsert_cached_event_raw(&state.db, user_id, calendar_href, event_href, "", raw_ical, &state.search_mode).await {
         eprintln!("Optimistic cache update failed: {e}");
     }
     // For non-recurring events embed the full EventJson so the frontend can patch without a round-trip.
@@ -956,6 +956,7 @@ pub async fn import_ics(
                     &event_href,
                     "",
                     &wrapped_ical,
+                    &state.search_mode,
                 )
                 .await
                 {
@@ -994,13 +995,6 @@ pub struct SearchResultItem {
     pub calendar_color: Option<String>,
 }
 
-fn build_fts_query(q: &str) -> String {
-    q.split_whitespace()
-        .map(|token| format!("\"{}\"*", token.replace('"', "\"\"")))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 pub async fn search_events(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -1027,7 +1021,10 @@ pub async fn search_events(
     }
     let q: String = q.chars().take(200).collect();
 
-    let fts = build_fts_query(&q);
+    let fts = state.search_mode.build_fts_query(&q);
+    if fts.is_empty() {
+        return Json(Vec::<SearchResultItem>::new()).into_response();
+    }
     let user_id = user.user_id.clone();
 
     let mut sql = r#"SELECT e.uid, e.calendar_href, e.summary, e.description, e.location,

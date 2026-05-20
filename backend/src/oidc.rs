@@ -16,6 +16,7 @@ use tower::{Layer, Service};
 use tower_sessions::Session;
 use crate::caldav::CalDavClient;
 use crate::db;
+use crate::search::SearchMode;
 
 #[derive(Clone, Debug, ValueEnum)]
 pub enum UserIdClaim {
@@ -40,6 +41,7 @@ pub struct AppState {
     pub sync_manager: Arc<crate::sync::SyncManager>,
     pub sse_broadcaster: Arc<crate::sse::SseBroadcaster>,
     pub auth_mode: AuthMode,
+    pub search_mode: SearchMode,
 }
 
 pub struct CurrentUser {

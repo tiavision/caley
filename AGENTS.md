@@ -13,7 +13,7 @@ Two-package monorepo with no root-level tooling:
 - Configuration is via environment variables. A `.env` file in `backend/` is also loaded automatically.
 - Always required: `APP_BASE_URL`, `ENCRYPTION_KEY`
 - OIDC mode (all three must be set): `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`
-- Optional: `CALDAV_PORT` (default: `3000`), `OIDC_LOGOUT` (default: `true`), `OIDC_USER_ID_CLAIM` (default: `sub`), `DATABASE_PATH` (default: `./data/caley.db`), `STATIC_DIR` (defaults to `../frontend/dist`), `SYNC_INTERVAL_MINS` (default: `5`)
+- Optional: `CALDAV_PORT` (default: `3000`), `OIDC_LOGOUT` (default: `true`), `OIDC_USER_ID_CLAIM` (default: `sub`), `DATABASE_PATH` (default: `./data/caley.db`), `STATIC_DIR` (defaults to `../frontend/dist`), `SYNC_INTERVAL_MINS` (default: `5`), `SEARCH_MODE` (`default`/`trigram`/Snowball algorithm name e.g. `German`, default: `default`)
 - CalDAV credentials (base URL, username, password) are per-user settings stored encrypted in SQLite with AES-256-GCM
 - Uses `dotenvy` to load `.env`; `clap` with derive + env feature for CLI args
 - Session store: in-memory (`MemoryStore` from `tower-sessions`); sessions lost on restart

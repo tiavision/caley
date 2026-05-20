@@ -4,6 +4,7 @@ mod crypto;
 mod db;
 mod local_auth;
 mod oidc;
+mod search;
 mod settings;
 mod sse;
 mod sync;
@@ -17,6 +18,7 @@ use axum_oidc::{EmptyAdditionalClaims, OidcAuthLayer, OidcLoginLayer};
 use clap::Parser;
 use dotenvy::dotenv;
 use oidc::{AppState, AuthMode, UserIdClaim};
+use search::SearchMode;
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
@@ -47,6 +49,8 @@ struct Cli {
     encryption_key: String,
     #[arg(long, env = "SYNC_INTERVAL_MINS", default_value = "5")]
     sync_interval_mins: u64,
+    #[arg(long, env = "SEARCH_MODE", default_value = "default")]
+    search_mode: String,
 }
 
 #[tokio::main]
@@ -55,6 +59,12 @@ async fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
 
     let db = db::init_db(&args.database_path).await?;
+
+    let search_mode = args.search_mode.parse::<SearchMode>().unwrap_or_else(|e| {
+        eprintln!("Warning: invalid SEARCH_MODE — {e}");
+        SearchMode::Default
+    });
+    db::ensure_fts_schema(&db, &search_mode).await?;
 
     let encryption_key = crypto::derive_key(&args.encryption_key);
 
@@ -72,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&sse_broadcaster),
         args.app_base_url.clone(),
         args.sync_interval_mins,
+        search_mode.clone(),
     );
 
     let session_store = SqliteStore::new(db.clone());
@@ -85,6 +96,7 @@ async fn main() -> anyhow::Result<()> {
         sync_manager,
         sse_broadcaster,
         auth_mode: auth_mode.clone(),
+        search_mode,
     };
 
     let static_dir = args.static_dir
