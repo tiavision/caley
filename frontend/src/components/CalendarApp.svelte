@@ -446,8 +446,9 @@
                 on:click={() => eventDetail.open(event)}
                 on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); eventDetail.open(event); } }}
               >
-                <header>{event.time_range}</header>
-                <p>{event.summary}</p>
+                <div class="appt-content">
+                  <span class="appt-time">{event.time_range.split('-')[0]}</span> · {event.summary}
+                </div>
               </article>
             {/each}
           </div>
@@ -648,9 +649,8 @@
       color: var(--pico-muted-color);
       display: inline;
     }
-    :global(.appointments) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.5rem; }
     :global(.day.day-past .appointments) { display: none; }
-    :global(.day.day-past.day-expanded .appointments) { display: grid; }
+    :global(.day.day-past.day-expanded .appointments) { display: block; }
     :global(.day.day-past .day-heading) { cursor: pointer; user-select: none; }
     :global(.day.day-past .day-heading::after) { content: none; }
     :global(.day.day-past.day-expanded .day-heading::after) { content: none; }
@@ -662,26 +662,28 @@
       min-width: 1.4em; height: 1.4em; padding: 0 0.25em;
       margin-left: 0.4em; vertical-align: middle;
     }
-    :global(article.appointment:last-child:nth-child(odd)) { grid-column: 1 / -1; }
-    :global(article.appointment p) { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   }
   @media (min-width: 960px) {
     :global(.day.day-past) { opacity: 0.45; }
-    :global(article.appointment p) { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
   }
 
   /* Appointments */
   :global(article.appointment) {
     margin: 0 0 0.5rem 0 !important;
+    padding: 0.55rem 0.65rem !important;
     min-width: 0;
-    font-size: medium;
     box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.08);
   }
-  :global(article.appointment p) { margin-bottom: 0.125rem; overflow-wrap: anywhere; }
-  :global(article.appointment > header) {
-    font-size: small;
+  :global(.appt-content) {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.4;
+  }
+  :global(.appt-time) {
     color: var(--pico-muted-color);
-    overflow-wrap: anywhere;
+    font-size: 0.85em;
   }
   @media (prefers-color-scheme: dark) {
     :global(article.appointment) { box-shadow: 0 1px 3px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08); }
