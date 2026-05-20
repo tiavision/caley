@@ -140,5 +140,6 @@
   "search_noResults": "No events found.",
   "search_error": "Search failed.",
   "search_from": "From",
-  "search_to": "To"
+  "search_to": "To",
+  "search_calendars": "Calendars"
 }

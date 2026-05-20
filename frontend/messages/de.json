@@ -140,5 +140,6 @@
   "search_noResults": "Keine Termine gefunden.",
   "search_error": "Suche fehlgeschlagen.",
   "search_from": "Von",
-  "search_to": "Bis"
+  "search_to": "Bis",
+  "search_calendars": "Kalender"
 }

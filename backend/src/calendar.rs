@@ -1003,6 +1003,7 @@ pub async fn search_events(
     let mut q = String::new();
     let mut start: Option<String> = None;
     let mut end: Option<String> = None;
+    let mut cal_hrefs: Vec<String> = Vec::new();
 
     if let Some(query) = raw_query {
         for (key, value) in form_urlencoded::parse(query.as_bytes()) {
@@ -1010,6 +1011,7 @@ pub async fn search_events(
                 "q" => q = value.into_owned(),
                 "start" => start = Some(value.into_owned()),
                 "end" => end = Some(value.into_owned()),
+                "cal" => cal_hrefs.push(value.into_owned()),
                 _ => {}
             }
         }
@@ -1035,11 +1037,16 @@ pub async fn search_events(
     WHERE events_fts MATCH ? AND e.user_id = ?"#.to_string();
     if start.is_some() { sql.push_str(" AND e.dtstart >= ?"); }
     if end.is_some() { sql.push_str(" AND e.dtstart <= ?"); }
+    if !cal_hrefs.is_empty() {
+        let placeholders = cal_hrefs.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        sql.push_str(&format!(" AND e.calendar_href IN ({})", placeholders));
+    }
     sql.push_str(" ORDER BY e.dtstart DESC LIMIT 100");
 
     let mut query = sqlx::query(&sql).bind(fts).bind(user_id);
     if let Some(s) = start { query = query.bind(s); }
     if let Some(e) = end { query = query.bind(e); }
+    for href in &cal_hrefs { query = query.bind(href.clone()); }
 
     match query.fetch_all(&state.db).await {
         Ok(rows) => {
