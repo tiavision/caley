@@ -14,8 +14,37 @@ body {
     flex-direction: column;
 }
 
-main.container-fluid {
+main {
     flex: 1;
+}
+
+footer {
+    border-top: 1px solid var(--pico-muted-border-color);
+    padding-block: 0.5rem;
+    font-size: 0.875rem;
+}
+
+footer nav {
+    justify-content: space-between;
+}
+
+footer a.brand {
+    --pico-color: inherit;
+    color: var(--pico-color);
+    text-decoration: none;
+    font-weight: 600;
+    opacity: 0.8;
+}
+
+footer #nav-user-list li + li::before {
+    content: "|";
+    margin-right: 0.5rem;
+    opacity: 0.4;
+}
+
+footer #nav-user-list li:not(:has(a)) {
+    font-weight: 600;
+    opacity: 0.8;
 }
 
 dialog article header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }

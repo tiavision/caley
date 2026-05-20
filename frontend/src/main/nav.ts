@@ -1,16 +1,5 @@
 import { m } from '../paraglide/messages.js';
 
-const navStyles = document.createElement('style');
-navStyles.textContent = `
-  a.brand { color: inherit; text-decoration: none; }
-  nav { flex-wrap: wrap; row-gap: 0.25rem; }
-  #nav-user-list { flex-wrap: wrap; }
-  #nav-user-list li { padding: 0 0.25rem; }
-  #nav-user-list li + li::before { content: "|"; margin-right: 0.5rem; opacity: 0.4; }
-  #nav-user-list li:not(:has(a)) { font-weight: 600; opacity: 0.8; }
-`;
-document.head.appendChild(navStyles);
-
 export function initNav() {
   document.getElementById('nav-brand')!.textContent = m.app_brand();
   document.getElementById('nav-loading')!.textContent = m.nav_loading();
