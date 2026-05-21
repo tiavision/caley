@@ -366,6 +366,7 @@
     grid-template-columns: 280px 1fr;
     gap: 0;
     min-height: calc(100vh - 8rem);
+    min-height: calc(100dvh - 8rem);
     border: 1px solid var(--pico-muted-border-color);
     border-radius: var(--pico-border-radius);
     overflow: hidden;

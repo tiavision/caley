@@ -21,6 +21,8 @@
   let selectedWeekStart: Date = getMonday(new Date());
   let gridMonth: string = fmtYM(selectedWeekStart);
   const todayStr: string = fmtDate(new Date());
+  let touchStartX = 0;
+  let touchStartY = 0;
 
   $: weekEnd = (() => { const d = new Date(selectedWeekStart); d.setDate(d.getDate() + 6); return d; })();
 
@@ -163,6 +165,7 @@
     fetchEvents();
     const nm = fmtYM(d);
     if (nm !== gridMonth) { gridMonth = nm; fetchMonthGrid(nm); }
+    window.scrollTo(0, 0);
   }
 
   function selectDay(dateStr: string) {
@@ -172,6 +175,7 @@
     fetchEvents();
     const nm = String(y) + '-' + String(mo).padStart(2, '0');
     if (nm !== gridMonth) { gridMonth = nm; fetchMonthGrid(nm); }
+    window.scrollTo(0, 0);
   }
 
   function navigateToMonth(month: string) {
@@ -185,6 +189,19 @@
     fetchEvents();
     const nm = fmtYM(today);
     if (nm !== gridMonth) { gridMonth = nm; fetchMonthGrid(nm); }
+    window.scrollTo(0, 0);
+  }
+
+  function handleTouchStart(e: TouchEvent) {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }
+
+  function handleTouchEnd(e: TouchEvent) {
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
+    navigateWeek(dx > 0 ? -7 : 7);
   }
 
   // ── Event detail ───────────────────────────────────────────────────────────
@@ -367,7 +384,7 @@
 <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
 <div class="layout">
   <!-- Weekly view -->
-  <div class="weekly">
+  <div class="weekly" on:touchstart={handleTouchStart} on:touchend={handleTouchEnd}>
     <div class="weekly-header">
       <div class="week-nav-wrapper">
         <button class="nav-btn" aria-label="Previous week" on:click={() => navigateWeek(-7)}><span class="arrow">‹</span></button>
