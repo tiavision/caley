@@ -150,6 +150,8 @@
   "contacts_addPhone": "Add phone",
   "contacts_error": "Failed to save contact.",
   "contacts_addressbook": "Address book",
+  "contacts_addressbooks": "Address books",
+  "contacts_filterplaceholder": "Filter contacts…",
   "search_heading": "Search",
   "search_placeholder": "Search by title, description, location…",
   "search_submit": "Search",

@@ -150,6 +150,8 @@
   "contacts_addPhone": "Telefon hinzufügen",
   "contacts_error": "Kontakt konnte nicht gespeichert werden.",
   "contacts_addressbook": "Adressbuch",
+  "contacts_addressbooks": "Adressbücher",
+  "contacts_filterplaceholder": "Kontakte filtern…",
   "search_heading": "Suchen",
   "search_placeholder": "Titel, Beschreibung, Ort…",
   "search_submit": "Suchen",
