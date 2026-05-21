@@ -12,7 +12,6 @@ use uuid::Uuid;
 
 use crate::caldav::CalDavClient;
 use crate::carddav;
-use crate::contacts::ContactJson;
 use crate::db;
 use crate::search::SearchMode;
 use crate::sse::{SseBroadcaster, SseMessage};
@@ -349,16 +348,7 @@ impl SyncManager {
 
     async fn load_contact_json(&self, user_id: &str, addressbook_href: &str, uid: &str) -> Option<String> {
         let contact = db::get_contact(&self.db, user_id, addressbook_href, uid).await.ok()??;
-        let emails: Vec<String> = serde_json::from_str(&contact.emails).unwrap_or_default();
-        let phones: Vec<String> = serde_json::from_str(&contact.phones).unwrap_or_default();
-        let cj = ContactJson {
-            uid: contact.uid,
-            addressbook_href: contact.addressbook_href,
-            fn_name: contact.fn_name,
-            emails,
-            phones,
-            org: contact.org,
-        };
+        let cj = crate::contacts::cached_to_json_pub(&contact);
         serde_json::to_string(&cj).ok()
     }
 

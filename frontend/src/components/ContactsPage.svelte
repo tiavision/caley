@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { initI18n, getLocale, makeTl } from '../lib/i18n.ts';
-  import type { ContactJson, AddressbookJson, ContactsResponse } from '../types/calendar.ts';
+  import type { ContactJson, AddressbookJson, ContactsResponse, TypedEntry, AddressEntry } from '../types/calendar.ts';
 
   let locale = 'en';
   $: tl = makeTl(locale);
@@ -19,10 +19,15 @@
   let abDropdownOpen = false;
 
   let formDialog: HTMLDialogElement;
+  const emptyEmail = (): TypedEntry => ({ value: '', type_label: 'other' });
+  const emptyPhone = (): TypedEntry => ({ value: '', type_label: 'other' });
+  const emptyAddress = (): AddressEntry => ({ street: '', city: '', region: '', postal: '', country: '', type_label: 'home' });
+
   let formUid: string | null = null;
   let formName = '';
-  let formEmails: string[] = [''];
-  let formPhones: string[] = [''];
+  let formEmails: TypedEntry[] = [emptyEmail()];
+  let formPhones: TypedEntry[] = [emptyPhone()];
+  let formAddresses: AddressEntry[] = [];
   let formOrg = '';
   let formAddressbookHref = '';
   let formSaving = false;
@@ -113,9 +118,9 @@
     if (q) {
       list = list.filter(c =>
         c.fn_name.toLowerCase().includes(q) ||
-        c.emails.some(e => e.toLowerCase().includes(q)) ||
+        c.emails.some(e => e.value.toLowerCase().includes(q)) ||
         c.org.toLowerCase().includes(q) ||
-        c.phones.some(p => p.toLowerCase().includes(q))
+        c.phones.some(p => p.value.toLowerCase().includes(q))
       );
     }
     return list;
@@ -171,8 +176,9 @@
   async function openNewForm() {
     formUid = null;
     formName = '';
-    formEmails = [''];
-    formPhones = [''];
+    formEmails = [emptyEmail()];
+    formPhones = [emptyPhone()];
+    formAddresses = [];
     formOrg = '';
     formAddressbookHref = addressbooks[0]?.href ?? '';
     formError = '';
@@ -187,8 +193,9 @@
     }
     formUid = c.uid;
     formName = c.fn_name;
-    formEmails = c.emails.length > 0 ? [...c.emails] : [''];
-    formPhones = c.phones.length > 0 ? [...c.phones] : [''];
+    formEmails = c.emails.length > 0 ? c.emails.map(e => ({ ...e })) : [emptyEmail()];
+    formPhones = c.phones.length > 0 ? c.phones.map(p => ({ ...p })) : [emptyPhone()];
+    formAddresses = c.addresses.map(a => ({ ...a }));
     formOrg = c.org;
     formAddressbookHref = c.addressbook_href;
     formError = '';
@@ -204,8 +211,9 @@
     e.preventDefault();
     formSaving = true;
     formError = '';
-    const emails = formEmails.filter(s => s.trim());
-    const phones = formPhones.filter(s => s.trim());
+    const emails = formEmails.filter(e => e.value.trim());
+    const phones = formPhones.filter(p => p.value.trim());
+    const addresses = formAddresses.filter(a => a.street.trim() || a.city.trim() || a.country.trim());
     try {
       const res = await fetch('/api/contact', {
         method: 'POST',
@@ -216,6 +224,7 @@
           fn_name: formName.trim(),
           emails,
           phones,
+          addresses,
           org: formOrg.trim(),
         }),
       });
@@ -314,10 +323,10 @@
                 <div class="card-body">
                   <span class="card-name">{contact.fn_name || '—'}</span>
                   {#if contact.emails[0]}
-                    <a href="mailto:{contact.emails[0]}" class="card-link card-email" on:click|stopPropagation>{contact.emails[0]}</a>
+                    <a href="mailto:{contact.emails[0].value}" class="card-link card-email" on:click|stopPropagation>{contact.emails[0].value}</a>
                   {/if}
                   {#if contact.phones[0]}
-                    <a href="tel:{contact.phones[0]}" class="card-link card-phone" on:click|stopPropagation>{contact.phones[0]}</a>
+                    <a href="tel:{contact.phones[0].value}" class="card-link card-phone" on:click|stopPropagation>{contact.phones[0].value}</a>
                   {/if}
                   {#if contact.org}
                     <span class="card-org">{contact.org}</span>
@@ -383,8 +392,11 @@
           <div class="detail-row">
             <span class="detail-label">{tl('contacts_email')}</span>
             <div class="detail-links">
-              {#each selectedContact.emails as email}
-                <a href="mailto:{email}">{email}</a>
+              {#each selectedContact.emails as entry}
+                <div class="typed-entry">
+                  <span class="type-chip">{tl(`contacts_type_${entry.type_label}`)}</span>
+                  <a href="mailto:{entry.value}">{entry.value}</a>
+                </div>
               {/each}
             </div>
           </div>
@@ -394,8 +406,29 @@
           <div class="detail-row">
             <span class="detail-label">{tl('contacts_phone')}</span>
             <div class="detail-links">
-              {#each selectedContact.phones as phone}
-                <a href="tel:{phone}">{phone}</a>
+              {#each selectedContact.phones as entry}
+                <div class="typed-entry">
+                  <span class="type-chip">{tl(`contacts_type_${entry.type_label}`)}</span>
+                  <a href="tel:{entry.value}">{entry.value}</a>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        {#if selectedContact.addresses.length > 0}
+          <div class="detail-row">
+            <span class="detail-label">{tl('contacts_address')}</span>
+            <div class="detail-links">
+              {#each selectedContact.addresses as addr}
+                <div class="typed-entry">
+                  <span class="type-chip">{tl(`contacts_type_${addr.type_label}`)}</span>
+                  <span class="address-text">
+                    {#if addr.street}{addr.street}<br />{/if}
+                    {#if addr.city || addr.region || addr.postal}{addr.city}{addr.region ? (addr.city ? ', ' : '') + addr.region : ''}{addr.postal ? ' ' + addr.postal : ''}<br />{/if}
+                    {#if addr.country}{addr.country}{/if}
+                  </span>
+                </div>
               {/each}
             </div>
           </div>
@@ -442,34 +475,90 @@
         <input type="text" bind:value={formName} required />
       </label>
 
-      {#each formEmails as _, i}
+      {#each formEmails as entry, i}
         <label>
           {tl('contacts_email')}{formEmails.length > 1 ? ` ${i + 1}` : ''}
           <div class="field-row">
-            <input type="email" bind:value={formEmails[i]} />
+            <input type="email" bind:value={formEmails[i].value} />
+            <select bind:value={formEmails[i].type_label} class="type-select">
+              <option value="home">{tl('contacts_type_home')}</option>
+              <option value="work">{tl('contacts_type_work')}</option>
+              <option value="other">{tl('contacts_type_other')}</option>
+            </select>
             {#if formEmails.length > 1}
               <button type="button" class="remove-btn" on:click={() => { formEmails = formEmails.filter((_, j) => j !== i); }}>✕</button>
             {/if}
           </div>
         </label>
       {/each}
-      <button type="button" class="add-field-btn" on:click={() => { formEmails = [...formEmails, '']; }}>
+      <button type="button" class="add-field-btn" on:click={() => { formEmails = [...formEmails, emptyEmail()]; }}>
         + {tl('contacts_addEmail')}
       </button>
 
-      {#each formPhones as _, i}
+      {#each formPhones as entry, i}
         <label>
           {tl('contacts_phone')}{formPhones.length > 1 ? ` ${i + 1}` : ''}
           <div class="field-row">
-            <input type="tel" bind:value={formPhones[i]} />
+            <input type="tel" bind:value={formPhones[i].value} />
+            <select bind:value={formPhones[i].type_label} class="type-select">
+              <option value="home">{tl('contacts_type_home')}</option>
+              <option value="work">{tl('contacts_type_work')}</option>
+              <option value="mobile">{tl('contacts_type_mobile')}</option>
+              <option value="fax">{tl('contacts_type_fax')}</option>
+              <option value="pager">{tl('contacts_type_pager')}</option>
+              <option value="other">{tl('contacts_type_other')}</option>
+            </select>
             {#if formPhones.length > 1}
               <button type="button" class="remove-btn" on:click={() => { formPhones = formPhones.filter((_, j) => j !== i); }}>✕</button>
             {/if}
           </div>
         </label>
       {/each}
-      <button type="button" class="add-field-btn" on:click={() => { formPhones = [...formPhones, '']; }}>
+      <button type="button" class="add-field-btn" on:click={() => { formPhones = [...formPhones, emptyPhone()]; }}>
         + {tl('contacts_addPhone')}
+      </button>
+
+      {#each formAddresses as addr, i}
+        <fieldset class="address-fieldset">
+          <legend>
+            {tl('contacts_address')}{formAddresses.length > 1 ? ` ${i + 1}` : ''}
+            <button type="button" class="remove-btn legend-remove" on:click={() => { formAddresses = formAddresses.filter((_, j) => j !== i); }}>✕</button>
+          </legend>
+          <label>
+            {tl('contacts_street')}
+            <input type="text" bind:value={formAddresses[i].street} />
+          </label>
+          <div class="addr-row">
+            <label class="addr-city">
+              {tl('contacts_city')}
+              <input type="text" bind:value={formAddresses[i].city} />
+            </label>
+            <label class="addr-region">
+              {tl('contacts_region')}
+              <input type="text" bind:value={formAddresses[i].region} />
+            </label>
+            <label class="addr-postal">
+              {tl('contacts_postal')}
+              <input type="text" bind:value={formAddresses[i].postal} />
+            </label>
+          </div>
+          <div class="addr-row">
+            <label class="addr-country">
+              {tl('contacts_country')}
+              <input type="text" bind:value={formAddresses[i].country} />
+            </label>
+            <label class="addr-type">
+              <select bind:value={formAddresses[i].type_label} class="type-select">
+                <option value="home">{tl('contacts_type_home')}</option>
+                <option value="work">{tl('contacts_type_work')}</option>
+                <option value="other">{tl('contacts_type_other')}</option>
+              </select>
+            </label>
+          </div>
+        </fieldset>
+      {/each}
+      <button type="button" class="add-field-btn" on:click={() => { formAddresses = [...formAddresses, emptyAddress()]; }}>
+        + {tl('contacts_addAddress')}
       </button>
 
       <label>
@@ -788,7 +877,7 @@
   .detail-links {
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
+    gap: 0.35rem;
   }
 
   .detail-links a {
@@ -799,6 +888,30 @@
 
   .detail-links a:hover {
     text-decoration: underline;
+  }
+
+  .typed-entry {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+  }
+
+  .type-chip {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--pico-muted-color, #666);
+    background: var(--pico-muted-background-color);
+    border-radius: 0.25rem;
+    padding: 0.05rem 0.35rem;
+    flex-shrink: 0;
+    line-height: 1.4;
+  }
+
+  .address-text {
+    font-size: 0.9rem;
+    line-height: 1.5;
   }
 
   .detail-actions {
@@ -822,6 +935,53 @@
     flex: 1;
     margin-bottom: 0;
   }
+
+  .type-select {
+    width: auto;
+    min-width: 5.5rem;
+    margin-bottom: 0;
+    font-size: 0.8rem;
+    padding-top: 0.3rem;
+    padding-bottom: 0.3rem;
+    flex-shrink: 0;
+  }
+
+  .address-fieldset {
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .address-fieldset legend {
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 0.25rem;
+  }
+
+  .legend-remove {
+    padding: 0.1rem 0.3rem;
+    font-size: 0.75rem;
+  }
+
+  .address-fieldset label {
+    margin-bottom: 0.4rem;
+  }
+
+  .addr-row {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+
+  .addr-city { flex: 2; min-width: 8rem; }
+  .addr-region { flex: 1; min-width: 5rem; }
+  .addr-postal { flex: 1; min-width: 5rem; }
+  .addr-country { flex: 2; min-width: 8rem; }
+  .addr-type { flex: 1; min-width: 6rem; display: flex; flex-direction: column; justify-content: flex-end; }
 
   .remove-btn {
     padding: 0.25rem 0.5rem;

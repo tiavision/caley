@@ -2,7 +2,7 @@ use anyhow::{bail, Context};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::caldav::{extract_ctag_and_token, extract_hrefs, resolve_url, CalDavClient};
 
@@ -12,11 +12,28 @@ pub struct Addressbook {
     pub name: String,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct TypedEntry {
+    pub value: String,
+    pub type_label: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct AddressEntry {
+    pub street: String,
+    pub city: String,
+    pub region: String,
+    pub postal: String,
+    pub country: String,
+    pub type_label: String,
+}
+
 pub struct ContactFields {
     pub uid: String,
     pub fn_name: String,
-    pub emails: Vec<String>,
-    pub phones: Vec<String>,
+    pub emails: Vec<TypedEntry>,
+    pub phones: Vec<TypedEntry>,
+    pub addresses: Vec<AddressEntry>,
     pub org: String,
 }
 
@@ -451,12 +468,30 @@ pub async fn delete_contact(client: &CalDavClient, contact_href: &str) -> anyhow
 
 // ── vCard parsing / building ──────────────────────────────────────────────────
 
+fn extract_type_label(prop: &ical::property::Property) -> String {
+    let raw = prop
+        .params
+        .as_ref()
+        .and_then(|p| p.iter().find(|(k, _)| k == "TYPE"))
+        .and_then(|(_, vals)| vals.first())
+        .map(|s| s.to_uppercase());
+    match raw.as_deref() {
+        Some("HOME") => "home".into(),
+        Some("WORK") => "work".into(),
+        Some("CELL") | Some("MOBILE") => "mobile".into(),
+        Some("FAX") => "fax".into(),
+        Some("PAGER") => "pager".into(),
+        _ => "other".into(),
+    }
+}
+
 pub fn parse_vcard(raw: &str) -> ContactFields {
     let reader = ical::VcardParser::new(raw.as_bytes());
     let mut uid = String::new();
     let mut fn_name = String::new();
     let mut emails = Vec::new();
     let mut phones = Vec::new();
+    let mut addresses = Vec::new();
     let mut org = String::new();
 
     if let Some(Ok(contact)) = reader.into_iter().next() {
@@ -467,25 +502,50 @@ pub fn parse_vcard(raw: &str) -> ContactFields {
                 "EMAIL" => {
                     if let Some(v) = &prop.value {
                         if !v.is_empty() {
-                            emails.push(v.clone());
+                            emails.push(TypedEntry {
+                                value: v.clone(),
+                                type_label: extract_type_label(prop),
+                            });
                         }
                     }
                 }
                 "TEL" => {
                     if let Some(v) = &prop.value {
                         if !v.is_empty() {
-                            phones.push(v.clone());
+                            phones.push(TypedEntry {
+                                value: v.clone(),
+                                type_label: extract_type_label(prop),
+                            });
+                        }
+                    }
+                }
+                "ADR" => {
+                    if let Some(v) = &prop.value {
+                        // ADR format: POBox;ExtAddr;Street;City;Region;Postal;Country
+                        let parts: Vec<&str> = v.splitn(7, ';').collect();
+                        let street = parts.get(2).copied().unwrap_or("").trim().to_string();
+                        let city = parts.get(3).copied().unwrap_or("").trim().to_string();
+                        let region = parts.get(4).copied().unwrap_or("").trim().to_string();
+                        let postal = parts.get(5).copied().unwrap_or("").trim().to_string();
+                        let country = parts.get(6).copied().unwrap_or("").trim().to_string();
+                        if !street.is_empty() || !city.is_empty() || !country.is_empty() {
+                            addresses.push(AddressEntry {
+                                street,
+                                city,
+                                region,
+                                postal,
+                                country,
+                                type_label: extract_type_label(prop),
+                            });
                         }
                     }
                 }
                 "ORG" => {
                     if let Some(v) = &prop.value {
-                        // ORG is semicolon-separated components; take the first
                         org = v.split(';').next().unwrap_or("").to_string();
                     }
                 }
                 "N" if fn_name.is_empty() => {
-                    // Fall back to N if FN is absent
                     if let Some(v) = &prop.value {
                         // N format: Family;Given;Additional;Prefix;Suffix
                         let parts: Vec<&str> = v.split(';').collect();
@@ -504,29 +564,60 @@ pub fn parse_vcard(raw: &str) -> ContactFields {
         }
     }
 
-    ContactFields { uid, fn_name, emails, phones, org }
+    ContactFields { uid, fn_name, emails, phones, addresses, org }
 }
 
-pub fn build_vcard(uid: &str, fn_name: &str, emails: &[String], phones: &[String], org: &str) -> String {
+pub fn build_vcard(
+    uid: &str,
+    fn_name: &str,
+    emails: &[TypedEntry],
+    phones: &[TypedEntry],
+    addresses: &[AddressEntry],
+    org: &str,
+) -> String {
     let mut lines = vec![
         "BEGIN:VCARD".to_string(),
         "VERSION:3.0".to_string(),
         format!("UID:{uid}"),
         format!("FN:{}", escape_vcard(fn_name)),
     ];
-    // N: Family;Given;Additional;Prefix;Suffix — store whole name in Given for simplicity
     lines.push(format!("N:;{};;;", escape_vcard(fn_name)));
-    for email in emails {
-        lines.push(format!("EMAIL:{}", escape_vcard(email)));
+    for e in emails {
+        let type_param = vcard_type_param(&e.type_label);
+        lines.push(format!("EMAIL{type_param}:{}", escape_vcard(&e.value)));
     }
-    for phone in phones {
-        lines.push(format!("TEL:{}", escape_vcard(phone)));
+    for p in phones {
+        let type_param = vcard_type_param(&p.type_label);
+        lines.push(format!("TEL{type_param}:{}", escape_vcard(&p.value)));
+    }
+    for a in addresses {
+        let type_param = vcard_type_param(&a.type_label);
+        lines.push(format!(
+            "ADR{type_param}:;;{};{};{};{};{}",
+            escape_vcard(&a.street),
+            escape_vcard(&a.city),
+            escape_vcard(&a.region),
+            escape_vcard(&a.postal),
+            escape_vcard(&a.country),
+        ));
     }
     if !org.is_empty() {
         lines.push(format!("ORG:{}", escape_vcard(org)));
     }
     lines.push("END:VCARD".to_string());
     lines.join("\r\n") + "\r\n"
+}
+
+fn vcard_type_param(type_label: &str) -> String {
+    let upper = match type_label {
+        "home" => "HOME",
+        "work" => "WORK",
+        "mobile" => "CELL",
+        "fax" => "FAX",
+        "pager" => "PAGER",
+        _ => return String::new(),
+    };
+    format!(";TYPE={upper}")
 }
 
 fn escape_vcard(s: &str) -> String {

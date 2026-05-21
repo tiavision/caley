@@ -6,7 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::carddav::{self, build_vcard, contact_href};
+use crate::carddav::{self, build_vcard, contact_href, AddressEntry, TypedEntry};
 use crate::db;
 use crate::oidc::{require_client, AppState, CurrentUser};
 use crate::sse::SseMessage;
@@ -22,8 +22,9 @@ pub struct ContactJson {
     pub uid: String,
     pub addressbook_href: String,
     pub fn_name: String,
-    pub emails: Vec<String>,
-    pub phones: Vec<String>,
+    pub emails: Vec<TypedEntry>,
+    pub phones: Vec<TypedEntry>,
+    pub addresses: Vec<AddressEntry>,
     pub org: String,
 }
 
@@ -33,15 +34,31 @@ pub struct ContactsResponse {
     pub contacts: Vec<ContactJson>,
 }
 
+fn parse_typed_entries(json: &str) -> Vec<TypedEntry> {
+    serde_json::from_str::<Vec<TypedEntry>>(json).unwrap_or_else(|_| {
+        serde_json::from_str::<Vec<String>>(json)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|v| TypedEntry { value: v, type_label: "other".into() })
+            .collect()
+    })
+}
+
+pub fn cached_to_json_pub(c: &db::CachedContact) -> ContactJson {
+    cached_to_json(c)
+}
+
 fn cached_to_json(c: &db::CachedContact) -> ContactJson {
-    let emails: Vec<String> = serde_json::from_str(&c.emails).unwrap_or_default();
-    let phones: Vec<String> = serde_json::from_str(&c.phones).unwrap_or_default();
+    let emails = parse_typed_entries(&c.emails);
+    let phones = parse_typed_entries(&c.phones);
+    let addresses: Vec<AddressEntry> = serde_json::from_str(&c.addresses).unwrap_or_default();
     ContactJson {
         uid: c.uid.clone(),
         addressbook_href: c.addressbook_href.clone(),
         fn_name: c.fn_name.clone(),
         emails,
         phones,
+        addresses,
         org: c.org.clone(),
     }
 }
@@ -82,8 +99,9 @@ pub struct SaveContactRequest {
     pub uid: Option<String>,
     pub addressbook_href: String,
     pub fn_name: String,
-    pub emails: Vec<String>,
-    pub phones: Vec<String>,
+    pub emails: Vec<TypedEntry>,
+    pub phones: Vec<TypedEntry>,
+    pub addresses: Vec<AddressEntry>,
     pub org: String,
 }
 
@@ -116,7 +134,7 @@ pub async fn save_contact(
         (new_uid, h)
     };
 
-    let raw_vcard = build_vcard(&uid, &req.fn_name, &req.emails, &req.phones, &req.org);
+    let raw_vcard = build_vcard(&uid, &req.fn_name, &req.emails, &req.phones, &req.addresses, &req.org);
 
     if let Err(e) = carddav::put_contact(&client, &href, &raw_vcard).await {
         eprintln!("[contacts] put_contact error: {e}");
@@ -126,6 +144,7 @@ pub async fn save_contact(
     // Update local cache
     let emails_json = serde_json::to_string(&req.emails).unwrap_or_else(|_| "[]".to_string());
     let phones_json = serde_json::to_string(&req.phones).unwrap_or_else(|_| "[]".to_string());
+    let addresses_json = serde_json::to_string(&req.addresses).unwrap_or_else(|_| "[]".to_string());
     if let Err(e) = db::upsert_contact(
         &state.db,
         &user.user_id,
@@ -137,6 +156,7 @@ pub async fn save_contact(
         &req.fn_name,
         &emails_json,
         &phones_json,
+        &addresses_json,
         &req.org,
     ).await {
         eprintln!("[contacts] upsert_contact error: {e}");
@@ -148,6 +168,7 @@ pub async fn save_contact(
         fn_name: req.fn_name.clone(),
         emails: req.emails.clone(),
         phones: req.phones.clone(),
+        addresses: req.addresses.clone(),
         org: req.org.clone(),
     };
     let contact_json_str = serde_json::to_string(&contact_json).ok();

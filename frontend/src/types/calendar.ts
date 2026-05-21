@@ -75,12 +75,27 @@ export interface SearchResultItem {
   calendar_color: string | null;
 }
 
+export interface TypedEntry {
+  value: string;
+  type_label: string;
+}
+
+export interface AddressEntry {
+  street: string;
+  city: string;
+  region: string;
+  postal: string;
+  country: string;
+  type_label: string;
+}
+
 export interface ContactJson {
   uid: string;
   addressbook_href: string;
   fn_name: string;
-  emails: string[];
-  phones: string[];
+  emails: TypedEntry[];
+  phones: TypedEntry[];
+  addresses: AddressEntry[];
   org: string;
 }
 
