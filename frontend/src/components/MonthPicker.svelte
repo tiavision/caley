@@ -154,8 +154,6 @@
   }
   .month-picker { display: inline-flex; align-items: baseline; gap: 0.25rem; white-space: nowrap; flex: 1; justify-content: center; }
   .month-picker select {
-    font: inherit;
-    min-width: 0;
     cursor: pointer;
     padding: 0.15rem 1.25rem 0.15rem 0.4rem;
     line-height: 1.4;
@@ -166,35 +164,25 @@
   .date-grid {
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 0;
   }
   .date-header {
     text-align: center;
-    min-width: 0;
     font-size: 0.75rem;
     color: var(--pico-muted-color);
     padding: 0.25rem 0;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
   }
   .date-cell {
-    padding: 0 0.25rem;
-    min-width: 0;
-    text-align: center;
     border-bottom: var(--pico-border-width) solid var(--pico-muted-border-color);
     border-right: var(--pico-border-width) solid var(--pico-muted-border-color);
     aspect-ratio: 1;
     position: relative;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     font-size: 0.875rem;
-    transition: background 0.1s;
-    background: transparent;
-    color: inherit;
   }
   .date-cell:nth-child(7n) { border-right: none; }
   .date-cell:nth-last-child(-n+7) { border-bottom: none; }
@@ -205,29 +193,7 @@
   }
   .date-cell.empty { background: transparent; cursor: default; }
   .date-cell.is-today .day-number {
-    position: relative;
-    z-index: 0;
-    display: block;
-    width: 1.5rem;
-    line-height: 1.5rem;
-    text-align: center;
-    color: var(--pico-primary-inverse);
-    font-weight: 700;
-    margin: 0 auto;
-  }
-  .date-cell.is-today .day-number::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    background: var(--pico-primary-background);
-    z-index: -1;
-  }
-  .date-cell.selected-week.is-today .day-number {
-    color: var(--pico-primary-background);
-  }
-  .date-cell.selected-week.is-today .day-number::before {
-    background: var(--pico-primary-inverse);
+    font-weight: 900;
   }
   .event-dots { position: absolute; bottom: 0.3rem; left: 0; right: 0; display: flex; justify-content: center; gap: 3px; }
   .event-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex-shrink: 0; }

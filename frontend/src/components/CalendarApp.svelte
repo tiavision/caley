@@ -104,10 +104,14 @@
   // ── SSE ────────────────────────────────────────────────────────────────────
   let sseSource: EventSource | null = null;
   let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let sseConnectedOnce = false;
 
   function setupSSE() {
     sseSource = new EventSource('/api/events/stream');
-    sseSource.onopen = () => { fetchCalendars(); fetchEvents(); fetchMonthGrid(); };
+    sseSource.onopen = () => {
+      if (sseConnectedOnce) { fetchCalendars(); fetchEvents(); fetchMonthGrid(); }
+      sseConnectedOnce = true;
+    };
     sseSource.addEventListener('events_refetch', () => { fetchEvents(); fetchMonthGrid(); });
     sseSource.addEventListener('calendars_changed', () => { fetchCalendars(); fetchMonthGrid(); });
     sseSource.addEventListener('event_updated', async (e: MessageEvent) => {
@@ -347,6 +351,9 @@
     window.addEventListener('keydown', handleKeydown);
 
     setupSSE();
+    fetchCalendars();
+    fetchEvents();
+    fetchMonthGrid();
   });
 
   onDestroy(() => {

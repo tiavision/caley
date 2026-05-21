@@ -4,6 +4,7 @@ import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { resolve } from 'path';
 
 export default defineConfig({
+  appType: 'mpa',
   plugins: [
     svelte(),
     paraglideVitePlugin({
@@ -28,7 +29,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:3000',
+      '/api': { target: 'http://localhost:3000', changeOrigin: true },
       '/auth': 'http://localhost:3000',
       '/logout': 'http://localhost:3000',
     },
