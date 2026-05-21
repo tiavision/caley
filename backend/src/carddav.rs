@@ -407,11 +407,15 @@ pub async fn put_contact(
     client: &CalDavClient,
     contact_href: &str,
     raw_vcard: &str,
-) -> anyhow::Result<()> {
+    is_new: bool,
+) -> anyhow::Result<Option<String>> {
     let mut url = contact_href.to_string();
     for _ in 0..5 {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/vcard; charset=utf-8"));
+        if is_new {
+            headers.insert("If-None-Match", HeaderValue::from_static("*"));
+        }
 
         let resp = client
             .http_client()
@@ -435,7 +439,11 @@ pub async fn put_contact(
             let text = resp.text().await.unwrap_or_default();
             bail!("PUT contact returned {status}: {text}");
         }
-        return Ok(());
+        let new_etag = resp.headers()
+            .get("etag")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.trim().trim_matches('"').to_string());
+        return Ok(new_etag);
     }
     bail!("too many redirects for PUT contact")
 }
@@ -500,12 +508,12 @@ pub fn parse_vcard(raw: &str) -> ContactFields {
         for prop in &contact.properties {
             match prop.name.as_str() {
                 "UID" => uid = prop.value.clone().unwrap_or_default(),
-                "FN" => fn_name = prop.value.clone().unwrap_or_default(),
+                "FN" => fn_name = unescape_vcard(&prop.value.clone().unwrap_or_default()),
                 "EMAIL" => {
                     if let Some(v) = &prop.value {
                         if !v.is_empty() {
                             emails.push(TypedEntry {
-                                value: v.clone(),
+                                value: unescape_vcard(v),
                                 type_label: extract_type_label(prop),
                             });
                         }
@@ -515,7 +523,7 @@ pub fn parse_vcard(raw: &str) -> ContactFields {
                     if let Some(v) = &prop.value {
                         if !v.is_empty() {
                             phones.push(TypedEntry {
-                                value: v.clone(),
+                                value: unescape_vcard(v),
                                 type_label: extract_type_label(prop),
                             });
                         }
@@ -525,11 +533,11 @@ pub fn parse_vcard(raw: &str) -> ContactFields {
                     if let Some(v) = &prop.value {
                         // ADR format: POBox;ExtAddr;Street;City;Region;Postal;Country
                         let parts: Vec<&str> = v.splitn(7, ';').collect();
-                        let street = parts.get(2).copied().unwrap_or("").trim().to_string();
-                        let city = parts.get(3).copied().unwrap_or("").trim().to_string();
-                        let region = parts.get(4).copied().unwrap_or("").trim().to_string();
-                        let postal = parts.get(5).copied().unwrap_or("").trim().to_string();
-                        let country = parts.get(6).copied().unwrap_or("").trim().to_string();
+                        let street = unescape_vcard(parts.get(2).copied().unwrap_or("").trim());
+                        let city = unescape_vcard(parts.get(3).copied().unwrap_or("").trim());
+                        let region = unescape_vcard(parts.get(4).copied().unwrap_or("").trim());
+                        let postal = unescape_vcard(parts.get(5).copied().unwrap_or("").trim());
+                        let country = unescape_vcard(parts.get(6).copied().unwrap_or("").trim());
                         if !street.is_empty() || !city.is_empty() || !country.is_empty() {
                             addresses.push(AddressEntry {
                                 street,
@@ -544,19 +552,19 @@ pub fn parse_vcard(raw: &str) -> ContactFields {
                 }
                 "ORG" => {
                     if let Some(v) = &prop.value {
-                        org = v.split(';').next().unwrap_or("").to_string();
+                        org = unescape_vcard(v.split(';').next().unwrap_or(""));
                     }
                 }
                 "N" if fn_name.is_empty() => {
                     if let Some(v) = &prop.value {
                         // N format: Family;Given;Additional;Prefix;Suffix
                         let parts: Vec<&str> = v.split(';').collect();
-                        let family = parts.first().copied().unwrap_or("").trim();
-                        let given = parts.get(1).copied().unwrap_or("").trim();
+                        let family = unescape_vcard(parts.first().copied().unwrap_or("").trim());
+                        let given = unescape_vcard(parts.get(1).copied().unwrap_or("").trim());
                         fn_name = match (given.is_empty(), family.is_empty()) {
                             (false, false) => format!("{given} {family}"),
-                            (true, false) => family.to_string(),
-                            (false, true) => given.to_string(),
+                            (true, false) => family,
+                            (false, true) => given,
                             _ => String::new(),
                         };
                     }
@@ -649,26 +657,39 @@ pub fn build_vcard_preserving(
         return build_vcard(uid, fn_name, emails, phones, addresses, org);
     };
 
-    // Unfold continuation lines (RFC 6350 §3.2)
-    let unfolded = raw
-        .replace("\r\n ", "")
-        .replace("\r\n\t", "")
-        .replace("\n ", "")
-        .replace("\n\t", "");
+    const REPLACE: &[&str] = &[
+        "BEGIN", "END", "UID", "FN", "N", "EMAIL", "TEL", "ADR", "ORG",
+    ];
+    const REMOVE: &[&str] = &["REV", "PRODID"];
 
-    const MANAGED: &[&str] = &["BEGIN", "END", "VERSION", "UID", "FN", "N", "EMAIL", "TEL", "ADR", "ORG"];
+    let groups = split_property_groups(raw);
 
-    let preserved: Vec<&str> = unfolded
-        .lines()
-        .filter(|line| {
-            let prop = line.split(|c| c == ':' || c == ';').next().unwrap_or("").to_uppercase();
-            !MANAGED.contains(&prop.as_str())
-        })
-        .collect();
+    let mut version_line = "VERSION:3.0".to_string();
+    for g in &groups {
+        if g.property_name(raw) == "VERSION" {
+            version_line = raw[g.start..g.first_line_end].to_string();
+            break;
+        }
+    }
 
-    let mut lines = vec![
+    let mut preserved: Vec<&str> = Vec::new();
+    for g in &groups {
+        let name = g.property_name(raw);
+        if REPLACE.contains(&name.as_str()) || REMOVE.contains(&name.as_str()) {
+            continue;
+        }
+        if name.contains('.') {
+            continue;
+        }
+        if name == "VERSION" {
+            continue;
+        }
+        preserved.push(&raw[g.start..g.end]);
+    }
+
+    let mut lines: Vec<String> = vec![
         "BEGIN:VCARD".to_string(),
-        "VERSION:3.0".to_string(),
+        version_line,
         format!("UID:{uid}"),
         format!("FN:{}", escape_vcard(fn_name)),
         format!("N:;{};;;", escape_vcard(fn_name)),
@@ -695,11 +716,89 @@ pub fn build_vcard_preserving(
     if !org.is_empty() {
         lines.push(format!("ORG:{}", escape_vcard(org)));
     }
-    for line in preserved {
-        lines.push(line.to_string());
+
+    let mut out = lines.join("\r\n");
+    for p in &preserved {
+        out.push_str("\r\n");
+        out.push_str(&normalize_crlf(p.trim_end_matches(|c| c == '\r' || c == '\n')));
     }
-    lines.push("END:VCARD".to_string());
-    lines.join("\r\n") + "\r\n"
+    out.push_str("\r\nEND:VCARD\r\n");
+    out
+}
+
+struct PropertyGroup {
+    start: usize,
+    first_line_end: usize,
+    end: usize,
+    name_start: usize,
+    name_end: usize,
+}
+
+impl PropertyGroup {
+    fn property_name(&self, raw: &str) -> String {
+        raw[self.name_start..self.name_end].to_uppercase()
+    }
+}
+
+fn split_property_groups(raw: &str) -> Vec<PropertyGroup> {
+    let mut groups = Vec::new();
+    let bytes = raw.as_bytes();
+    let len = bytes.len();
+    let mut pos = 0;
+
+    while pos < len {
+        while pos < len && (bytes[pos] == b'\r' || bytes[pos] == b'\n') {
+            pos += 1;
+        }
+        if pos >= len {
+            break;
+        }
+        let group_start = pos;
+        let mut first_line_end = pos;
+
+        let name_start = pos;
+        let name_end = loop {
+            if pos >= len || bytes[pos] == b':' || bytes[pos] == b';' {
+                break pos;
+            }
+            pos += 1;
+        };
+
+        loop {
+            let line_end = loop {
+                if pos >= len || bytes[pos] == b'\r' || bytes[pos] == b'\n' {
+                    break pos;
+                }
+                pos += 1;
+            };
+            if first_line_end == group_start {
+                first_line_end = line_end;
+            }
+            let after = if pos + 1 < len && bytes[pos] == b'\r' && bytes[pos + 1] == b'\n' {
+                pos + 2
+            } else if pos < len {
+                pos + 1
+            } else {
+                pos
+            };
+            if after < len && (bytes[after] == b' ' || bytes[after] == b'\t') {
+                pos = after + 1;
+            } else {
+                pos = after;
+                break;
+            }
+        }
+
+        groups.push(PropertyGroup {
+            start: group_start,
+            first_line_end,
+            end: pos,
+            name_start,
+            name_end,
+        });
+    }
+
+    groups
 }
 
 fn vcard_type_param(type_label: &str) -> String {
@@ -716,6 +815,46 @@ fn vcard_type_param(type_label: &str) -> String {
 
 fn escape_vcard(s: &str) -> String {
     s.replace('\\', "\\\\").replace(',', "\\,").replace(';', "\\;").replace('\n', "\\n")
+}
+
+fn unescape_vcard(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            match chars[i + 1] {
+                'n' | 'N' => {
+                    result.push('\n');
+                    i += 2;
+                }
+                ',' => {
+                    result.push(',');
+                    i += 2;
+                }
+                ';' => {
+                    result.push(';');
+                    i += 2;
+                }
+                '\\' => {
+                    result.push('\\');
+                    i += 2;
+                }
+                _ => {
+                    result.push(chars[i]);
+                    i += 1;
+                }
+            }
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+    result
+}
+
+fn normalize_crlf(s: &str) -> String {
+    s.replace("\r\n", "\n").replace('\n', "\r\n")
 }
 
 /// Derive the contact href from addressbook href and uid.

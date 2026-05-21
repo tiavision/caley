@@ -898,6 +898,7 @@ pub struct CachedContact {
     pub uid: String,
     pub addressbook_href: String,
     pub href: Option<String>,
+    pub etag: String,
     pub raw_vcard: String,
     pub fn_name: String,
     pub emails: String,    // JSON array of TypedEntry
@@ -956,7 +957,7 @@ pub async fn upsert_contact(
 
 pub async fn get_contacts(pool: &SqlitePool, user_id: &str) -> anyhow::Result<Vec<CachedContact>> {
     let contacts = sqlx::query_as::<_, CachedContact>(
-        "SELECT uid, addressbook_href, href, raw_vcard, fn_name, emails, phones, addresses, org, photo
+        "SELECT uid, addressbook_href, href, etag, raw_vcard, fn_name, emails, phones, addresses, org, photo
          FROM cached_contacts
          WHERE user_id = ?
          ORDER BY fn_name COLLATE NOCASE ASC",
@@ -974,7 +975,7 @@ pub async fn get_contact(
     uid: &str,
 ) -> anyhow::Result<Option<CachedContact>> {
     let contact = sqlx::query_as::<_, CachedContact>(
-        "SELECT uid, addressbook_href, href, raw_vcard, fn_name, emails, phones, addresses, org, photo
+        "SELECT uid, addressbook_href, href, etag, raw_vcard, fn_name, emails, phones, addresses, org, photo
          FROM cached_contacts
          WHERE user_id = ? AND addressbook_href = ? AND uid = ?",
     )

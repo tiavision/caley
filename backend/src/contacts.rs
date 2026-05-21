@@ -118,7 +118,7 @@ pub async fn save_contact(
         Err(r) => return r,
     };
 
-    let (uid, href, existing_raw, existing_photo) = if let Some(ref existing_uid) = req.uid {
+    let (uid, href, existing_raw, existing_photo, is_new) = if let Some(ref existing_uid) = req.uid {
         // Update: look up stored href and raw vCard for non-destructive rebuild
         let stored = match db::get_contact(&state.db, &user.user_id, &req.addressbook_href, existing_uid).await {
             Ok(Some(c)) => c,
@@ -129,12 +129,12 @@ pub async fn save_contact(
             }
         };
         let h = stored.href.unwrap_or_else(|| contact_href(&req.addressbook_href, existing_uid));
-        (existing_uid.clone(), h, Some(stored.raw_vcard), stored.photo)
+        (existing_uid.clone(), h, Some(stored.raw_vcard), stored.photo, false)
     } else {
         // Create: generate new uid and href
         let new_uid = Uuid::new_v4().to_string();
         let h = contact_href(&req.addressbook_href, &new_uid);
-        (new_uid, h, None, None)
+        (new_uid, h, None, None, true)
     };
 
     let raw_vcard = build_vcard_preserving(
@@ -142,21 +142,25 @@ pub async fn save_contact(
         &uid, &req.fn_name, &req.emails, &req.phones, &req.addresses, &req.org,
     );
 
-    if let Err(e) = carddav::put_contact(&client, &href, &raw_vcard).await {
-        eprintln!("[contacts] put_contact error: {e}");
-        return (StatusCode::BAD_GATEWAY, "Failed to save contact on server").into_response();
-    }
+    let new_etag = match carddav::put_contact(&client, &href, &raw_vcard, is_new).await {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("[contacts] put_contact error: {e}");
+            return (StatusCode::BAD_GATEWAY, "Failed to save contact on server").into_response();
+        }
+    };
 
     // Update local cache
     let emails_json = serde_json::to_string(&req.emails).unwrap_or_else(|_| "[]".to_string());
     let phones_json = serde_json::to_string(&req.phones).unwrap_or_else(|_| "[]".to_string());
     let addresses_json = serde_json::to_string(&req.addresses).unwrap_or_else(|_| "[]".to_string());
+    let cache_etag = new_etag.unwrap_or_default();
     if let Err(e) = db::upsert_contact(
         &state.db,
         &user.user_id,
         &req.addressbook_href,
         &uid,
-        "",
+        &cache_etag,
         &href,
         &raw_vcard,
         &req.fn_name,
