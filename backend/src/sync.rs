@@ -142,7 +142,7 @@ impl SyncManager {
         self.sync_calendar(&client, user_id, calendar_href).await
     }
 
-    async fn sync_user(&self, user_id: &str, full: bool) -> anyhow::Result<()> {
+    async fn sync_user(&self, user_id: &str, _full: bool) -> anyhow::Result<()> {
         let settings = db::get_settings(&self.db, user_id, &self.encryption_key).await?;
         let Some(settings) = settings else {
             return Ok(()); // no CalDAV credentials configured yet
@@ -154,41 +154,45 @@ impl SyncManager {
             settings.caldav_password,
         )?;
 
-        // Determine whether we need to re-discover calendars.
-        // Always do a full discovery when explicitly requested, or when the cache is empty.
-        let cached_empty = if !full {
-            db::get_cached_calendars(&self.db, user_id).await?.is_empty()
-        } else {
-            false
-        };
-        let do_full = full || cached_empty;
-
-        // On full sync, rediscover the calendar list from CalDAV
-        let calendars: Vec<db::CachedCalendar> = if do_full {
-            let fresh = client.calendars().await?;
-            let fresh_hrefs: HashSet<String> = fresh.iter().map(|c| c.href.clone()).collect();
-            for cal in &fresh {
-                db::upsert_cached_calendar(
-                    &self.db,
-                    user_id,
-                    &cal.href,
-                    &cal.name,
-                    cal.color.as_deref(),
-                )
-                .await?;
+        // Rediscover the calendar list from CalDAV on every sync — a single PROPFIND,
+        // so the cost is low. This ensures new calendars added on the server are picked
+        // up within one sync interval and get push subscriptions registered.
+        let calendars: Vec<db::CachedCalendar> = match client.calendars().await {
+            Ok(fresh) if !fresh.is_empty() => {
+                let fresh_hrefs: HashSet<String> = fresh.iter().map(|c| c.href.clone()).collect();
+                let old_cached = db::get_cached_calendars(&self.db, user_id).await?;
+                let old_hrefs: HashSet<String> = old_cached.iter().map(|c| c.href.clone()).collect();
+                for cal in &fresh {
+                    db::upsert_cached_calendar(
+                        &self.db,
+                        user_id,
+                        &cal.href,
+                        &cal.name,
+                        cal.color.as_deref(),
+                    )
+                    .await?;
+                }
+                db::remove_stale_calendars(&self.db, user_id, &fresh_hrefs, &self.encryption_key).await?;
+                if fresh_hrefs != old_hrefs {
+                    self.broadcaster.send(user_id, SseMessage::CalendarsChanged);
+                }
+                fresh
+                    .into_iter()
+                    .map(|c| db::CachedCalendar {
+                        href: c.href,
+                        name: c.name,
+                        color: c.color,
+                    })
+                    .collect()
             }
-            db::remove_stale_calendars(&self.db, user_id, &fresh_hrefs, &self.encryption_key).await?;
-            self.broadcaster.send(user_id, SseMessage::CalendarsChanged);
-            fresh
-                .into_iter()
-                .map(|c| db::CachedCalendar {
-                    href: c.href,
-                    name: c.name,
-                    color: c.color,
-                })
-                .collect()
-        } else {
-            db::get_cached_calendars(&self.db, user_id).await?
+            Ok(_) => {
+                eprintln!("[sync] calendars() returned empty for {user_id}, falling back to cache");
+                db::get_cached_calendars(&self.db, user_id).await?
+            }
+            Err(e) => {
+                eprintln!("[sync] calendars() failed for {user_id}: {e}");
+                db::get_cached_calendars(&self.db, user_id).await?
+            }
         };
 
         for cal in &calendars {
@@ -209,7 +213,7 @@ impl SyncManager {
         }
 
         // Sync contacts alongside calendars
-        if let Err(e) = self.sync_contacts(&client, user_id, do_full).await {
+        if let Err(e) = self.sync_contacts(&client, user_id).await {
             eprintln!("[sync] contact sync failed for {user_id}: {e}");
         }
 
@@ -220,41 +224,30 @@ impl SyncManager {
         &self,
         client: &CalDavClient,
         user_id: &str,
-        full: bool,
     ) -> anyhow::Result<()> {
-        let cached_empty = if !full {
-            db::get_cached_addressbooks(&self.db, user_id).await?.is_empty()
-        } else {
-            false
-        };
-        let do_full = full || cached_empty;
-
-        let addressbooks = if do_full {
-            match carddav::discover_addressbooks(client).await {
-                Ok(fresh) => {
-                    if fresh.is_empty() {
-                        eprintln!("[sync] discover_addressbooks returned empty for {user_id}, falling back to cache");
-                        db::get_cached_addressbooks(&self.db, user_id).await?
-                    } else {
-                        let fresh_hrefs: HashSet<String> = fresh.iter().map(|a| a.href.clone()).collect();
-                        for ab in &fresh {
-                            if let Err(e) = db::upsert_cached_addressbook(&self.db, user_id, &ab.href, &ab.name).await {
-                                eprintln!("[sync] upsert_cached_addressbook error: {e}");
-                            }
-                        }
-                        if let Err(e) = db::remove_stale_addressbooks(&self.db, user_id, &fresh_hrefs).await {
-                            eprintln!("[sync] remove_stale_addressbooks error: {e}");
-                        }
-                        fresh.into_iter().map(|a| db::CachedAddressbook { href: a.href, name: a.name }).collect()
+        // Rediscover addressbooks on every sync — ensures new ones are picked up within
+        // one sync interval and get push subscriptions registered.
+        let addressbooks = match carddav::discover_addressbooks(client).await {
+            Ok(fresh) if !fresh.is_empty() => {
+                let fresh_hrefs: HashSet<String> = fresh.iter().map(|a| a.href.clone()).collect();
+                for ab in &fresh {
+                    if let Err(e) = db::upsert_cached_addressbook(&self.db, user_id, &ab.href, &ab.name).await {
+                        eprintln!("[sync] upsert_cached_addressbook error: {e}");
                     }
                 }
-                Err(e) => {
-                    eprintln!("[sync] discover_addressbooks failed for {user_id}: {e}");
-                    db::get_cached_addressbooks(&self.db, user_id).await?
+                if let Err(e) = db::remove_stale_addressbooks(&self.db, user_id, &fresh_hrefs).await {
+                    eprintln!("[sync] remove_stale_addressbooks error: {e}");
                 }
+                fresh.into_iter().map(|a| db::CachedAddressbook { href: a.href, name: a.name }).collect()
             }
-        } else {
-            db::get_cached_addressbooks(&self.db, user_id).await?
+            Ok(_) => {
+                eprintln!("[sync] discover_addressbooks returned empty for {user_id}, falling back to cache");
+                db::get_cached_addressbooks(&self.db, user_id).await?
+            }
+            Err(e) => {
+                eprintln!("[sync] discover_addressbooks failed for {user_id}: {e}");
+                db::get_cached_addressbooks(&self.db, user_id).await?
+            }
         };
 
         for ab in &addressbooks {
