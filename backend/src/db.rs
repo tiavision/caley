@@ -897,7 +897,6 @@ pub async fn remove_stale_addressbooks(
 pub struct CachedContact {
     pub uid: String,
     pub addressbook_href: String,
-    pub etag: Option<String>,
     pub href: Option<String>,
     pub raw_vcard: String,
     pub fn_name: String,
@@ -905,6 +904,7 @@ pub struct CachedContact {
     pub phones: String,    // JSON array of TypedEntry
     pub addresses: String, // JSON array of AddressEntry
     pub org: String,
+    pub photo: Option<String>,
 }
 
 pub async fn upsert_contact(
@@ -920,11 +920,12 @@ pub async fn upsert_contact(
     phones_json: &str,
     addresses_json: &str,
     org: &str,
+    photo: Option<&str>,
 ) -> anyhow::Result<()> {
     sqlx::query(
         "INSERT INTO cached_contacts
-             (user_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             (user_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id, addressbook_href, uid) DO UPDATE SET
              etag = excluded.etag,
              href = excluded.href,
@@ -933,7 +934,8 @@ pub async fn upsert_contact(
              emails = excluded.emails,
              phones = excluded.phones,
              addresses = excluded.addresses,
-             org = excluded.org",
+             org = excluded.org,
+             photo = excluded.photo",
     )
     .bind(user_id)
     .bind(addressbook_href)
@@ -946,6 +948,7 @@ pub async fn upsert_contact(
     .bind(phones_json)
     .bind(addresses_json)
     .bind(org)
+    .bind(photo)
     .execute(pool)
     .await?;
     Ok(())
@@ -953,7 +956,7 @@ pub async fn upsert_contact(
 
 pub async fn get_contacts(pool: &SqlitePool, user_id: &str) -> anyhow::Result<Vec<CachedContact>> {
     let contacts = sqlx::query_as::<_, CachedContact>(
-        "SELECT uid, addressbook_href, etag, href, raw_vcard, fn_name, emails, phones, addresses, org
+        "SELECT uid, addressbook_href, href, raw_vcard, fn_name, emails, phones, addresses, org, photo
          FROM cached_contacts
          WHERE user_id = ?
          ORDER BY fn_name COLLATE NOCASE ASC",
@@ -971,7 +974,7 @@ pub async fn get_contact(
     uid: &str,
 ) -> anyhow::Result<Option<CachedContact>> {
     let contact = sqlx::query_as::<_, CachedContact>(
-        "SELECT uid, addressbook_href, etag, href, raw_vcard, fn_name, emails, phones, addresses, org
+        "SELECT uid, addressbook_href, href, raw_vcard, fn_name, emails, phones, addresses, org, photo
          FROM cached_contacts
          WHERE user_id = ? AND addressbook_href = ? AND uid = ?",
     )
@@ -1000,32 +1003,6 @@ pub async fn delete_contact_from_cache(
     Ok(())
 }
 
-pub async fn delete_contact_by_href(
-    pool: &SqlitePool,
-    user_id: &str,
-    addressbook_href: &str,
-    contact_href: &str,
-) -> anyhow::Result<Option<String>> {
-    let uid: Option<String> = sqlx::query_scalar(
-        "SELECT uid FROM cached_contacts WHERE user_id = ? AND addressbook_href = ? AND href = ?",
-    )
-    .bind(user_id)
-    .bind(addressbook_href)
-    .bind(contact_href)
-    .fetch_optional(pool)
-    .await?;
-    if let Some(ref u) = uid {
-        sqlx::query(
-            "DELETE FROM cached_contacts WHERE user_id = ? AND addressbook_href = ? AND uid = ?",
-        )
-        .bind(user_id)
-        .bind(addressbook_href)
-        .bind(u)
-        .execute(pool)
-        .await?;
-    }
-    Ok(uid)
-}
 
 pub struct ContactRef {
     pub uid: String,
@@ -1058,8 +1035,8 @@ pub async fn apply_incremental_contact_sync(
         let addresses_json = serde_json::to_string(&fields.addresses).unwrap_or_else(|_| "[]".to_string());
         sqlx::query(
             "INSERT INTO cached_contacts
-                 (user_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 (user_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(user_id, addressbook_href, uid) DO UPDATE SET
                  etag = excluded.etag,
                  href = excluded.href,
@@ -1068,7 +1045,8 @@ pub async fn apply_incremental_contact_sync(
                  emails = excluded.emails,
                  phones = excluded.phones,
                  addresses = excluded.addresses,
-                 org = excluded.org",
+                 org = excluded.org,
+                 photo = excluded.photo",
         )
         .bind(user_id)
         .bind(addressbook_href)
@@ -1081,6 +1059,7 @@ pub async fn apply_incremental_contact_sync(
         .bind(&phones_json)
         .bind(&addresses_json)
         .bind(&fields.org)
+        .bind(fields.photo.as_deref())
         .execute(&mut *tx)
         .await?;
         changed_result.push(ContactRef { uid: fields.uid, addressbook_href: addressbook_href.to_string() });
@@ -1157,8 +1136,8 @@ pub async fn replace_addressbook_contacts(
         let addresses_json = serde_json::to_string(&fields.addresses).unwrap_or_else(|_| "[]".to_string());
         sqlx::query(
             "INSERT INTO cached_contacts
-                 (user_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 (user_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(user_id, addressbook_href, uid) DO UPDATE SET
                  etag = excluded.etag,
                  href = excluded.href,
@@ -1167,7 +1146,8 @@ pub async fn replace_addressbook_contacts(
                  emails = excluded.emails,
                  phones = excluded.phones,
                  addresses = excluded.addresses,
-                 org = excluded.org",
+                 org = excluded.org,
+                 photo = excluded.photo",
         )
         .bind(user_id)
         .bind(addressbook_href)
@@ -1180,6 +1160,7 @@ pub async fn replace_addressbook_contacts(
         .bind(&phones_json)
         .bind(&addresses_json)
         .bind(&fields.org)
+        .bind(fields.photo.as_deref())
         .execute(&mut *tx)
         .await?;
     }

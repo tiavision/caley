@@ -1,12 +1,13 @@
 use axum::{
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Json},
+    extract::{Query, State},
+    http::{header, StatusCode},
+    response::{IntoResponse, Json, Redirect, Response},
 };
+use base64::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::carddav::{self, build_vcard, contact_href, AddressEntry, TypedEntry};
+use crate::carddav::{self, build_vcard_preserving, contact_href, AddressEntry, TypedEntry};
 use crate::db;
 use crate::oidc::{require_client, AppState, CurrentUser};
 use crate::sse::SseMessage;
@@ -26,6 +27,7 @@ pub struct ContactJson {
     pub phones: Vec<TypedEntry>,
     pub addresses: Vec<AddressEntry>,
     pub org: String,
+    pub has_photo: bool,
 }
 
 #[derive(Serialize)]
@@ -60,6 +62,7 @@ fn cached_to_json(c: &db::CachedContact) -> ContactJson {
         phones,
         addresses,
         org: c.org.clone(),
+        has_photo: c.photo.is_some(),
     }
 }
 
@@ -115,8 +118,8 @@ pub async fn save_contact(
         Err(r) => return r,
     };
 
-    let (uid, href) = if let Some(ref existing_uid) = req.uid {
-        // Update: look up stored href
+    let (uid, href, existing_raw, existing_photo) = if let Some(ref existing_uid) = req.uid {
+        // Update: look up stored href and raw vCard for non-destructive rebuild
         let stored = match db::get_contact(&state.db, &user.user_id, &req.addressbook_href, existing_uid).await {
             Ok(Some(c)) => c,
             Ok(None) => return (StatusCode::NOT_FOUND, "Contact not found").into_response(),
@@ -126,15 +129,18 @@ pub async fn save_contact(
             }
         };
         let h = stored.href.unwrap_or_else(|| contact_href(&req.addressbook_href, existing_uid));
-        (existing_uid.clone(), h)
+        (existing_uid.clone(), h, Some(stored.raw_vcard), stored.photo)
     } else {
         // Create: generate new uid and href
         let new_uid = Uuid::new_v4().to_string();
         let h = contact_href(&req.addressbook_href, &new_uid);
-        (new_uid, h)
+        (new_uid, h, None, None)
     };
 
-    let raw_vcard = build_vcard(&uid, &req.fn_name, &req.emails, &req.phones, &req.addresses, &req.org);
+    let raw_vcard = build_vcard_preserving(
+        existing_raw.as_deref(),
+        &uid, &req.fn_name, &req.emails, &req.phones, &req.addresses, &req.org,
+    );
 
     if let Err(e) = carddav::put_contact(&client, &href, &raw_vcard).await {
         eprintln!("[contacts] put_contact error: {e}");
@@ -158,6 +164,7 @@ pub async fn save_contact(
         &phones_json,
         &addresses_json,
         &req.org,
+        existing_photo.as_deref(),
     ).await {
         eprintln!("[contacts] upsert_contact error: {e}");
     }
@@ -170,6 +177,7 @@ pub async fn save_contact(
         phones: req.phones.clone(),
         addresses: req.addresses.clone(),
         org: req.org.clone(),
+        has_photo: existing_photo.is_some(),
     };
     let contact_json_str = serde_json::to_string(&contact_json).ok();
 
@@ -231,4 +239,46 @@ pub async fn delete_contact(
     );
 
     StatusCode::NO_CONTENT.into_response()
+}
+
+// GET /api/contact/photo
+#[derive(Deserialize)]
+pub struct PhotoQuery {
+    pub uid: String,
+    pub addressbook_href: String,
+}
+
+pub async fn get_contact_photo(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<PhotoQuery>,
+) -> Response {
+    let contact = match db::get_contact(&state.db, &user.user_id, &q.addressbook_href, &q.uid).await {
+        Ok(Some(c)) => c,
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let photo = match contact.photo {
+        Some(p) => p,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    if photo.starts_with("http://") || photo.starts_with("https://") {
+        return Redirect::temporary(&photo).into_response();
+    }
+
+    // Parse data URI: data:<mime>;base64,<data>
+    if let Some(rest) = photo.strip_prefix("data:") {
+        if let Some((meta, b64)) = rest.split_once(',') {
+            let mime = meta.split(';').next().unwrap_or("application/octet-stream");
+            if let Ok(bytes) = BASE64_STANDARD.decode(b64.trim()) {
+                return (
+                    [(header::CONTENT_TYPE, mime.to_string())],
+                    bytes,
+                ).into_response();
+            }
+        }
+    }
+
+    StatusCode::NOT_FOUND.into_response()
 }

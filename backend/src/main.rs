@@ -135,6 +135,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/contacts", get(contacts::list_contacts))
         .route("/api/contact", post(contacts::save_contact))
         .route("/api/contact", delete(contacts::delete_contact))
+        .route("/api/contact/photo", get(contacts::get_contact_photo))
         .route("/api/account", delete(local_auth::delete_account));
 
     let app = if use_oidc {

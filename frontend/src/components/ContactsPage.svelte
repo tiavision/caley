@@ -339,7 +339,13 @@
                 onclick={() => openDetail(contact)}
                 onkeydown={(e) => e.key === 'Enter' && openDetail(contact)}
               >
-                <div class="card-avatar">{(contact.fn_name[0] ?? '?').toUpperCase()}</div>
+                <div class="card-avatar">
+                  {#if contact.has_photo}
+                    <img class="avatar-photo" src="/api/contact/photo?uid={encodeURIComponent(contact.uid)}&addressbook_href={encodeURIComponent(contact.addressbook_href)}" alt="" />
+                  {:else}
+                    {(contact.fn_name[0] ?? '?').toUpperCase()}
+                  {/if}
+                </div>
                 <div class="card-body">
                   <span class="card-name">{contact.fn_name || '—'}</span>
                   {#if contact.emails[0]}
@@ -398,7 +404,13 @@
     {#if selectedContact}
       <div class="contact-detail-body">
         <div class="detail-avatar-wrap">
-          <div class="detail-avatar">{(selectedContact.fn_name[0] ?? '?').toUpperCase()}</div>
+          <div class="detail-avatar">
+            {#if selectedContact.has_photo}
+              <img class="avatar-photo" src="/api/contact/photo?uid={encodeURIComponent(selectedContact.uid)}&addressbook_href={encodeURIComponent(selectedContact.addressbook_href)}" alt="" />
+            {:else}
+              {(selectedContact.fn_name[0] ?? '?').toUpperCase()}
+            {/if}
+          </div>
         </div>
 
         {#if selectedContact.org}
@@ -775,6 +787,7 @@
     font-weight: 600;
     flex-shrink: 0;
     margin-bottom: 0.15rem;
+    overflow: hidden;
   }
 
   .card-body {
@@ -871,6 +884,14 @@
     justify-content: center;
     font-size: 1.6rem;
     font-weight: 600;
+    overflow: hidden;
+  }
+
+  .avatar-photo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 
   .contact-detail-body {

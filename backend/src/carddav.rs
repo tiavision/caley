@@ -35,6 +35,7 @@ pub struct ContactFields {
     pub phones: Vec<TypedEntry>,
     pub addresses: Vec<AddressEntry>,
     pub org: String,
+    pub photo: Option<String>,
 }
 
 pub struct CardSyncResult {
@@ -493,6 +494,7 @@ pub fn parse_vcard(raw: &str) -> ContactFields {
     let mut phones = Vec::new();
     let mut addresses = Vec::new();
     let mut org = String::new();
+    let mut photo: Option<String> = None;
 
     if let Some(Ok(contact)) = reader.into_iter().next() {
         for prop in &contact.properties {
@@ -559,12 +561,38 @@ pub fn parse_vcard(raw: &str) -> ContactFields {
                         };
                     }
                 }
+                "PHOTO" => {
+                    if let Some(v) = &prop.value {
+                        if !v.is_empty() {
+                            let params = prop.params.as_deref().unwrap_or(&[]);
+                            let is_uri = params.iter().any(|(k, vals)| {
+                                k == "VALUE" && vals.iter().any(|v| v.eq_ignore_ascii_case("uri"))
+                            });
+                            let is_b64 = params.iter().any(|(k, vals)| {
+                                k == "ENCODING" && vals.iter().any(|v| {
+                                    v.eq_ignore_ascii_case("b") || v.eq_ignore_ascii_case("base64")
+                                })
+                            });
+                            if v.starts_with("data:") || is_uri || (!is_b64 && (v.starts_with("http://") || v.starts_with("https://"))) {
+                                photo = Some(v.clone());
+                            } else if is_b64 {
+                                let mime = params.iter()
+                                    .find(|(k, _)| k == "TYPE")
+                                    .and_then(|(_, vals)| vals.first())
+                                    .map(|t| t.to_lowercase())
+                                    .unwrap_or_else(|| "jpeg".to_string());
+                                let mime = if mime.contains('/') { mime } else { format!("image/{mime}") };
+                                photo = Some(format!("data:{mime};base64,{v}"));
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }
     }
 
-    ContactFields { uid, fn_name, emails, phones, addresses, org }
+    ContactFields { uid, fn_name, emails, phones, addresses, org, photo }
 }
 
 pub fn build_vcard(
@@ -603,6 +631,72 @@ pub fn build_vcard(
     }
     if !org.is_empty() {
         lines.push(format!("ORG:{}", escape_vcard(org)));
+    }
+    lines.push("END:VCARD".to_string());
+    lines.join("\r\n") + "\r\n"
+}
+
+pub fn build_vcard_preserving(
+    existing_raw: Option<&str>,
+    uid: &str,
+    fn_name: &str,
+    emails: &[TypedEntry],
+    phones: &[TypedEntry],
+    addresses: &[AddressEntry],
+    org: &str,
+) -> String {
+    let Some(raw) = existing_raw else {
+        return build_vcard(uid, fn_name, emails, phones, addresses, org);
+    };
+
+    // Unfold continuation lines (RFC 6350 §3.2)
+    let unfolded = raw
+        .replace("\r\n ", "")
+        .replace("\r\n\t", "")
+        .replace("\n ", "")
+        .replace("\n\t", "");
+
+    const MANAGED: &[&str] = &["BEGIN", "END", "VERSION", "UID", "FN", "N", "EMAIL", "TEL", "ADR", "ORG"];
+
+    let preserved: Vec<&str> = unfolded
+        .lines()
+        .filter(|line| {
+            let prop = line.split(|c| c == ':' || c == ';').next().unwrap_or("").to_uppercase();
+            !MANAGED.contains(&prop.as_str())
+        })
+        .collect();
+
+    let mut lines = vec![
+        "BEGIN:VCARD".to_string(),
+        "VERSION:3.0".to_string(),
+        format!("UID:{uid}"),
+        format!("FN:{}", escape_vcard(fn_name)),
+        format!("N:;{};;;", escape_vcard(fn_name)),
+    ];
+    for e in emails {
+        let type_param = vcard_type_param(&e.type_label);
+        lines.push(format!("EMAIL{type_param}:{}", escape_vcard(&e.value)));
+    }
+    for p in phones {
+        let type_param = vcard_type_param(&p.type_label);
+        lines.push(format!("TEL{type_param}:{}", escape_vcard(&p.value)));
+    }
+    for a in addresses {
+        let type_param = vcard_type_param(&a.type_label);
+        lines.push(format!(
+            "ADR{type_param}:;;{};{};{};{};{}",
+            escape_vcard(&a.street),
+            escape_vcard(&a.city),
+            escape_vcard(&a.region),
+            escape_vcard(&a.postal),
+            escape_vcard(&a.country),
+        ));
+    }
+    if !org.is_empty() {
+        lines.push(format!("ORG:{}", escape_vcard(org)));
+    }
+    for line in preserved {
+        lines.push(line.to_string());
     }
     lines.push("END:VCARD".to_string());
     lines.join("\r\n") + "\r\n"
