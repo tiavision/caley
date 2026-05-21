@@ -27,6 +27,17 @@
     dialogEl?.showModal();
   }
 
+  function openMap(event: MouseEvent, query: string) {
+    event.preventDefault();
+    const encoded = encodeURIComponent(query);
+    window.location.href = `geo:0,0?q=${encoded}`;
+    setTimeout(() => {
+      if (!document.hidden) {
+        window.open(`https://www.openstreetmap.org/search?query=${encoded}`, '_blank');
+      }
+    }, 800);
+  }
+
   export function close() {
     if (!isOpen) return;
     isOpen = false;
@@ -95,7 +106,7 @@
         {#if detailEvent.location}
           <div class="event-detail-row">
             <span class="event-detail-label">{tl('event_location')}</span>
-            <a href="https://www.google.com/maps/search/?api=1&query={encodeURIComponent(detailEvent.location)}" target="_blank" rel="noopener noreferrer">{detailEvent.location}</a>
+            <a href="geo:0,0?q={encodeURIComponent(detailEvent.location)}" onclick={(e) => openMap(e, detailEvent!.location)} rel="noopener noreferrer">{detailEvent.location}</a>
           </div>
         {/if}
         {#if detailRecText}

@@ -23,6 +23,21 @@
   const emptyPhone = (): TypedEntry => ({ value: '', type_label: 'other' });
   const emptyAddress = (): AddressEntry => ({ street: '', city: '', region: '', postal: '', country: '', type_label: 'home' });
 
+  function addressQuery(addr: AddressEntry) {
+    return [addr.street, addr.city, addr.region, addr.postal, addr.country].filter(Boolean).join(', ');
+  }
+
+  function openMap(event: MouseEvent, query: string) {
+    event.preventDefault();
+    const encoded = encodeURIComponent(query);
+    window.location.href = `geo:0,0?q=${encoded}`;
+    setTimeout(() => {
+      if (!document.hidden) {
+        window.open(`https://www.openstreetmap.org/search?query=${encoded}`, '_blank');
+      }
+    }, 800);
+  }
+
   let formUid: string | null = null;
   let formName = '';
   let formEmails: TypedEntry[] = [emptyEmail()];
@@ -423,11 +438,11 @@
               {#each selectedContact.addresses as addr}
                 <div class="typed-entry">
                   <span class="type-chip">{tl(`contacts_type_${addr.type_label}`)}</span>
-                  <span class="address-text">
+                  <a href="geo:0,0?q={encodeURIComponent(addressQuery(addr))}" on:click={(e) => openMap(e, addressQuery(addr))} class="address-text" rel="noopener noreferrer">
                     {#if addr.street}{addr.street}<br />{/if}
                     {#if addr.city || addr.region || addr.postal}{addr.city}{addr.region ? (addr.city ? ', ' : '') + addr.region : ''}{addr.postal ? ' ' + addr.postal : ''}<br />{/if}
                     {#if addr.country}{addr.country}{/if}
-                  </span>
+                  </a>
                 </div>
               {/each}
             </div>
