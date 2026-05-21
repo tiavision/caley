@@ -1,6 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { initI18n, getLocale, setLocale, makeTl } from '../lib/i18n.ts';
+  import EventColorDot from './EventColorDot.svelte';
+  import CreateCalendarDialog from './CreateCalendarDialog.svelte';
+  import ImportDialog from './ImportDialog.svelte';
+  import type { CalendarJson } from '../types/calendar.ts';
 
   let locale = 'en';
   $: tl = makeTl(locale);
@@ -15,6 +19,38 @@
   let errorMsg = '';
   // true when the user is not authenticated yet (login mode)
   let isLoginMode = false;
+
+  // ── Tabs (only shown when authenticated) ──────────────────────────────────
+  let tab: 'settings' | 'calendars' = 'settings';
+
+  // ── Calendars tab ─────────────────────────────────────────────────────────
+  let calendars: CalendarJson[] = [];
+  let calendarsLoading = false;
+  let createCalDialog: CreateCalendarDialog;
+  let importDialog: ImportDialog;
+
+  async function fetchCalendars() {
+    calendarsLoading = true;
+    try {
+      const res = await fetch('/api/calendars');
+      if (res.ok) calendars = await res.json();
+    } catch {}
+    calendarsLoading = false;
+  }
+
+  async function toggleCalendar(href: string, active: boolean) {
+    calendars = calendars.map(c => c.href === href ? { ...c, is_active: active } : c);
+    await fetch('/api/calendar/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `href=${encodeURIComponent(href)}&active=${active}`,
+    });
+  }
+
+  function switchTab(t: 'settings' | 'calendars') {
+    tab = t;
+    if (t === 'calendars' && calendars.length === 0) fetchCalendars();
+  }
 
   const localeOptions = [
     { value: 'en', label: 'English' },
@@ -116,11 +152,27 @@
     </span>
   </div>
 
-  <p>{isLoginMode ? tl('login_subtitle') : tl('settings_subtitle')}</p>
+  {#if !isLoginMode && !loading}
+    <div class="tabs" role="tablist">
+      <button
+        role="tab"
+        class:active={tab === 'settings'}
+        aria-selected={tab === 'settings'}
+        on:click={() => switchTab('settings')}
+      >{tl('nav_settings')}</button>
+      <button
+        role="tab"
+        class:active={tab === 'calendars'}
+        aria-selected={tab === 'calendars'}
+        on:click={() => switchTab('calendars')}
+      >{tl('cal_calendars')}</button>
+    </div>
+  {/if}
 
   {#if loading}
     <p aria-busy="true">{tl('nav_loading')}</p>
-  {:else}
+  {:else if isLoginMode || tab === 'settings'}
+    <p>{isLoginMode ? tl('login_subtitle') : tl('settings_subtitle')}</p>
     <form on:submit|preventDefault={onSubmit}>
       <label>
         <span>{tl('settings_baseUrl')}</span>
@@ -167,8 +219,50 @@
         {tl('settings_deleteAccount')}
       </button>
     {/if}
+  {:else}
+    <!-- Calendars tab -->
+    {#if calendarsLoading}
+      <p aria-busy="true">{tl('nav_loading')}</p>
+    {:else}
+      <ul class="calendar-list">
+        {#each calendars as cal}
+          <li>
+            <label>
+              <input
+                type="checkbox"
+                checked={cal.is_active}
+                on:change={(e) => toggleCalendar(cal.href, (e.target as HTMLInputElement).checked)}
+              />
+              <EventColorDot color={cal.color} />
+              {cal.name}
+            </label>
+          </li>
+        {/each}
+      </ul>
+      <div class="cal-actions">
+        <button class="cal-action-btn" on:click={() => createCalDialog.open()}>
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          {tl('cal_createCalendar')}
+        </button>
+        <button class="cal-action-btn" on:click={() => importDialog.open()}>
+          {tl('cal_import')}
+        </button>
+      </div>
+    {/if}
   {/if}
 </div>
+
+<CreateCalendarDialog
+  bind:this={createCalDialog}
+  {locale}
+  on:created={(e) => { calendars = [...calendars, e.detail]; }}
+/>
+<ImportDialog
+  bind:this={importDialog}
+  {calendars}
+  {locale}
+  on:imported={fetchCalendars}
+/>
 
 <style>
   .settings-form {
@@ -203,5 +297,74 @@
   .delete-account-btn:hover {
     background-color: var(--pico-del-color);
     color: white;
+  }
+
+  .tabs {
+    display: flex;
+    border-bottom: 2px solid var(--pico-muted-border-color);
+    margin-bottom: 1.5rem;
+  }
+  .tabs button {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    padding: 0.4rem 1rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--pico-muted-color);
+    cursor: pointer;
+    border-radius: 0;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tabs button:hover {
+    color: var(--pico-primary);
+  }
+  .tabs button.active {
+    color: var(--pico-primary);
+    border-bottom-color: var(--pico-primary);
+    font-weight: 600;
+  }
+
+  .calendar-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 0.75rem;
+  }
+  .calendar-list li { list-style: none; }
+  .calendar-list label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+  }
+  .calendar-list input[type="checkbox"] {
+    cursor: pointer;
+    margin: 0;
+  }
+
+  .cal-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .cal-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.8rem;
+    background: none;
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    color: var(--pico-muted-color);
+    cursor: pointer;
+    line-height: 1.4;
+    margin-bottom: 0;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .cal-action-btn:hover {
+    color: var(--pico-primary);
+    border-color: var(--pico-primary);
   }
 </style>

@@ -3,10 +3,7 @@
   import { initI18n, getLocale, makeTl } from '../lib/i18n.ts';
   import EventFormDialog from './EventFormDialog.svelte';
   import MonthPicker from './MonthPicker.svelte';
-  import CalendarList from './CalendarList.svelte';
   import EventDetail from './EventDetail.svelte';
-  import CreateCalendarDialog from './CreateCalendarDialog.svelte';
-  import ImportDialog from './ImportDialog.svelte';
   import type { EventJson, DayEventsJson, CalendarJson, MonthGridJson } from '../types/calendar.ts';
   import { getMonday, fmtDate, fmtYM } from '../lib/date.ts';
 
@@ -180,18 +177,6 @@
     if (nm !== gridMonth) { gridMonth = nm; fetchMonthGrid(nm); }
   }
 
-  // ── Calendar toggle ────────────────────────────────────────────────────────
-  async function toggleCalendar(href: string, active: boolean) {
-    calendars = calendars.map(c => c.href === href ? { ...c, is_active: active } : c);
-    await fetch('/api/calendar/toggle', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `href=${encodeURIComponent(href)}&active=${active}`,
-    });
-    fetchEvents();
-    fetchMonthGrid();
-  }
-
   // ── Event detail ───────────────────────────────────────────────────────────
   let eventDetail: EventDetail;
   let detailIsOpen = false;
@@ -200,17 +185,6 @@
   let formDialog: EventFormDialog;
   let focusedEventDate = '';
 
-  // ── Calendar management ────────────────────────────────────────────────────
-  let createCalDialog: CreateCalendarDialog;
-  let importDialog: ImportDialog;
-
-  function handleCalendarCreated(e: CustomEvent<CalendarJson>) {
-    calendars = [...calendars, e.detail];
-  }
-
-  function handleImported() {
-    fetchEvents();
-  }
 
   // ── Past days ──────────────────────────────────────────────────────────────
   function isPastDay(dateStr: string): boolean {
@@ -371,17 +345,6 @@
         on:navigateToMonth={(e) => navigateToMonth(e.detail)}
       />
     </div>
-    <div class="calendar-list-section">
-      <div class="section-header">
-        <span>{tl('cal_calendars')}</span>
-        <button class="icon-btn" title={tl('cal_createCalendar')} on:click={() => createCalDialog.open()}>+</button>
-      </div>
-      <CalendarList
-        {calendars}
-        on:toggle={(e) => toggleCalendar(e.detail.href, e.detail.active)}
-      />
-      <button class="sidebar-import-btn" on:click={() => importDialog.open()}>{tl('cal_import')}</button>
-    </div>
   </div>
 
   <!-- Weekly view -->
@@ -481,18 +444,6 @@
   on:deleted={() => { fetchEvents(); fetchMonthGrid(); }}
 />
 
-<!-- ── Calendar management dialogs ────────────────────────────────────────── -->
-<CreateCalendarDialog
-  bind:this={createCalDialog}
-  {locale}
-  on:created={handleCalendarCreated}
-/>
-<ImportDialog
-  bind:this={importDialog}
-  {calendars}
-  {locale}
-  on:imported={handleImported}
-/>
 
 <!-- FAB -->
 <button class="fab" aria-label={tl('event_new')} title={tl('event_new')} on:click={() => formDialog.openNewEventForm()}>
@@ -532,9 +483,7 @@
       grid-template-columns: 1fr 1fr;
       gap: 1rem;
     }
-    .sidebar { grid-area: sidebar; display: flex; gap: 1rem; }
-    .calendar-picker { flex: 1; }
-    .calendar-list-section { flex: 1; }
+    .sidebar { grid-area: sidebar; }
     .weekly { grid-area: weekly; }
   }
 
@@ -699,25 +648,6 @@
   :global(.event-trigger:hover) { filter: brightness(0.95); }
   :global(.event-trigger:focus-visible) { outline: 2px solid var(--pico-primary-background, #0074d9); outline-offset: 2px; }
 
-  /* Sidebar calendar management */
-  .section-header {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 0.25rem;
-    font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
-    color: var(--pico-muted-color); letter-spacing: 0.05em;
-  }
-  .icon-btn {
-    background: none; border: none; cursor: pointer; padding: 0 0.25rem;
-    font-size: 1.1rem; line-height: 1; color: var(--pico-muted-color);
-  }
-  .icon-btn:hover { color: var(--pico-primary); }
-  .sidebar-import-btn {
-    width: 100%; margin-top: 0.5rem; padding: 0.35rem 0.5rem;
-    font-size: 0.8rem; background: none; border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius); cursor: pointer; color: var(--pico-muted-color);
-    text-align: left;
-  }
-  .sidebar-import-btn:hover { color: var(--pico-primary); border-color: var(--pico-primary); }
 
   /* FAB */
   .fab {
