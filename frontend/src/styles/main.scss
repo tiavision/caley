@@ -26,6 +26,21 @@ footer {
 
 footer nav {
     justify-content: space-between;
+    flex-wrap: wrap;
+    row-gap: 0.25rem;
+}
+
+footer nav li {
+    padding-block: 0;
+}
+
+@media (max-width: 480px) {
+    footer nav {
+        justify-content: center;
+    }
+    footer nav ul {
+        justify-content: center;
+    }
 }
 
 footer a.brand {
@@ -45,6 +60,10 @@ footer #nav-user-list li + li::before {
 footer #nav-user-list li:not(:has(a)) {
     font-weight: 600;
     opacity: 0.8;
+    max-width: 8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 dialog article header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
