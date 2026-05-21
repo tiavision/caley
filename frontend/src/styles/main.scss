@@ -121,6 +121,19 @@ dialog article { margin: 0; padding: 1.5rem; }
 .nav-btn:hover { background: var(--pico-primary-hover-background); color: var(--pico-primary-inverse); }
 .arrow { display: inline-block; transform: translateY(-0.08em); }
 
+/* Shared home/back icon link — mirrors CalendarApp's search/contacts icon links */
+.home-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem 0.3rem;
+  color: var(--pico-primary);
+  text-decoration: none;
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+.home-btn:hover { opacity: 1; }
+
 /* Shared form utilities */
 .locale-picker {
   margin: 0;

@@ -134,6 +134,7 @@
   "cal_importPartial": "{n} events failed to import",
   "nav_search": "Search",
   "nav_contacts": "Contacts",
+  "nav_calendar": "Calendar",
   "contacts_heading": "Contacts",
   "contacts_new": "New contact",
   "contacts_noContacts": "No contacts.",

@@ -134,6 +134,7 @@
   "cal_importPartial": "{n} Termine konnten nicht importiert werden",
   "nav_search": "Suchen",
   "nav_contacts": "Kontakte",
+  "nav_calendar": "Kalender",
   "contacts_heading": "Kontakte",
   "contacts_new": "Neuer Kontakt",
   "contacts_noContacts": "Keine Kontakte.",
