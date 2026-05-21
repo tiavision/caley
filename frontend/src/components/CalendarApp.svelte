@@ -384,7 +384,7 @@
 <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
 <div class="layout">
   <!-- Weekly view -->
-  <div class="weekly" on:touchstart={handleTouchStart} on:touchend={handleTouchEnd}>
+  <div class="weekly" role="application" on:touchstart={handleTouchStart} on:touchend={handleTouchEnd}>
     <div class="weekly-header">
       <div class="week-nav-wrapper">
         <button class="nav-btn" aria-label="Previous week" on:click={() => navigateWeek(-7)}><span class="arrow">‹</span></button>
