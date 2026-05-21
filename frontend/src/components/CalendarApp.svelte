@@ -16,6 +16,7 @@
   let days: DayEventsJson[] = [];
   let monthGrid: MonthGridJson | null = null;
   let eventsLoading = false;
+  let monthPickerOpen = false;
 
   let selectedWeekStart: Date = getMonday(new Date());
   let gridMonth: string = fmtYM(selectedWeekStart);
@@ -157,6 +158,7 @@
   }
 
   function selectDay(dateStr: string) {
+    monthPickerOpen = false;
     const [y, mo, dd] = dateStr.split('-').map(Number);
     selectedWeekStart = getMonday(new Date(y, mo - 1, dd));
     fetchEvents();
@@ -286,6 +288,7 @@
     const active = document.activeElement as HTMLElement;
     const tag = active?.tagName?.toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select' || active?.isContentEditable) return;
+    if (monthPickerOpen && e.key === 'Escape') { e.preventDefault(); monthPickerOpen = false; return; }
     if (detailIsOpen) {
       if (e.key === 'e') { e.preventDefault(); eventDetail.triggerEdit(); }
       return;
@@ -331,28 +334,32 @@
 
 <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
 <div class="layout">
-
-  <!-- Sidebar: month picker + calendar list -->
-  <div class="sidebar">
-    <div class="calendar-picker">
-      <MonthPicker
-        {monthGrid}
-        weekStart={selectedWeekStart}
-        {weekEnd}
-        {todayStr}
-        {locale}
-        on:selectDay={(e) => selectDay(e.detail)}
-        on:navigateToMonth={(e) => navigateToMonth(e.detail)}
-      />
-    </div>
-  </div>
-
   <!-- Weekly view -->
   <div class="weekly">
     <div class="weekly-header">
-      <button class="nav-btn" aria-label="Previous week" on:click={() => navigateWeek(-7)}><span class="arrow">‹</span></button>
-      <span class="week-range">{weekRangeText}</span>
-      <button class="nav-btn" aria-label="Next week" on:click={() => navigateWeek(7)}><span class="arrow">›</span></button>
+      <div class="week-nav-wrapper">
+        <button class="nav-btn" aria-label="Previous week" on:click={() => navigateWeek(-7)}><span class="arrow">‹</span></button>
+        <button class="week-range-btn" on:click={() => monthPickerOpen = !monthPickerOpen} aria-expanded={monthPickerOpen} aria-haspopup="true">
+          <span class="week-range">{weekRangeText}</span>
+          <span class="picker-caret" aria-hidden="true"></span>
+        </button>
+        <button class="nav-btn" aria-label="Next week" on:click={() => navigateWeek(7)}><span class="arrow">›</span></button>
+        {#if monthPickerOpen}
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <div class="popover-backdrop" on:click={() => monthPickerOpen = false}></div>
+          <div class="month-picker-popover">
+            <MonthPicker
+              {monthGrid}
+              weekStart={selectedWeekStart}
+              {weekEnd}
+              {todayStr}
+              {locale}
+              on:selectDay={(e) => selectDay(e.detail)}
+              on:navigateToMonth={(e) => navigateToMonth(e.detail)}
+            />
+          </div>
+        {/if}
+      </div>
       <div class="header-actions">
         <a href="/contacts" class="contacts-btn" aria-label={tl('nav_contacts')}>
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -461,43 +468,6 @@
     flex-direction: column;
     gap: 1rem;
   }
-  .sidebar { order: 2; }
-  .weekly { order: 1; }
-
-  @media (min-width: 600px) and (max-width: 959px) {
-    .layout {
-      display: grid;
-      grid-template-columns: 22rem 1fr;
-      grid-template-areas: "sidebar weekly";
-      gap: 1rem;
-      align-items: start;
-    }
-    .sidebar { grid-area: sidebar; display: flex; flex-direction: column; gap: 1rem; position: sticky; top: 0; }
-    .weekly { grid-area: weekly; }
-  }
-
-  @media (min-width: 960px) and (max-width: 1399px) {
-    .layout {
-      display: grid;
-      grid-template-areas: "weekly weekly" "sidebar sidebar";
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-    }
-    .sidebar { grid-area: sidebar; }
-    .weekly { grid-area: weekly; }
-  }
-
-  @media (min-width: 1400px) {
-    .layout {
-      display: grid;
-      grid-template-columns: 22rem 1fr;
-      grid-template-areas: "sidebar weekly";
-      gap: 1rem;
-      align-items: start;
-    }
-    .sidebar { grid-area: sidebar; display: flex; flex-direction: column; gap: 1rem; position: sticky; top: 0; }
-    .weekly { grid-area: weekly; }
-  }
 
   /* Weekly header */
   .weekly-header {
@@ -506,7 +476,33 @@
     background: var(--pico-background-color);
     padding-top: 0.25rem;
   }
+  .week-nav-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .week-range-btn {
+    display: flex; align-items: center; gap: 0.3rem;
+    background: none; border: none; cursor: pointer;
+    padding: 0.15rem 0.35rem; font: inherit; color: inherit;
+    border-radius: var(--pico-border-radius);
+    transition: background 0.12s; margin-bottom: 0;
+  }
+  .week-range-btn:hover { background: rgba(0,0,0,0.06); }
+  @media (prefers-color-scheme: dark) {
+    .week-range-btn:hover { background: rgba(255,255,255,0.08); }
+  }
   .week-range { font-size: 0.875rem; color: var(--pico-muted-color); }
+  .picker-caret { font-size: 0.6em; color: var(--pico-muted-color); opacity: 0.7; }
+  .picker-caret::before { content: '▾'; }
+  .popover-backdrop { position: fixed; inset: 0; z-index: 50; background: transparent; }
+  .month-picker-popover {
+    position: absolute; top: calc(100% + 0.5rem); left: 0; z-index: 51;
+    min-width: 18rem; max-width: calc(100vw - 2rem);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    border-radius: var(--pico-border-radius);
+  }
   .header-actions {
     margin-left: auto;
     display: flex;
