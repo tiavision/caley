@@ -64,10 +64,14 @@
           pendingFocusUid = null;
           pendingFocusDate = null;
           const targetDay = days.find(d => d.date_iso === dateStr);
-          if (targetDay) {
-            const s = new Set(expandedPastDays);
-            s.add(dateStr);
-            expandedPastDays = s;
+          if (targetDay && isDayCollapsed(dateStr)) {
+            const s = new Set(toggledDays);
+            if (isDefaultCollapsed(dateStr)) {
+              s.add(dateStr);
+            } else {
+              s.delete(dateStr);
+            }
+            toggledDays = s;
             await tick();
             const eventIdx = Math.max(0, targetDay.events.findIndex(ev => ev.uid === uid));
             const dayEl = document.querySelector<HTMLElement>(`.day[data-date="${dateStr}"]`);
@@ -188,7 +192,7 @@
   let focusedEventDate = '';
 
 
-  // ── Past days ──────────────────────────────────────────────────────────────
+  // ── Past days / collapsing ──────────────────────────────────────────────────
   function isPastDay(dateStr: string): boolean {
     const [y, mo, d] = dateStr.split('-').map(Number);
     const dt = new Date(y, mo - 1, d);
@@ -196,13 +200,34 @@
     return dt < today;
   }
 
-  let expandedPastDays = new Set<string>();
+  function isCurrentWeekDay(dateStr: string): boolean {
+    const [y, mo, d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, mo - 1, d);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const dow = today.getDay();
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return dt >= monday && dt <= sunday;
+  }
+
+  function isDefaultCollapsed(dateStr: string): boolean {
+    return isPastDay(dateStr) && isCurrentWeekDay(dateStr);
+  }
+
+  let toggledDays = new Set<string>();
   let pendingFocusUid: string | null = null;
   let pendingFocusDate: string | null = null;
-  function togglePastDay(dateStr: string) {
-    const s = new Set(expandedPastDays);
+
+  function isDayCollapsed(dateStr: string): boolean {
+    return isDefaultCollapsed(dateStr) !== toggledDays.has(dateStr);
+  }
+
+  function toggleDay(dateStr: string) {
+    const s = new Set(toggledDays);
     s.has(dateStr) ? s.delete(dateStr) : s.add(dateStr);
-    expandedPastDays = s;
+    toggledDays = s;
   }
 
   // ── Grid keyboard navigation ───────────────────────────────────────────────
@@ -390,24 +415,25 @@
 
       {#each days as day (day.date_iso)}
         {@const past = isPastDay(day.date_iso)}
-        {@const expanded = expandedPastDays.has(day.date_iso)}
+        {@const collapsed = isDefaultCollapsed(day.date_iso) !== toggledDays.has(day.date_iso)}
         <div
           class="day"
           class:today={day.is_today}
           class:day-past={past}
           class:day-past-empty={past && day.events.length === 0}
-          class:day-expanded={expanded}
+          class:day-collapsed={collapsed}
+          class:day-collapsible={day.events.length > 0}
           data-date={day.date_iso}
         >
           <button type="button" class="day-heading"
             title={new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { dateStyle: 'long' })}
-            on:click={() => { if (past && day.events.length > 0) togglePastDay(day.date_iso); }}>
+            on:click={() => { if (day.events.length > 0) toggleDay(day.date_iso); }}>
             {new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { weekday: 'long' })}
-            {#if past && day.events.length > 0 && !expanded}
+            {#if collapsed && day.events.length > 0}
               <span class="day-past-count">{day.events.length}</span>
             {/if}
-            {#if past && day.events.length > 0}
-              <span class="day-expand-icon" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+            {#if day.events.length > 0}
+              <span class="day-expand-icon" aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
             {/if}
             <span class="day-date">{new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { month: 'short', day: 'numeric' })}</span>
           </button>
@@ -601,11 +627,9 @@
       color: var(--pico-muted-color);
       display: inline;
     }
-    :global(.day.day-past .appointments) { display: none; }
-    :global(.day.day-past.day-expanded .appointments) { display: block; }
-    :global(.day.day-past .day-heading) { cursor: pointer; user-select: none; }
-    :global(.day.day-past .day-heading::after) { content: none; }
-    :global(.day.day-past.day-expanded .day-heading::after) { content: none; }
+    :global(.day.day-collapsed .appointments) { display: none; }
+    :global(.day.day-collapsible .day-heading) { user-select: none; }
+    :global(.day.day-collapsible .day-heading::after) { content: none; }
     :global(.day.day-past-empty) { display: none; }
     .day-past-count {
       display: inline-flex; align-items: center; justify-content: center;
