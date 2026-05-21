@@ -141,6 +141,7 @@
       bind:value={query}
       placeholder={tl('search_placeholder')}
       class="search-input"
+      autofocus
     />
     <button type="submit">{tl('search_submit')}</button>
   </div>
