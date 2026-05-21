@@ -1,12 +1,10 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
   import { makeTl } from '../lib/i18n.ts';
   import type { CalendarJson } from '../types/calendar.ts';
 
   export let calendars: CalendarJson[] = [];
   export let locale: string = 'en';
-
-  const dispatch = createEventDispatcher<{ imported: { imported: number; errors: number } }>();
+  export let onimported: ((data: { imported: number; errors: number }) => void) | undefined = undefined;
 
   $: tl = makeTl(locale);
 
@@ -56,7 +54,7 @@
         if (!resp.ok) { error = await resp.text(); importing = false; return; }
         const cal: CalendarJson = await resp.json();
         targetHref = cal.href;
-        dispatch('imported', { imported: 0, errors: 0 }); // signal calendars changed
+        onimported?.({ imported: 0, errors: 0 }); // signal calendars changed
       }
 
       const fd = new FormData();
@@ -69,7 +67,7 @@
       if (result.errors > 0) {
         successMsg += ' · ' + tl('cal_importPartial', { n: result.errors });
       }
-      dispatch('imported', result);
+      onimported?.(result);
       if (result.errors === 0) {
         setTimeout(() => dialogEl?.close(), 1500);
       }
@@ -84,12 +82,12 @@
 <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
 <dialog
   bind:this={dialogEl}
-  on:click={(e) => { if (e.target === e.currentTarget) dialogEl?.close(); }}
+  onclick={(e) => { if (e.target === e.currentTarget) dialogEl?.close(); }}
 >
   <article>
     <header>
       <h3>{tl('cal_import')}</h3>
-      <button class="close-btn" aria-label={tl('weekly_aria_close')} on:click={() => dialogEl?.close()}></button>
+      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={() => dialogEl?.close()}></button>
     </header>
 
     {#if error}
@@ -99,7 +97,7 @@
       <div class="form-success">{successMsg}</div>
     {/if}
 
-    <form on:submit|preventDefault={submit}>
+    <form onsubmit={(e) => { e.preventDefault(); submit(); }}>
       <label>
         <span>{tl('cal_importFile')}</span>
         <input type="file" accept=".ics" bind:this={fileInput} required />
@@ -125,7 +123,7 @@
 
       <footer>
         <button type="submit" aria-busy={importing}>{tl('cal_importSubmit')}</button>
-        <button type="button" class="secondary" on:click={() => dialogEl?.close()}>
+        <button type="button" class="secondary" onclick={() => dialogEl?.close()}>
           {tl('event_cancel')}
         </button>
       </footer>

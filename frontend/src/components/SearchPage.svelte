@@ -90,7 +90,7 @@
   }
 </script>
 
-<svelte:window on:click={handleWindowClick} />
+<svelte:window onclick={handleWindowClick} />
 
 <h2>{tl('search_heading')}</h2>
 
@@ -99,7 +99,7 @@
     <button
       type="button"
       class="cal-dropdown-btn"
-      on:click={() => calDropdownOpen = !calDropdownOpen}
+      onclick={() => calDropdownOpen = !calDropdownOpen}
     >
       {calBtnLabel} <span class="dropdown-arrow" aria-hidden="true">▾</span>
     </button>
@@ -111,7 +111,7 @@
               <input
                 type="checkbox"
                 checked={selectedHrefs.has(cal.href)}
-                on:change={() => toggleCalendar(cal.href)}
+                onchange={() => toggleCalendar(cal.href)}
               />
               <EventColorDot color={cal.color} />
               {cal.name}
@@ -134,7 +134,7 @@
   </div>
 </div>
 
-<form on:submit|preventDefault={doSearch} class="search-form">
+<form onsubmit={(e) => { e.preventDefault(); doSearch(); }} class="search-form">
   <div class="search-row">
     <input
       type="search"

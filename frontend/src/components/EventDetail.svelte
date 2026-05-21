@@ -1,13 +1,12 @@
 <script lang="ts">
-  import { tick, createEventDispatcher } from 'svelte';
+  import { tick } from 'svelte';
   import { makeTl } from '../lib/i18n.ts';
   import type { EventJson } from '../types/calendar.ts';
   import { formatEventTime, formatRecurrence, formatAlarm, partstatKey } from '../lib/format.ts';
 
   export let locale: string;
   export let isOpen = false;
-
-  const dispatch = createEventDispatcher<{ edit: { event: EventJson; scope: 'series' | 'this_instance' } }>();
+  export let onedit: ((data: { event: EventJson; scope: 'series' | 'this_instance' }) => void) | undefined = undefined;
 
   $: tl = makeTl(locale);
 
@@ -52,7 +51,7 @@
     } else {
       const ev = detailEvent;
       close();
-      dispatch('edit', { event: ev, scope: 'series' });
+      onedit?.({ event: ev, scope: 'series' });
     }
   }
 
@@ -60,7 +59,7 @@
     if (!detailEvent) return;
     const ev = detailEvent;
     close();
-    dispatch('edit', { event: ev, scope });
+    onedit?.({ event: ev, scope });
   }
 </script>
 
@@ -68,9 +67,9 @@
 <dialog
   bind:this={dialogEl}
   id="event-detail"
-  on:click={(e) => { if (e.target === e.currentTarget) close(); }}
-  on:close={close}
-  on:cancel={(e) => { e.preventDefault(); close(); }}
+  onclick={(e) => { if (e.target === e.currentTarget) close(); }}
+  onclose={close}
+  oncancel={(e) => { e.preventDefault(); close(); }}
 >
   <article>
     <header>
@@ -81,17 +80,17 @@
             <button
               class="edit-btn"
               title={tl('event_edit')}
-              on:click={() => triggerEdit()}
+              onclick={() => triggerEdit()}
             >&#9998;</button>
             {#if detailEditPopoverOpen}
               <div class="edit-choice-popover">
-                <button on:click={() => editWith('series')}>{tl('event_editSeries')}</button>
-                <button on:click={() => editWith('this_instance')}>{tl('event_editInstance')}</button>
+                <button onclick={() => editWith('series')}>{tl('event_editSeries')}</button>
+                <button onclick={() => editWith('this_instance')}>{tl('event_editInstance')}</button>
               </div>
             {/if}
           </div>
         {/if}
-        <button class="close-btn" aria-label={tl('weekly_aria_close')} on:click={close}></button>
+        <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={close}></button>
       </div>
     </header>
 

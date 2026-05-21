@@ -384,18 +384,18 @@
 <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
 <div class="layout">
   <!-- Weekly view -->
-  <div class="weekly" role="application" on:touchstart={handleTouchStart} on:touchend={handleTouchEnd}>
+  <div class="weekly" role="application" ontouchstart={handleTouchStart} ontouchend={handleTouchEnd}>
     <div class="weekly-header">
       <div class="week-nav-wrapper">
-        <button class="nav-btn" aria-label="Previous week" on:click={() => navigateWeek(-7)}><span class="arrow">‹</span></button>
-        <button class="week-range-btn" on:click={() => monthPickerOpen = !monthPickerOpen} aria-expanded={monthPickerOpen} aria-haspopup="true">
+        <button class="nav-btn" aria-label="Previous week" onclick={() => navigateWeek(-7)}><span class="arrow">‹</span></button>
+        <button class="week-range-btn" onclick={() => monthPickerOpen = !monthPickerOpen} aria-expanded={monthPickerOpen} aria-haspopup="true">
           <span class="week-range">{weekRangeText}</span>
           <span class="picker-caret" aria-hidden="true"></span>
         </button>
-        <button class="nav-btn" aria-label="Next week" on:click={() => navigateWeek(7)}><span class="arrow">›</span></button>
+        <button class="nav-btn" aria-label="Next week" onclick={() => navigateWeek(7)}><span class="arrow">›</span></button>
         {#if monthPickerOpen}
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <div class="popover-backdrop" on:click={() => monthPickerOpen = false}></div>
+          <div class="popover-backdrop" onclick={() => monthPickerOpen = false}></div>
           <div class="month-picker-popover">
             <MonthPicker
               {monthGrid}
@@ -403,8 +403,8 @@
               {weekEnd}
               {todayStr}
               {locale}
-              on:selectDay={(e) => selectDay(e.detail)}
-              on:navigateToMonth={(e) => navigateToMonth(e.detail)}
+              onselectDay={(d) => selectDay(d)}
+              onnavigateToMonth={(m) => navigateToMonth(m)}
             />
           </div>
         {/if}
@@ -420,7 +420,7 @@
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
         </a>
-        <button class="today-btn" on:click={navigateToday}>{tl('cal_today')}</button>
+        <button class="today-btn" onclick={navigateToday}>{tl('cal_today')}</button>
       </div>
     </div>
 
@@ -431,7 +431,7 @@
       aria-label="Weekly calendar"
       tabindex="0"
       style="position:relative"
-      on:keydown={handleGridKeydown}
+      onkeydown={handleGridKeydown}
     >
       {#if eventsLoading}
         <div class="week-loading">{tl('weekly_loading')}</div>
@@ -451,7 +451,7 @@
         >
           <button type="button" class="day-heading"
             title={new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { dateStyle: 'long' })}
-            on:click={() => { if (day.events.length > 0) toggleDay(day.date_iso); }}>
+            onclick={() => { if (day.events.length > 0) toggleDay(day.date_iso); }}>
             {new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { weekday: 'long' })}
             {#if collapsed && day.events.length > 0}
               <span class="day-past-count">{day.events.length}</span>
@@ -468,8 +468,8 @@
                 class="appointment event-trigger"
                 style="border-left: 3px solid {event.color}"
                 tabindex="-1"
-                on:click={() => eventDetail.open(event)}
-                on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); eventDetail.open(event); } }}
+                onclick={() => eventDetail.open(event)}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); eventDetail.open(event); } }}
               >
                 <div class="appt-content">
                   <span class="appt-time">{event.time_range.split('-')[0]}</span> · {event.summary}
@@ -488,7 +488,7 @@
   bind:this={eventDetail}
   bind:isOpen={detailIsOpen}
   {locale}
-  on:edit={(e) => formDialog.openEditForm(e.detail.event, e.detail.scope)}
+  onedit={(d) => formDialog.openEditForm(d.event, d.scope)}
 />
 
 <!-- ── Event form dialog ──────────────────────────────────────────────────── -->
@@ -497,13 +497,13 @@
   {calendars}
   {locale}
   {focusedEventDate}
-  on:saved={() => { fetchEvents(); fetchMonthGrid(); }}
-  on:deleted={() => { fetchEvents(); fetchMonthGrid(); }}
+  onsaved={() => { fetchEvents(); fetchMonthGrid(); }}
+  ondeleted={() => { fetchEvents(); fetchMonthGrid(); }}
 />
 
 
 <!-- FAB -->
-<button class="fab" aria-label={tl('event_new')} title={tl('event_new')} on:click={() => formDialog.openNewEventForm()}>
+<button class="fab" aria-label={tl('event_new')} title={tl('event_new')} onclick={() => formDialog.openNewEventForm()}>
   <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
     <line x1="12" y1="5" x2="12" y2="19"></line>
     <line x1="5" y1="12" x2="19" y2="12"></line>

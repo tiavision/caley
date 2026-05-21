@@ -271,7 +271,7 @@
   }
 </script>
 
-<svelte:window on:click={handleWindowClick} />
+<svelte:window onclick={handleWindowClick} />
 
 <div class="contacts-page">
   <div class="contacts-toolbar">
@@ -282,7 +282,7 @@
           <button
             type="button"
             class="ab-dropdown-btn"
-            on:click={() => abDropdownOpen = !abDropdownOpen}
+            onclick={() => abDropdownOpen = !abDropdownOpen}
           >
             {abBtnLabel} <span class="dropdown-arrow" aria-hidden="true">▾</span>
           </button>
@@ -294,7 +294,7 @@
                     <input
                       type="checkbox"
                       checked={selectedAddressbookHrefs.has(ab.href)}
-                      on:change={() => toggleAddressbook(ab.href)}
+                      onchange={() => toggleAddressbook(ab.href)}
                     />
                     {ab.name}
                   </label>
@@ -331,17 +331,17 @@
                 class="contact-card"
                 role="button"
                 tabindex="0"
-                on:click={() => openDetail(contact)}
-                on:keydown={(e) => e.key === 'Enter' && openDetail(contact)}
+                onclick={() => openDetail(contact)}
+                onkeydown={(e) => e.key === 'Enter' && openDetail(contact)}
               >
                 <div class="card-avatar">{(contact.fn_name[0] ?? '?').toUpperCase()}</div>
                 <div class="card-body">
                   <span class="card-name">{contact.fn_name || '—'}</span>
                   {#if contact.emails[0]}
-                    <a href="mailto:{contact.emails[0].value}" class="card-link card-email" on:click|stopPropagation>{contact.emails[0].value}</a>
+                    <a href="mailto:{contact.emails[0].value}" class="card-link card-email" onclick={(e) => e.stopPropagation()}>{contact.emails[0].value}</a>
                   {/if}
                   {#if contact.phones[0]}
-                    <a href="tel:{contact.phones[0].value}" class="card-link card-phone" on:click|stopPropagation>{contact.phones[0].value}</a>
+                    <a href="tel:{contact.phones[0].value}" class="card-link card-phone" onclick={(e) => e.stopPropagation()}>{contact.phones[0].value}</a>
                   {/if}
                   {#if contact.org}
                     <span class="card-org">{contact.org}</span>
@@ -360,7 +360,7 @@
 </div>
 
 <!-- FAB: new contact -->
-<button class="contacts-fab" on:click={openNewForm} aria-label={tl('contacts_new')}>
+<button class="contacts-fab" onclick={openNewForm} aria-label={tl('contacts_new')}>
   <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
   </svg>
@@ -371,9 +371,9 @@
 <dialog
   bind:this={detailDialog}
   id="contact-detail"
-  on:click={(e) => { if (e.target === e.currentTarget) closeDetail(); }}
-  on:close={closeDetail}
-  on:cancel={(e) => { e.preventDefault(); closeDetail(); }}
+  onclick={(e) => { if (e.target === e.currentTarget) closeDetail(); }}
+  onclose={closeDetail}
+  oncancel={(e) => { e.preventDefault(); closeDetail(); }}
 >
   <article>
     <header>
@@ -383,10 +383,10 @@
           <button
             class="edit-btn"
             title={tl('contacts_edit')}
-            on:click={() => openEditForm(selectedContact!)}
+            onclick={() => openEditForm(selectedContact!)}
           >&#9998;</button>
         {/if}
-        <button class="close-btn" aria-label={tl('weekly_aria_close')} on:click={closeDetail}></button>
+        <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={closeDetail}></button>
       </div>
     </header>
 
@@ -438,7 +438,7 @@
               {#each selectedContact.addresses as addr}
                 <div class="typed-entry">
                   <span class="type-chip">{tl(`contacts_type_${addr.type_label}`)}</span>
-                  <a href="geo:0,0?q={encodeURIComponent(addressQuery(addr))}" on:click={(e) => openMap(e, addressQuery(addr))} class="address-text" rel="noopener noreferrer">
+                  <a href="geo:0,0?q={encodeURIComponent(addressQuery(addr))}" onclick={(e) => openMap(e, addressQuery(addr))} class="address-text" rel="noopener noreferrer">
                     {#if addr.street}{addr.street}<br />{/if}
                     {#if addr.city || addr.region || addr.postal}{addr.city}{addr.region ? (addr.city ? ', ' : '') + addr.region : ''}{addr.postal ? ' ' + addr.postal : ''}<br />{/if}
                     {#if addr.country}{addr.country}{/if}
@@ -457,7 +457,7 @@
         {/if}
 
         <div class="detail-actions">
-          <button class="secondary outline" on:click={() => deleteContact(selectedContact!)}>{tl('contacts_delete')}</button>
+          <button class="secondary outline" onclick={() => deleteContact(selectedContact!)}>{tl('contacts_delete')}</button>
         </div>
       </div>
     {/if}
@@ -469,18 +469,18 @@
 <dialog
   bind:this={formDialog}
   id="contact-form"
-  on:click={(e) => { if (e.target === e.currentTarget) closeForm(); }}
-  on:cancel={(e) => { e.preventDefault(); closeForm(); }}
+  onclick={(e) => { if (e.target === e.currentTarget) closeForm(); }}
+  oncancel={(e) => { e.preventDefault(); closeForm(); }}
 >
   <article>
     <header>
       <h3>{formUid ? tl('contacts_edit') : tl('contacts_new')}</h3>
       <div class="header-actions">
-        <button class="close-btn" aria-label={tl('weekly_aria_close')} on:click={closeForm}></button>
+        <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={closeForm}></button>
       </div>
     </header>
 
-    <form on:submit={saveContact}>
+    <form onsubmit={saveContact}>
       {#if formError}
         <p class="form-error">{formError}</p>
       {/if}
@@ -501,12 +501,12 @@
               <option value="other">{tl('contacts_type_other')}</option>
             </select>
             {#if formEmails.length > 1}
-              <button type="button" class="remove-btn" on:click={() => { formEmails = formEmails.filter((_, j) => j !== i); }}>✕</button>
+              <button type="button" class="remove-btn" onclick={() => { formEmails = formEmails.filter((_, j) => j !== i); }}>✕</button>
             {/if}
           </div>
         </label>
       {/each}
-      <button type="button" class="add-field-btn" on:click={() => { formEmails = [...formEmails, emptyEmail()]; }}>
+      <button type="button" class="add-field-btn" onclick={() => { formEmails = [...formEmails, emptyEmail()]; }}>
         + {tl('contacts_addEmail')}
       </button>
 
@@ -524,12 +524,12 @@
               <option value="other">{tl('contacts_type_other')}</option>
             </select>
             {#if formPhones.length > 1}
-              <button type="button" class="remove-btn" on:click={() => { formPhones = formPhones.filter((_, j) => j !== i); }}>✕</button>
+              <button type="button" class="remove-btn" onclick={() => { formPhones = formPhones.filter((_, j) => j !== i); }}>✕</button>
             {/if}
           </div>
         </label>
       {/each}
-      <button type="button" class="add-field-btn" on:click={() => { formPhones = [...formPhones, emptyPhone()]; }}>
+      <button type="button" class="add-field-btn" onclick={() => { formPhones = [...formPhones, emptyPhone()]; }}>
         + {tl('contacts_addPhone')}
       </button>
 
@@ -537,7 +537,7 @@
         <fieldset class="address-fieldset">
           <legend>
             {tl('contacts_address')}{formAddresses.length > 1 ? ` ${i + 1}` : ''}
-            <button type="button" class="remove-btn legend-remove" on:click={() => { formAddresses = formAddresses.filter((_, j) => j !== i); }}>✕</button>
+            <button type="button" class="remove-btn legend-remove" onclick={() => { formAddresses = formAddresses.filter((_, j) => j !== i); }}>✕</button>
           </legend>
           <label>
             {tl('contacts_street')}
@@ -572,7 +572,7 @@
           </div>
         </fieldset>
       {/each}
-      <button type="button" class="add-field-btn" on:click={() => { formAddresses = [...formAddresses, emptyAddress()]; }}>
+      <button type="button" class="add-field-btn" onclick={() => { formAddresses = [...formAddresses, emptyAddress()]; }}>
         + {tl('contacts_addAddress')}
       </button>
 
@@ -594,7 +594,7 @@
 
       <div class="form-actions">
         <button type="submit" aria-busy={formSaving} disabled={formSaving}>{tl('contacts_save')}</button>
-        <button type="button" class="secondary" on:click={closeForm}>{tl('contacts_cancel')}</button>
+        <button type="button" class="secondary" onclick={closeForm}>{tl('contacts_cancel')}</button>
       </div>
     </form>
   </article>

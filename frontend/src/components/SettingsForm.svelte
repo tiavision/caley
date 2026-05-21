@@ -143,7 +143,7 @@
         class="locale-picker"
         aria-label={tl('settings_language')}
         bind:value={selectedLocale}
-        on:change={onLocaleChange}
+        onchange={onLocaleChange}
       >
         {#each localeOptions as opt}
           <option value={opt.value}>{opt.label}</option>
@@ -158,13 +158,13 @@
         role="tab"
         class:active={tab === 'settings'}
         aria-selected={tab === 'settings'}
-        on:click={() => switchTab('settings')}
+        onclick={() => switchTab('settings')}
       >{tl('nav_settings')}</button>
       <button
         role="tab"
         class:active={tab === 'calendars'}
         aria-selected={tab === 'calendars'}
-        on:click={() => switchTab('calendars')}
+        onclick={() => switchTab('calendars')}
       >{tl('cal_calendars')}</button>
     </div>
   {/if}
@@ -173,7 +173,7 @@
     <p aria-busy="true">{tl('nav_loading')}</p>
   {:else if isLoginMode || tab === 'settings'}
     <p>{isLoginMode ? tl('login_subtitle') : tl('settings_subtitle')}</p>
-    <form on:submit|preventDefault={onSubmit}>
+    <form onsubmit={(e) => { e.preventDefault(); onSubmit(); }}>
       <label>
         <span>{tl('settings_baseUrl')}</span>
         <input
@@ -215,7 +215,7 @@
 
     {#if !isLoginMode}
       <hr />
-      <button class="delete-account-btn" on:click={onDeleteAccount} disabled={deleting} aria-busy={deleting}>
+      <button class="delete-account-btn" onclick={onDeleteAccount} disabled={deleting} aria-busy={deleting}>
         {tl('settings_deleteAccount')}
       </button>
     {/if}
@@ -231,7 +231,7 @@
               <input
                 type="checkbox"
                 checked={cal.is_active}
-                on:change={(e) => toggleCalendar(cal.href, (e.target as HTMLInputElement).checked)}
+                onchange={(e) => toggleCalendar(cal.href, (e.target as HTMLInputElement).checked)}
               />
               <EventColorDot color={cal.color} />
               {cal.name}
@@ -240,11 +240,11 @@
         {/each}
       </ul>
       <div class="cal-actions">
-        <button class="cal-action-btn" on:click={() => createCalDialog.open()}>
+        <button class="cal-action-btn" onclick={() => createCalDialog.open()}>
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           {tl('cal_createCalendar')}
         </button>
-        <button class="cal-action-btn" on:click={() => importDialog.open()}>
+        <button class="cal-action-btn" onclick={() => importDialog.open()}>
           {tl('cal_import')}
         </button>
       </div>
@@ -255,13 +255,13 @@
 <CreateCalendarDialog
   bind:this={createCalDialog}
   {locale}
-  on:created={(e) => { calendars = [...calendars, e.detail]; }}
+  oncreated={(cal) => { calendars = [...calendars, cal]; }}
 />
 <ImportDialog
   bind:this={importDialog}
   {calendars}
   {locale}
-  on:imported={fetchCalendars}
+  onimported={fetchCalendars}
 />
 
 <style>

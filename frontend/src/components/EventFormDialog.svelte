@@ -1,6 +1,5 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { createEventDispatcher } from 'svelte';
   import { makeTl } from '../lib/i18n.ts';
   import type { PartStat, AlarmFields, AttendeeFields, RecurrenceInfo, EventJson, CalendarJson } from '../types/calendar.ts';
   import { fmtDate } from '../lib/date.ts';
@@ -8,8 +7,8 @@
   export let calendars: CalendarJson[] = [];
   export let locale: string = 'en';
   export let focusedEventDate: string = '';
-
-  const dispatch = createEventDispatcher<{ saved: void; deleted: void }>();
+  export let onsaved: (() => void) | undefined = undefined;
+  export let ondeleted: (() => void) | undefined = undefined;
 
   $: tl = makeTl(locale);
 
@@ -174,7 +173,7 @@
       if (res.ok) {
         if (formMode === 'create') localStorage.setItem('defaultCalendar', fCalendarHref);
         formDialogEl?.close();
-        dispatch('saved');
+        onsaved?.();
       } else {
         formError = (await res.text()) || tl('event_error');
       }
@@ -191,7 +190,7 @@
       url += `&scope=this_instance&original_dtstart=${encodeURIComponent(fOriginalDtstart)}&tz=${encodeURIComponent(fTz)}`;
     try {
       const res = await fetch(url, { method: 'DELETE' });
-      if (res.ok) { formDialogEl?.close(); dispatch('deleted'); }
+      if (res.ok) { formDialogEl?.close(); ondeleted?.(); }
       else { formError = (await res.text()) || tl('event_error'); }
     } catch { formError = tl('event_error'); }
     formSaving = false;
@@ -263,27 +262,27 @@
 <dialog
   bind:this={formDialogEl}
   id="event-form"
-  on:click={(e) => { if (e.target === e.currentTarget) formDialogEl?.close(); }}
+  onclick={(e) => { if (e.target === e.currentTarget) formDialogEl?.close(); }}
 >
   <article>
     <header>
       <h3>{formMode === 'edit' ? tl('event_edit') : tl('event_create')}</h3>
-      <button class="close-btn" aria-label={tl('weekly_aria_close')} on:click={() => formDialogEl?.close()}></button>
+      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={() => formDialogEl?.close()}></button>
     </header>
 
     {#if formError}
       <div class="form-error">{formError}</div>
     {/if}
 
-    <form on:submit|preventDefault={submitEventForm}>
+    <form onsubmit={(e) => { e.preventDefault(); submitEventForm(); }}>
       <label>
         <span>{tl('event_summary')}</span>
         <div class="summary-wrap">
           <input
             type="text" bind:value={fSummary} bind:this={summaryInputEl} required
-            on:input={onSummaryInput}
-            on:keydown={onSummaryKeydown}
-            on:blur={onSummaryBlur}
+            oninput={onSummaryInput}
+            onkeydown={onSummaryKeydown}
+            onblur={onSummaryBlur}
           />
           {#if timeSuggestions.length > 0}
             <ul class="time-suggestions" role="listbox">
@@ -292,7 +291,7 @@
                   <button
                     type="button"
                     class:active={i === timeSuggestionIdx}
-                    on:mousedown|preventDefault={() => applyTimeSuggestion(s)}
+                    onmousedown={(e) => { e.preventDefault(); applyTimeSuggestion(s); }}
                   >{s.label}</button>
                 </li>
               {/each}
@@ -316,7 +315,7 @@
           <div class="time-fields">
             <label>
               <span>{tl('event_startTime')}</span>
-              <input type="time" bind:value={fStartTime} on:change={autoFillEndTime} />
+              <input type="time" bind:value={fStartTime} onchange={autoFillEndTime} />
             </label>
             <label>
               <span>{tl('event_endTime')}</span>
@@ -346,11 +345,11 @@
                 <div class="alarm-relative-fields">
                   <input
                     type="number" min="1" value={alarm.value} style="width:4rem;margin-bottom:0"
-                    on:input={(e) => { formAlarms[i] = { ...alarm, value: (e.target as HTMLInputElement).value }; formAlarms = formAlarms; }}
+                    oninput={(e) => { formAlarms[i] = { ...alarm, value: (e.target as HTMLInputElement).value }; formAlarms = formAlarms; }}
                   />
                   <select
                     value={alarm.unit} style="margin-bottom:0"
-                    on:change={(e) => { formAlarms[i] = { ...alarm, unit: (e.target as HTMLSelectElement).value }; formAlarms = formAlarms; }}
+                    onchange={(e) => { formAlarms[i] = { ...alarm, unit: (e.target as HTMLSelectElement).value }; formAlarms = formAlarms; }}
                   >
                     <option value="1">{tl('event_reminderMin')}</option>
                     <option value="60">{tl('event_reminderHours')}</option>
@@ -361,13 +360,13 @@
                 <div class="alarm-absolute-fields">
                   <input
                     type="datetime-local" value={datetimeForInput(alarm.datetime)} style="margin-bottom:0"
-                    on:change={(e) => { formAlarms[i] = { ...alarm, datetime: (e.target as HTMLInputElement).value }; formAlarms = formAlarms; }}
+                    onchange={(e) => { formAlarms[i] = { ...alarm, datetime: (e.target as HTMLInputElement).value }; formAlarms = formAlarms; }}
                   />
                 </div>
               {/if}
               <select
                 class="alarm-direction" value={alarm.direction} style="margin-bottom:0"
-                on:change={(e) => { formAlarms[i] = { ...alarm, direction: (e.target as HTMLSelectElement).value }; formAlarms = formAlarms; }}
+                onchange={(e) => { formAlarms[i] = { ...alarm, direction: (e.target as HTMLSelectElement).value }; formAlarms = formAlarms; }}
               >
                 <option value="before-start">{tl('event_reminderBeforeStart')}</option>
                 <option value="before-end">{tl('event_reminderBeforeEnd')}</option>
@@ -375,11 +374,11 @@
                 <option value="after-end">{tl('event_reminderAfterEnd')}</option>
                 <option value="absolute">{tl('event_reminderAtTime')}</option>
               </select>
-              <button type="button" class="alarm-remove outline" aria-label="Remove" on:click={() => { formAlarms = formAlarms.filter((_, j) => j !== i); }}>×</button>
+              <button type="button" class="alarm-remove outline" aria-label="Remove" onclick={() => { formAlarms = formAlarms.filter((_, j) => j !== i); }}>×</button>
             </li>
           {/each}
         </ul>
-        <button type="button" class="outline small" on:click={() => { formAlarms = [...formAlarms, { direction: 'before-start', value: '15', unit: '1', datetime: '' }]; }}>
+        <button type="button" class="outline small" onclick={() => { formAlarms = [...formAlarms, { direction: 'before-start', value: '15', unit: '1', datetime: '' }]; }}>
           {tl('event_reminderAdd')}
         </button>
       </fieldset>
@@ -395,20 +394,20 @@
                 placeholder={tl('event_attendeeName')}
                 value={att.cn}
                 style="flex:1;margin-bottom:0"
-                on:input={(e) => { formAttendees[i] = { ...att, cn: (e.target as HTMLInputElement).value }; formAttendees = formAttendees; }}
+                oninput={(e) => { formAttendees[i] = { ...att, cn: (e.target as HTMLInputElement).value }; formAttendees = formAttendees; }}
               />
               <input
                 type="email"
                 placeholder={tl('event_attendeeEmail')}
                 value={att.email}
                 style="flex:2;margin-bottom:0"
-                on:input={(e) => { formAttendees[i] = { ...att, email: (e.target as HTMLInputElement).value }; formAttendees = formAttendees; }}
+                oninput={(e) => { formAttendees[i] = { ...att, email: (e.target as HTMLInputElement).value }; formAttendees = formAttendees; }}
               />
               <select
                 class="attendee-partstat-select"
                 value={att.partstat}
                 style="margin-bottom:0"
-                on:change={(e) => { formAttendees[i] = { ...att, partstat: (e.target as HTMLSelectElement).value as PartStat }; formAttendees = formAttendees; }}
+                onchange={(e) => { formAttendees[i] = { ...att, partstat: (e.target as HTMLSelectElement).value as PartStat }; formAttendees = formAttendees; }}
               >
                 <option value="NEEDS-ACTION">{tl('event_attendeeStatusNeedsAction')}</option>
                 <option value="ACCEPTED">{tl('event_attendeeStatusAccepted')}</option>
@@ -416,12 +415,12 @@
                 <option value="TENTATIVE">{tl('event_attendeeStatusTentative')}</option>
               </select>
               <button type="button" class="alarm-remove outline" aria-label={tl('event_attendeeRemove')}
-                on:click={() => { formAttendees = formAttendees.filter((_, j) => j !== i); }}>×</button>
+                onclick={() => { formAttendees = formAttendees.filter((_, j) => j !== i); }}>×</button>
             </li>
           {/each}
         </ul>
         <button type="button" class="outline small"
-          on:click={() => { formAttendees = [...formAttendees, { cn: '', email: '', partstat: 'NEEDS-ACTION' as PartStat }]; }}>
+          onclick={() => { formAttendees = [...formAttendees, { cn: '', email: '', partstat: 'NEEDS-ACTION' as PartStat }]; }}>
           {tl('event_attendeeAdd')}
         </button>
       </fieldset>
@@ -460,7 +459,7 @@
                   <label class="day-toggle">
                     <input
                       type="checkbox" value={code} checked={fByDay.includes(code)}
-                      on:change={(e) => {
+                      onchange={(e) => {
                         if ((e.target as HTMLInputElement).checked) fByDay = [...fByDay, code];
                         else fByDay = fByDay.filter(d => d !== code);
                       }}
@@ -526,7 +525,7 @@
 
       <label>
         <span>{tl('event_calendar')}</span>
-        <select bind:value={fCalendarHref} disabled={formScope === 'this_instance'} on:change={() => localStorage.setItem('defaultCalendar', fCalendarHref)}>
+        <select bind:value={fCalendarHref} disabled={formScope === 'this_instance'} onchange={() => localStorage.setItem('defaultCalendar', fCalendarHref)}>
           {#each calendars as cal}
             <option value={cal.href}>{cal.name}</option>
           {/each}
@@ -535,9 +534,9 @@
 
       <div class="event-form-actions">
         <button type="submit" disabled={formSaving}>{tl('event_save')}</button>
-        <button type="button" class="secondary" disabled={formSaving} on:click={() => formDialogEl?.close()}>{tl('event_cancel')}</button>
+        <button type="button" class="secondary" disabled={formSaving} onclick={() => formDialogEl?.close()}>{tl('event_cancel')}</button>
         {#if formMode === 'edit'}
-          <button type="button" class="contrast outline" disabled={formSaving} on:click={deleteEvent}>{tl('event_delete')}</button>
+          <button type="button" class="contrast outline" disabled={formSaving} onclick={deleteEvent}>{tl('event_delete')}</button>
         {/if}
       </div>
     </form>

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
   import { makeTl } from '../lib/i18n.ts';
   import type { MonthGridJson } from '../types/calendar.ts';
 
@@ -8,8 +7,8 @@
   export let weekEnd: Date;
   export let todayStr: string;
   export let locale: string;
-
-  const dispatch = createEventDispatcher<{ selectDay: string; navigateToMonth: string }>();
+  export let onselectDay: ((d: string) => void) | undefined = undefined;
+  export let onnavigateToMonth: ((m: string) => void) | undefined = undefined;
 
   $: tl = makeTl(locale);
 
@@ -55,9 +54,9 @@
 
   function onSelectChange(field: 'month' | 'year', val: number) {
     if (field === 'month') {
-      dispatch('navigateToMonth', String(gridYear) + '-' + String(val).padStart(2, '0'));
+      onnavigateToMonth?.(String(gridYear) + '-' + String(val).padStart(2, '0'));
     } else {
-      dispatch('navigateToMonth', String(val) + '-' + String(gridMonthNum).padStart(2, '0'));
+      onnavigateToMonth?.(String(val) + '-' + String(gridMonthNum).padStart(2, '0'));
     }
   }
 </script>
@@ -71,14 +70,14 @@
             <button
               class="nav-btn"
               aria-label={tl('cal_aria_prevMonth')}
-              on:click={() => dispatch('navigateToMonth', monthGrid.prev_month)}
+              onclick={() => onnavigateToMonth?.(monthGrid.prev_month)}
             ><span class="arrow">‹</span></button>
 
             <span class="month-picker">
               <select
                 aria-label={tl('cal_aria_month')}
                 value={gridMonthNum}
-                on:change={(e) => onSelectChange('month', +(e.target as HTMLSelectElement).value)}
+                onchange={(e) => onSelectChange('month', +(e.target as HTMLSelectElement).value)}
               >
                 {#each monthNames as name, i}
                   <option value={i + 1}>{name}</option>
@@ -87,7 +86,7 @@
               <select
                 aria-label={tl('cal_aria_year')}
                 value={gridYear}
-                on:change={(e) => onSelectChange('year', +(e.target as HTMLSelectElement).value)}
+                onchange={(e) => onSelectChange('year', +(e.target as HTMLSelectElement).value)}
               >
                 {#each yearRange as y}
                   <option value={y}>{y}</option>
@@ -98,7 +97,7 @@
             <button
               class="nav-btn"
               aria-label={tl('cal_aria_nextMonth')}
-              on:click={() => dispatch('navigateToMonth', monthGrid.next_month)}
+              onclick={() => onnavigateToMonth?.(monthGrid.next_month)}
             ><span class="arrow">›</span></button>
           </h2>
         </hgroup>
@@ -120,8 +119,8 @@
               data-date={day.date_str}
               role="gridcell"
               tabindex="0"
-              on:click={() => dispatch('selectDay', day.date_str)}
-              on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dispatch('selectDay', day.date_str); } }}
+              onclick={() => onselectDay?.(day.date_str)}
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onselectDay?.(day.date_str); } }}
             >
               <span class="day-number">{day.day_number}</span>
               {#if day.event_colors.length > 0}

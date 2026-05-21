@@ -1,11 +1,9 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
   import type { CalendarJson } from '../types/calendar.ts';
   import EventColorDot from './EventColorDot.svelte';
 
   export let calendars: CalendarJson[];
-
-  const dispatch = createEventDispatcher<{ toggle: { href: string; active: boolean } }>();
+  export let ontoggle: ((data: { href: string; active: boolean }) => void) | undefined = undefined;
 </script>
 
 <ul class="calendar-list">
@@ -15,7 +13,7 @@
         <input
           type="checkbox"
           checked={cal.is_active}
-          on:change={(e) => dispatch('toggle', { href: cal.href, active: (e.target as HTMLInputElement).checked })}
+          onchange={(e) => ontoggle?.({ href: cal.href, active: (e.target as HTMLInputElement).checked })}
         />
         <EventColorDot color={cal.color} />
         {cal.name}
