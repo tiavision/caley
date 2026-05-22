@@ -788,6 +788,9 @@ pub async fn delete_user(pool: &SqlitePool, user_id: &str) -> anyhow::Result<()>
     sqlx::query("DELETE FROM cached_addressbooks WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM cached_contacts WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM contact_push_subscriptions WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM imap_accounts WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM virtual_folders WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM email_image_whitelist WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
 }

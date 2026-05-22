@@ -112,6 +112,8 @@ pub async fn fetch_headers(
                 Default::default()
             };
 
+        let size = fetch.size.map(|s| s as i64);
+
         let subject_idx = subject.as_deref().map(|s| search_mode.normalize_text(s));
         let from_idx = from_addr.as_deref().map(|s| search_mode.normalize_text(s));
 
@@ -126,7 +128,7 @@ pub async fn fetch_headers(
             sent_at,
             flags: Some(flags_json),
             has_attachments: false,
-            // body and idx fields not used in header struct; stored separately
+            size,
         });
         let _ = subject_idx;
         let _ = from_idx;
@@ -134,16 +136,56 @@ pub async fn fetch_headers(
     Ok(headers)
 }
 
-/// Fetches the full raw body for a single UID. Returns (body_text, body_html, has_attachments).
-pub async fn fetch_body(session: &mut ImapSession, uid: u32) -> Result<(String, Option<String>, bool)> {
+/// Parsed attachment extracted from a MIME message.
+pub struct AttachmentPart {
+    pub filename: Option<String>,
+    pub content_type: String,
+    pub content_id: Option<String>,
+    pub bytes: Vec<u8>,
+}
+
+/// Fetches the full raw body for a single UID.
+/// Returns (raw_bytes, body_text, raw_html, has_attachments, attachments).
+pub async fn fetch_body(
+    session: &mut ImapSession,
+    uid: u32,
+) -> Result<(Vec<u8>, String, Option<String>, bool, Vec<AttachmentPart>)> {
     let mut stream = session.uid_fetch(uid.to_string(), "(BODY.PEEK[])").await?;
     if let Some(item) = stream.next().await {
         let fetch = item?;
         if let Some(body_bytes) = fetch.body() {
-            return parse_body_bytes(body_bytes);
+            let raw = body_bytes.to_vec();
+            let (text, html, has_attach, attachments) = parse_body_bytes(body_bytes)?;
+            return Ok((raw, text, html, has_attach, attachments));
         }
     }
-    Ok((String::new(), None, false))
+    Ok((Vec::new(), String::new(), None, false, Vec::new()))
+}
+
+/// Fetches full raw bodies for a list of UIDs in one IMAP command.
+/// Returns a vec of (uid, body_text, raw_html, has_attachments, attachments).
+pub async fn fetch_bodies(
+    session: &mut ImapSession,
+    uids: &[u32],
+) -> Result<Vec<(u32, String, Option<String>, bool, Vec<AttachmentPart>)>> {
+    if uids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let uid_set = uids_to_set(uids);
+    let mut stream = session.uid_fetch(&uid_set, "(BODY.PEEK[])").await?;
+    let mut results = Vec::new();
+    while let Some(item) = stream.next().await {
+        let fetch = item?;
+        let uid = match fetch.uid {
+            Some(u) => u,
+            None => continue,
+        };
+        if let Some(body_bytes) = fetch.body() {
+            let (text, html, has_attach, attachments) = parse_body_bytes(body_bytes)?;
+            results.push((uid, text, html, has_attach, attachments));
+        }
+    }
+    Ok(results)
 }
 
 /// Stores the \Deleted flag and expunges on the server.
@@ -242,12 +284,12 @@ fn format_addr(a: &mail_parser::Addr<'_>) -> String {
     }
 }
 
-fn parse_body_bytes(bytes: &[u8]) -> Result<(String, Option<String>, bool)> {
+fn parse_body_bytes(bytes: &[u8]) -> Result<(String, Option<String>, bool, Vec<AttachmentPart>)> {
     use mail_parser::MessageParser;
     let parser = MessageParser::default();
     let msg = match parser.parse(bytes) {
         Some(m) => m,
-        None => return Ok((String::from_utf8_lossy(bytes).into_owned(), None, false)),
+        None => return Ok((String::from_utf8_lossy(bytes).into_owned(), None, false, Vec::new())),
     };
 
     let has_attachments = msg.attachments().count() > 0;
@@ -263,7 +305,108 @@ fn parse_body_bytes(bytes: &[u8]) -> Result<(String, Option<String>, bool)> {
         String::new()
     };
 
-    Ok((body_text, body_html, has_attachments))
+    let attachments = extract_attachments(&msg);
+
+    Ok((body_text, body_html, has_attachments, attachments))
+}
+
+fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
+    use mail_parser::MimeHeaders;
+    let mut attachments = Vec::new();
+    for part in msg.parts.iter() {
+        let is_attachment = part.content_disposition().map_or(false, |cd| {
+            cd.ctype().to_ascii_lowercase() == "attachment"
+        });
+        let has_filename = part.attachment_name().is_some();
+        let is_inline_image = part.content_disposition().map_or(false, |cd| {
+            cd.ctype().to_ascii_lowercase() == "inline"
+        }) && part.content_type().map_or(false, |ct| {
+            ct.ctype().starts_with("image/")
+        });
+
+        if !is_attachment && !has_filename && !is_inline_image {
+            continue;
+        }
+
+        let filename = part
+            .attachment_name()
+            .map(|s| s.to_owned())
+            .or_else(|| {
+                // Use Content-ID as fallback filename for inline images
+                part.content_id().map(|cid| {
+                    let safe = cid.trim_start_matches('<').trim_end_matches('>').replace(['/', '\\', ':', ' '], "_");
+                    format!("{safe}.bin")
+                })
+            })
+            .unwrap_or_else(|| "untitled".to_string());
+
+        let content_type = part
+            .content_type()
+            .map(|ct| format!("{}/{}", ct.ctype(), ct.subtype().unwrap_or("octet-stream")))
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+
+        let content_id = part.content_id().map(|cid| {
+            cid.trim_start_matches('<').trim_end_matches('>').to_owned()
+        });
+
+        let bytes = match &part.body {
+            mail_parser::PartType::Binary(b) => b.as_ref().to_vec(),
+            mail_parser::PartType::InlineBinary(b) => b.as_ref().to_vec(),
+            mail_parser::PartType::Text(t) => t.as_bytes().to_vec(),
+            mail_parser::PartType::Html(h) => h.as_bytes().to_vec(),
+            _ => Vec::new(),
+        };
+
+        attachments.push(AttachmentPart {
+            filename: Some(filename),
+            content_type,
+            content_id,
+            bytes,
+        });
+    }
+    attachments
+}
+
+/// Rewrite `cid:xxx` URLs in HTML to point at our proxy endpoint.
+pub fn rewrite_cid_urls(
+    html: &str,
+    account_id: &str,
+    mailbox: &str,
+    uid: u32,
+) -> String {
+    use lol_html::{element, HtmlRewriter, Settings};
+
+    let mut output = Vec::with_capacity(html.len() + 256);
+    {
+        let mut rewriter = HtmlRewriter::new(
+            Settings {
+                element_content_handlers: vec![
+                    element!("img", |el| {
+                        if let Some(src) = el.get_attribute("src") {
+                            if let Some(cid) = src.strip_prefix("cid:") {
+                                let encoded_cid: String =
+                                    url::form_urlencoded::byte_serialize(cid.as_bytes()).collect();
+                                let new_src = format!(
+                                    "/api/email/proxy-image?account_id={}&mailbox={}&uid={}&cid={}",
+                                    url::form_urlencoded::byte_serialize(account_id.as_bytes()).collect::<String>(),
+                                    url::form_urlencoded::byte_serialize(mailbox.as_bytes()).collect::<String>(),
+                                    uid,
+                                    encoded_cid
+                                );
+                                el.set_attribute("src", &new_src)?;
+                            }
+                        }
+                        Ok(())
+                    }),
+                ],
+                ..Settings::default()
+            },
+            |c: &[u8]| output.extend_from_slice(c),
+        );
+        let _ = rewriter.write(html.as_bytes());
+        let _ = rewriter.end();
+    }
+    String::from_utf8(output).unwrap_or_else(|_| html.to_owned())
 }
 
 // ── HTML sanitization for email display ──────────────────────────────────────

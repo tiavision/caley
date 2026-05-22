@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_imap::extensions::idle::IdleResponse;
@@ -22,6 +23,7 @@ pub struct EmailSyncManager {
     broadcaster: Arc<SseBroadcaster>,
     sync_interval: Duration,
     search_mode: SearchMode,
+    data_dir: PathBuf,
     /// keyed by account_id
     tasks: Mutex<HashMap<String, mpsc::UnboundedSender<EmailSyncTrigger>>>,
     /// persistent IDLE connections, one per account — keyed by account_id
@@ -35,6 +37,7 @@ impl EmailSyncManager {
         broadcaster: Arc<SseBroadcaster>,
         sync_interval_mins: u64,
         search_mode: SearchMode,
+        data_dir: PathBuf,
     ) -> Arc<Self> {
         Arc::new(Self {
             db,
@@ -42,6 +45,7 @@ impl EmailSyncManager {
             broadcaster,
             sync_interval: Duration::from_secs(sync_interval_mins.saturating_mul(60)),
             search_mode,
+            data_dir,
             tasks: Mutex::new(HashMap::new()),
             idle_tasks: Mutex::new(HashMap::new()),
         })
@@ -335,7 +339,7 @@ impl EmailSyncManager {
             }
         }
 
-        // New on server
+        // New on server — fetch headers
         let new_uids: Vec<u32> = server_uids.difference(&cached_uids).copied().collect();
         if !new_uids.is_empty() {
             let headers = imap_client::fetch_headers(session, &new_uids, &self.search_mode).await?;
@@ -364,6 +368,95 @@ impl EmailSyncManager {
             }
         }
 
+        // Fetch bodies + attachments eagerly for any cached messages missing them
+        let missing_body_uids = email_db::get_cached_uids_missing_body(&self.db, account_id, mailbox).await?;
+        let uids_to_fetch: Vec<u32> = new_uids.into_iter()
+            .chain(missing_body_uids)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        if !uids_to_fetch.is_empty() {
+            for chunk in uids_to_fetch.chunks(50) {
+                match imap_client::fetch_bodies(session, chunk).await {
+                    Ok(bodies) => {
+                        for (uid, body_text, body_html, has_attach, attachments) in bodies {
+                            let body_idx = self.search_mode.normalize_text(&body_text);
+                            let html = body_html.map(|h| imap_client::rewrite_cid_urls(&h, account_id, mailbox, uid));
+
+                            email_db::update_message_body(
+                                &self.db, account_id, mailbox, uid,
+                                &body_text, html.as_deref(), &body_idx, has_attach, None,
+                            ).await?;
+
+                            if !attachments.is_empty() {
+                                let uid_hash = sha2_hex(format!("{account_id}:{mailbox}:{uid}"));
+                                let att_dir = self.data_dir.join("attachments").join(user_id).join(&uid_hash);
+
+                                for att in attachments {
+                                    let filename = sanitize_filename(att.filename.as_deref().unwrap_or("untitled"));
+                                    tokio::fs::create_dir_all(&att_dir).await?;
+                                    let path = unique_file_path(&att_dir, &filename);
+                                    tokio::fs::write(&path, &att.bytes).await?;
+                                    let fs_path = path.to_string_lossy().to_string();
+                                    email_db::insert_attachment(
+                                        &self.db, account_id, mailbox, uid,
+                                        &filename, &att.content_type, att.bytes.len() as i64,
+                                        &fs_path, att.content_id.as_deref(),
+                                    ).await?;
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[email_sync] fetch_bodies error for {mailbox}: {e}");
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
+}
+
+fn sha2_hex(input: String) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => c,
+        })
+        .collect::<String>()
+}
+
+fn unique_file_path(dir: &std::path::Path, filename: &str) -> std::path::PathBuf {
+    let path = dir.join(filename);
+    if !path.exists() {
+        return path;
+    }
+    let stem = std::path::Path::new(filename)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file");
+    let ext = std::path::Path::new(filename)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    for i in 1..=1000 {
+        let candidate = if ext.is_empty() {
+            dir.join(format!("{}_{}", stem, i))
+        } else {
+            dir.join(format!("{}_{}.{}", stem, i, ext))
+        };
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(format!("{}_{}.bin", stem, uuid::Uuid::new_v4()))
 }

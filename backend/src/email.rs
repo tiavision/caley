@@ -101,6 +101,13 @@ pub async fn delete_account(
     user: CurrentUser,
     Query(q): Query<AccountIdQuery>,
 ) -> impl IntoResponse {
+    // Delete attachment files before the DB transaction removes the records
+    if let Ok(paths) = email_db::get_attachment_paths_for_account(&state.db, &q.account_id).await {
+        for path in paths {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
     if let Err(e) = email_db::delete_account(&state.db, &q.account_id, &user.user_id).await {
         eprintln!("[email] delete_account error: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
@@ -291,38 +298,16 @@ pub async fn get_message(
             eprintln!("[email] get_message account lookup error: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
         }
-        Ok(Some(account)) => {
-            // Fetch body from IMAP if not cached
-            let cached = email_db::get_message(&state.db, &q.account_id, &q.mailbox, q.uid)
-                .await
-                .unwrap_or(None);
-
-            let needs_body = cached.as_ref().map_or(true, |m| m.body_text.is_none());
-            if needs_body {
-                match imap_client::connect(&account.host, account.port as u16, &account.username, &account.password).await {
-                    Ok(mut session) => {
-                        if imap_client::select_mailbox(&mut session, &q.mailbox).await.is_ok() {
-                            match imap_client::fetch_body(&mut session, q.uid).await {
-                                Ok((body_text, body_html, _has_att)) => {
-                                    let body_idx = state.search_mode.normalize_text(&body_text);
-                                    let _ = email_db::update_message_body(
-                                        &state.db, &q.account_id, &q.mailbox, q.uid,
-                                        &body_text, body_html.as_deref(), &body_idx,
-                                    ).await;
-                                }
-                                Err(e) => eprintln!("[email] fetch_body error: {e}"),
-                            }
-                        }
-                        let _ = session.logout().await;
-                    }
-                    Err(e) => eprintln!("[email] connect for body fetch error: {e}"),
-                }
-            }
-        }
+        Ok(Some(_)) => {}
     }
 
     match email_db::get_message(&state.db, &q.account_id, &q.mailbox, q.uid).await {
-        Ok(Some(msg)) => Json(message_to_json(&msg)).into_response(),
+        Ok(Some(msg)) => {
+            let attachments = email_db::list_attachments(&state.db, &q.account_id, &q.mailbox, q.uid)
+                .await
+                .unwrap_or_default();
+            Json(message_to_json_with_attachments(&msg, &attachments)).into_response()
+        }
         Ok(None) => (StatusCode::NOT_FOUND, "message not found").into_response(),
         Err(e) => {
             eprintln!("[email] get_message error: {e}");
@@ -433,6 +418,13 @@ pub async fn delete_message(
         Err(e) => eprintln!("[email] connect for delete error: {e}"),
     }
 
+    // Delete attachment files from disk before removing DB rows
+    if let Ok(attachments) = email_db::delete_attachments_for_message(&state.db, &q.account_id, &q.mailbox, q.uid).await {
+        for att in attachments {
+            let _ = std::fs::remove_file(&att.fs_path);
+        }
+    }
+
     let _ = email_db::delete_message(&state.db, &q.account_id, &q.mailbox, q.uid).await;
 
     state.sse_broadcaster.send(&user.user_id, SseMessage::EmailRemoved {
@@ -521,6 +513,13 @@ pub async fn search(
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn message_to_json(m: &email_db::MessageRow) -> serde_json::Value {
+    message_to_json_with_attachments(m, &[])
+}
+
+fn message_to_json_with_attachments(
+    m: &email_db::MessageRow,
+    attachments: &[email_db::AttachmentRow],
+) -> serde_json::Value {
     let to: Vec<String> = m.to_addrs.as_deref()
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or_default();
@@ -530,6 +529,14 @@ fn message_to_json(m: &email_db::MessageRow) -> serde_json::Value {
     let flags: Vec<String> = m.flags.as_deref()
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or_default();
+
+    let att_list: Vec<serde_json::Value> = attachments.iter().map(|a| {
+        json!({
+            "filename": a.filename,
+            "content_type": a.content_type,
+            "size": a.size,
+        })
+    }).collect();
 
     json!({
         "uid": m.uid,
@@ -548,6 +555,7 @@ fn message_to_json(m: &email_db::MessageRow) -> serde_json::Value {
         "body_html": m.body_html,
         "is_read": flags.iter().any(|f| f == "\\Seen"),
         "is_flagged": flags.iter().any(|f| f == "\\Flagged"),
+        "attachments": att_list,
     })
 }
 
@@ -555,7 +563,11 @@ fn message_to_json(m: &email_db::MessageRow) -> serde_json::Value {
 
 #[derive(Deserialize)]
 pub struct ProxyImageQuery {
-    pub url: String,
+    pub url: Option<String>,
+    pub account_id: Option<String>,
+    pub mailbox: Option<String>,
+    pub uid: Option<u32>,
+    pub cid: Option<String>,
 }
 
 pub async fn proxy_image(
@@ -563,10 +575,37 @@ pub async fn proxy_image(
     user: CurrentUser,
     Query(q): Query<ProxyImageQuery>,
 ) -> Response {
-    let url = &q.url;
+    // CID-based inline attachment lookup
+    if let (Some(cid), Some(account_id), Some(mailbox), Some(uid)) = (&q.cid, &q.account_id, &q.mailbox, q.uid) {
+        let att = match email_db::get_attachment_by_cid(&state.db, account_id, mailbox, uid, cid).await {
+            Ok(Some(a)) => a,
+            _ => return transparent_pixel(),
+        };
 
-    // Validate scheme and SSRF safety
-    let parsed = match url::Url::parse(url) {
+        let bytes = match tokio::fs::read(&att.fs_path).await {
+            Ok(b) => b,
+            Err(_) => return transparent_pixel(),
+        };
+
+        let ct = att.content_type.unwrap_or_else(|| "application/octet-stream".to_string());
+        return (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, ct),
+                (header::CACHE_CONTROL, "private, max-age=3600".to_string()),
+                (header::HeaderName::from_static("x-content-type-options"), "nosniff".to_string()),
+            ],
+            bytes,
+        )
+            .into_response();
+    }
+
+    // External URL proxy (original behaviour)
+    let Some(url) = q.url else {
+        return (StatusCode::BAD_REQUEST, "invalid url").into_response();
+    };
+
+    let parsed = match url::Url::parse(&url) {
         Ok(u) if matches!(u.scheme(), "http" | "https") => u,
         _ => return (StatusCode::BAD_REQUEST, "invalid url").into_response(),
     };
@@ -575,7 +614,6 @@ pub async fn proxy_image(
         return transparent_pixel();
     }
 
-    // Extract origin and check whitelist
     let Some(host) = parsed.host_str() else {
         return transparent_pixel();
     };
@@ -586,18 +624,16 @@ pub async fn proxy_image(
         _ => return transparent_pixel(),
     }
 
-    // Fetch the image
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
         .unwrap_or_default();
 
-    let resp = match client.get(url).send().await {
+    let resp = match client.get(&url).send().await {
         Ok(r) => r,
         Err(_) => return transparent_pixel(),
     };
 
-    // Validate Content-Type is an image but not SVG (SVGs can contain scripts)
     let ct = resp
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -620,6 +656,63 @@ pub async fn proxy_image(
         [
             (header::CONTENT_TYPE, ct_owned),
             (header::CACHE_CONTROL, "private, max-age=3600".to_string()),
+            (header::HeaderName::from_static("x-content-type-options"), "nosniff".to_string()),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
+// ── Attachment download ───────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct DownloadAttachmentQuery {
+    pub account_id: String,
+    pub mailbox: String,
+    pub uid: u32,
+    pub filename: String,
+}
+
+pub async fn download_attachment(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<DownloadAttachmentQuery>,
+) -> Response {
+    // Verify account belongs to user
+    match email_db::get_account(&state.db, &q.account_id, &user.user_id, &state.encryption_key).await {
+        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
+        Err(e) => {
+            eprintln!("[email] download_attachment account lookup error: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+        Ok(Some(_)) => {}
+    }
+
+    let att = match email_db::get_attachment_by_filename(&state.db, &q.account_id, &q.mailbox, q.uid, &q.filename).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return (StatusCode::NOT_FOUND, "attachment not found").into_response(),
+        Err(e) => {
+            eprintln!("[email] download_attachment lookup error: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+    };
+
+    let bytes = match tokio::fs::read(&att.fs_path).await {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("[email] download_attachment read error: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "file read error").into_response();
+        }
+    };
+
+    let ct = att.content_type.unwrap_or_else(|| "application/octet-stream".to_string());
+    let disposition = format!("attachment; filename=\"{}\"", q.filename.replace('"', "\\\""));
+
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, ct),
+            (header::HeaderName::from_static("content-disposition"), disposition),
             (header::HeaderName::from_static("x-content-type-options"), "nosniff".to_string()),
         ],
         bytes,

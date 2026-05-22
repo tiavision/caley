@@ -246,6 +246,7 @@ pub struct MessageHeader {
     pub sent_at: Option<i64>,
     pub flags: Option<String>,
     pub has_attachments: bool,
+    pub size: Option<i64>,
 }
 
 pub async fn upsert_message_header(
@@ -259,8 +260,8 @@ pub async fn upsert_message_header(
     sqlx::query(
         "INSERT INTO cached_messages
             (account_id, mailbox, uid, message_id, thread_id, from_addr, to_addrs, cc_addrs,
-             subject, sent_at, flags, has_attachments, subject_idx, from_idx)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             subject, sent_at, flags, has_attachments, size, subject_idx, from_idx)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(account_id, mailbox, uid) DO UPDATE SET
             message_id      = excluded.message_id,
             thread_id       = excluded.thread_id,
@@ -271,6 +272,7 @@ pub async fn upsert_message_header(
             sent_at         = excluded.sent_at,
             flags           = excluded.flags,
             has_attachments = excluded.has_attachments,
+            size            = excluded.size,
             subject_idx     = excluded.subject_idx,
             from_idx        = excluded.from_idx",
     )
@@ -286,6 +288,7 @@ pub async fn upsert_message_header(
     .bind(h.sent_at)
     .bind(&h.flags)
     .bind(h.has_attachments as i64)
+    .bind(h.size)
     .bind(subject_idx)
     .bind(from_idx)
     .execute(pool)
@@ -320,13 +323,17 @@ pub async fn update_message_body(
     body_text: &str,
     body_html: Option<&str>,
     body_idx: &str,
+    has_attachments: bool,
+    size: Option<i64>,
 ) -> Result<()> {
     sqlx::query(
-        "UPDATE cached_messages SET body_text = ?, body_html = ?, body_idx = ? WHERE account_id = ? AND mailbox = ? AND uid = ?",
+        "UPDATE cached_messages SET body_text = ?, body_html = ?, body_idx = ?, has_attachments = ?, size = ? WHERE account_id = ? AND mailbox = ? AND uid = ?",
     )
     .bind(body_text)
     .bind(body_html)
     .bind(body_idx)
+    .bind(has_attachments as i64)
+    .bind(size)
     .bind(account_id)
     .bind(mailbox)
     .bind(uid as i64)
@@ -385,6 +392,21 @@ pub async fn get_cached_uids(
     Ok(rows.iter().map(|r| r.get::<i64, _>(0) as u32).collect())
 }
 
+pub async fn get_cached_uids_missing_body(
+    pool: &SqlitePool,
+    account_id: &str,
+    mailbox: &str,
+) -> Result<Vec<u32>> {
+    let rows = sqlx::query(
+        "SELECT uid FROM cached_messages WHERE account_id = ? AND mailbox = ? AND body_text IS NULL",
+    )
+    .bind(account_id)
+    .bind(mailbox)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(|r| r.get::<i64, _>(0) as u32).collect())
+}
+
 pub struct MessageRow {
     pub uid: i64,
     pub account_id: String,
@@ -400,6 +422,201 @@ pub struct MessageRow {
     pub has_attachments: bool,
     pub body_text: Option<String>,
     pub body_html: Option<String>,
+    pub size: Option<i64>,
+}
+
+// ── Attachments ───────────────────────────────────────────────────────────────
+
+pub struct AttachmentRow {
+    pub id: i64,
+    pub account_id: String,
+    pub mailbox: String,
+    pub uid: i64,
+    pub filename: Option<String>,
+    pub content_type: Option<String>,
+    pub size: Option<i64>,
+    pub fs_path: String,
+    pub content_id: Option<String>,
+}
+
+pub async fn insert_attachment(
+    pool: &SqlitePool,
+    account_id: &str,
+    mailbox: &str,
+    uid: u32,
+    filename: &str,
+    content_type: &str,
+    size: i64,
+    fs_path: &str,
+    content_id: Option<&str>,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO cached_attachments (account_id, mailbox, uid, filename, content_type, size, fs_path, content_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(account_id)
+    .bind(mailbox)
+    .bind(uid as i64)
+    .bind(filename)
+    .bind(content_type)
+    .bind(size)
+    .bind(fs_path)
+    .bind(content_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn list_attachments(
+    pool: &SqlitePool,
+    account_id: &str,
+    mailbox: &str,
+    uid: u32,
+) -> Result<Vec<AttachmentRow>> {
+    let rows = sqlx::query(
+        "SELECT id, account_id, mailbox, uid, filename, content_type, size, fs_path, content_id
+         FROM cached_attachments WHERE account_id = ? AND mailbox = ? AND uid = ?",
+    )
+    .bind(account_id)
+    .bind(mailbox)
+    .bind(uid as i64)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .iter()
+        .map(|r| AttachmentRow {
+            id: r.get(0),
+            account_id: r.get(1),
+            mailbox: r.get(2),
+            uid: r.get(3),
+            filename: r.get(4),
+            content_type: r.get(5),
+            size: r.get(6),
+            fs_path: r.get(7),
+            content_id: r.get(8),
+        })
+        .collect())
+}
+
+pub async fn get_attachment_by_cid(
+    pool: &SqlitePool,
+    account_id: &str,
+    mailbox: &str,
+    uid: u32,
+    cid: &str,
+) -> Result<Option<AttachmentRow>> {
+    let row = sqlx::query(
+        "SELECT id, account_id, mailbox, uid, filename, content_type, size, fs_path, content_id
+         FROM cached_attachments
+         WHERE account_id = ? AND mailbox = ? AND uid = ? AND content_id = ?",
+    )
+    .bind(account_id)
+    .bind(mailbox)
+    .bind(uid as i64)
+    .bind(cid)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|r| AttachmentRow {
+        id: r.get(0),
+        account_id: r.get(1),
+        mailbox: r.get(2),
+        uid: r.get(3),
+        filename: r.get(4),
+        content_type: r.get(5),
+        size: r.get(6),
+        fs_path: r.get(7),
+        content_id: r.get(8),
+    }))
+}
+
+pub async fn get_attachment_by_filename(
+    pool: &SqlitePool,
+    account_id: &str,
+    mailbox: &str,
+    uid: u32,
+    filename: &str,
+) -> Result<Option<AttachmentRow>> {
+    let row = sqlx::query(
+        "SELECT id, account_id, mailbox, uid, filename, content_type, size, fs_path, content_id
+         FROM cached_attachments
+         WHERE account_id = ? AND mailbox = ? AND uid = ? AND filename = ?",
+    )
+    .bind(account_id)
+    .bind(mailbox)
+    .bind(uid as i64)
+    .bind(filename)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|r| AttachmentRow {
+        id: r.get(0),
+        account_id: r.get(1),
+        mailbox: r.get(2),
+        uid: r.get(3),
+        filename: r.get(4),
+        content_type: r.get(5),
+        size: r.get(6),
+        fs_path: r.get(7),
+        content_id: r.get(8),
+    }))
+}
+
+pub async fn delete_attachments_for_message(
+    pool: &SqlitePool,
+    account_id: &str,
+    mailbox: &str,
+    uid: u32,
+) -> Result<Vec<AttachmentRow>> {
+    let rows = sqlx::query(
+        "SELECT id, account_id, mailbox, uid, filename, content_type, size, fs_path, content_id
+         FROM cached_attachments
+         WHERE account_id = ? AND mailbox = ? AND uid = ?",
+    )
+    .bind(account_id)
+    .bind(mailbox)
+    .bind(uid as i64)
+    .fetch_all(pool)
+    .await?;
+
+    let attachments: Vec<AttachmentRow> = rows
+        .iter()
+        .map(|r| AttachmentRow {
+            id: r.get(0),
+            account_id: r.get(1),
+            mailbox: r.get(2),
+            uid: r.get(3),
+            filename: r.get(4),
+            content_type: r.get(5),
+            size: r.get(6),
+            fs_path: r.get(7),
+            content_id: r.get(8),
+        })
+        .collect();
+
+    sqlx::query("DELETE FROM cached_attachments WHERE account_id = ? AND mailbox = ? AND uid = ?")
+        .bind(account_id)
+        .bind(mailbox)
+        .bind(uid as i64)
+        .execute(pool)
+        .await?;
+
+    Ok(attachments)
+}
+
+pub async fn get_attachment_paths_for_account(
+    pool: &SqlitePool,
+    account_id: &str,
+) -> Result<Vec<String>> {
+    let rows = sqlx::query(
+        "SELECT fs_path FROM cached_attachments WHERE account_id = ?",
+    )
+    .bind(account_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.iter().map(|r: &sqlx::sqlite::SqliteRow| r.get::<String, _>(0)).collect())
 }
 
 pub async fn list_messages(
@@ -485,7 +702,7 @@ pub async fn get_message(
 ) -> Result<Option<MessageRow>> {
     let row = sqlx::query(
         "SELECT uid, account_id, mailbox, message_id, thread_id, from_addr, to_addrs, cc_addrs,
-                subject, sent_at, flags, has_attachments, body_text, body_html
+                subject, sent_at, flags, has_attachments, body_text, body_html, size
          FROM cached_messages WHERE account_id = ? AND mailbox = ? AND uid = ?",
     )
     .bind(account_id)
@@ -512,6 +729,7 @@ fn row_to_message(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
         has_attachments: r.get::<i64, _>(11) != 0,
         body_text: r.get(12),
         body_html: None,
+        size: None,
     }
 }
 
@@ -531,6 +749,7 @@ fn row_to_message_full(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
         has_attachments: r.get::<i64, _>(11) != 0,
         body_text: r.get(12),
         body_html: r.get(13),
+        size: r.get(14),
     }
 }
 

@@ -25,6 +25,7 @@ use clap::Parser;
 use dotenvy::dotenv;
 use oidc::{AppState, AuthMode, UserIdClaim};
 use search::SearchMode;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
@@ -85,6 +86,11 @@ async fn main() -> anyhow::Result<()> {
 
     let auth_mode = if use_oidc { AuthMode::Oidc } else { AuthMode::Local };
 
+    let data_dir = PathBuf::from(&args.database_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("./data"));
+
     let sync_manager = sync::SyncManager::new(
         db.clone(),
         encryption_key,
@@ -100,6 +106,7 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&sse_broadcaster),
         args.sync_interval_mins,
         search_mode.clone(),
+        data_dir.clone(),
     );
 
     let session_store = SqliteStore::new(db.clone());
@@ -116,6 +123,7 @@ async fn main() -> anyhow::Result<()> {
         auth_mode: auth_mode.clone(),
         search_mode,
         map_url: args.map_url,
+        data_dir,
     };
 
     let static_dir = args.static_dir
@@ -171,6 +179,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/email/send", post(email::send_email))
         .route("/api/email/search", get(email::search))
         .route("/api/email/proxy-image", get(email::proxy_image))
+        .route("/api/email/attachment", get(email::download_attachment))
         .route("/api/email/image-origins", get(email::list_image_origins))
         .route("/api/email/image-origins", post(email::add_image_origin))
         .route("/api/email/image-origins", delete(email::remove_image_origin));

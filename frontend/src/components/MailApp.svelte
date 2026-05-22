@@ -29,6 +29,12 @@
     rules: { account_id: string | null; mailbox_pattern: string | null }[];
   }
 
+  interface Attachment {
+    filename: string;
+    content_type: string;
+    size: number;
+  }
+
   interface Message {
     uid: number;
     account_id: string;
@@ -46,6 +52,7 @@
     body_html: string | null;
     is_read: boolean;
     is_flagged: boolean;
+    attachments: Attachment[];
   }
 
   // ── State ────────────────────────────────────────────────────────────────
@@ -536,12 +543,16 @@
   }
 
   function hasRealHtml(html: string | null, text: string | null): boolean {
-    if (!html?.trim()) return false;
-    if (!html.includes('<')) return false;
-    // Strip tags and collapse whitespace; if the result is the same as the text, it's not real HTML
+    if (!html) return false;
     const stripped = html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
     const textNorm = text?.replace(/\s+/g, ' ').trim() || '';
-    return stripped !== textNorm;
+    return stripped !== textNorm && stripped.length > 0;
+  }
+
+  function humanSize(bytes: number): string {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
   function senderName(from: string | null): string {
@@ -584,8 +595,6 @@
   <div class="mail-layout">
     <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
     <aside class="mail-sidebar">
-      <button class="compose-btn" on:click={() => openCompose()}>Compose</button>
-
       <!-- Virtual folders -->
       {#if virtualFolders.length > 0}
         <div class="sidebar-section">
@@ -725,6 +734,19 @@
           {/if}
           <div><strong>Date:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
         </div>
+        {#if selectedMessage.attachments && selectedMessage.attachments.length > 0}
+          <div class="attachments">
+            {#each selectedMessage.attachments as att}
+              <a
+                class="attachment-link"
+                href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
+                download={att.filename}
+              >
+                {att.filename} ({humanSize(att.size)})
+              </a>
+            {/each}
+          </div>
+        {/if}
         <div class="detail-body">
           {#if messageLoading && !selectedMessage.body_text && !selectedMessage.body_html}
             <div class="loading">Loading body…</div>
@@ -755,7 +777,7 @@
               {/if}
               {#key iframeKey}
                 <iframe
-                  sandbox="allow-popups"
+                  sandbox="allow-popups allow-same-origin"
                   srcdoc={selectedMessage.body_html}
                   title="Email body"
                   class="html-body"
@@ -782,8 +804,6 @@
   on:click={(e) => { if (e.target === e.currentTarget) sidebarDialog?.close(); }}
 >
   <div class="drawer-content">
-    <button class="compose-btn" on:click={() => { sidebarDialog?.close(); openCompose(); }}>Compose</button>
-
     {#if virtualFolders.length > 0}
       <div class="sidebar-section">
         <div class="sidebar-section-header">
@@ -876,6 +896,19 @@
         {/if}
         <div><strong>Date:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
       </div>
+      {#if selectedMessage.attachments && selectedMessage.attachments.length > 0}
+        <div class="attachments">
+          {#each selectedMessage.attachments as att}
+            <a
+              class="attachment-link"
+              href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
+              download={att.filename}
+            >
+              {att.filename} ({humanSize(att.size)})
+            </a>
+          {/each}
+        </div>
+      {/if}
       <div class="detail-body">
         {#if hasRealHtml(selectedMessage.body_html, selectedMessage.body_text)}
           <div class="view-toggle">
@@ -903,7 +936,7 @@
           {/if}
           {#key iframeKey}
             <iframe
-              sandbox="allow-popups"
+              sandbox="allow-popups allow-same-origin"
               srcdoc={selectedMessage.body_html}
               title="Email body"
               class="html-body"
@@ -1125,22 +1158,6 @@
     flex-direction: column;
     overflow-y: auto;
     padding-bottom: 1rem;
-  }
-
-  .compose-btn {
-    margin: 0.75rem;
-    padding: 0.5rem 1rem;
-    background: var(--pico-primary-background, #0172ad);
-    color: var(--pico-primary-inverse, white);
-    border: none;
-    border-radius: var(--pico-border-radius, 4px);
-    cursor: pointer;
-    font-size: 0.9rem;
-    text-align: left;
-  }
-
-  .compose-btn:hover {
-    opacity: 0.9;
   }
 
   .sidebar-section {
@@ -1396,6 +1413,30 @@
     margin-bottom: 0.1rem;
   }
 
+  .attachments {
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid var(--pico-muted-border-color, #eee);
+    flex-shrink: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .attachment-link {
+    display: inline-block;
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--pico-muted-border-color, #ddd);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    text-decoration: none;
+    color: var(--pico-primary, #2a6496);
+    background: var(--pico-card-background-color, #f8f8f8);
+  }
+
+  .attachment-link:hover {
+    background: var(--pico-primary-background, #e8f0f8);
+  }
+
   .detail-body {
     flex: 1;
     overflow-y: auto;
@@ -1626,10 +1667,6 @@
 
     .sidebar-toggle {
       display: block;
-    }
-
-    .compose-btn {
-      display: none;
     }
 
     .fab {

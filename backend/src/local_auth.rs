@@ -104,6 +104,10 @@ pub async fn delete_account(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to delete account"}))).into_response();
     }
 
+    // Clean up attachment files for this user
+    let user_att_dir = state.data_dir.join("attachments").join(&user.user_id);
+    let _ = std::fs::remove_dir_all(&user_att_dir);
+
     let redirect = match state.auth_mode {
         AuthMode::Local => {
             session.flush().await.ok();

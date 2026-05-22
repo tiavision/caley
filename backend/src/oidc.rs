@@ -9,6 +9,7 @@ use clap::ValueEnum;
 use futures_util::future::BoxFuture;
 use serde_json::json;
 use std::{
+    path::PathBuf,
     sync::Arc,
     task::{Context, Poll},
 };
@@ -45,6 +46,7 @@ pub struct AppState {
     pub auth_mode: AuthMode,
     pub search_mode: SearchMode,
     pub map_url: String,
+    pub data_dir: PathBuf,
 }
 
 pub struct CurrentUser {
