@@ -170,6 +170,7 @@
 
   function selectDay(dateStr: string) {
     monthPickerOpen = false;
+    focusedEventDate = dateStr;
     const [y, mo, dd] = dateStr.split('-').map(Number);
     selectedWeekStart = getMonday(new Date(y, mo - 1, dd));
     fetchEvents();
@@ -449,18 +450,26 @@
           class:day-collapsible={day.events.length > 0}
           data-date={day.date_iso}
         >
-          <button type="button" class="day-heading"
-            title={new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { dateStyle: 'long' })}
-            onclick={() => { if (day.events.length > 0) toggleDay(day.date_iso); }}>
-            {new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { weekday: 'long' })}
-            {#if collapsed && day.events.length > 0}
-              <span class="day-past-count">{day.events.length}</span>
-            {/if}
-            {#if day.events.length > 0}
-              <span class="day-expand-icon" aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
-            {/if}
-            <span class="day-date">{new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { month: 'short', day: 'numeric' })}</span>
-          </button>
+          <div class="day-header-row">
+            <button type="button" class="day-heading"
+              title={new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { dateStyle: 'long' })}
+              onclick={() => { focusedEventDate = day.date_iso; if (day.events.length > 0) toggleDay(day.date_iso); }}>
+              {new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { weekday: 'long' })}
+              {#if collapsed && day.events.length > 0}
+                <span class="day-past-count">{day.events.length}</span>
+              {/if}
+              {#if day.events.length > 0}
+                <span class="day-expand-icon" aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
+              {/if}
+              <span class="day-date">{new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { month: 'short', day: 'numeric' })}</span>
+            </button>
+            <button type="button" class="day-add-btn" aria-label={tl('event_new')}
+              onclick={() => { focusedEventDate = day.date_iso; formDialog.openNewEventForm(); }}>
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+                <line x1="8" y1="2" x2="8" y2="14"/><line x1="2" y1="8" x2="14" y2="8"/>
+              </svg>
+            </button>
+          </div>
           <div class="appointments">
             {#each day.events as event (event.uid + event.dtstart)}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -550,7 +559,6 @@
   .month-picker-popover {
     position: absolute; top: calc(100% + 0.5rem); left: 0; z-index: 51;
     min-width: 18rem; max-width: calc(100vw - 2rem);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
     border-radius: var(--pico-border-radius);
   }
   .header-actions {
@@ -598,7 +606,10 @@
     grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 0.5rem;
   }
-  @media (max-width: 959px) { .calendar { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 959px) {
+    .calendar { grid-template-columns: minmax(0, 1fr); }
+    .weekly { min-height: 100svh; }
+  }
 
   .week-loading {
     position: absolute;
@@ -619,13 +630,26 @@
   :global(.day.today) { border-top: 2px solid var(--pico-primary-background); }
   :global(.day.today .day-heading) { color: var(--pico-primary-background); font-weight: bold; }
 
+  .day-header-row {
+    display: flex; align-items: center; gap: 0.25rem;
+  }
   .day-heading {
     background: none; border: none; margin: 0; padding: 0;
     color: inherit; font: inherit; text-align: inherit; cursor: pointer;
     font-size: 1.125rem; font-weight: 700; line-height: 1.225;
-    width: 100%; display: block;
+    flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .day-heading:focus:not(:focus-visible) { outline: none; }
+  .day-add-btn {
+    background: none; border: none; padding: 0.2rem 0.3rem; margin: 0;
+    cursor: pointer; color: var(--pico-muted-color);
+    border-radius: 4px; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; opacity: 0;
+    transition: opacity 120ms, color 120ms, background 120ms;
+  }
+  .day-header-row:hover .day-add-btn,
+  .day-add-btn:focus-visible { opacity: 1; }
+  .day-add-btn:hover { color: var(--pico-primary-background); background: var(--pico-primary-hover-background, rgba(0,0,0,0.07)); }
   .calendar:focus:not(:focus-visible) { outline: none; }
   .day-date { display: none; }
   .day-expand-icon { display: none; }
@@ -633,6 +657,7 @@
   :global(.appointments) { margin-top: 0.4rem; }
 
   @media (max-width: 959px) {
+    .day-add-btn { opacity: 1; }
     .day-heading {
       display: flex;
       align-items: center;
