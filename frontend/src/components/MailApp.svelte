@@ -70,13 +70,11 @@
   let sseSource: EventSource | null = null;
 
   // Account form
-  let showAccountForm = false;
   let accountForm = emptyAccountForm();
   let accountSaving = false;
   let accountError = '';
 
   // Compose form
-  let showCompose = false;
   let composeTo = '';
   let composeSubject = '';
   let composeBody = '';
@@ -86,7 +84,6 @@
   let composeError = '';
 
   // Virtual folder form
-  let showFolderForm = false;
   let folderName = '';
   let folderSaving = false;
 
@@ -97,6 +94,16 @@
   let viewMode: 'html' | 'text' = 'text';
   let imageOrigins: string[] = [];
   let iframeKey = 0;
+
+  // Dialog refs
+  let accountDialog: HTMLDialogElement;
+  let composeDialog: HTMLDialogElement;
+  let folderDialog: HTMLDialogElement;
+  let detailDialog: HTMLDialogElement;
+  let sidebarDialog: HTMLDialogElement;
+
+  let isMobile = false;
+  let mediaQueryListener: ((e: MediaQueryListEvent) => void) | null = null;
 
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -111,10 +118,19 @@
 
     await loadAll();
     connectSSE();
+
+    const mql = window.matchMedia('(max-width: 767px)');
+    isMobile = mql.matches;
+    mediaQueryListener = (e: MediaQueryListEvent) => { isMobile = e.matches; };
+    mql.addEventListener('change', mediaQueryListener);
   });
 
   onDestroy(() => {
     sseSource?.close();
+    if (mediaQueryListener) {
+      const mql = window.matchMedia('(max-width: 767px)');
+      mql.removeEventListener('change', mediaQueryListener);
+    }
   });
 
   // ── Data loading ─────────────────────────────────────────────────────────
@@ -201,6 +217,7 @@
     selectedFolderId = null;
     selectedMessage = null;
     messagesOffset = 0;
+    sidebarDialog?.close();
     await loadMessages();
   }
 
@@ -210,6 +227,7 @@
     selectedMailbox = null;
     selectedMessage = null;
     messagesOffset = 0;
+    sidebarDialog?.close();
     await loadMessages();
   }
 
@@ -244,7 +262,7 @@
       if (r.ok) {
         const full = await r.json();
         selectedMessage = full;
-        viewMode = full.body_html ? 'html' : 'text';
+        viewMode = hasRealHtml(full.body_html, full.body_text) ? 'html' : 'text';
         // Update in list
         messages = messages.map(m =>
           m.uid === msg.uid && m.account_id === msg.account_id && m.mailbox === msg.mailbox ? full : m
@@ -256,6 +274,14 @@
       }
     } catch {}
     messageLoading = false;
+    if (isMobile && !detailDialog?.open) {
+      detailDialog?.showModal();
+    }
+  }
+
+  function closeDetail() {
+    detailDialog?.close();
+    selectedMessage = null;
   }
 
   async function setFlag(msg: Message, flag: string, set: boolean) {
@@ -293,7 +319,7 @@
     );
     messages = messages.filter(m => !(m.uid === msg.uid && m.account_id === msg.account_id));
     if (selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id) {
-      selectedMessage = null;
+      closeDetail();
     }
   }
 
@@ -316,7 +342,7 @@
   function openAddAccount() {
     accountForm = emptyAccountForm();
     accountError = '';
-    showAccountForm = true;
+    accountDialog?.showModal();
   }
 
   function openEditAccount(acc: Account) {
@@ -332,7 +358,7 @@
       smtp_port: acc.smtp_port || 587,
     };
     accountError = '';
-    showAccountForm = true;
+    accountDialog?.showModal();
   }
 
   async function saveAccount() {
@@ -358,7 +384,7 @@
         const text = await r.text();
         accountError = text || 'Failed to save account.';
       } else {
-        showAccountForm = false;
+        accountDialog?.close();
         await loadAccounts();
         for (const acc of accounts) {
           await loadMailboxes(acc.account_id);
@@ -402,7 +428,7 @@
       composeInReplyTo = null;
       composeAccountId = accounts[0]?.account_id || '';
     }
-    showCompose = true;
+    composeDialog?.showModal();
   }
 
   async function sendEmail() {
@@ -424,7 +450,7 @@
         const text = await r.text();
         composeError = text || 'Failed to send.';
       } else {
-        showCompose = false;
+        composeDialog?.close();
       }
     } catch {
       composeError = 'Failed to send.';
@@ -446,7 +472,7 @@
         }),
       });
       folderName = '';
-      showFolderForm = false;
+      folderDialog?.close();
       await loadVirtualFolders();
     } catch {}
     folderSaving = false;
@@ -509,6 +535,15 @@
     return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
+  function hasRealHtml(html: string | null, text: string | null): boolean {
+    if (!html?.trim()) return false;
+    if (!html.includes('<')) return false;
+    // Strip tags and collapse whitespace; if the result is the same as the text, it's not real HTML
+    const stripped = html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+    const textNorm = text?.replace(/\s+/g, ' ').trim() || '';
+    return stripped !== textNorm;
+  }
+
   function senderName(from: string | null): string {
     if (!from) return '(unknown)';
     const match = from.match(/^(.+?)\s*<[^>]+>/);
@@ -533,20 +568,222 @@
   })();
 </script>
 
-<div class="mail-layout">
-  <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
-  <aside class="mail-sidebar">
-    <div class="sidebar-header">
-      <nav class="top-nav">
-        <a href="/" title="Calendar">📅</a>
-        <a href="/contacts/" title="Contacts">👤</a>
-        <a href="/mail/" class="active" title="Mail">✉</a>
-      </nav>
-    </div>
+<div class="mail-page">
+  <!-- ── Toolbar ────────────────────────────────────────────────────────────── -->
+  <div class="mail-toolbar">
+    <a href="/" class="home-btn" aria-label="Calendar">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+      </svg>
+    </a>
+    <h1>Mail</h1>
+    <button class="sidebar-toggle" on:click={() => sidebarDialog?.showModal()} aria-label="Folders">☰</button>
+  </div>
 
-    <button class="compose-btn" on:click={() => openCompose()}>Compose</button>
+  <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
+  <div class="mail-layout">
+    <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
+    <aside class="mail-sidebar">
+      <button class="compose-btn" on:click={() => openCompose()}>Compose</button>
 
-    <!-- Virtual folders -->
+      <!-- Virtual folders -->
+      {#if virtualFolders.length > 0}
+        <div class="sidebar-section">
+          <div class="sidebar-section-header">
+            <span>Folders</span>
+          </div>
+          {#each virtualFolders as folder}
+            <div
+              class="sidebar-item"
+              class:active={selectedFolderId === folder.folder_id}
+              role="button"
+              tabindex="0"
+              on:click={() => selectVirtualFolder(folder.folder_id)}
+              on:keydown={e => e.key === 'Enter' && selectVirtualFolder(folder.folder_id)}
+            >
+              <span class="folder-icon">📂</span>
+              <span class="folder-name">{folder.display_name}</span>
+              <button class="icon-btn delete-btn" on:click|stopPropagation={() => deleteFolder(folder)} title="Remove folder">×</button>
+            </div>
+          {/each}
+        </div>
+      {/if}
+
+      <!-- Accounts + mailboxes -->
+      {#each accounts as acc}
+        <div class="sidebar-section">
+          <div class="sidebar-section-header">
+            <span class="account-name" title={acc.username}>{acc.display_name}</span>
+            <button class="icon-btn" on:click={() => openEditAccount(acc)} title="Edit account">✏</button>
+            <button class="icon-btn delete-btn" on:click={() => removeAccount(acc)} title="Remove account">×</button>
+          </div>
+          {#each (mailboxesByAccount[acc.account_id] || []) as mb}
+            {#if mb.subscribed}
+              <button
+                class="sidebar-item"
+                class:active={selectedAccountId === acc.account_id && selectedMailbox === mb.name}
+                on:click={() => selectMailbox(acc.account_id, mb.name)}
+              >
+                <span class="folder-icon">{mb.name.toUpperCase() === 'INBOX' ? '📥' : '📁'}</span>
+                <span class="folder-name">{mb.name}</span>
+              </button>
+            {/if}
+          {/each}
+        </div>
+      {/each}
+
+      <!-- Add account / folder buttons -->
+      <div class="sidebar-actions">
+        <button class="link-btn" on:click={openAddAccount}>+ Add account</button>
+        <button class="link-btn" on:click={() => { folderName = 'Unified Inbox'; folderDialog?.showModal(); }}>+ Unified inbox</button>
+      </div>
+    </aside>
+
+    <!-- ── Message list ────────────────────────────────────────────────────── -->
+    <section class="message-list">
+      <div class="message-list-header">
+        {#if selectedFolderId}
+          <h2>{virtualFolders.find(f => f.folder_id === selectedFolderId)?.display_name || 'Folder'}</h2>
+        {:else if selectedMailbox}
+          <h2>{selectedMailbox}</h2>
+        {:else}
+          <h2>Mail</h2>
+        {/if}
+        {#if totalMessages > 0}
+          <span class="count">{totalMessages} messages{unreadCount > 0 ? `, ${unreadCount} unread` : ''}</span>
+        {/if}
+      </div>
+
+      {#if messagesLoading}
+        <div class="loading">Loading…</div>
+      {:else if messages.length === 0}
+        <div class="empty">
+          {#if accounts.length === 0}
+            No accounts configured. Add an IMAP account to get started.
+          {:else if !selectedAccountId && !selectedFolderId}
+            Select a mailbox.
+          {:else}
+            No messages.
+          {/if}
+        </div>
+      {:else}
+        {#each messages as msg}
+          <button
+            class="message-row"
+            class:unread={!msg.is_read}
+            class:selected={selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id}
+            on:click={() => openMessage(msg)}
+          >
+            <div class="message-row-top">
+              <span class="from">{senderName(msg.from)}</span>
+              <span class="date">{formatDate(msg.sent_at)}</span>
+            </div>
+            <div class="message-row-subject">{msg.subject || '(no subject)'}</div>
+            <div class="message-row-meta">
+              {#if msg.is_flagged}<span class="flag-star" title="Flagged">⭐</span>{/if}
+              {#if msg.has_attachments}<span title="Has attachments">📎</span>{/if}
+            </div>
+          </button>
+        {/each}
+
+        {#if totalMessages > messages.length + messagesOffset}
+          <button class="load-more" on:click={async () => { messagesOffset += pageSize; await loadMessages(); }}>
+            Load more
+          </button>
+        {/if}
+      {/if}
+    </section>
+
+    <!-- ── Message detail (desktop) ─────────────────────────────────────────── -->
+    <section class="message-detail">
+      {#if messageLoading}
+        <div class="loading">Loading message…</div>
+      {:else if selectedMessage}
+        <div class="detail-header">
+          <div class="detail-subject">{selectedMessage.subject || '(no subject)'}</div>
+          <div class="detail-actions">
+            <button on:click={() => openCompose(selectedMessage!)}>Reply</button>
+            <button
+              on:click={() => setFlag(selectedMessage!, '\\Flagged', !selectedMessage!.is_flagged)}
+              title={selectedMessage.is_flagged ? 'Unflag' : 'Flag'}
+            >
+              {selectedMessage.is_flagged ? '⭐ Flagged' : '☆ Flag'}
+            </button>
+            <button
+              on:click={() => setFlag(selectedMessage!, '\\Seen', !selectedMessage!.is_read)}
+            >
+              {selectedMessage.is_read ? 'Mark unread' : 'Mark read'}
+            </button>
+            <button on:click={() => deleteMessage(selectedMessage!)} class="danger-btn">Delete</button>
+          </div>
+        </div>
+        <div class="detail-meta">
+          <div><strong>From:</strong> {selectedMessage.from || ''}</div>
+          <div><strong>To:</strong> {selectedMessage.to.join(', ')}</div>
+          {#if selectedMessage.cc.length > 0}
+            <div><strong>CC:</strong> {selectedMessage.cc.join(', ')}</div>
+          {/if}
+          <div><strong>Date:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
+        </div>
+        <div class="detail-body">
+          {#if messageLoading && !selectedMessage.body_text && !selectedMessage.body_html}
+            <div class="loading">Loading body…</div>
+          {:else}
+            {#if hasRealHtml(selectedMessage.body_html, selectedMessage.body_text)}
+              <div class="view-toggle">
+                <button
+                  class:active={viewMode === 'html'}
+                  on:click={() => viewMode = 'html'}
+                >HTML</button>
+                <button
+                  class:active={viewMode === 'text'}
+                  on:click={() => viewMode = 'text'}
+                >Plain text</button>
+              </div>
+            {/if}
+
+            {#if viewMode === 'html' && hasRealHtml(selectedMessage.body_html, selectedMessage.body_text)}
+              {#if blockedOrigins.length > 0}
+                <div class="images-notice">
+                  <span>Images are blocked.</span>
+                  {#each blockedOrigins as origin}
+                    <button class="allow-btn" on:click={() => allowOrigin(origin)}>
+                      Allow {origin}
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+              {#key iframeKey}
+                <iframe
+                  sandbox="allow-popups"
+                  srcdoc={selectedMessage.body_html}
+                  title="Email body"
+                  class="html-body"
+                ></iframe>
+              {/key}
+            {:else if selectedMessage.body_text}
+              <pre class="body-text">{selectedMessage.body_text}</pre>
+            {:else}
+              <div class="loading">Loading body…</div>
+            {/if}
+          {/if}
+        </div>
+      {:else}
+        <div class="empty">Select a message.</div>
+      {/if}
+    </section>
+  </div>
+</div>
+
+<!-- ── Mobile sidebar drawer ──────────────────────────────────────────────── -->
+<dialog
+  bind:this={sidebarDialog}
+  class="sidebar-drawer"
+  on:click={(e) => { if (e.target === e.currentTarget) sidebarDialog?.close(); }}
+>
+  <div class="drawer-content">
+    <button class="compose-btn" on:click={() => { sidebarDialog?.close(); openCompose(); }}>Compose</button>
+
     {#if virtualFolders.length > 0}
       <div class="sidebar-section">
         <div class="sidebar-section-header">
@@ -569,12 +806,11 @@
       </div>
     {/if}
 
-    <!-- Accounts + mailboxes -->
     {#each accounts as acc}
       <div class="sidebar-section">
         <div class="sidebar-section-header">
           <span class="account-name" title={acc.username}>{acc.display_name}</span>
-          <button class="icon-btn" on:click={() => openEditAccount(acc)} title="Edit account">✏</button>
+          <button class="icon-btn" on:click={() => { sidebarDialog?.close(); openEditAccount(acc); }} title="Edit account">✏</button>
           <button class="icon-btn delete-btn" on:click={() => removeAccount(acc)} title="Remove account">×</button>
         </div>
         {#each (mailboxesByAccount[acc.account_id] || []) as mb}
@@ -592,84 +828,32 @@
       </div>
     {/each}
 
-    <!-- Add account / folder buttons -->
     <div class="sidebar-actions">
-      <button class="link-btn" on:click={openAddAccount}>+ Add account</button>
-      <button class="link-btn" on:click={() => { showFolderForm = true; folderName = 'Unified Inbox'; }}>+ Unified inbox</button>
+      <button class="link-btn" on:click={() => { sidebarDialog?.close(); openAddAccount(); }}>+ Add account</button>
+      <button class="link-btn" on:click={() => { folderName = 'Unified Inbox'; sidebarDialog?.close(); folderDialog?.showModal(); }}>+ Unified inbox</button>
     </div>
+  </div>
+</dialog>
 
-    {#if displayName}
-      <div class="sidebar-footer">
-        <span class="user-name">{displayName}</span>
-        <a href="/logout" class="logout-link">Sign out</a>
+<!-- ── Mobile email detail dialog ─────────────────────────────────────────── -->
+<dialog
+  bind:this={detailDialog}
+  class="email-detail-dialog"
+  on:click={(e) => { if (e.target === e.currentTarget) closeDetail(); }}
+  on:cancel={(e) => { e.preventDefault(); closeDetail(); }}
+>
+  <article>
+    <header>
+      <h3>{selectedMessage?.subject || '(no subject)'}</h3>
+      <div class="header-actions">
+        <button class="close-btn" aria-label="Close" on:click={closeDetail}></button>
       </div>
-    {/if}
-  </aside>
-
-  <!-- ── Message list ────────────────────────────────────────────────────── -->
-  <section class="message-list">
-    <div class="message-list-header">
-      {#if selectedFolderId}
-        <h2>{virtualFolders.find(f => f.folder_id === selectedFolderId)?.display_name || 'Folder'}</h2>
-      {:else if selectedMailbox}
-        <h2>{selectedMailbox}</h2>
-      {:else}
-        <h2>Mail</h2>
-      {/if}
-      {#if totalMessages > 0}
-        <span class="count">{totalMessages} messages{unreadCount > 0 ? `, ${unreadCount} unread` : ''}</span>
-      {/if}
-    </div>
-
-    {#if messagesLoading}
-      <div class="loading">Loading…</div>
-    {:else if messages.length === 0}
-      <div class="empty">
-        {#if accounts.length === 0}
-          No accounts configured. Add an IMAP account to get started.
-        {:else if !selectedAccountId && !selectedFolderId}
-          Select a mailbox.
-        {:else}
-          No messages.
-        {/if}
-      </div>
-    {:else}
-      {#each messages as msg}
-        <button
-          class="message-row"
-          class:unread={!msg.is_read}
-          class:selected={selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id}
-          on:click={() => openMessage(msg)}
-        >
-          <div class="message-row-top">
-            <span class="from">{senderName(msg.from)}</span>
-            <span class="date">{formatDate(msg.sent_at)}</span>
-          </div>
-          <div class="message-row-subject">{msg.subject || '(no subject)'}</div>
-          <div class="message-row-meta">
-            {#if msg.is_flagged}<span class="flag-star" title="Flagged">⭐</span>{/if}
-            {#if msg.has_attachments}<span title="Has attachments">📎</span>{/if}
-          </div>
-        </button>
-      {/each}
-
-      {#if totalMessages > messages.length + messagesOffset}
-        <button class="load-more" on:click={async () => { messagesOffset += pageSize; await loadMessages(); }}>
-          Load more
-        </button>
-      {/if}
-    {/if}
-  </section>
-
-  <!-- ── Message detail ─────────────────────────────────────────────────── -->
-  <section class="message-detail">
-    {#if messageLoading}
-      <div class="loading">Loading message…</div>
-    {:else if selectedMessage}
+    </header>
+    {#if selectedMessage}
       <div class="detail-header">
         <div class="detail-subject">{selectedMessage.subject || '(no subject)'}</div>
         <div class="detail-actions">
-          <button on:click={() => openCompose(selectedMessage!)}>Reply</button>
+          <button on:click={() => { detailDialog?.close(); openCompose(selectedMessage!); }}>Reply</button>
           <button
             on:click={() => setFlag(selectedMessage!, '\\Flagged', !selectedMessage!.is_flagged)}
             title={selectedMessage.is_flagged ? 'Unflag' : 'Flag'}
@@ -693,59 +877,62 @@
         <div><strong>Date:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
       </div>
       <div class="detail-body">
-        {#if messageLoading && !selectedMessage.body_text && !selectedMessage.body_html}
-          <div class="loading">Loading body…</div>
-        {:else}
-          {#if selectedMessage.body_html}
-            <div class="view-toggle">
-              <button
-                class:active={viewMode === 'html'}
-                on:click={() => viewMode = 'html'}
-              >HTML</button>
-              <button
-                class:active={viewMode === 'text'}
-                on:click={() => viewMode = 'text'}
-              >Plain text</button>
+        {#if hasRealHtml(selectedMessage.body_html, selectedMessage.body_text)}
+          <div class="view-toggle">
+            <button
+              class:active={viewMode === 'html'}
+              on:click={() => viewMode = 'html'}
+            >HTML</button>
+            <button
+              class:active={viewMode === 'text'}
+              on:click={() => viewMode = 'text'}
+            >Plain text</button>
+          </div>
+        {/if}
+
+        {#if viewMode === 'html' && hasRealHtml(selectedMessage.body_html, selectedMessage.body_text)}
+          {#if blockedOrigins.length > 0}
+            <div class="images-notice">
+              <span>Images are blocked.</span>
+              {#each blockedOrigins as origin}
+                <button class="allow-btn" on:click={() => allowOrigin(origin)}>
+                  Allow {origin}
+                </button>
+              {/each}
             </div>
           {/if}
-
-          {#if viewMode === 'html' && selectedMessage.body_html}
-            {#if blockedOrigins.length > 0}
-              <div class="images-notice">
-                <span>Images are blocked.</span>
-                {#each blockedOrigins as origin}
-                  <button class="allow-btn" on:click={() => allowOrigin(origin)}>
-                    Allow {origin}
-                  </button>
-                {/each}
-              </div>
-            {/if}
-            {#key iframeKey}
-              <iframe
-                sandbox="allow-popups"
-                srcdoc={selectedMessage.body_html}
-                title="Email body"
-                class="html-body"
-              ></iframe>
-            {/key}
-          {:else if selectedMessage.body_text}
-            <pre class="body-text">{selectedMessage.body_text}</pre>
-          {:else}
-            <div class="loading">Loading body…</div>
-          {/if}
+          {#key iframeKey}
+            <iframe
+              sandbox="allow-popups"
+              srcdoc={selectedMessage.body_html}
+              title="Email body"
+              class="html-body"
+            ></iframe>
+          {/key}
+        {:else if selectedMessage.body_text}
+          <pre class="body-text">{selectedMessage.body_text}</pre>
+        {:else}
+          <div class="loading">Loading body…</div>
         {/if}
       </div>
-    {:else}
-      <div class="empty">Select a message.</div>
     {/if}
-  </section>
-</div>
+  </article>
+</dialog>
 
 <!-- ── Account form dialog ───────────────────────────────────────────────── -->
-{#if showAccountForm}
-  <div class="modal-backdrop" on:click={() => showAccountForm = false}>
-    <div class="modal" on:click|stopPropagation>
+<dialog
+  bind:this={accountDialog}
+  on:click={(e) => { if (e.target === e.currentTarget) accountDialog?.close(); }}
+  on:cancel={(e) => { e.preventDefault(); accountDialog?.close(); }}
+>
+  <article>
+    <header>
       <h3>{accountForm.account_id ? 'Edit account' : 'Add IMAP account'}</h3>
+      <div class="header-actions">
+        <button class="close-btn" aria-label="Close" on:click={() => accountDialog?.close()}></button>
+      </div>
+    </header>
+    <form on:submit|preventDefault={saveAccount}>
       <label>
         Display name
         <input bind:value={accountForm.display_name} placeholder="e.g. Work" />
@@ -783,17 +970,17 @@
       {#if accountError}
         <p class="error">{accountError}</p>
       {/if}
-      <div class="modal-actions">
-        <button on:click={() => showAccountForm = false}>Cancel</button>
-        <button class="primary" on:click={saveAccount} disabled={accountSaving}>
+      <footer>
+        <button type="button" class="secondary outline" on:click={() => accountDialog?.close()}>Cancel</button>
+        <button type="submit" class="primary" disabled={accountSaving}>
           {accountSaving ? 'Testing connection…' : 'Save'}
         </button>
-      </div>
-    </div>
-  </div>
-{/if}
+      </footer>
+    </form>
+  </article>
+</dialog>
 
-<!-- ── Trusted image sources dialog ─────────────────────────────────────── -->
+<!-- ── Trusted image sources panel ────────────────────────────────────────── -->
 {#if imageOrigins.length > 0}
   <details class="origins-panel">
     <summary>Trusted image sources ({imageOrigins.length})</summary>
@@ -808,11 +995,21 @@
   </details>
 {/if}
 
-<!-- ── Compose dialog ────────────────────────────────────────────────────── -->
-{#if showCompose}
-  <div class="modal-backdrop" on:click={() => showCompose = false}>
-    <div class="modal compose-modal" on:click|stopPropagation>
+<!-- ── Compose dialog ─────────────────────────────────────────────────────── -->
+<dialog
+  bind:this={composeDialog}
+  class="compose-dialog"
+  on:click={(e) => { if (e.target === e.currentTarget) composeDialog?.close(); }}
+  on:cancel={(e) => { e.preventDefault(); composeDialog?.close(); }}
+>
+  <article>
+    <header>
       <h3>New message</h3>
+      <div class="header-actions">
+        <button class="close-btn" aria-label="Close" on:click={() => composeDialog?.close()}></button>
+      </div>
+    </header>
+    <form on:submit|preventDefault={sendEmail}>
       {#if accounts.length > 1}
         <label>
           From account
@@ -838,48 +1035,86 @@
       {#if composeError}
         <p class="error">{composeError}</p>
       {/if}
-      <div class="modal-actions">
-        <button on:click={() => showCompose = false}>Cancel</button>
-        <button class="primary" on:click={sendEmail} disabled={composeSending}>
+      <footer>
+        <button type="button" class="secondary outline" on:click={() => composeDialog?.close()}>Cancel</button>
+        <button type="submit" class="primary" disabled={composeSending}>
           {composeSending ? 'Sending…' : 'Send'}
         </button>
-      </div>
-    </div>
-  </div>
-{/if}
+      </footer>
+    </form>
+  </article>
+</dialog>
 
-<!-- ── Unified inbox / folder form ──────────────────────────────────────── -->
-{#if showFolderForm}
-  <div class="modal-backdrop" on:click={() => showFolderForm = false}>
-    <div class="modal" on:click|stopPropagation>
+<!-- ── Unified inbox / folder form ────────────────────────────────────────── -->
+<dialog
+  bind:this={folderDialog}
+  on:click={(e) => { if (e.target === e.currentTarget) folderDialog?.close(); }}
+  on:cancel={(e) => { e.preventDefault(); folderDialog?.close(); }}
+>
+  <article>
+    <header>
       <h3>Create unified folder</h3>
+      <div class="header-actions">
+        <button class="close-btn" aria-label="Close" on:click={() => folderDialog?.close()}></button>
+      </div>
+    </header>
+    <form on:submit|preventDefault={createUnifiedInbox}>
       <p>This creates a virtual folder that shows INBOX from all your accounts.</p>
       <label>
         Name
         <input bind:value={folderName} />
       </label>
-      <div class="modal-actions">
-        <button on:click={() => showFolderForm = false}>Cancel</button>
-        <button class="primary" on:click={createUnifiedInbox} disabled={folderSaving}>Create</button>
-      </div>
-    </div>
-  </div>
-{/if}
+      <footer>
+        <button type="button" class="secondary outline" on:click={() => folderDialog?.close()}>Cancel</button>
+        <button type="submit" class="primary" disabled={folderSaving}>Create</button>
+      </footer>
+    </form>
+  </article>
+</dialog>
+
+<!-- ── FAB ────────────────────────────────────────────────────────────────── -->
+<button class="fab" on:click={() => openCompose()} aria-label="Compose">
+  <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+  </svg>
+</button>
 
 <style>
-  :global(body) {
+  .mail-page {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .mail-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
+    flex-shrink: 0;
+  }
+
+  .mail-toolbar h1 {
     margin: 0;
-    padding: 0;
-    height: 100vh;
-    overflow: hidden;
+    font-size: 1.125rem;
+    font-weight: 600;
+    flex: 1;
+  }
+
+  .sidebar-toggle {
+    display: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.25rem;
+    padding: 0.25rem;
+    color: inherit;
   }
 
   .mail-layout {
     display: grid;
     grid-template-columns: 220px 320px 1fr;
-    height: 100vh;
     overflow: hidden;
-    font-size: 0.9rem;
   }
 
   /* Sidebar */
@@ -892,33 +1127,13 @@
     padding-bottom: 1rem;
   }
 
-  .sidebar-header {
-    padding: 0.75rem;
-    border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
-  }
-
-  .top-nav {
-    display: flex;
-    gap: 0.5rem;
-  }
-
-  .top-nav a {
-    text-decoration: none;
-    opacity: 0.6;
-    font-size: 1.1rem;
-  }
-
-  .top-nav a.active {
-    opacity: 1;
-  }
-
   .compose-btn {
     margin: 0.75rem;
     padding: 0.5rem 1rem;
-    background: var(--pico-primary, #0172ad);
-    color: white;
+    background: var(--pico-primary-background, #0172ad);
+    color: var(--pico-primary-inverse, white);
     border: none;
-    border-radius: 4px;
+    border-radius: var(--pico-border-radius, 4px);
     cursor: pointer;
     font-size: 0.9rem;
     text-align: left;
@@ -1023,35 +1238,18 @@
     padding: 0;
   }
 
-  .sidebar-footer {
-    margin-top: auto;
-    padding: 0.75rem;
-    border-top: 1px solid var(--pico-muted-border-color, #ddd);
-    font-size: 0.75rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .user-name {
-    color: var(--pico-muted-color, #666);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .logout-link {
-    font-size: 0.75rem;
-    color: var(--pico-muted-color, #666);
-    flex-shrink: 0;
-  }
-
   /* Message list */
   .message-list {
     border-right: 1px solid var(--pico-muted-border-color, #ddd);
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+
+  @media (min-width: 768px) {
+    .message-list {
+      overflow-y: auto;
+    }
   }
 
   .message-list-header {
@@ -1202,6 +1400,8 @@
     flex: 1;
     overflow-y: auto;
     padding: 1rem;
+    display: flex;
+    flex-direction: column;
   }
 
   .body-text {
@@ -1209,8 +1409,11 @@
     word-break: break-word;
     font-family: inherit;
     font-size: 0.88rem;
-    line-height: 1.5;
+    line-height: 1.6;
     margin: 0;
+    padding: 0.5rem 0.75rem;
+    background: var(--pico-card-background-color, #fafafa);
+    border-radius: var(--pico-border-radius, 4px);
   }
 
   .view-toggle {
@@ -1273,16 +1476,16 @@
 
   .html-body {
     width: 100%;
-    min-height: 300px;
     border: none;
-    display: block;
     flex: 1;
+    min-height: 0;
   }
 
   .origins-panel {
     position: fixed;
-    bottom: 1rem;
-    right: 1rem;
+    bottom: 2.75rem;
+    right: 6.5rem;
+    transform: translateY(50%);
     background: var(--pico-background-color, white);
     border: 1px solid var(--pico-muted-border-color, #ccc);
     border-radius: 6px;
@@ -1322,124 +1525,95 @@
     font-size: 0.9rem;
   }
 
-  /* Modals */
-  .modal-backdrop {
+  /* Dialog overrides */
+  .sidebar-drawer {
+    margin: 0 auto 0 0;
+    height: 100%;
+    max-height: 100dvh;
+    width: 280px;
+    max-width: 80vw;
+    border-radius: 0;
+    border: none;
+    border-right: 1px solid var(--pico-muted-border-color, #ddd);
+    padding: 0;
+  }
+
+  .sidebar-drawer::backdrop {
+    background: rgba(0,0,0,0.2);
+  }
+
+  .sidebar-drawer .drawer-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow-y: auto;
+    background: var(--pico-card-background-color, #f4f4f4);
+  }
+
+  .email-detail-dialog {
+    max-width: 48rem;
+    width: 95vw;
+    max-height: 90dvh;
+    padding: 0;
+  }
+
+  .email-detail-dialog article {
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    max-height: 90dvh;
+  }
+
+  .email-detail-dialog article header {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
+    margin-bottom: 0;
+    flex-shrink: 0;
+  }
+
+  .email-detail-dialog .detail-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem 1.5rem;
+  }
+
+  .compose-dialog {
+    max-width: 48rem;
+    width: 95vw;
+    max-height: 90dvh;
+    padding: 0;
+  }
+
+  /* FAB */
+  .fab {
     position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.4);
+    bottom: 2rem;
+    right: 2rem;
+    z-index: 20;
+    width: 3.5rem;
+    height: 3.5rem;
+    border-radius: 50%;
+    border: none;
+    background: var(--pico-primary-background);
+    color: var(--pico-primary-inverse);
+    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 100;
+    box-shadow: 0 0.25rem 1rem rgba(0,0,0,0.25);
+    transition: transform 0.15s, box-shadow 0.15s;
   }
 
-  .modal {
-    background: var(--pico-background-color, white);
-    border-radius: 8px;
-    padding: 1.5rem;
-    width: 480px;
-    max-width: 95vw;
-    max-height: 90vh;
-    overflow-y: auto;
+  .fab:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0.35rem 1.25rem rgba(0,0,0,0.3);
   }
 
-  .compose-modal {
-    width: 580px;
-  }
-
-  .modal h3 {
-    margin: 0 0 1rem;
-    font-size: 1rem;
-  }
-
-  .modal label {
-    display: block;
-    margin-bottom: 0.75rem;
-    font-size: 0.85rem;
-    font-weight: 500;
-  }
-
-  .modal input,
-  .modal select,
-  .modal textarea {
-    display: block;
-    width: 100%;
-    margin-top: 0.2rem;
-    padding: 0.4rem 0.6rem;
-    border: 1px solid var(--pico-muted-border-color, #ccc);
-    border-radius: 4px;
-    font-size: 0.85rem;
-    font-family: inherit;
-    box-sizing: border-box;
-    background: var(--pico-background-color, white);
-    color: inherit;
-  }
-
-  .modal textarea {
-    resize: vertical;
-  }
-
-  .checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .checkbox-label input {
-    width: auto;
-    display: inline;
-    margin: 0;
-  }
-
-  .modal details {
-    margin-bottom: 0.75rem;
-  }
-
-  .modal summary {
-    cursor: pointer;
-    font-size: 0.85rem;
-    color: var(--pico-primary, #0172ad);
-    margin-bottom: 0.5rem;
-  }
-
-  .modal-actions {
-    display: flex;
-    gap: 0.5rem;
-    justify-content: flex-end;
-    margin-top: 1rem;
-  }
-
-  .modal-actions button {
-    padding: 0.4rem 1rem;
-    border-radius: 4px;
-    border: 1px solid var(--pico-muted-border-color, #ccc);
-    background: none;
-    cursor: pointer;
-    font-size: 0.85rem;
-    color: inherit;
-  }
-
-  .modal-actions button.primary {
-    background: var(--pico-primary, #0172ad);
-    color: white;
-    border-color: var(--pico-primary, #0172ad);
-  }
-
-  .modal-actions button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .error {
-    color: var(--pico-del-color, #c0392b);
-    font-size: 0.82rem;
-    margin: 0.5rem 0 0;
-  }
-
-  @media (max-width: 768px) {
+  /* Responsive */
+  @media (max-width: 767px) {
     .mail-layout {
       grid-template-columns: 1fr;
-      grid-template-rows: auto 1fr;
     }
 
     .mail-sidebar {
@@ -1450,8 +1624,34 @@
       display: none;
     }
 
-    .message-list {
-      border-right: none;
+    .sidebar-toggle {
+      display: block;
+    }
+
+    .compose-btn {
+      display: none;
+    }
+
+    .fab {
+      bottom: 1.5rem;
+      right: 1.5rem;
+    }
+
+    .origins-panel {
+      bottom: 2.25rem;
+      right: 5.5rem;
+      transform: translateY(50%);
+    }
+  }
+
+  @media (min-width: 768px) {
+    .mail-page {
+      height: calc(100dvh - 2.5rem);
+    }
+
+    .mail-layout {
+      flex: 1;
+      min-height: 0;
     }
   }
 </style>
