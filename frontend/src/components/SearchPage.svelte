@@ -2,7 +2,9 @@
   import { onMount } from 'svelte';
   import { initI18n, getLocale, makeTl } from '../lib/i18n.ts';
   import EventColorDot from './EventColorDot.svelte';
-  import type { SearchResultItem, CalendarJson } from '../types/calendar.ts';
+  import EventDetail from './EventDetail.svelte';
+  import EventFormDialog from './EventFormDialog.svelte';
+  import type { EventJson, CalendarJson } from '../types/calendar.ts';
 
   let locale = 'en';
   $: tl = makeTl(locale);
@@ -10,7 +12,7 @@
   let query = '';
   let start = '';
   let end = '';
-  let results: SearchResultItem[] = [];
+  let results: EventJson[] = [];
   let loading = false;
   let searched = false;
   let errorMsg = '';
@@ -19,6 +21,10 @@
   let selectedHrefs = new Set<string>();
   let calendarsLoaded = false;
   let calDropdownOpen = false;
+
+  let eventDetail: EventDetail;
+  let formDialog: EventFormDialog;
+  let detailIsOpen = false;
 
   onMount(async () => {
     await initI18n();
@@ -50,6 +56,13 @@
     if (calDropdownOpen && !(e.target as Element).closest('.cal-dropdown')) {
       calDropdownOpen = false;
     }
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const tag = (document.activeElement as HTMLElement)?.tagName?.toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    if (detailIsOpen && e.key === 'e') { e.preventDefault(); eventDetail.triggerEdit(); }
   }
 
   async function doSearch() {
@@ -84,13 +97,18 @@
   }
 
   function formatDate(dtstart: string): string {
-    const [y, mo, d] = dtstart.split('-').map(Number);
+    const datePart = dtstart.split('T')[0].replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+    const [y, mo, d] = datePart.split('-').map(Number);
     if (!y || !mo || !d) return dtstart;
     return new Date(y, mo - 1, d).toLocaleDateString(locale, { dateStyle: 'long' });
   }
+
+  function calendarName(href: string): string {
+    return calendars.find(c => c.href === href)?.name ?? '';
+  }
 </script>
 
-<svelte:window onclick={handleWindowClick} />
+<svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} />
 
 <div class="page-header">
   <a href="/" class="home-btn" aria-label={tl('nav_calendar')}>
@@ -164,8 +182,9 @@
   <ul class="search-results" aria-live="polite">
     {#each results as item (item.uid + item.dtstart)}
       <li>
-        <a href="/?date={item.dtstart}&uid={encodeURIComponent(item.uid)}" class="search-result">
-          <EventColorDot color={item.calendar_color} />
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <button type="button" class="search-result" onclick={() => eventDetail.open(item)}>
+          <EventColorDot color={item.color} />
           <div class="result-body">
             <span class="result-summary">{item.summary}</span>
             <span class="result-meta">
@@ -175,13 +194,31 @@
             {#if item.description}
               <span class="result-desc">{item.description}</span>
             {/if}
-            <span class="result-calendar">{item.calendar_name}</span>
+            {#if calendarName(item.calendar_href)}
+              <span class="result-calendar">{calendarName(item.calendar_href)}</span>
+            {/if}
           </div>
-        </a>
+        </button>
       </li>
     {/each}
   </ul>
 {/if}
+
+<EventDetail
+  bind:this={eventDetail}
+  bind:isOpen={detailIsOpen}
+  {locale}
+  onedit={(d) => formDialog.openEditForm(d.event, d.scope)}
+/>
+
+<EventFormDialog
+  bind:this={formDialog}
+  {calendars}
+  {locale}
+  focusedEventDate=""
+  onsaved={() => doSearch()}
+  ondeleted={() => doSearch()}
+/>
 
 <style>
   .page-header {
@@ -340,6 +377,12 @@
     text-decoration: none;
     color: inherit;
     border: 1px solid var(--pico-muted-border-color);
+    background: none;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    font-size: inherit;
+    line-height: inherit;
   }
 
   .search-result:hover {

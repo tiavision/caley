@@ -983,18 +983,6 @@ pub async fn import_ics(
 
 // ── Search ────────────────────────────────────────────────────────────────────
 
-#[derive(Serialize)]
-pub struct SearchResultItem {
-    pub uid: String,
-    pub calendar_href: String,
-    pub summary: String,
-    pub description: String,
-    pub location: String,
-    pub dtstart: String,
-    pub calendar_name: String,
-    pub calendar_color: Option<String>,
-}
-
 pub async fn search_events(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -1025,12 +1013,11 @@ pub async fn search_events(
 
     let fts = state.search_mode.build_fts_query(&q);
     if fts.is_empty() {
-        return Json(Vec::<SearchResultItem>::new()).into_response();
+        return Json(Vec::<EventJson>::new()).into_response();
     }
     let user_id = user.user_id.clone();
 
-    let mut sql = r#"SELECT e.uid, e.calendar_href, e.summary, e.description, e.location,
-           e.dtstart, c.name AS calendar_name, c.color AS calendar_color
+    let mut sql = r#"SELECT e.uid, e.calendar_href, e.dtstart, e.raw_ical, c.color AS calendar_color
     FROM events_fts
     JOIN cached_events e ON events_fts.rowid = e.rowid
     JOIN cached_calendars c ON c.user_id = e.user_id AND c.href = e.calendar_href
@@ -1050,16 +1037,19 @@ pub async fn search_events(
 
     match query.fetch_all(&state.db).await {
         Ok(rows) => {
-            let results: Vec<SearchResultItem> = rows.iter().map(|r| SearchResultItem {
-                uid: r.get(0),
-                calendar_href: r.get(1),
-                summary: r.get(2),
-                description: r.get(3),
-                location: r.get(4),
-                dtstart: r.get(5),
-                calendar_name: r.get(6),
-                calendar_color: r.get(7),
-            }).collect();
+            let mut results: Vec<EventJson> = Vec::new();
+            for r in &rows {
+                let calendar_href: String = r.get(1);
+                let dtstart: String = r.get(2);
+                let raw_ical: String = r.get(3);
+                let color: Option<String> = r.get(4);
+                let color_str = color.as_deref().unwrap_or("");
+                if let Ok(date) = NaiveDate::parse_from_str(&dtstart, "%Y-%m-%d") {
+                    if let Some(event) = CalDavClient::events_from_raw_ical(&raw_ical, date, date).into_iter().next() {
+                        results.push(build_event_json(&event, color_str, &calendar_href));
+                    }
+                }
+            }
             Json(results).into_response()
         }
         Err(e) => {

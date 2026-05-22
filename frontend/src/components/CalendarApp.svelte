@@ -60,36 +60,6 @@
         await tick();
         initRovingTabindex();
         scheduleReminders();
-        if (pendingFocusUid && pendingFocusDate) {
-          const uid = pendingFocusUid;
-          const dateStr = pendingFocusDate;
-          pendingFocusUid = null;
-          pendingFocusDate = null;
-          const targetDay = days.find(d => d.date_iso === dateStr);
-          if (targetDay && isDayCollapsed(dateStr)) {
-            const s = new Set(toggledDays);
-            if (isDefaultCollapsed(dateStr)) {
-              s.add(dateStr);
-            } else {
-              s.delete(dateStr);
-            }
-            toggledDays = s;
-            await tick();
-            const eventIdx = Math.max(0, targetDay.events.findIndex(ev => ev.uid === uid));
-            const dayEl = document.querySelector<HTMLElement>(`.day[data-date="${dateStr}"]`);
-            if (dayEl) {
-              const eventEls = dayEl.querySelectorAll<HTMLElement>('.appointment.event-trigger');
-              const targetEl = eventEls[eventIdx] ?? eventEls[0];
-              if (targetEl) {
-                document.querySelectorAll<HTMLElement>('.appointment.event-trigger')
-                  .forEach(el => el.setAttribute('tabindex', '-1'));
-                targetEl.setAttribute('tabindex', '0');
-                targetEl.focus();
-                focusedEventDate = dateStr;
-              }
-            }
-          }
-        }
       }
     } catch {}
     eventsLoading = false;
@@ -239,8 +209,6 @@
   }
 
   let toggledDays = new Set<string>();
-  let pendingFocusUid: string | null = null;
-  let pendingFocusDate: string | null = null;
 
   function isDayCollapsed(dateStr: string): boolean {
     return isDefaultCollapsed(dateStr) !== toggledDays.has(dateStr);
@@ -352,20 +320,6 @@
   onMount(async () => {
     await initI18n();
     locale = getLocale();
-
-    const dateParam = new URLSearchParams(window.location.search).get('date');
-    if (dateParam) {
-      const [y, mo, d] = dateParam.split('-').map(Number);
-      if (y && mo && d) {
-        selectedWeekStart = getMonday(new Date(y, mo - 1, d));
-        gridMonth = fmtYM(selectedWeekStart);
-      }
-      const uidParam = new URLSearchParams(window.location.search).get('uid');
-      if (uidParam) {
-        pendingFocusUid = uidParam;
-        pendingFocusDate = dateParam;
-      }
-    }
 
     window.addEventListener('keydown', handleKeydown);
 
