@@ -64,6 +64,7 @@ struct Cli {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
+    rustls::crypto::ring::default_provider().install_default().unwrap();
     let args = Cli::parse();
 
     let db = db::init_db(&args.database_path).await?;

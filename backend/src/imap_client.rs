@@ -387,121 +387,97 @@ fn contains_url_function(css: &str) -> bool {
     false
 }
 
-/// Post-processes ammonia-sanitized HTML: adds `target="_blank"` to all `<a>` tags
-/// and rewrites hrefs that spoof a URL in the anchor text to the navigate warning endpoint.
+/// Post-processes ammonia-sanitized HTML using two lol_html passes:
+/// 1. Identify anchors where the visible text looks like a URL that differs from the href (phishing).
+/// 2. Add `target="_blank"` to all `<a>` tags; rewrite identified phishing hrefs to the navigate warning page.
 fn rewrite_links(html: &str) -> String {
-    let mut out = String::with_capacity(html.len() + 256);
-    let mut s = html;
+    use lol_html::{element, text, HtmlRewriter, Settings};
+    use std::cell::RefCell;
+    use std::collections::HashSet;
+    use std::rc::Rc;
 
-    loop {
-        let Some(i) = find_open_a(s) else {
-            out.push_str(s);
-            break;
-        };
+    // Pass 1: collect hrefs whose anchor text spoofs a different host.
+    let phishing: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
+    let cur_href: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    let cur_text: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
 
-        out.push_str(&s[..i]);
-        s = &s[i..];
+    {
+        let ph = Rc::clone(&phishing);
+        let ch = Rc::clone(&cur_href);
+        let ct = Rc::clone(&cur_text);
+        let ch_t = Rc::clone(&cur_href);
+        let ct_t = Rc::clone(&cur_text);
 
-        let Some(j) = find_tag_end(s) else {
-            out.push_str(s);
-            break;
-        };
+        let mut scanner = HtmlRewriter::new(
+            Settings {
+                element_content_handlers: vec![
+                    element!("a[href]", move |el| {
+                        let href = el.get_attribute("href").unwrap_or_default();
+                        *ch.borrow_mut() = Some(href);
+                        ct.borrow_mut().clear();
 
-        let opening = &s[..j + 1];
-        s = &s[j + 1..];
-
-        // Find matching </a> (case-insensitive)
-        let lower_rest = s.to_ascii_lowercase();
-        if let Some(close) = lower_rest.find("</a>") {
-            let inner = &s[..close];
-            s = &s[close + 4..];
-
-            let new_opening = process_a_tag(opening, inner);
-            out.push_str(&new_opening);
-            out.push_str(inner);
-            out.push_str("</a>");
-        } else {
-            // No closing tag — emit opening as-is with target="_blank"
-            out.push_str(&add_target_blank(opening));
-        }
+                        let ph2 = Rc::clone(&ph);
+                        let ch2 = Rc::clone(&ch);
+                        let ct2 = Rc::clone(&ct);
+                        if let Some(handlers) = el.end_tag_handlers() {
+                            handlers.push(Box::new(move |_end| {
+                                let text = ct2.borrow().clone();
+                                let href_ref = ch2.borrow();
+                                let href = href_ref.as_deref().unwrap_or("");
+                                if looks_like_url(text.trim()) && !same_host(text.trim(), href) {
+                                    ph2.borrow_mut().insert(href.to_owned());
+                                }
+                                Ok(())
+                            }));
+                        }
+                        Ok(())
+                    }),
+                    text!("a", move |t| {
+                        if ch_t.borrow().is_some() {
+                            ct_t.borrow_mut().push_str(t.as_str());
+                        }
+                        Ok(())
+                    }),
+                ],
+                ..Settings::default()
+            },
+            |_: &[u8]| {},
+        );
+        let _ = scanner.write(html.as_bytes());
+        let _ = scanner.end();
     }
 
-    out
-}
+    let phishing = phishing.borrow().clone();
 
-fn find_open_a(s: &str) -> Option<usize> {
-    let lower = s.to_ascii_lowercase();
-    let mut from = 0;
-    loop {
-        let pos = lower[from..].find("<a").map(|p| from + p)?;
-        // Ensure it's <a> or <a followed by whitespace (not <abbr etc.)
-        let after = s.as_bytes().get(pos + 2).copied();
-        if matches!(after, Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r') | Some(b'>') | None) {
-            return Some(pos);
-        }
-        from = pos + 2;
-    }
-}
-
-/// Finds the closing `>` of a tag, respecting quoted attribute values.
-fn find_tag_end(s: &str) -> Option<usize> {
-    let mut in_q: Option<char> = None;
-    for (i, c) in s.char_indices() {
-        match (c, in_q) {
-            ('"' | '\'', None) => in_q = Some(c),
-            (q, Some(open)) if q == open => in_q = None,
-            ('>', None) => return Some(i),
-            _ => {}
-        }
-    }
-    None
-}
-
-fn process_a_tag(opening: &str, inner: &str) -> String {
-    let with_target = add_target_blank(opening);
-
-    let text = strip_tags(inner);
-    let text = text.trim();
-
-    if let Some(href) = get_href(&with_target) {
-        if looks_like_url(text) && !same_host(text, href) {
-            let encoded: String =
-                url::form_urlencoded::byte_serialize(href.as_bytes()).collect();
-            let new_href = format!("/api/email/navigate?to={encoded}");
-            return replace_href_value(&with_target, href, &new_href);
-        }
+    // Pass 2: add target="_blank" and rewrite phishing hrefs.
+    let mut output = Vec::with_capacity(html.len() + 256);
+    {
+        let mut rewriter = HtmlRewriter::new(
+            Settings {
+                element_content_handlers: vec![
+                    element!("a", move |el| {
+                        if el.get_attribute("target").is_none() {
+                            el.set_attribute("target", "_blank")?;
+                        }
+                        if let Some(href) = el.get_attribute("href") {
+                            if phishing.contains(&href) {
+                                let encoded: String =
+                                    url::form_urlencoded::byte_serialize(href.as_bytes()).collect();
+                                el.set_attribute("href", &format!("/api/email/navigate?to={encoded}"))?;
+                            }
+                        }
+                        Ok(())
+                    }),
+                ],
+                ..Settings::default()
+            },
+            |c: &[u8]| output.extend_from_slice(c),
+        );
+        let _ = rewriter.write(html.as_bytes());
+        let _ = rewriter.end();
     }
 
-    with_target
-}
-
-fn add_target_blank(opening: &str) -> String {
-    if opening.to_ascii_lowercase().contains("target=") {
-        return opening.to_string();
-    }
-    // Insert before the closing >
-    if let Some(pos) = opening.rfind('>') {
-        format!("{} target=\"_blank\">", &opening[..pos])
-    } else {
-        opening.to_string()
-    }
-}
-
-fn get_href(opening: &str) -> Option<&str> {
-    let lower = opening.to_ascii_lowercase();
-    let href_pos = lower.find("href=")?;
-    let rest = &opening[href_pos + 5..];
-    let quote = rest.chars().next()?;
-    if quote == '"' || quote == '\'' {
-        let end = rest[1..].find(quote)?;
-        Some(&rest[1..end + 1])
-    } else {
-        None
-    }
-}
-
-fn replace_href_value(opening: &str, old_href: &str, new_href: &str) -> String {
-    opening.replacen(old_href, new_href, 1)
+    String::from_utf8(output).unwrap_or_else(|_| html.to_owned())
 }
 
 fn strip_tags(html: &str) -> String {

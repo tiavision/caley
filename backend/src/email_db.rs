@@ -446,8 +446,8 @@ pub async fn list_messages_virtual(
         "SELECT COUNT(*) FROM cached_messages m
          JOIN imap_accounts a ON a.account_id = m.account_id
          JOIN virtual_folder_rules r ON r.folder_id = ?
-             AND (r.account_id IS NULL OR r.account_id = m.account_id)
-             AND (r.mailbox_pattern IS NULL OR m.mailbox LIKE r.mailbox_pattern)
+             AND (r.account_id = '' OR r.account_id = m.account_id)
+             AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
          WHERE a.user_id = ?",
     )
     .bind(folder_id)
@@ -461,8 +461,8 @@ pub async fn list_messages_virtual(
          FROM cached_messages m
          JOIN imap_accounts a ON a.account_id = m.account_id
          JOIN virtual_folder_rules r ON r.folder_id = ?
-             AND (r.account_id IS NULL OR r.account_id = m.account_id)
-             AND (r.mailbox_pattern IS NULL OR m.mailbox LIKE r.mailbox_pattern)
+             AND (r.account_id = '' OR r.account_id = m.account_id)
+             AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
          WHERE a.user_id = ?
          ORDER BY COALESCE(m.sent_at, 0) DESC
          LIMIT ? OFFSET ?",
@@ -597,8 +597,8 @@ pub async fn list_virtual_folders(pool: &SqlitePool, user_id: &str) -> Result<Ve
             rules: rules
                 .iter()
                 .map(|r| VirtualFolderRule {
-                    account_id: r.get(0),
-                    mailbox_pattern: r.get(1),
+                    account_id: r.get::<Option<String>, _>(0).and_then(|s| if s.is_empty() { None } else { Some(s) }),
+                    mailbox_pattern: r.get::<Option<String>, _>(1).and_then(|s| if s.is_empty() { None } else { Some(s) }),
                 })
                 .collect(),
         });
@@ -628,8 +628,8 @@ pub async fn create_virtual_folder(
             "INSERT OR IGNORE INTO virtual_folder_rules (folder_id, account_id, mailbox_pattern) VALUES (?, ?, ?)",
         )
         .bind(folder_id)
-        .bind(account_id)
-        .bind(pattern)
+        .bind(account_id.unwrap_or(""))
+        .bind(pattern.unwrap_or(""))
         .execute(&mut *tx)
         .await?;
     }

@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS virtual_folders (
 
 CREATE TABLE IF NOT EXISTS virtual_folder_rules (
     folder_id       TEXT NOT NULL,
-    account_id      TEXT,
-    mailbox_pattern TEXT,
-    PRIMARY KEY (folder_id, COALESCE(account_id,''), COALESCE(mailbox_pattern,''))
+    account_id      TEXT NOT NULL DEFAULT '',
+    mailbox_pattern TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (folder_id, account_id, mailbox_pattern)
 );

@@ -40,7 +40,9 @@ uuid = { version = "1", features = ["v4"] }
 p256 = { version = "0.13", features = ["ecdh"] }
 rust-stemmers = "1.2"
 ammonia = "3"
+lol_html = "1"
 async-imap = { version = "0.9", default-features = false, features = ["runtime-tokio"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 tokio-rustls = "0.26"
 rustls-pki-types = "1"
 webpki-roots = "0.26"

@@ -664,6 +664,7 @@ fn transparent_pixel() -> Response {
         [
             (header::CONTENT_TYPE, "image/gif"),
             (header::CACHE_CONTROL, "no-store"),
+            (header::HeaderName::from_static("x-content-type-options"), "nosniff"),
         ],
         GIF,
     )
