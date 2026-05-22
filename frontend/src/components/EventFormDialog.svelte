@@ -33,6 +33,8 @@
 
   let timeSuggestions: { label: string; h: number; m: number; prefixLen: number }[] = [];
   let timeSuggestionIdx = -1;
+  let daySuggestions: { label: string; date: string; prefixLen: number }[] = [];
+  let daySuggestionIdx = -1;
 
   $: rruleJson = (() => {
     if (!fFreq) return '';
@@ -216,6 +218,73 @@
     return [make(h, min), make(h + 12, min)];
   }
 
+  function parseDaySuggestion(input: string, loc: string): { label: string; date: string; prefixLen: number }[] {
+    const rtf = new Intl.RelativeTimeFormat(loc, { numeric: 'auto' });
+    const todayWord = rtf.format(0, 'day').toLowerCase();
+    const tomorrowWord = rtf.format(1, 'day').toLowerCase();
+    // Jan 7 2024 = Sunday (dayIndex 0), Jan 8 = Monday (dayIndex 1), …, Jan 13 = Saturday (dayIndex 6)
+    const dayNames: { name: string; dayIndex: number }[] = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(2024, 0, 7 + i);
+      const long = date.toLocaleDateString(loc, { weekday: 'long' }).toLowerCase();
+      const short = date.toLocaleDateString(loc, { weekday: 'short' }).toLowerCase().replace(/\.$/, '');
+      dayNames.push({ name: long, dayIndex: i });
+      if (short !== long) dayNames.push({ name: short, dayIndex: i });
+    }
+    const combined: { name: string; dayIndex: number }[] = [
+      { name: todayWord, dayIndex: -1 },
+      { name: tomorrowWord, dayIndex: -2 },
+      ...dayNames,
+    ];
+
+    const lower = input.toLowerCase();
+    let wordLen = lower.length;
+    let hasMore = false;
+    for (let i = 0; i < lower.length; i++) {
+      if (lower[i] === ' ' || lower[i] === '\t') {
+        wordLen = i;
+        hasMore = lower.slice(i + 1).trimStart().length > 0;
+        break;
+      }
+    }
+    const typedWord = lower.slice(0, wordLen);
+    if (!typedWord || hasMore) return [];
+
+    const today = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const makeEntry = (daysAhead: number) => {
+      const target = new Date(today.getFullYear(), today.getMonth(), today.getDate() + daysAhead);
+      const dateStr = `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`;
+      const label = target.toLocaleDateString(navigator.language || 'en', { weekday: 'long', month: 'short', day: 'numeric' });
+      return { label, date: dateStr, prefixLen: wordLen };
+    };
+
+    const seen = new Set<number>();
+    const results: { label: string; date: string; prefixLen: number }[] = [];
+    for (const { name, dayIndex } of combined) {
+      if (!name.startsWith(typedWord)) continue;
+      if (dayIndex >= 0 && seen.has(dayIndex)) continue;
+      if (dayIndex >= 0) seen.add(dayIndex);
+      let daysAhead = 0;
+      if (dayIndex === -2) {
+        daysAhead = 1;
+      } else if (dayIndex >= 0) {
+        daysAhead = (dayIndex - today.getDay() + 7) % 7;
+        if (daysAhead === 0) daysAhead = 7;
+      }
+      results.push(makeEntry(daysAhead));
+    }
+    return results;
+  }
+
+  function applyDaySuggestion(s: { label: string; date: string; prefixLen: number }) {
+    fSummary = fSummary.slice(s.prefixLen).trimStart();
+    fDate = s.date;
+    daySuggestions = [];
+    daySuggestionIdx = -1;
+    tick().then(() => summaryInputEl?.focus());
+  }
+
   function applyTimeSuggestion(s: { label: string; h: number; m: number; prefixLen: number }) {
     fSummary = fSummary.slice(s.prefixLen).trimStart();
     fIsAllDay = false;
@@ -230,31 +299,55 @@
 
   function onSummaryInput() {
     timeSuggestions = parseTimeSuggestions(fSummary);
+    daySuggestions = timeSuggestions.length === 0 ? parseDaySuggestion(fSummary, locale) : [];
     timeSuggestionIdx = -1;
+    daySuggestionIdx = -1;
   }
 
   function onSummaryKeydown(e: KeyboardEvent) {
-    if (!timeSuggestions.length) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      timeSuggestionIdx = Math.min(timeSuggestionIdx + 1, timeSuggestions.length - 1);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      timeSuggestionIdx = Math.max(timeSuggestionIdx - 1, -1);
-    } else if (e.key === 'Enter' && timeSuggestionIdx >= 0) {
-      e.preventDefault();
-      applyTimeSuggestion(timeSuggestions[timeSuggestionIdx]);
-    } else if (e.key === 'Tab') {
-      e.preventDefault();
-      applyTimeSuggestion(timeSuggestions[timeSuggestionIdx >= 0 ? timeSuggestionIdx : 0]);
-    } else if (e.key === 'Escape') {
-      timeSuggestions = [];
-      timeSuggestionIdx = -1;
+    if (!timeSuggestions.length && !daySuggestions.length) return;
+    if (timeSuggestions.length) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        timeSuggestionIdx = Math.min(timeSuggestionIdx + 1, timeSuggestions.length - 1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        timeSuggestionIdx = Math.max(timeSuggestionIdx - 1, -1);
+      } else if (e.key === 'Enter' && timeSuggestionIdx >= 0) {
+        e.preventDefault();
+        applyTimeSuggestion(timeSuggestions[timeSuggestionIdx]);
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        applyTimeSuggestion(timeSuggestions[timeSuggestionIdx >= 0 ? timeSuggestionIdx : 0]);
+      } else if (e.key === 'Escape') {
+        timeSuggestions = [];
+        timeSuggestionIdx = -1;
+      }
+    } else {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        daySuggestionIdx = Math.min(daySuggestionIdx + 1, daySuggestions.length - 1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        daySuggestionIdx = Math.max(daySuggestionIdx - 1, -1);
+      } else if (e.key === 'Enter' && daySuggestionIdx >= 0) {
+        e.preventDefault();
+        applyDaySuggestion(daySuggestions[daySuggestionIdx]);
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        applyDaySuggestion(daySuggestions[daySuggestionIdx >= 0 ? daySuggestionIdx : 0]);
+      } else if (e.key === 'Escape') {
+        daySuggestions = [];
+        daySuggestionIdx = -1;
+      }
     }
   }
 
   function onSummaryBlur() {
-    setTimeout(() => { timeSuggestions = []; timeSuggestionIdx = -1; }, 150);
+    setTimeout(() => {
+      timeSuggestions = []; timeSuggestionIdx = -1;
+      daySuggestions = []; daySuggestionIdx = -1;
+    }, 150);
   }
 </script>
 
@@ -292,6 +385,19 @@
                     type="button"
                     class:active={i === timeSuggestionIdx}
                     onmousedown={(e) => { e.preventDefault(); applyTimeSuggestion(s); }}
+                  >{s.label}</button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          {#if daySuggestions.length > 0}
+            <ul class="time-suggestions" role="listbox">
+              {#each daySuggestions as s, i}
+                <li role="option" aria-selected={i === daySuggestionIdx}>
+                  <button
+                    type="button"
+                    class:active={i === daySuggestionIdx}
+                    onmousedown={(e) => { e.preventDefault(); applyDaySuggestion(s); }}
                   >{s.label}</button>
                 </li>
               {/each}
@@ -554,7 +660,7 @@
     border-radius: var(--pico-border-radius);
     box-shadow: 0 0.25rem 0.75rem rgba(0,0,0,0.15);
   }
-  .time-suggestions li { margin: 0; }
+  .time-suggestions li { list-style: none; padding: 0; margin: 0; }
   .time-suggestions button {
     width: 100%; text-align: left; border: none; background: none; margin: 0;
     padding: 0.375rem 0.75rem; cursor: pointer; font-size: 0.875rem;
