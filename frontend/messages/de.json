@@ -160,6 +160,7 @@
   "contacts_region": "Region",
   "contacts_postal": "Postleitzahl",
   "contacts_country": "Land",
+  "contacts_type": "Typ",
   "contacts_type_home": "Privat",
   "contacts_type_work": "Arbeit",
   "contacts_type_mobile": "Mobil",

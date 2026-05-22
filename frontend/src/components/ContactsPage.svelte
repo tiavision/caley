@@ -40,6 +40,7 @@
 
   let formUid: string | null = null;
   let formName = '';
+  let formNameInput: HTMLInputElement;
   let formEmails: TypedEntry[] = [emptyEmail()];
   let formPhones: TypedEntry[] = [emptyPhone()];
   let formAddresses: AddressEntry[] = [];
@@ -177,6 +178,19 @@
     }
   }
 
+  function handleKeydown(e: KeyboardEvent) {
+    if (formDialog?.open) return;
+    const target = e.target as HTMLElement;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target.isContentEditable) return;
+    if (e.key === 'c' && !detailDialog?.open) {
+      e.preventDefault();
+      openNewForm();
+    } else if (e.key === 'e' && detailDialog?.open && selectedContact) {
+      e.preventDefault();
+      openEditForm(selectedContact);
+    }
+  }
+
   async function openDetail(c: ContactJson) {
     selectedContact = c;
     await tick();
@@ -199,6 +213,8 @@
     formError = '';
     await tick();
     formDialog?.showModal();
+    formDialog?.querySelector('article')?.scrollTo(0, 0);
+    formNameInput?.select();
   }
 
   async function openEditForm(c: ContactJson) {
@@ -216,6 +232,8 @@
     formError = '';
     await tick();
     formDialog?.showModal();
+    formDialog?.querySelector('article')?.scrollTo(0, 0);
+    formNameInput?.select();
   }
 
   function closeForm() {
@@ -271,7 +289,7 @@
   }
 </script>
 
-<svelte:window onclick={handleWindowClick} />
+<svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} />
 
 <div class="contacts-page">
   <div class="contacts-toolbar">
@@ -504,94 +522,100 @@
 
       <label>
         {tl('contacts_name')}
-        <input type="text" bind:value={formName} required />
+        <input type="text" bind:value={formName} bind:this={formNameInput} required />
       </label>
 
-      {#each formEmails as entry, i}
-        <label>
-          {tl('contacts_email')}{formEmails.length > 1 ? ` ${i + 1}` : ''}
-          <div class="field-row">
-            <input type="email" bind:value={formEmails[i].value} />
-            <select bind:value={formEmails[i].type_label} class="type-select">
-              <option value="home">{tl('contacts_type_home')}</option>
-              <option value="work">{tl('contacts_type_work')}</option>
-              <option value="other">{tl('contacts_type_other')}</option>
-            </select>
-            {#if formEmails.length > 1}
-              <button type="button" class="remove-btn" onclick={() => { formEmails = formEmails.filter((_, j) => j !== i); }}>✕</button>
-            {/if}
-          </div>
-        </label>
-      {/each}
-      <button type="button" class="add-field-btn" onclick={() => { formEmails = [...formEmails, emptyEmail()]; }}>
-        + {tl('contacts_addEmail')}
-      </button>
-
-      {#each formPhones as entry, i}
-        <label>
-          {tl('contacts_phone')}{formPhones.length > 1 ? ` ${i + 1}` : ''}
-          <div class="field-row">
-            <input type="tel" bind:value={formPhones[i].value} />
-            <select bind:value={formPhones[i].type_label} class="type-select">
-              <option value="home">{tl('contacts_type_home')}</option>
-              <option value="work">{tl('contacts_type_work')}</option>
-              <option value="mobile">{tl('contacts_type_mobile')}</option>
-              <option value="fax">{tl('contacts_type_fax')}</option>
-              <option value="pager">{tl('contacts_type_pager')}</option>
-              <option value="other">{tl('contacts_type_other')}</option>
-            </select>
-            {#if formPhones.length > 1}
-              <button type="button" class="remove-btn" onclick={() => { formPhones = formPhones.filter((_, j) => j !== i); }}>✕</button>
-            {/if}
-          </div>
-        </label>
-      {/each}
-      <button type="button" class="add-field-btn" onclick={() => { formPhones = [...formPhones, emptyPhone()]; }}>
-        + {tl('contacts_addPhone')}
-      </button>
-
-      {#each formAddresses as addr, i}
-        <fieldset class="address-fieldset">
-          <legend>
-            {tl('contacts_address')}{formAddresses.length > 1 ? ` ${i + 1}` : ''}
-            <button type="button" class="remove-btn legend-remove" onclick={() => { formAddresses = formAddresses.filter((_, j) => j !== i); }}>✕</button>
-          </legend>
-          <label>
-            {tl('contacts_street')}
-            <input type="text" bind:value={formAddresses[i].street} />
-          </label>
-          <div class="addr-row">
-            <label class="addr-city">
-              {tl('contacts_city')}
-              <input type="text" bind:value={formAddresses[i].city} />
-            </label>
-            <label class="addr-region">
-              {tl('contacts_region')}
-              <input type="text" bind:value={formAddresses[i].region} />
-            </label>
-            <label class="addr-postal">
-              {tl('contacts_postal')}
-              <input type="text" bind:value={formAddresses[i].postal} />
-            </label>
-          </div>
-          <div class="addr-row">
-            <label class="addr-country">
-              {tl('contacts_country')}
-              <input type="text" bind:value={formAddresses[i].country} />
-            </label>
-            <label class="addr-type">
-              <select bind:value={formAddresses[i].type_label} class="type-select">
+      <fieldset class="contact-field-section">
+        <legend>{tl('contacts_email')}</legend>
+        <ul class="contact-field-list">
+          {#each formEmails as entry, i}
+            <li class="contact-field-row">
+              <input type="email" bind:value={formEmails[i].value} />
+              <select bind:value={formEmails[i].type_label} class="type-select">
                 <option value="home">{tl('contacts_type_home')}</option>
                 <option value="work">{tl('contacts_type_work')}</option>
                 <option value="other">{tl('contacts_type_other')}</option>
               </select>
-            </label>
-          </div>
-        </fieldset>
-      {/each}
-      <button type="button" class="add-field-btn" onclick={() => { formAddresses = [...formAddresses, emptyAddress()]; }}>
-        + {tl('contacts_addAddress')}
-      </button>
+              <button type="button" class="remove-btn" onclick={() => { formEmails = formEmails.filter((_, j) => j !== i); }}>×</button>
+            </li>
+          {/each}
+        </ul>
+        <button type="button" class="outline small" onclick={() => { formEmails = [...formEmails, emptyEmail()]; }}>
+          {tl('contacts_addEmail')}
+        </button>
+      </fieldset>
+
+      <fieldset class="contact-field-section">
+        <legend>{tl('contacts_phone')}</legend>
+        <ul class="contact-field-list">
+          {#each formPhones as entry, i}
+            <li class="contact-field-row">
+              <input type="tel" bind:value={formPhones[i].value} />
+              <select bind:value={formPhones[i].type_label} class="type-select">
+                <option value="home">{tl('contacts_type_home')}</option>
+                <option value="work">{tl('contacts_type_work')}</option>
+                <option value="mobile">{tl('contacts_type_mobile')}</option>
+                <option value="fax">{tl('contacts_type_fax')}</option>
+                <option value="pager">{tl('contacts_type_pager')}</option>
+                <option value="other">{tl('contacts_type_other')}</option>
+              </select>
+              <button type="button" class="remove-btn" onclick={() => { formPhones = formPhones.filter((_, j) => j !== i); }}>×</button>
+            </li>
+          {/each}
+        </ul>
+        <button type="button" class="outline small" onclick={() => { formPhones = [...formPhones, emptyPhone()]; }}>
+          {tl('contacts_addPhone')}
+        </button>
+      </fieldset>
+
+      <fieldset class="contact-field-section">
+        <legend>{tl('contacts_address')}</legend>
+        <ul class="contact-addr-list">
+          {#each formAddresses as addr, i}
+            <li class="contact-addr-item">
+              <div class="contact-addr-header">
+                <span>{tl('contacts_address')}{formAddresses.length > 1 ? ` ${i + 1}` : ''}</span>
+                <button type="button" class="remove-btn" onclick={() => { formAddresses = formAddresses.filter((_, j) => j !== i); }}>×</button>
+              </div>
+              <label>
+                {tl('contacts_street')}
+                <input type="text" bind:value={formAddresses[i].street} />
+              </label>
+              <div class="addr-row">
+                <label class="addr-city">
+                  {tl('contacts_city')}
+                  <input type="text" bind:value={formAddresses[i].city} />
+                </label>
+                <label class="addr-region">
+                  {tl('contacts_region')}
+                  <input type="text" bind:value={formAddresses[i].region} />
+                </label>
+                <label class="addr-postal">
+                  {tl('contacts_postal')}
+                  <input type="text" bind:value={formAddresses[i].postal} />
+                </label>
+              </div>
+              <div class="addr-row">
+                <label class="addr-country">
+                  {tl('contacts_country')}
+                  <input type="text" bind:value={formAddresses[i].country} />
+                </label>
+                <label class="addr-type">
+                  {tl('contacts_type')}
+                  <select bind:value={formAddresses[i].type_label} class="type-select">
+                    <option value="home">{tl('contacts_type_home')}</option>
+                    <option value="work">{tl('contacts_type_work')}</option>
+                    <option value="other">{tl('contacts_type_other')}</option>
+                  </select>
+                </label>
+              </div>
+            </li>
+          {/each}
+        </ul>
+        <button type="button" class="outline small" onclick={() => { formAddresses = [...formAddresses, emptyAddress()]; }}>
+          {tl('contacts_addAddress')}
+        </button>
+      </fieldset>
 
       <label>
         {tl('contacts_org')}
@@ -965,15 +989,67 @@
     margin-bottom: 0;
   }
 
-  /* Form styles */
-  .field-row {
-    display: flex;
-    gap: 0.4rem;
-    align-items: center;
+  /* Form styles — grouped sections mirror .alarm-section in EventFormDialog */
+  .contact-field-section {
+    border: none;
+    border-left: 3px solid var(--pico-primary-background);
+    padding: 0 0 0 0.75rem;
+    margin: 0 0 0.75rem;
   }
 
-  .field-row input {
-    flex: 1;
+  .contact-field-section legend {
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+    color: var(--pico-muted-color);
+    margin-bottom: 0.375rem;
+  }
+
+  .contact-field-list,
+  .contact-addr-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .contact-field-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .contact-field-row input { flex: 1; }
+
+  .contact-field-list input,
+  .contact-field-list select {
+    margin-bottom: 0;
+  }
+
+  .contact-addr-item { list-style: none; }
+
+  .contact-addr-item + .contact-addr-item {
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--pico-muted-border-color);
+  }
+
+  .contact-addr-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--pico-muted-color);
+  }
+
+  .contact-addr-item label { margin-bottom: 0.4rem; }
+
+  .contact-addr-item input,
+  .contact-addr-item select {
     margin-bottom: 0;
   }
 
@@ -981,35 +1057,7 @@
     width: auto;
     min-width: 5.5rem;
     margin-bottom: 0;
-    font-size: 0.8rem;
-    padding-top: 0.3rem;
-    padding-bottom: 0.3rem;
     flex-shrink: 0;
-  }
-
-  .address-fieldset {
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    padding: 0.75rem;
-    margin-bottom: 0.5rem;
-  }
-
-  .address-fieldset legend {
-    font-size: 0.85rem;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0 0.25rem;
-  }
-
-  .legend-remove {
-    padding: 0.1rem 0.3rem;
-    font-size: 0.75rem;
-  }
-
-  .address-fieldset label {
-    margin-bottom: 0.4rem;
   }
 
   .addr-row {
@@ -1022,7 +1070,10 @@
   .addr-region { flex: 1; min-width: 5rem; }
   .addr-postal { flex: 1; min-width: 5rem; }
   .addr-country { flex: 2; min-width: 8rem; }
-  .addr-type { flex: 1; min-width: 6rem; display: flex; flex-direction: column; justify-content: flex-end; }
+  .addr-type { flex: 1; min-width: 6rem; }
+  .addr-type .type-select { width: 100%; }
+
+  :global(button.small) { font-size: 0.875rem; padding: 0.25rem 0.75rem; }
 
   .remove-btn {
     padding: 0.25rem 0.5rem;
@@ -1035,18 +1086,6 @@
     margin-bottom: 0;
     width: auto;
     flex-shrink: 0;
-  }
-
-  .add-field-btn {
-    background: transparent;
-    border: none;
-    padding: 0.1rem 0;
-    font-size: 0.8rem;
-    color: var(--pico-primary);
-    cursor: pointer;
-    text-align: left;
-    margin-bottom: 0.75rem;
-    width: auto;
   }
 
   .form-actions {
