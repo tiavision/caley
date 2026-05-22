@@ -80,7 +80,9 @@ pub async fn save_account(
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
 
-    // Kick off sync for the new account
+    // Stop any existing IDLE watcher so it reconnects with updated credentials
+    state.email_sync_manager.stop_idle_for(&account_id);
+    // Kick off sync (and IDLE) for this account
     state.email_sync_manager.ensure_task_for(&account_id);
     state.sse_broadcaster.send(&user.user_id, SseMessage::AccountsChanged);
 
@@ -101,6 +103,8 @@ pub async fn delete_account(
         eprintln!("[email] delete_account error: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
+    state.email_sync_manager.stop_idle_for(&q.account_id);
+    state.email_sync_manager.stop_task_for(&q.account_id);
     state.sse_broadcaster.send(&user.user_id, SseMessage::AccountsChanged);
     StatusCode::NO_CONTENT.into_response()
 }

@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+use async_imap::extensions::idle::IdleResponse;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
 use crate::email_db;
@@ -22,6 +24,8 @@ pub struct EmailSyncManager {
     search_mode: SearchMode,
     /// keyed by account_id
     tasks: Mutex<HashMap<String, mpsc::UnboundedSender<EmailSyncTrigger>>>,
+    /// persistent IDLE connections, one per account — keyed by account_id
+    idle_tasks: Mutex<HashMap<String, JoinHandle<()>>>,
 }
 
 impl EmailSyncManager {
@@ -39,6 +43,7 @@ impl EmailSyncManager {
             sync_interval: Duration::from_secs(sync_interval_mins.saturating_mul(60)),
             search_mode,
             tasks: Mutex::new(HashMap::new()),
+            idle_tasks: Mutex::new(HashMap::new()),
         })
     }
 
@@ -59,6 +64,8 @@ impl EmailSyncManager {
     pub fn ensure_task_for(self: &Arc<Self>, account_id: &str) {
         let mut tasks = self.tasks.lock().unwrap();
         if tasks.contains_key(account_id) {
+            drop(tasks);
+            self.ensure_idle_for(account_id);
             return;
         }
         let (tx, rx) = mpsc::unbounded_channel();
@@ -70,6 +77,36 @@ impl EmailSyncManager {
         tokio::spawn(async move {
             mgr.run_account_loop(aid, rx).await;
         });
+
+        self.ensure_idle_for(account_id);
+    }
+
+    /// Start an IMAP IDLE watcher for this account if one isn't already running.
+    pub fn ensure_idle_for(self: &Arc<Self>, account_id: &str) {
+        let mut idle_tasks = self.idle_tasks.lock().unwrap();
+        if let Some(h) = idle_tasks.get(account_id) {
+            if !h.is_finished() {
+                return;
+            }
+        }
+        let mgr = Arc::clone(self);
+        let aid = account_id.to_owned();
+        let handle = tokio::spawn(async move {
+            mgr.run_idle_loop(aid).await;
+        });
+        idle_tasks.insert(account_id.to_owned(), handle);
+    }
+
+    /// Abort the IDLE watcher for this account (call on account deletion or credential update).
+    pub fn stop_idle_for(&self, account_id: &str) {
+        if let Some(h) = self.idle_tasks.lock().unwrap().remove(account_id) {
+            h.abort();
+        }
+    }
+
+    /// Drop the sync task sender for this account, causing the sync loop to exit.
+    pub fn stop_task_for(&self, account_id: &str) {
+        self.tasks.lock().unwrap().remove(account_id);
     }
 
     pub fn trigger(&self, account_id: &str, trigger: EmailSyncTrigger) {
@@ -178,6 +215,84 @@ impl EmailSyncManager {
         self.sync_mailbox_session(&mut session, account_id, &user_id, mailbox).await?;
         let _ = session.logout().await;
         Ok(())
+    }
+
+    // ── IMAP IDLE ─────────────────────────────────────────────────────────────
+
+    async fn run_idle_loop(self: Arc<Self>, account_id: String) {
+        let mut backoff = Duration::from_secs(5);
+        const MAX_BACKOFF: Duration = Duration::from_secs(300);
+        loop {
+            match self.idle_once(&account_id).await {
+                Ok(true) => {
+                    backoff = Duration::from_secs(5);
+                }
+                Ok(false) => {
+                    eprintln!("[idle] {account_id}: server does not support IDLE, falling back to polling");
+                    break;
+                }
+                Err(e) => {
+                    eprintln!("[idle] {account_id}: error ({e}), retrying in {backoff:?}");
+                    sleep(backoff).await;
+                    backoff = (backoff * 2).min(MAX_BACKOFF);
+                }
+            }
+        }
+        self.idle_tasks.lock().unwrap().remove(&account_id);
+    }
+
+    /// Opens a dedicated IMAP connection, enters IDLE on INBOX, and triggers
+    /// a mailbox sync whenever the server signals a change.
+    ///
+    /// Returns `Ok(true)` on a clean disconnect/reconnect cycle, `Ok(false)` if
+    /// the server doesn't support IDLE, and `Err` on any other failure.
+    async fn idle_once(&self, account_id: &str) -> anyhow::Result<bool> {
+        let (mut session, _user_id) = self.load_session(account_id).await?;
+
+        let caps = session.capabilities().await
+            .map_err(|e| anyhow::anyhow!("CAPABILITY failed: {e}"))?;
+        if !caps.has_str("IDLE") {
+            return Ok(false);
+        }
+
+        session.select("INBOX").await
+            .map_err(|e| anyhow::anyhow!("SELECT INBOX failed: {e}"))?;
+
+        let mut handle = session.idle();
+        handle.init().await
+            .map_err(|e| anyhow::anyhow!("IDLE init failed: {e}"))?;
+
+        loop {
+            // RFC 2177: re-issue IDLE at least every 29 minutes. We use 25 min to be safe.
+            let (wait_fut, _stop_source) = handle.wait_with_timeout(Duration::from_secs(25 * 60));
+            let resp = wait_fut.await
+                .map_err(|e| anyhow::anyhow!("IDLE wait error: {e}"))?;
+
+            match resp {
+                IdleResponse::NewData(_) => {
+                    let session = handle.done().await
+                        .map_err(|e| anyhow::anyhow!("IDLE done failed: {e}"))?;
+                    self.trigger(account_id, EmailSyncTrigger::Mailbox("INBOX".to_owned()));
+                    // Brief pause so the sync task can consume the trigger before we re-IDLE
+                    sleep(Duration::from_millis(500)).await;
+                    handle = session.idle();
+                    handle.init().await
+                        .map_err(|e| anyhow::anyhow!("IDLE re-init failed: {e}"))?;
+                }
+                IdleResponse::Timeout => {
+                    // Keep the connection alive by sending DONE and re-issuing IDLE
+                    let session = handle.done().await
+                        .map_err(|e| anyhow::anyhow!("IDLE done (timeout) failed: {e}"))?;
+                    handle = session.idle();
+                    handle.init().await
+                        .map_err(|e| anyhow::anyhow!("IDLE re-init (timeout) failed: {e}"))?;
+                }
+                IdleResponse::ManualInterrupt => {
+                    let _ = handle.done().await;
+                    return Ok(true);
+                }
+            }
+        }
     }
 
     async fn sync_mailbox_session(
