@@ -259,7 +259,7 @@
   }
 
   async function deleteContact(c: ContactJson) {
-    if (!confirm(tl('contacts_deleteconfirm1'))) return;
+    if (!confirm(tl('contacts_deleteConfirm'))) return;
     closeDetail();
     try {
       await fetch('/api/contact', {
@@ -323,7 +323,7 @@
   {:else if errorMsg}
     <p class="contacts-status form-error">{errorMsg}</p>
   {:else if filteredContacts.length === 0}
-    <p class="contacts-status">{tl('contacts_nocontacts1')}</p>
+    <p class="contacts-status">{tl('contacts_noContacts')}</p>
   {:else}
     <div class="contacts-groups">
       {#each grouped as group (group.letter)}
