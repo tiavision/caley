@@ -4,6 +4,10 @@ mod carddav;
 mod contacts;
 mod crypto;
 mod db;
+mod email;
+mod email_db;
+mod email_sync;
+mod imap_client;
 mod local_auth;
 mod oidc;
 mod search;
@@ -13,7 +17,7 @@ mod sync;
 
 use axum::error_handling::HandleErrorLayer;
 use axum::response::{IntoResponse, Redirect};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
 use axum_oidc::error::MiddlewareError;
 use axum_oidc::{EmptyAdditionalClaims, OidcAuthLayer, OidcLoginLayer};
@@ -89,6 +93,14 @@ async fn main() -> anyhow::Result<()> {
         search_mode.clone(),
     );
 
+    let email_sync_manager = email_sync::EmailSyncManager::new(
+        db.clone(),
+        encryption_key,
+        Arc::clone(&sse_broadcaster),
+        args.sync_interval_mins,
+        search_mode.clone(),
+    );
+
     let session_store = SqliteStore::new(db.clone());
     session_store.migrate().await?;
 
@@ -98,6 +110,7 @@ async fn main() -> anyhow::Result<()> {
         oidc_user_id_claim: args.oidc_user_id_claim,
         encryption_key,
         sync_manager,
+        email_sync_manager,
         sse_broadcaster,
         auth_mode: auth_mode.clone(),
         search_mode,
@@ -139,7 +152,22 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/contact", post(contacts::save_contact))
         .route("/api/contact", delete(contacts::delete_contact))
         .route("/api/contact/photo", get(contacts::get_contact_photo))
-        .route("/api/account", delete(local_auth::delete_account));
+        .route("/api/account", delete(local_auth::delete_account))
+        // Email routes
+        .route("/api/email/accounts", get(email::list_accounts))
+        .route("/api/email/account", post(email::save_account))
+        .route("/api/email/account", put(email::save_account))
+        .route("/api/email/account", delete(email::delete_account))
+        .route("/api/email/mailboxes", get(email::list_mailboxes))
+        .route("/api/email/folders", get(email::list_virtual_folders))
+        .route("/api/email/folder", post(email::create_virtual_folder))
+        .route("/api/email/folder", delete(email::delete_virtual_folder))
+        .route("/api/email/messages", get(email::list_messages))
+        .route("/api/email/message", get(email::get_message))
+        .route("/api/email/message/flags", patch(email::update_flags))
+        .route("/api/email/message", delete(email::delete_message))
+        .route("/api/email/send", post(email::send_email))
+        .route("/api/email/search", get(email::search));
 
     let app = if use_oidc {
         let oidc_issuer = args.oidc_issuer.unwrap();

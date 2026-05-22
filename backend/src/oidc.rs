@@ -16,6 +16,7 @@ use tower::{Layer, Service};
 use tower_sessions::Session;
 use crate::caldav::CalDavClient;
 use crate::db;
+use crate::email_sync::EmailSyncManager;
 use crate::search::SearchMode;
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -39,6 +40,7 @@ pub struct AppState {
     pub oidc_user_id_claim: UserIdClaim,
     pub encryption_key: [u8; 32],
     pub sync_manager: Arc<crate::sync::SyncManager>,
+    pub email_sync_manager: Arc<EmailSyncManager>,
     pub sse_broadcaster: Arc<crate::sse::SseBroadcaster>,
     pub auth_mode: AuthMode,
     pub search_mode: SearchMode,

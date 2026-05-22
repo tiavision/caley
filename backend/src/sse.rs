@@ -28,6 +28,16 @@ pub enum SseMessage {
     ContactRemoved { uid: String, addressbook_href: String },
     /// A single contact was created or updated (contact_json is inline to avoid a roundtrip)
     ContactUpdated { uid: String, addressbook_href: String, contact_json: Option<String> },
+    /// One or more emails changed — client should re-fetch the mailbox
+    EmailsRefetch { account_id: String, mailbox: String },
+    /// A single email was deleted
+    EmailRemoved { account_id: String, uid: u32, mailbox: String },
+    /// A single email was created or its flags changed
+    EmailUpdated { account_id: String, uid: u32, mailbox: String, flags: Vec<String> },
+    /// The account list changed (account added or removed)
+    AccountsChanged,
+    /// The mailbox list for an account changed
+    MailboxesChanged { account_id: String },
 }
 
 pub struct SseBroadcaster {
@@ -64,14 +74,9 @@ pub async fn events_stream(
     // Subscribe before triggering sync so we never miss the completion event.
     let rx = state.sse_broadcaster.subscribe(&user.user_id);
 
-    // Ensure the sync task is running.
-    // On first login the task immediately runs an initial full sync (populates
-    // the cache and sends CalendarsChanged + EventsRefetch).
-    // On subsequent connects the cache is already populated; real-time updates
-    // come via WebDAV push, and the periodic sync keeps everything fresh.
-    // Triggering an extra sync here would cause spurious events_refetch for
-    // every calendar that falls back to ctag comparison.
+    // Ensure CalDAV and email sync tasks are running for this user.
     state.sync_manager.ensure_task_for(&user.user_id);
+    state.email_sync_manager.ensure_tasks_for_user(&user.user_id).await;
     let stream = BroadcastStream::new(rx).filter_map(|msg| {
         let event: Option<Event> = match msg {
             Ok(SseMessage::EventsRefetch) => {
@@ -111,6 +116,29 @@ pub async fn events_stream(
                     serde_json::json!({ "uid": uid, "addressbook_href": addressbook_href }).to_string()
                 };
                 Some(Event::default().event("contact_updated").data(data))
+            }
+            Ok(SseMessage::EmailsRefetch { account_id, mailbox }) => {
+                Some(Event::default().event("emails_refetch").data(
+                    serde_json::json!({ "account_id": account_id, "mailbox": mailbox }).to_string(),
+                ))
+            }
+            Ok(SseMessage::EmailRemoved { account_id, uid, mailbox }) => {
+                Some(Event::default().event("email_removed").data(
+                    serde_json::json!({ "account_id": account_id, "uid": uid, "mailbox": mailbox }).to_string(),
+                ))
+            }
+            Ok(SseMessage::EmailUpdated { account_id, uid, mailbox, flags }) => {
+                Some(Event::default().event("email_updated").data(
+                    serde_json::json!({ "account_id": account_id, "uid": uid, "mailbox": mailbox, "flags": flags }).to_string(),
+                ))
+            }
+            Ok(SseMessage::AccountsChanged) => {
+                Some(Event::default().event("accounts_changed").data("1"))
+            }
+            Ok(SseMessage::MailboxesChanged { account_id }) => {
+                Some(Event::default().event("mailboxes_changed").data(
+                    serde_json::json!({ "account_id": account_id }).to_string(),
+                ))
             }
             Err(_) => None,
         };

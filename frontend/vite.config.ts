@@ -24,6 +24,7 @@ export default defineConfig({
         settings: resolve(__dirname, 'settings/index.html'),
         search: resolve(__dirname, 'search/index.html'),
         contacts: resolve(__dirname, 'contacts/index.html'),
+        mail: resolve(__dirname, 'mail/index.html'),
       },
     },
   },
