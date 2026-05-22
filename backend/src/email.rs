@@ -1,7 +1,9 @@
+use std::time::Duration;
+
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
-    response::{IntoResponse, Json},
+    http::{header, StatusCode},
+    response::{IntoResponse, Json, Response},
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -301,10 +303,11 @@ pub async fn get_message(
                     Ok(mut session) => {
                         if imap_client::select_mailbox(&mut session, &q.mailbox).await.is_ok() {
                             match imap_client::fetch_body(&mut session, q.uid).await {
-                                Ok((body_text, _has_att)) => {
+                                Ok((body_text, body_html, _has_att)) => {
                                     let body_idx = state.search_mode.normalize_text(&body_text);
                                     let _ = email_db::update_message_body(
-                                        &state.db, &q.account_id, &q.mailbox, q.uid, &body_text, &body_idx,
+                                        &state.db, &q.account_id, &q.mailbox, q.uid,
+                                        &body_text, body_html.as_deref(), &body_idx,
                                     ).await;
                                 }
                                 Err(e) => eprintln!("[email] fetch_body error: {e}"),
@@ -542,7 +545,249 @@ fn message_to_json(m: &email_db::MessageRow) -> serde_json::Value {
         "flags": flags,
         "has_attachments": m.has_attachments,
         "body_text": m.body_text,
+        "body_html": m.body_html,
         "is_read": flags.iter().any(|f| f == "\\Seen"),
         "is_flagged": flags.iter().any(|f| f == "\\Flagged"),
     })
+}
+
+// ── Image proxy ───────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct ProxyImageQuery {
+    pub url: String,
+}
+
+pub async fn proxy_image(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<ProxyImageQuery>,
+) -> Response {
+    let url = &q.url;
+
+    // Validate scheme and SSRF safety
+    let parsed = match url::Url::parse(url) {
+        Ok(u) if matches!(u.scheme(), "http" | "https") => u,
+        _ => return (StatusCode::BAD_REQUEST, "invalid url").into_response(),
+    };
+
+    if !is_ssrf_safe(&parsed).await {
+        return transparent_pixel();
+    }
+
+    // Extract origin and check whitelist
+    let Some(host) = parsed.host_str() else {
+        return transparent_pixel();
+    };
+    let origin = format!("{}://{}", parsed.scheme(), host);
+
+    match email_db::is_origin_whitelisted(&state.db, &user.user_id, &origin).await {
+        Ok(true) => {}
+        _ => return transparent_pixel(),
+    }
+
+    // Fetch the image
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap_or_default();
+
+    let resp = match client.get(url).send().await {
+        Ok(r) => r,
+        Err(_) => return transparent_pixel(),
+    };
+
+    // Validate Content-Type is an image but not SVG (SVGs can contain scripts)
+    let ct = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    if !ct.starts_with("image/") || ct.contains("svg") {
+        return transparent_pixel();
+    }
+
+    let ct_owned = ct.clone();
+    let bytes = match resp.bytes().await {
+        Ok(b) => b,
+        Err(_) => return transparent_pixel(),
+    };
+
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, ct_owned),
+            (header::CACHE_CONTROL, "private, max-age=3600".to_string()),
+            (header::HeaderName::from_static("x-content-type-options"), "nosniff".to_string()),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
+async fn is_ssrf_safe(parsed: &url::Url) -> bool {
+    let host = match parsed.host_str() {
+        Some(h) => h,
+        None => return false,
+    };
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    match tokio::net::lookup_host(format!("{host}:{port}")).await {
+        Ok(mut addrs) => addrs.all(|a| !is_private_ip(a.ip())),
+        Err(_) => false,
+    }
+}
+
+fn is_private_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_loopback() || v4.is_private() || v4.is_link_local()
+                || v4.is_broadcast() || v4.is_multicast() || v4.is_unspecified()
+        }
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback() || v6.is_multicast() || v6.is_unspecified()
+        }
+    }
+}
+
+fn transparent_pixel() -> Response {
+    // 1×1 transparent GIF
+    const GIF: &[u8] = &[
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80,
+        0x00, 0x00, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x21, 0xf9, 0x04,
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01,
+        0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b,
+    ];
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "image/gif"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        GIF,
+    )
+        .into_response()
+}
+
+// ── Navigate (link warning page) ─────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct NavigateQuery {
+    pub to: String,
+}
+
+pub async fn navigate(Query(q): Query<NavigateQuery>) -> Response {
+    let url = &q.to;
+    match url::Url::parse(url) {
+        Ok(u) if matches!(u.scheme(), "http" | "https") => {}
+        _ => return (StatusCode::BAD_REQUEST, "invalid url").into_response(),
+    }
+
+    let esc = html_escape(url);
+    let html = format!(
+        r##"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>External Link</title>
+<style>
+  body {{ font-family: sans-serif; max-width: 560px; margin: 3rem auto; padding: 0 1.5rem; color: #222; }}
+  h2 {{ font-size: 1.1rem; margin-bottom: 1rem; }}
+  .url {{ word-break: break-all; background: #f5f5f5; padding: .6rem .8rem; border-radius: 4px; margin: 1rem 0; font-size: .9rem; }}
+  .actions {{ display: flex; gap: .75rem; margin-top: 1.5rem; }}
+  .continue {{ background: #2a6496; color: #fff; padding: .55rem 1.1rem; border-radius: 4px; text-decoration: none; font-size: .9rem; }}
+  .cancel {{ padding: .55rem 1.1rem; border-radius: 4px; text-decoration: none; font-size: .9rem; border: 1px solid #999; color: inherit; cursor: pointer; background: none; }}
+</style>
+</head>
+<body>
+<h2>You are about to visit an external site</h2>
+<p>Destination:</p>
+<div class="url">{esc}</div>
+<div class="actions">
+  <a class="continue" href="{esc}">Continue</a>
+  <button class="cancel" onclick="window.close()">Cancel</button>
+</div>
+</body>
+</html>"##
+    );
+
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        html,
+    )
+        .into_response()
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+// ── Image origin whitelist API ────────────────────────────────────────────────
+
+pub async fn list_image_origins(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> impl IntoResponse {
+    match email_db::get_image_whitelist(&state.db, &user.user_id).await {
+        Ok(origins) => Json(json!({ "origins": origins })).into_response(),
+        Err(e) => {
+            eprintln!("[email] list_image_origins error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ImageOriginBody {
+    pub origin: String,
+}
+
+pub async fn add_image_origin(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<ImageOriginBody>,
+) -> impl IntoResponse {
+    // Validate that the origin is a well-formed http(s) origin
+    match url::Url::parse(&body.origin) {
+        Ok(u) if matches!(u.scheme(), "http" | "https") && u.host().is_some() => {}
+        _ => return (StatusCode::BAD_REQUEST, "invalid origin").into_response(),
+    }
+    // Normalise to scheme://host (strip path/query)
+    let origin = {
+        let u = url::Url::parse(&body.origin).unwrap();
+        format!("{}://{}", u.scheme(), u.host_str().unwrap_or(""))
+    };
+
+    match email_db::add_image_origin(&state.db, &user.user_id, &origin).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            eprintln!("[email] add_image_origin error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ImageOriginQuery {
+    pub origin: String,
+}
+
+pub async fn remove_image_origin(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<ImageOriginQuery>,
+) -> impl IntoResponse {
+    match email_db::remove_image_origin(&state.db, &user.user_id, &q.origin).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            eprintln!("[email] remove_image_origin error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
 }

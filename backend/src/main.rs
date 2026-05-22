@@ -124,9 +124,10 @@ async fn main() -> anyhow::Result<()> {
         .with_same_site(SameSite::Lax)
         .with_expiry(Expiry::OnInactivity(time::Duration::days(7)));
 
-    // Public — CalDAV servers POST here without a session cookie
+    // Public — no authentication required
     let public = Router::new()
         .route("/api/push/webhook", post(sse::push_webhook))
+        .route("/api/email/navigate", get(email::navigate))
         .with_state(state.clone());
 
     // Shared private routes (both auth modes)
@@ -167,7 +168,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/email/message/flags", patch(email::update_flags))
         .route("/api/email/message", delete(email::delete_message))
         .route("/api/email/send", post(email::send_email))
-        .route("/api/email/search", get(email::search));
+        .route("/api/email/search", get(email::search))
+        .route("/api/email/proxy-image", get(email::proxy_image))
+        .route("/api/email/image-origins", get(email::list_image_origins))
+        .route("/api/email/image-origins", post(email::add_image_origin))
+        .route("/api/email/image-origins", delete(email::remove_image_origin));
 
     let app = if use_oidc {
         let oidc_issuer = args.oidc_issuer.unwrap();

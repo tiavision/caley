@@ -318,12 +318,14 @@ pub async fn update_message_body(
     mailbox: &str,
     uid: u32,
     body_text: &str,
+    body_html: Option<&str>,
     body_idx: &str,
 ) -> Result<()> {
     sqlx::query(
-        "UPDATE cached_messages SET body_text = ?, body_idx = ? WHERE account_id = ? AND mailbox = ? AND uid = ?",
+        "UPDATE cached_messages SET body_text = ?, body_html = ?, body_idx = ? WHERE account_id = ? AND mailbox = ? AND uid = ?",
     )
     .bind(body_text)
+    .bind(body_html)
     .bind(body_idx)
     .bind(account_id)
     .bind(mailbox)
@@ -397,6 +399,7 @@ pub struct MessageRow {
     pub flags: Option<String>,
     pub has_attachments: bool,
     pub body_text: Option<String>,
+    pub body_html: Option<String>,
 }
 
 pub async fn list_messages(
@@ -482,7 +485,7 @@ pub async fn get_message(
 ) -> Result<Option<MessageRow>> {
     let row = sqlx::query(
         "SELECT uid, account_id, mailbox, message_id, thread_id, from_addr, to_addrs, cc_addrs,
-                subject, sent_at, flags, has_attachments, body_text
+                subject, sent_at, flags, has_attachments, body_text, body_html
          FROM cached_messages WHERE account_id = ? AND mailbox = ? AND uid = ?",
     )
     .bind(account_id)
@@ -490,7 +493,7 @@ pub async fn get_message(
     .bind(uid as i64)
     .fetch_optional(pool)
     .await?;
-    Ok(row.as_ref().map(row_to_message))
+    Ok(row.as_ref().map(row_to_message_full))
 }
 
 fn row_to_message(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
@@ -508,6 +511,26 @@ fn row_to_message(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
         flags: r.get(10),
         has_attachments: r.get::<i64, _>(11) != 0,
         body_text: r.get(12),
+        body_html: None,
+    }
+}
+
+fn row_to_message_full(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
+    MessageRow {
+        uid: r.get(0),
+        account_id: r.get(1),
+        mailbox: r.get(2),
+        message_id: r.get(3),
+        thread_id: r.get(4),
+        from_addr: r.get(5),
+        to_addrs: r.get(6),
+        cc_addrs: r.get(7),
+        subject: r.get(8),
+        sent_at: r.get(9),
+        flags: r.get(10),
+        has_attachments: r.get::<i64, _>(11) != 0,
+        body_text: r.get(12),
+        body_html: r.get(13),
     }
 }
 
@@ -620,5 +643,50 @@ pub async fn delete_virtual_folder(pool: &SqlitePool, folder_id: &str, user_id: 
     sqlx::query("DELETE FROM virtual_folders WHERE folder_id = ? AND user_id = ?")
         .bind(folder_id).bind(user_id).execute(&mut *tx).await?;
     tx.commit().await?;
+    Ok(())
+}
+
+// ── Image origin whitelist ────────────────────────────────────────────────────
+
+pub async fn get_image_whitelist(pool: &SqlitePool, user_id: &str) -> Result<Vec<String>> {
+    let rows = sqlx::query(
+        "SELECT origin FROM email_image_whitelist WHERE user_id = ? ORDER BY origin",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(|r| r.get(0)).collect())
+}
+
+pub async fn is_origin_whitelisted(pool: &SqlitePool, user_id: &str, origin: &str) -> Result<bool> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM email_image_whitelist WHERE user_id = ? AND origin = ?",
+    )
+    .bind(user_id)
+    .bind(origin)
+    .fetch_one(pool)
+    .await?;
+    Ok(count > 0)
+}
+
+pub async fn add_image_origin(pool: &SqlitePool, user_id: &str, origin: &str) -> Result<()> {
+    sqlx::query(
+        "INSERT OR IGNORE INTO email_image_whitelist (user_id, origin) VALUES (?, ?)",
+    )
+    .bind(user_id)
+    .bind(origin)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn remove_image_origin(pool: &SqlitePool, user_id: &str, origin: &str) -> Result<()> {
+    sqlx::query(
+        "DELETE FROM email_image_whitelist WHERE user_id = ? AND origin = ?",
+    )
+    .bind(user_id)
+    .bind(origin)
+    .execute(pool)
+    .await?;
     Ok(())
 }

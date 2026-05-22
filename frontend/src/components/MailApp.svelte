@@ -43,6 +43,7 @@
     flags: string[];
     has_attachments: boolean;
     body_text: string | null;
+    body_html: string | null;
     is_read: boolean;
     is_flagged: boolean;
   }
@@ -92,6 +93,11 @@
   let displayName = '';
   let authMode = '';
 
+  // HTML email rendering
+  let viewMode: 'html' | 'text' = 'text';
+  let imageOrigins: string[] = [];
+  let iframeKey = 0;
+
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
   onMount(async () => {
@@ -114,7 +120,7 @@
   // ── Data loading ─────────────────────────────────────────────────────────
 
   async function loadAll() {
-    await Promise.all([loadAccounts(), loadVirtualFolders()]);
+    await Promise.all([loadAccounts(), loadVirtualFolders(), loadImageOrigins()]);
     for (const acc of accounts) {
       await loadMailboxes(acc.account_id);
     }
@@ -160,6 +166,35 @@
     } catch {}
   }
 
+  async function loadImageOrigins() {
+    try {
+      const r = await fetch('/api/email/image-origins');
+      if (r.ok) {
+        const data = await r.json();
+        imageOrigins = data.origins || [];
+      }
+    } catch {}
+  }
+
+  async function allowOrigin(origin: string) {
+    try {
+      await fetch('/api/email/image-origins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ origin }),
+      });
+      imageOrigins = [...imageOrigins, origin];
+      iframeKey++; // force iframe reload so images are re-fetched
+    } catch {}
+  }
+
+  async function revokeOrigin(origin: string) {
+    try {
+      await fetch(`/api/email/image-origins?origin=${encodeURIComponent(origin)}`, { method: 'DELETE' });
+      imageOrigins = imageOrigins.filter(o => o !== origin);
+    } catch {}
+  }
+
   async function selectMailbox(accountId: string, mailbox: string) {
     selectedAccountId = accountId;
     selectedMailbox = mailbox;
@@ -202,12 +237,14 @@
   async function openMessage(msg: Message) {
     messageLoading = true;
     selectedMessage = msg;
+    viewMode = 'text'; // reset while loading
     try {
       const url = `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
       const r = await fetch(url);
       if (r.ok) {
         const full = await r.json();
         selectedMessage = full;
+        viewMode = full.body_html ? 'html' : 'text';
         // Update in list
         messages = messages.map(m =>
           m.uid === msg.uid && m.account_id === msg.account_id && m.mailbox === msg.mailbox ? full : m
@@ -479,6 +516,21 @@
   }
 
   $: unreadCount = messages.filter(m => !m.is_read).length;
+
+  $: blockedOrigins = (() => {
+    if (!selectedMessage?.body_html) return [];
+    const found = new Set<string>();
+    const re = /\/api\/email\/proxy-image\?url=([^"&\s]+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(selectedMessage.body_html)) !== null) {
+      try {
+        const decoded = decodeURIComponent(m[1]);
+        const u = new URL(decoded);
+        found.add(`${u.protocol}//${u.host}`);
+      } catch {}
+    }
+    return [...found].filter(o => !imageOrigins.includes(o));
+  })();
 </script>
 
 <div class="mail-layout">
@@ -641,10 +693,46 @@
         <div><strong>Date:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
       </div>
       <div class="detail-body">
-        {#if selectedMessage.body_text}
-          <pre class="body-text">{selectedMessage.body_text}</pre>
-        {:else}
+        {#if messageLoading && !selectedMessage.body_text && !selectedMessage.body_html}
           <div class="loading">Loading body…</div>
+        {:else}
+          {#if selectedMessage.body_html}
+            <div class="view-toggle">
+              <button
+                class:active={viewMode === 'html'}
+                on:click={() => viewMode = 'html'}
+              >HTML</button>
+              <button
+                class:active={viewMode === 'text'}
+                on:click={() => viewMode = 'text'}
+              >Plain text</button>
+            </div>
+          {/if}
+
+          {#if viewMode === 'html' && selectedMessage.body_html}
+            {#if blockedOrigins.length > 0}
+              <div class="images-notice">
+                <span>Images are blocked.</span>
+                {#each blockedOrigins as origin}
+                  <button class="allow-btn" on:click={() => allowOrigin(origin)}>
+                    Allow {origin}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+            {#key iframeKey}
+              <iframe
+                sandbox="allow-popups"
+                srcdoc={selectedMessage.body_html}
+                title="Email body"
+                class="html-body"
+              ></iframe>
+            {/key}
+          {:else if selectedMessage.body_text}
+            <pre class="body-text">{selectedMessage.body_text}</pre>
+          {:else}
+            <div class="loading">Loading body…</div>
+          {/if}
         {/if}
       </div>
     {:else}
@@ -703,6 +791,21 @@
       </div>
     </div>
   </div>
+{/if}
+
+<!-- ── Trusted image sources dialog ─────────────────────────────────────── -->
+{#if imageOrigins.length > 0}
+  <details class="origins-panel">
+    <summary>Trusted image sources ({imageOrigins.length})</summary>
+    <ul class="origins-list">
+      {#each imageOrigins as origin}
+        <li>
+          <span>{origin}</span>
+          <button class="icon-btn delete-btn" on:click={() => revokeOrigin(origin)} title="Remove">×</button>
+        </li>
+      {/each}
+    </ul>
+  </details>
 {/if}
 
 <!-- ── Compose dialog ────────────────────────────────────────────────────── -->
@@ -1108,6 +1211,106 @@
     font-size: 0.88rem;
     line-height: 1.5;
     margin: 0;
+  }
+
+  .view-toggle {
+    display: flex;
+    gap: 0;
+    margin-bottom: 0.75rem;
+    border: 1px solid var(--pico-muted-border-color, #ccc);
+    border-radius: 4px;
+    overflow: hidden;
+    width: fit-content;
+  }
+
+  .view-toggle button {
+    padding: 0.3rem 0.75rem;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: inherit;
+    border-right: 1px solid var(--pico-muted-border-color, #ccc);
+  }
+
+  .view-toggle button:last-child {
+    border-right: none;
+  }
+
+  .view-toggle button.active {
+    background: var(--pico-primary, #0172ad);
+    color: white;
+  }
+
+  .images-notice {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    background: var(--pico-card-background-color, #f9f9f9);
+    border: 1px solid var(--pico-muted-border-color, #ccc);
+    border-radius: 4px;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.75rem;
+    color: var(--pico-muted-color, #666);
+  }
+
+  .allow-btn {
+    padding: 0.2rem 0.6rem;
+    font-size: 0.78rem;
+    border: 1px solid var(--pico-primary, #0172ad);
+    border-radius: 3px;
+    background: none;
+    color: var(--pico-primary, #0172ad);
+    cursor: pointer;
+  }
+
+  .allow-btn:hover {
+    background: var(--pico-primary, #0172ad);
+    color: white;
+  }
+
+  .html-body {
+    width: 100%;
+    min-height: 300px;
+    border: none;
+    display: block;
+    flex: 1;
+  }
+
+  .origins-panel {
+    position: fixed;
+    bottom: 1rem;
+    right: 1rem;
+    background: var(--pico-background-color, white);
+    border: 1px solid var(--pico-muted-border-color, #ccc);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    font-size: 0.82rem;
+    z-index: 50;
+    min-width: 220px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.12);
+  }
+
+  .origins-panel summary {
+    cursor: pointer;
+    color: var(--pico-primary, #0172ad);
+    font-size: 0.82rem;
+  }
+
+  .origins-list {
+    list-style: none;
+    padding: 0.5rem 0 0;
+    margin: 0;
+  }
+
+  .origins-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.2rem 0;
   }
 
   /* Shared */

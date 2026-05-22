@@ -134,8 +134,8 @@ pub async fn fetch_headers(
     Ok(headers)
 }
 
-/// Fetches the full raw body for a single UID. Returns (body_text, has_attachments).
-pub async fn fetch_body(session: &mut ImapSession, uid: u32) -> Result<(String, bool)> {
+/// Fetches the full raw body for a single UID. Returns (body_text, body_html, has_attachments).
+pub async fn fetch_body(session: &mut ImapSession, uid: u32) -> Result<(String, Option<String>, bool)> {
     let mut stream = session.uid_fetch(uid.to_string(), "(BODY.PEEK[])").await?;
     if let Some(item) = stream.next().await {
         let fetch = item?;
@@ -143,7 +143,7 @@ pub async fn fetch_body(session: &mut ImapSession, uid: u32) -> Result<(String, 
             return parse_body_bytes(body_bytes);
         }
     }
-    Ok((String::new(), false))
+    Ok((String::new(), None, false))
 }
 
 /// Stores the \Deleted flag and expunges on the server.
@@ -242,41 +242,318 @@ fn format_addr(a: &mail_parser::Addr<'_>) -> String {
     }
 }
 
-fn parse_body_bytes(bytes: &[u8]) -> Result<(String, bool)> {
+fn parse_body_bytes(bytes: &[u8]) -> Result<(String, Option<String>, bool)> {
     use mail_parser::MessageParser;
     let parser = MessageParser::default();
     let msg = match parser.parse(bytes) {
         Some(m) => m,
-        None => return Ok((String::from_utf8_lossy(bytes).into_owned(), false)),
+        None => return Ok((String::from_utf8_lossy(bytes).into_owned(), None, false)),
     };
 
     let has_attachments = msg.attachments().count() > 0;
 
-    // Prefer plain text; fall back to stripping HTML
+    let raw_html = msg.body_html(0).map(|h| h.as_ref().to_owned());
+    let body_html = raw_html.as_deref().map(sanitize_email_html);
+
     let body_text = if let Some(text) = msg.body_text(0) {
         text.as_ref().to_owned()
-    } else if let Some(html) = msg.body_html(0) {
-        strip_html(html.as_ref())
+    } else if let Some(ref html) = raw_html {
+        strip_tags(html)
     } else {
         String::new()
     };
 
-    Ok((body_text, has_attachments))
+    Ok((body_text, body_html, has_attachments))
 }
 
-fn strip_html(html: &str) -> String {
-    let mut out = String::with_capacity(html.len());
-    let mut in_tag = false;
-    for ch in html.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            c if !in_tag => out.push(c),
+// ── HTML sanitization for email display ──────────────────────────────────────
+
+pub fn sanitize_email_html(html: &str) -> String {
+    use std::borrow::Cow;
+    use std::collections::{HashMap, HashSet};
+
+    let allowed_tags: HashSet<&str> = [
+        "a", "abbr", "b", "blockquote", "br", "cite", "code", "col", "colgroup",
+        "del", "div", "dl", "dt", "dd", "em", "font", "h1", "h2", "h3", "h4",
+        "h5", "h6", "hr", "i", "img", "ins", "li", "ol", "p", "pre", "s",
+        "small", "span", "strike", "strong", "sub", "sup", "table", "tbody",
+        "td", "tfoot", "th", "thead", "tr", "u", "ul",
+    ]
+    .iter()
+    .copied()
+    .collect();
+
+    let clean_content: HashSet<&str> = ["script", "style", "head", "noscript"]
+        .iter()
+        .copied()
+        .collect();
+
+    let cell_attrs: HashSet<&str> = [
+        "colspan", "rowspan", "align", "valign", "width", "height", "bgcolor",
+    ]
+    .iter()
+    .copied()
+    .collect();
+
+    let mut tag_attrs: HashMap<&str, HashSet<&str>> = HashMap::new();
+    tag_attrs.insert("a", ["href", "title"].iter().copied().collect());
+    tag_attrs.insert(
+        "img",
+        ["src", "alt", "width", "height"].iter().copied().collect(),
+    );
+    tag_attrs.insert("td", cell_attrs.clone());
+    tag_attrs.insert("th", cell_attrs);
+    tag_attrs.insert(
+        "table",
+        [
+            "width", "cellpadding", "cellspacing", "border", "bgcolor", "align",
+        ]
+        .iter()
+        .copied()
+        .collect(),
+    );
+    tag_attrs.insert(
+        "font",
+        ["color", "face", "size"].iter().copied().collect(),
+    );
+    tag_attrs.insert("col", ["span", "width"].iter().copied().collect());
+    tag_attrs.insert("colgroup", ["span"].iter().copied().collect());
+
+    let url_schemes: HashSet<&str> = ["http", "https", "mailto"].iter().copied().collect();
+    let generic_attrs: HashSet<&str> = ["style", "class", "align", "dir"]
+        .iter()
+        .copied()
+        .collect();
+
+    let clean = ammonia::Builder::new()
+        .tags(allowed_tags)
+        .clean_content_tags(clean_content)
+        .tag_attributes(tag_attrs)
+        .generic_attributes(generic_attrs)
+        .url_schemes(url_schemes)
+        .link_rel(Some("noopener noreferrer"))
+        .attribute_filter(|element, attribute, value| -> Option<Cow<str>> {
+            match (element, attribute) {
+                ("img", "src") => {
+                    if value.starts_with("http://") || value.starts_with("https://") {
+                        let encoded: String =
+                            url::form_urlencoded::byte_serialize(value.as_bytes()).collect();
+                        Some(Cow::Owned(format!("/api/email/proxy-image?url={encoded}")))
+                    } else if value.starts_with("data:image/") {
+                        Some(Cow::Borrowed(value))
+                    } else {
+                        None
+                    }
+                }
+                (_, "style") => {
+                    let filtered = strip_css_url_functions(value);
+                    if filtered.trim().is_empty() {
+                        None
+                    } else {
+                        Some(Cow::Owned(filtered))
+                    }
+                }
+                _ => Some(Cow::Borrowed(value)),
+            }
+        })
+        .clean(html)
+        .to_string();
+
+    rewrite_links(&clean)
+}
+
+/// Strips CSS declarations containing `url(` (with optional whitespace before `(`).
+fn strip_css_url_functions(style: &str) -> String {
+    style
+        .split(';')
+        .filter(|decl| !contains_url_function(decl))
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn contains_url_function(css: &str) -> bool {
+    let mut start = 0;
+    let lower = css.to_ascii_lowercase();
+    while let Some(pos) = lower[start..].find("url") {
+        let abs = start + pos;
+        let after = lower[abs + 3..].trim_start_matches(|c: char| c.is_ascii_whitespace());
+        if after.starts_with('(') {
+            return true;
+        }
+        start = abs + 1;
+    }
+    false
+}
+
+/// Post-processes ammonia-sanitized HTML: adds `target="_blank"` to all `<a>` tags
+/// and rewrites hrefs that spoof a URL in the anchor text to the navigate warning endpoint.
+fn rewrite_links(html: &str) -> String {
+    let mut out = String::with_capacity(html.len() + 256);
+    let mut s = html;
+
+    loop {
+        let Some(i) = find_open_a(s) else {
+            out.push_str(s);
+            break;
+        };
+
+        out.push_str(&s[..i]);
+        s = &s[i..];
+
+        let Some(j) = find_tag_end(s) else {
+            out.push_str(s);
+            break;
+        };
+
+        let opening = &s[..j + 1];
+        s = &s[j + 1..];
+
+        // Find matching </a> (case-insensitive)
+        let lower_rest = s.to_ascii_lowercase();
+        if let Some(close) = lower_rest.find("</a>") {
+            let inner = &s[..close];
+            s = &s[close + 4..];
+
+            let new_opening = process_a_tag(opening, inner);
+            out.push_str(&new_opening);
+            out.push_str(inner);
+            out.push_str("</a>");
+        } else {
+            // No closing tag — emit opening as-is with target="_blank"
+            out.push_str(&add_target_blank(opening));
+        }
+    }
+
+    out
+}
+
+fn find_open_a(s: &str) -> Option<usize> {
+    let lower = s.to_ascii_lowercase();
+    let mut from = 0;
+    loop {
+        let pos = lower[from..].find("<a").map(|p| from + p)?;
+        // Ensure it's <a> or <a followed by whitespace (not <abbr etc.)
+        let after = s.as_bytes().get(pos + 2).copied();
+        if matches!(after, Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r') | Some(b'>') | None) {
+            return Some(pos);
+        }
+        from = pos + 2;
+    }
+}
+
+/// Finds the closing `>` of a tag, respecting quoted attribute values.
+fn find_tag_end(s: &str) -> Option<usize> {
+    let mut in_q: Option<char> = None;
+    for (i, c) in s.char_indices() {
+        match (c, in_q) {
+            ('"' | '\'', None) => in_q = Some(c),
+            (q, Some(open)) if q == open => in_q = None,
+            ('>', None) => return Some(i),
             _ => {}
         }
     }
-    // Collapse runs of whitespace
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    None
+}
+
+fn process_a_tag(opening: &str, inner: &str) -> String {
+    let with_target = add_target_blank(opening);
+
+    let text = strip_tags(inner);
+    let text = text.trim();
+
+    if let Some(href) = get_href(&with_target) {
+        if looks_like_url(text) && !same_host(text, href) {
+            let encoded: String =
+                url::form_urlencoded::byte_serialize(href.as_bytes()).collect();
+            let new_href = format!("/api/email/navigate?to={encoded}");
+            return replace_href_value(&with_target, href, &new_href);
+        }
+    }
+
+    with_target
+}
+
+fn add_target_blank(opening: &str) -> String {
+    if opening.to_ascii_lowercase().contains("target=") {
+        return opening.to_string();
+    }
+    // Insert before the closing >
+    if let Some(pos) = opening.rfind('>') {
+        format!("{} target=\"_blank\">", &opening[..pos])
+    } else {
+        opening.to_string()
+    }
+}
+
+fn get_href(opening: &str) -> Option<&str> {
+    let lower = opening.to_ascii_lowercase();
+    let href_pos = lower.find("href=")?;
+    let rest = &opening[href_pos + 5..];
+    let quote = rest.chars().next()?;
+    if quote == '"' || quote == '\'' {
+        let end = rest[1..].find(quote)?;
+        Some(&rest[1..end + 1])
+    } else {
+        None
+    }
+}
+
+fn replace_href_value(opening: &str, old_href: &str, new_href: &str) -> String {
+    opening.replacen(old_href, new_href, 1)
+}
+
+fn strip_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            c if !in_tag => result.push(c),
+            _ => {}
+        }
+    }
+    result
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ")
+        .replace("&quot;", "\"")
+}
+
+fn looks_like_url(text: &str) -> bool {
+    if text.is_empty() || text.len() > 200 {
+        return false;
+    }
+    let lower = text.trim().to_ascii_lowercase();
+    lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("www.")
+        || (!lower.contains(' ') && lower.contains('.') && lower.len() >= 5)
+}
+
+fn same_host(text: &str, href: &str) -> bool {
+    let host_of = |s: &str| -> String {
+        let s = s.trim().to_ascii_lowercase();
+        let url_str = if s.starts_with("http://") || s.starts_with("https://") {
+            s.clone()
+        } else if s.starts_with("//") {
+            format!("https:{s}")
+        } else {
+            format!("https://{s}")
+        };
+        url::Url::parse(&url_str)
+            .ok()
+            .and_then(|u| u.host_str().map(|h| h.trim_start_matches("www.").to_ascii_lowercase()))
+            .unwrap_or_default()
+    };
+
+    let text_host = host_of(text);
+    let href_host = host_of(href);
+
+    href_host.is_empty() || text_host.is_empty() || text_host == href_host
 }
 
 fn uids_to_set(uids: &[u32]) -> String {
