@@ -30,6 +30,7 @@ All configuration is via environment variables. A `.env` file in `backend/` is a
 | `STATIC_DIR` | Path to frontend dist directory (default: `../frontend/dist`) | No |
 | `SYNC_INTERVAL_MINS` | Background sync interval in minutes (default: `5`) | No |
 | `SEARCH_MODE` | Full-text search strategy: `default` (unicode-aware prefix matching), `trigram` (substring matching, any language), or a Snowball algorithm name for language-specific stemming: `Arabic`, `Danish`, `Dutch`, `English`, `Finnish`, `French`, `German`, `Greek`, `Hungarian`, `Italian`, `Norwegian`, `Portuguese`, `Romanian`, `Russian`, `Spanish`, `Swedish`, `Tamil`, `Turkish`. Changing this rebuilds the search index on next start. (default: `default`) | No |
+| `MAP_URL` | URL template opened when tapping a location on a device that has no native maps app. Use `{q}` as a placeholder for the URL-encoded address (default: `https://www.openstreetmap.org/search?query={q}`) | No |
 
 If all three OIDC variables are set, OIDC mode is used. Otherwise the app starts in local CalDAV login mode — no OIDC provider needed.
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { initI18n, getLocale, setLocale, makeTl } from '../lib/i18n.ts';
+  import { getUser } from '../lib/user.ts';
   import EventColorDot from './EventColorDot.svelte';
   import CreateCalendarDialog from './CreateCalendarDialog.svelte';
   import ImportDialog from './ImportDialog.svelte';
@@ -63,9 +64,9 @@
     locale = getLocale();
     selectedLocale = locale.slice(0, 2);
 
-    // Detect auth state: 401 means we're not logged in → login mode
-    const userRes = await fetch('/api/user').catch(() => null);
-    if (!userRes || userRes.status === 401) {
+    // Detect auth state: 401 (or network error) means we're not logged in → login mode
+    const userRes = await getUser();
+    if (!userRes.ok) {
       isLoginMode = true;
       caldavBaseUrl = localStorage.getItem('caldav_base_url') || '';
       loading = false;

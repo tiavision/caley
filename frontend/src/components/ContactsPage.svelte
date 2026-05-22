@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { initI18n, getLocale, makeTl } from '../lib/i18n.ts';
+  import { getUser } from '../lib/user.ts';
   import type { ContactJson, AddressbookJson, ContactsResponse, TypedEntry, AddressEntry } from '../types/calendar.ts';
 
   let locale = 'en';
@@ -17,6 +18,7 @@
   let filterText = '';
   let selectedAddressbookHrefs = new Set<string>();
   let abDropdownOpen = false;
+  let mapUrl = 'https://www.openstreetmap.org/search?query={q}';
 
   let formDialog: HTMLDialogElement;
   const emptyEmail = (): TypedEntry => ({ value: '', type_label: 'other' });
@@ -30,12 +32,22 @@
   function openMap(event: MouseEvent, query: string) {
     event.preventDefault();
     const encoded = encodeURIComponent(query);
+
+    let appOpened = false;
+    const onBlur = () => { appOpened = true; };
+    const onVisibility = () => { if (document.hidden) appOpened = true; };
+    window.addEventListener('blur', onBlur, { once: true });
+    document.addEventListener('visibilitychange', onVisibility, { once: true });
+
     window.location.href = `geo:0,0?q=${encoded}`;
+
     setTimeout(() => {
-      if (!document.hidden) {
-        window.open(`https://www.openstreetmap.org/search?query=${encoded}`, '_blank');
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (!appOpened) {
+        window.open(mapUrl.replace('{q}', encoded), '_blank');
       }
-    }, 800);
+    }, 500);
   }
 
   let formUid: string | null = null;
@@ -54,6 +66,7 @@
   onMount(async () => {
     await initI18n();
     locale = getLocale();
+    getUser().then(u => { if (u.map_url) mapUrl = u.map_url; });
     await loadContacts();
     connectSSE();
   });

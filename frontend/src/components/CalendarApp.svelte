@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { initI18n, getLocale, makeTl } from '../lib/i18n.ts';
+  import { getUser } from '../lib/user.ts';
   import EventFormDialog from './EventFormDialog.svelte';
   import MonthPicker from './MonthPicker.svelte';
   import EventDetail from './EventDetail.svelte';
@@ -178,6 +179,7 @@
   // ── Event detail ───────────────────────────────────────────────────────────
   let eventDetail: EventDetail;
   let detailIsOpen = false;
+  let mapUrl = 'https://www.openstreetmap.org/search?query={q}';
 
   // ── Event form ─────────────────────────────────────────────────────────────
   let formDialog: EventFormDialog;
@@ -323,6 +325,8 @@
 
     window.addEventListener('keydown', handleKeydown);
 
+    getUser().then(u => { if (u.map_url) mapUrl = u.map_url; });
+
     setupSSE();
     fetchCalendars();
     fetchEvents();
@@ -452,6 +456,7 @@
   bind:this={eventDetail}
   bind:isOpen={detailIsOpen}
   {locale}
+  {mapUrl}
   onedit={(d) => formDialog.openEditForm(d.event, d.scope)}
 />
 

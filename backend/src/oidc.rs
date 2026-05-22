@@ -42,6 +42,7 @@ pub struct AppState {
     pub sse_broadcaster: Arc<crate::sse::SseBroadcaster>,
     pub auth_mode: AuthMode,
     pub search_mode: SearchMode,
+    pub map_url: String,
 }
 
 pub struct CurrentUser {
@@ -158,6 +159,7 @@ pub async fn user_info(
         "display_name": display_name,
         "has_settings": has_settings,
         "auth_mode": auth_mode,
+        "map_url": state.map_url,
     }))
 }
 

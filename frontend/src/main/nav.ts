@@ -1,4 +1,5 @@
 import { m } from '../paraglide/messages.js';
+import { getUser } from '../lib/user.ts';
 
 export function initNav() {
   document.getElementById('nav-brand')!.textContent = m.app_brand();
@@ -8,12 +9,11 @@ export function initNav() {
 
 async function loadNavUser() {
   try {
-    const res = await fetch('/api/user');
-    if (!res.ok) {
+    const user = await getUser();
+    if (!user.ok) {
       document.getElementById('nav-loading')!.textContent = '';
       return;
     }
-    const user = await res.json();
     const list = document.getElementById('nav-user-list');
     if (!list) return;
     const items: string[] = [];

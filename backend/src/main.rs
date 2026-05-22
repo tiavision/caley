@@ -53,6 +53,8 @@ struct Cli {
     sync_interval_mins: u64,
     #[arg(long, env = "SEARCH_MODE", default_value = "default")]
     search_mode: String,
+    #[arg(long, env = "MAP_URL", default_value = "https://www.openstreetmap.org/search?query={q}")]
+    map_url: String,
 }
 
 #[tokio::main]
@@ -99,6 +101,7 @@ async fn main() -> anyhow::Result<()> {
         sse_broadcaster,
         auth_mode: auth_mode.clone(),
         search_mode,
+        map_url: args.map_url,
     };
 
     let static_dir = args.static_dir

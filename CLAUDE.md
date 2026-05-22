@@ -113,6 +113,7 @@ cargo check                 # Check without building
 - `DATABASE_PATH` — SQLite database file (default: `./data/caley.db`)
 - `STATIC_DIR` — Frontend dist directory (default: `../frontend/dist`)
 - `SYNC_INTERVAL_MINS` — Background sync interval in minutes (default: `5`)
+- `MAP_URL` — URL template for the map fallback link on location fields. Use `{q}` as the placeholder for the URL-encoded query (default: `https://www.openstreetmap.org/search?query={q}`)
 - `SEARCH_MODE` — Full-text search strategy: `default` (unicode-aware prefix matching), `trigram` (SQLite trigram tokenizer, language-agnostic substring matching), or a Snowball algorithm name (e.g. `German`, `English`, `French` — full list: Arabic, Danish, Dutch, English, Finnish, French, German, Greek, Hungarian, Italian, Norwegian, Portuguese, Romanian, Russian, Spanish, Swedish, Tamil, Turkish). Parsed via serde — the string must match the `rust_stemmers::Algorithm` variant name exactly. Changing this rebuilds the FTS index on startup. (default: `default`)
 
 No linter, formatter, or test runner configured. No tests yet.

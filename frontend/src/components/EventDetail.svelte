@@ -7,6 +7,7 @@
   export let locale: string;
   export let isOpen = false;
   export let onedit: ((data: { event: EventJson; scope: 'series' | 'this_instance' }) => void) | undefined = undefined;
+  export let mapUrl: string = 'https://www.openstreetmap.org/search?query={q}';
 
   $: tl = makeTl(locale);
 
@@ -29,12 +30,22 @@
   function openMap(event: MouseEvent, query: string) {
     event.preventDefault();
     const encoded = encodeURIComponent(query);
+
+    let appOpened = false;
+    const onBlur = () => { appOpened = true; };
+    const onVisibility = () => { if (document.hidden) appOpened = true; };
+    window.addEventListener('blur', onBlur, { once: true });
+    document.addEventListener('visibilitychange', onVisibility, { once: true });
+
     window.location.href = `geo:0,0?q=${encoded}`;
+
     setTimeout(() => {
-      if (!document.hidden) {
-        window.open(`https://www.openstreetmap.org/search?query=${encoded}`, '_blank');
+      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (!appOpened) {
+        window.open(mapUrl.replace('{q}', encoded), '_blank');
       }
-    }, 800);
+    }, 500);
   }
 
   export function close() {
