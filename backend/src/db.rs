@@ -3,6 +3,7 @@ use sqlx::{Row, SqlitePool};
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::caldav::unescape_ical_text;
 use crate::search::SearchMode;
 
 pub use sqlx::SqlitePool as Db;
@@ -452,9 +453,9 @@ fn extract_ical_metadata(raw_ical: &str) -> (String, String, String, String, Str
         for prop in &event.properties {
             match prop.name.as_str() {
                 "UID" => uid = prop.value.clone().unwrap_or_default(),
-                "SUMMARY" => summary = prop.value.clone().unwrap_or_default(),
-                "DESCRIPTION" => description = prop.value.clone().unwrap_or_default(),
-                "LOCATION" => location = prop.value.clone().unwrap_or_default(),
+                "SUMMARY" => summary = prop.value.as_deref().map(unescape_ical_text).unwrap_or_default(),
+                "DESCRIPTION" => description = prop.value.as_deref().map(unescape_ical_text).unwrap_or_default(),
+                "LOCATION" => location = prop.value.as_deref().map(unescape_ical_text).unwrap_or_default(),
                 "DTSTART" => {
                     if let Some(ref val) = prop.value {
                         dtstart_date = ical_dt_to_date_str(val);

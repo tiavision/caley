@@ -830,7 +830,7 @@ fn parse_all_calendars(xml: &str, base_url: &str) -> anyhow::Result<Vec<Calendar
     Ok(calendars)
 }
 
-fn unescape_ical_text(s: &str) -> String {
+pub(crate) fn unescape_ical_text(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let chars: Vec<char> = s.chars().collect();
     let mut i = 0;
@@ -1000,7 +1000,7 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
                         if let Some(params) = &property.params {
                             for (key, vals) in params {
                                 match key.as_str() {
-                                    "CN" => cn = vals.first().cloned().unwrap_or_default(),
+                                    "CN" => cn = vals.first().map(|s| unescape_ical_text(s)).unwrap_or_default(),
                                     "PARTSTAT" => partstat = PartStat::from_ical(vals.first().map(|s| s.as_str()).unwrap_or("")),
                                     _ => {}
                                 }
