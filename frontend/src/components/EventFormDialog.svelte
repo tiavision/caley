@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { makeTl } from '../lib/i18n.ts';
-  import type { PartStat, AlarmFields, AttendeeFields, RecurrenceInfo, EventJson, CalendarJson } from '../types/calendar.ts';
+  import type { PartStat, AlarmFields, AttendeeFields, RecurrenceInfo, EventJson, CalendarJson, ContactJson } from '../types/calendar.ts';
   import { fmtDate } from '../lib/date.ts';
 
   export let calendars: CalendarJson[] = [];
@@ -35,6 +35,12 @@
   let timeSuggestionIdx = -1;
   let daySuggestions: { label: string; date: string; prefixLen: number }[] = [];
   let daySuggestionIdx = -1;
+
+  let allContacts: ContactJson[] = [];
+  let contactsLoaded = false;
+  let attendeeSuggestions: { fn_name: string; email: string }[] = [];
+  let attendeeSuggestionIdx = -1;
+  let attendeeSuggestionRow = -1;
 
   $: rruleJson = (() => {
     if (!fFreq) return '';
@@ -100,6 +106,7 @@
   }
 
   export function openNewEventForm() {
+    loadContacts();
     formMode = 'create'; formScope = 'series';
     fUid = ''; fSummary = ''; fDate = focusedEventDate || fmtDate(new Date());
     fIsAllDay = true; fStartTime = ''; fEndTime = '';
@@ -120,6 +127,7 @@
   }
 
   export function openEditForm(ev: EventJson, scope: 'series' | 'this_instance') {
+    loadContacts();
     formMode = 'edit'; formScope = scope;
     fUid = ev.uid; fSummary = ev.summary; fLocation = ev.location;
     fDescription = ev.description; fTz = ev.tz || getUserTz();
@@ -349,6 +357,81 @@
       daySuggestions = []; daySuggestionIdx = -1;
     }, 150);
   }
+
+  async function loadContacts() {
+    if (contactsLoaded) return;
+    try {
+      const res = await fetch('/api/contacts');
+      if (res.ok) {
+        const data = await res.json();
+        allContacts = data.contacts ?? [];
+      }
+    } catch {}
+    contactsLoaded = true;
+  }
+
+  function filterContacts(query: string): { fn_name: string; email: string }[] {
+    const q = query.trim().toLowerCase();
+    if (!q || allContacts.length === 0) return [];
+    const results: { fn_name: string; email: string }[] = [];
+    for (const c of allContacts) {
+      const nameMatch = c.fn_name.toLowerCase().includes(q);
+      const emailMatch = c.emails.some(e => e.value.toLowerCase().includes(q));
+      if (nameMatch || emailMatch) {
+        const bestEmail = c.emails.find(e => e.value.toLowerCase().includes(q))?.value
+                       ?? c.emails[0]?.value ?? '';
+        if (bestEmail) results.push({ fn_name: c.fn_name, email: bestEmail });
+      }
+    }
+    return results.slice(0, 8);
+  }
+
+  function onAttendeeInput(i: number, value: string) {
+    attendeeSuggestionRow = i;
+    attendeeSuggestions = filterContacts(value);
+    attendeeSuggestionIdx = -1;
+  }
+
+  function onAttendeeKeydown(e: KeyboardEvent) {
+    if (!attendeeSuggestions.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      attendeeSuggestionIdx = Math.min(attendeeSuggestionIdx + 1, attendeeSuggestions.length - 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      attendeeSuggestionIdx = Math.max(attendeeSuggestionIdx - 1, -1);
+    } else if (e.key === 'Enter' && attendeeSuggestionIdx >= 0) {
+      e.preventDefault();
+      applyAttendeeSuggestion(attendeeSuggestions[attendeeSuggestionIdx]);
+    } else if (e.key === 'Tab') {
+      if (attendeeSuggestionIdx >= 0) {
+        e.preventDefault();
+        applyAttendeeSuggestion(attendeeSuggestions[attendeeSuggestionIdx]);
+      } else if (attendeeSuggestions.length === 1) {
+        e.preventDefault();
+        applyAttendeeSuggestion(attendeeSuggestions[0]);
+      }
+    } else if (e.key === 'Escape') {
+      attendeeSuggestions = [];
+      attendeeSuggestionIdx = -1;
+    }
+  }
+
+  function applyAttendeeSuggestion(s: { fn_name: string; email: string }) {
+    const i = attendeeSuggestionRow;
+    formAttendees[i] = { ...formAttendees[i], cn: s.fn_name, email: s.email };
+    formAttendees = formAttendees;
+    attendeeSuggestions = [];
+    attendeeSuggestionIdx = -1;
+    attendeeSuggestionRow = -1;
+  }
+
+  function onAttendeeBlur() {
+    setTimeout(() => {
+      attendeeSuggestions = [];
+      attendeeSuggestionIdx = -1;
+    }, 150);
+  }
 </script>
 
 <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
@@ -495,20 +578,50 @@
         <ul class="alarm-list">
           {#each formAttendees as att, i}
             <li class="alarm-row attendee-row">
-              <input
-                type="text"
-                placeholder={tl('event_attendeeName')}
-                value={att.cn}
-                style="flex:1;margin-bottom:0"
-                oninput={(e) => { formAttendees[i] = { ...att, cn: (e.target as HTMLInputElement).value }; formAttendees = formAttendees; }}
-              />
-              <input
-                type="email"
-                placeholder={tl('event_attendeeEmail')}
-                value={att.email}
-                style="flex:2;margin-bottom:0"
-                oninput={(e) => { formAttendees[i] = { ...att, email: (e.target as HTMLInputElement).value }; formAttendees = formAttendees; }}
-              />
+              <div class="attendee-input-wrap" style="flex:1">
+                <input
+                  type="text"
+                  placeholder={tl('event_attendeeName')}
+                  value={att.cn}
+                  style="margin-bottom:0;width:100%"
+                  oninput={(e) => { const v = (e.target as HTMLInputElement).value; formAttendees[i] = { ...att, cn: v }; formAttendees = formAttendees; onAttendeeInput(i, v); }}
+                  onkeydown={onAttendeeKeydown}
+                  onblur={onAttendeeBlur}
+                />
+                {#if attendeeSuggestionRow === i && attendeeSuggestions.length > 0}
+                  <ul class="time-suggestions" role="listbox">
+                    {#each attendeeSuggestions as s, si}
+                      <li role="option" aria-selected={si === attendeeSuggestionIdx}>
+                        <button type="button" class:active={si === attendeeSuggestionIdx}
+                          onmousedown={(e) => { e.preventDefault(); applyAttendeeSuggestion(s); }}
+                        >{s.fn_name ? `${s.fn_name} <${s.email}>` : s.email}</button>
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+              </div>
+              <div class="attendee-input-wrap" style="flex:2">
+                <input
+                  type="email"
+                  placeholder={tl('event_attendeeEmail')}
+                  value={att.email}
+                  style="margin-bottom:0;width:100%"
+                  oninput={(e) => { const v = (e.target as HTMLInputElement).value; formAttendees[i] = { ...att, email: v }; formAttendees = formAttendees; onAttendeeInput(i, v); }}
+                  onkeydown={onAttendeeKeydown}
+                  onblur={onAttendeeBlur}
+                />
+                {#if attendeeSuggestionRow === i && attendeeSuggestions.length > 0}
+                  <ul class="time-suggestions" role="listbox">
+                    {#each attendeeSuggestions as s, si}
+                      <li role="option" aria-selected={si === attendeeSuggestionIdx}>
+                        <button type="button" class:active={si === attendeeSuggestionIdx}
+                          onmousedown={(e) => { e.preventDefault(); applyAttendeeSuggestion(s); }}
+                        >{s.fn_name ? `${s.fn_name} <${s.email}>` : s.email}</button>
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+              </div>
               <select
                 class="attendee-partstat-select"
                 value={att.partstat}
@@ -697,7 +810,8 @@
   .alarm-list { list-style: none; padding: 0; margin: 0 0 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
   .alarm-row { display: flex; align-items: center; gap: 0.5rem; }
   .attendee-row { flex-wrap: nowrap; }
-  .attendee-row input { min-width: 0; }
+  .attendee-input-wrap { position: relative; min-width: 0; }
+  .attendee-input-wrap input { width: 100%; }
   :global(.attendee-partstat-select) { flex: 0 0 auto; width: 7.5rem; margin-bottom: 0 !important; padding-left: 0.4rem; padding-right: 0.4rem; }
   .alarm-relative-fields { display: flex; align-items: center; gap: 0.25rem; }
   .alarm-absolute-fields { flex: 1; }

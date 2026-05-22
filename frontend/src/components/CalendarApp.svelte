@@ -340,7 +340,8 @@
       if (e.key === 'e') { e.preventDefault(); eventDetail.triggerEdit(); }
       return;
     }
-    if (e.key === 't') { e.preventDefault(); navigateToday(); }
+    if (e.key === 'c') { e.preventDefault(); formDialog.openNewEventForm(); }
+    else if (e.key === 't') { e.preventDefault(); navigateToday(); }
     else if (e.key === 'n') { e.preventDefault(); navigateWeek(7); }
     else if (e.key === 'N') { e.preventDefault(); navigateWeek(28); }
     else if (e.key === 'p') { e.preventDefault(); navigateWeek(-7); }
