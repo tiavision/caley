@@ -471,6 +471,9 @@ pub fn sanitize_email_html(html: &str) -> String {
                         Some(Cow::Owned(format!("/api/email/proxy-image?url={encoded}")))
                     } else if value.starts_with("data:image/") {
                         Some(Cow::Borrowed(value))
+                    } else if value.starts_with("cid:") {
+                        // Preserved as-is; rewrite_cid_urls rewrites these after sanitization.
+                        Some(Cow::Borrowed(value))
                     } else {
                         None
                     }
