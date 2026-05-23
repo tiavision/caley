@@ -88,12 +88,15 @@
 
   // Compose form
   let composeTo = '';
+  let composeCc = '';
+  let composeBcc = '';
   let composeSubject = '';
   let composeBody = '';
   let composeAccountId = '';
   let composeInReplyTo: string | null = null;
   let composeSending = false;
   let composeError = '';
+  let showComposeCcBcc = false;
 
   // Virtual folder form
   let folderName = '';
@@ -515,6 +518,9 @@
   function openCompose(replyTo?: Message) {
     composeError = '';
     composeSending = false;
+    composeCc = '';
+    composeBcc = '';
+    showComposeCcBcc = false;
     if (replyTo) {
       composeTo = replyTo.from || '';
       composeSubject = replyTo.subject?.startsWith('Re:') ? replyTo.subject : `Re: ${replyTo.subject || ''}`;
@@ -541,6 +547,8 @@
         body: JSON.stringify({
           account_id: composeAccountId,
           to: composeTo.split(',').map(s => s.trim()).filter(Boolean),
+          cc: composeCc.split(',').map(s => s.trim()).filter(Boolean),
+          bcc: composeBcc.split(',').map(s => s.trim()).filter(Boolean),
           subject: composeSubject,
           body: composeBody,
           in_reply_to: composeInReplyTo,
@@ -1316,40 +1324,50 @@
   on:cancel={(e) => { e.preventDefault(); composeDialog?.close(); }}
 >
   <article>
-    <header>
-      <h3>New message</h3>
-      <div class="header-actions">
-        <button class="close-btn" aria-label="Close" on:click={() => composeDialog?.close()}></button>
-      </div>
+    <header class="compose-header">
+      <span class="compose-title">{composeInReplyTo ? 'Reply' : 'New message'}</span>
+      <button class="close-btn" aria-label="Close" on:click={() => composeDialog?.close()}></button>
     </header>
-    <form on:submit|preventDefault={sendEmail}>
+    <form on:submit|preventDefault={sendEmail} class="compose-form">
       {#if accounts.length > 1}
-        <label>
-          From account
-          <select bind:value={composeAccountId}>
+        <div class="compose-row">
+          <span class="compose-label">From</span>
+          <select bind:value={composeAccountId} class="compose-input">
             {#each accounts as acc}
-              <option value={acc.account_id}>{acc.display_name} ({acc.username})</option>
+              <option value={acc.account_id}>{acc.display_name} &lt;{acc.username}&gt;</option>
             {/each}
           </select>
-        </label>
+        </div>
       {/if}
-      <label>
-        To
-        <input bind:value={composeTo} placeholder="recipient@example.com, ..." />
-      </label>
-      <label>
-        Subject
-        <input bind:value={composeSubject} />
-      </label>
-      <label>
-        Body
-        <textarea bind:value={composeBody} rows={12}></textarea>
-      </label>
+      <div class="compose-row">
+        <span class="compose-label">To</span>
+        <input class="compose-input" bind:value={composeTo} placeholder="recipient@example.com, ..." />
+        {#if !showComposeCcBcc}
+          <button type="button" class="ccbcc-toggle" on:click={() => { showComposeCcBcc = true; }}>CC/BCC</button>
+        {/if}
+      </div>
+      {#if showComposeCcBcc}
+        <div class="compose-row">
+          <span class="compose-label">CC</span>
+          <input class="compose-input" bind:value={composeCc} placeholder="cc@example.com, ..." />
+        </div>
+        <div class="compose-row">
+          <span class="compose-label">BCC</span>
+          <input class="compose-input" bind:value={composeBcc} placeholder="bcc@example.com, ..." />
+        </div>
+      {/if}
+      <div class="compose-row">
+        <span class="compose-label">Subject</span>
+        <input class="compose-input" bind:value={composeSubject} />
+      </div>
+      <div class="compose-body-row">
+        <textarea bind:value={composeBody} rows={10}></textarea>
+      </div>
       {#if composeError}
-        <p class="error">{composeError}</p>
+        <p class="error compose-error">{composeError}</p>
       {/if}
-      <footer>
-        <button type="button" class="secondary outline" on:click={() => composeDialog?.close()}>Cancel</button>
+      <footer class="compose-footer">
+        <button type="button" class="secondary outline" on:click={() => composeDialog?.close()}>Discard</button>
         <button type="submit" class="primary" disabled={composeSending}>
           {composeSending ? 'Sending…' : 'Send'}
         </button>
@@ -2222,10 +2240,134 @@
   }
 
   .compose-dialog {
-    max-width: 48rem;
+    max-width: 44rem;
     width: 95vw;
     max-height: 90dvh;
     padding: 0;
+    overflow: hidden;
+  }
+
+  .compose-dialog article {
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  .compose-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.6rem 1rem;
+    margin: 0 !important;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+    background: var(--pico-card-sectioning-background-color);
+  }
+
+  .compose-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--pico-color);
+  }
+
+  .compose-form {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .compose-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 1rem;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+  }
+
+  .compose-label {
+    font-size: 0.8rem;
+    color: var(--pico-muted-color);
+    width: 3.5rem;
+    flex-shrink: 0;
+    text-align: right;
+  }
+
+  .compose-input {
+    flex: 1;
+    min-width: 0;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0.45rem 0 !important;
+    margin: 0 !important;
+    font-size: 0.9rem;
+    color: var(--pico-color);
+  }
+
+  .compose-input:focus {
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  .ccbcc-toggle {
+    font-size: 0.75rem;
+    color: var(--pico-muted-color);
+    background: none;
+    border: none;
+    padding: 0.2rem 0.4rem;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin: 0;
+    line-height: 1;
+  }
+
+  .ccbcc-toggle:hover {
+    color: var(--pico-color);
+    background: var(--pico-secondary-background);
+    border-radius: 0.25rem;
+  }
+
+  .compose-body-row {
+    padding: 0.25rem 1rem 0;
+  }
+
+  .compose-body-row textarea {
+    width: 100%;
+    box-sizing: border-box;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    resize: vertical;
+    padding: 0.5rem 0 !important;
+    margin: 0 !important;
+    font-size: 0.9rem;
+    color: var(--pico-color);
+  }
+
+  .compose-body-row textarea:focus {
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  .compose-error {
+    margin: 0.25rem 1rem;
+    font-size: 0.85rem;
+  }
+
+  .compose-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0.6rem 1rem;
+    border-top: 1px solid var(--pico-muted-border-color);
+    background: var(--pico-card-sectioning-background-color);
+    margin: 0;
+  }
+
+  .compose-footer button {
+    margin: 0;
+    padding: 0.4rem 1rem;
+    font-size: 0.85rem;
   }
 
   /* FAB */
