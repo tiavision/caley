@@ -19,52 +19,15 @@ main {
     flex: 1;
 }
 
-footer {
-    border-top: 1px solid var(--pico-muted-border-color);
-    padding-block: 0.5rem;
-    font-size: 0.875rem;
+/* Left nav rail offset — only when the sidebar is present (authenticated). */
+body.nav-collapsed {
+    --nav-width: 3.75rem;
 }
 
-footer nav {
-    justify-content: space-between;
-    flex-wrap: wrap;
-    row-gap: 0.25rem;
-}
-
-footer nav li {
-    padding-block: 0;
-}
-
-@media (max-width: 480px) {
-    footer nav {
-        justify-content: center;
+@media (min-width: 768px) {
+    body.has-nav main {
+        margin-left: var(--nav-width, 15rem);
     }
-    footer nav ul {
-        justify-content: center;
-    }
-}
-
-footer a.brand {
-    --pico-color: inherit;
-    color: var(--pico-color);
-    text-decoration: none;
-    font-weight: 600;
-    opacity: 0.8;
-}
-
-footer #nav-user-list li + li::before {
-    content: "|";
-    margin-right: 0.5rem;
-    opacity: 0.4;
-}
-
-footer #nav-user-list li:not(:has(a)) {
-    font-weight: 600;
-    opacity: 0.8;
-    max-width: 8rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 dialog article header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
@@ -120,19 +83,6 @@ dialog article { margin: 0; padding: 1.5rem; }
 }
 .nav-btn:hover { background: var(--pico-primary-hover-background); color: var(--pico-primary-inverse); }
 .arrow { display: inline-block; transform: translateY(-0.08em); }
-
-/* Shared home/back icon link — mirrors CalendarApp's search/contacts icon links */
-.home-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.2rem 0.3rem;
-  color: var(--pico-primary);
-  text-decoration: none;
-  opacity: 0.8;
-  flex-shrink: 0;
-}
-.home-btn:hover { opacity: 1; }
 
 /* Shared form utilities */
 .locale-picker {

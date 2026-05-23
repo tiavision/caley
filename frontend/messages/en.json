@@ -2,6 +2,7 @@
   "app_title": "Caley",
   "app_brand": "Caley",
   "nav_loading": "Loading...",
+  "nav_mail": "Mail",
   "nav_settings": "Settings",
   "nav_setup": "Set up CalDAV",
   "nav_logout": "Logout",
