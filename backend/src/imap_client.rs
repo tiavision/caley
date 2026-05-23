@@ -704,12 +704,15 @@ pub async fn send_email(
     password: &str,
     from: &str,
     to: &[String],
+    cc: &[String],
+    bcc: &[String],
     subject: &str,
     body: &str,
     in_reply_to: Option<&str>,
+    attachments: Vec<(String, String, Vec<u8>)>,
 ) -> Result<()> {
     use lettre::{
-        message::{header::ContentType, SinglePart},
+        message::{header::ContentType, Attachment, MultiPart, SinglePart},
         AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
         transport::smtp::authentication::Credentials,
     };
@@ -721,17 +724,33 @@ pub async fn send_email(
     for addr in to {
         builder = builder.to(addr.parse().map_err(|e| anyhow!("invalid to address: {e}"))?);
     }
+    for addr in cc {
+        builder = builder.cc(addr.parse().map_err(|e| anyhow!("invalid cc address: {e}"))?);
+    }
+    for addr in bcc {
+        builder = builder.bcc(addr.parse().map_err(|e| anyhow!("invalid bcc address: {e}"))?);
+    }
     if let Some(reply_to) = in_reply_to {
         builder = builder.in_reply_to(reply_to.to_owned());
     }
 
-    let email = builder
-        .singlepart(
-            SinglePart::builder()
-                .header(ContentType::TEXT_PLAIN)
-                .body(body.to_owned()),
-        )
-        .map_err(|e| anyhow!("failed to build email: {e}"))?;
+    let text_part = SinglePart::builder()
+        .header(ContentType::TEXT_PLAIN)
+        .body(body.to_owned());
+
+    let email = if attachments.is_empty() {
+        builder.singlepart(text_part)
+    } else {
+        let mut mp = MultiPart::mixed().singlepart(text_part);
+        for (filename, content_type_str, bytes) in attachments {
+            let ct = content_type_str
+                .parse::<ContentType>()
+                .unwrap_or_else(|_| "application/octet-stream".parse().unwrap());
+            mp = mp.singlepart(Attachment::new(filename).body(bytes, ct));
+        }
+        builder.multipart(mp)
+    }
+    .map_err(|e| anyhow!("failed to build email: {e}"))?;
 
     let creds = Credentials::new(username.to_owned(), password.to_owned());
     // Port 465 uses implicit TLS (SMTPS); 587/25 use STARTTLS.

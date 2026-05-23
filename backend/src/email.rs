@@ -438,22 +438,70 @@ pub async fn delete_message(
 
 // ── Send ──────────────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct SendBody {
-    pub account_id: String,
-    pub to: Vec<String>,
-    pub cc: Option<Vec<String>>,
-    pub subject: String,
-    pub body: String,
-    pub in_reply_to: Option<String>,
-}
-
 pub async fn send_email(
     State(state): State<AppState>,
     user: CurrentUser,
-    Json(body): Json<SendBody>,
+    mut multipart: axum::extract::Multipart,
 ) -> impl IntoResponse {
-    let account = match email_db::get_account(&state.db, &body.account_id, &user.user_id, &state.encryption_key).await {
+    let mut account_id = String::new();
+    let mut to_raw = String::new();
+    let mut cc_raw = String::new();
+    let mut bcc_raw = String::new();
+    let mut subject = String::new();
+    let mut body = String::new();
+    let mut in_reply_to: Option<String> = None;
+    let mut attachments: Vec<(String, String, Vec<u8>)> = vec![];
+
+    loop {
+        match multipart.next_field().await {
+            Ok(Some(field)) => {
+                let name = field.name().unwrap_or("").to_owned();
+                if name == "attachment" {
+                    let filename = field.file_name().unwrap_or("attachment").to_owned();
+                    let ct = field.content_type()
+                        .map(|s| s.to_owned())
+                        .unwrap_or_else(|| "application/octet-stream".to_owned());
+                    match field.bytes().await {
+                        Ok(b) if !b.is_empty() => attachments.push((filename, ct, b.to_vec())),
+                        _ => {}
+                    }
+                } else {
+                    let text = match field.text().await {
+                        Ok(t) => t,
+                        Err(_) => continue,
+                    };
+                    match name.as_str() {
+                        "account_id" => account_id = text,
+                        "to" => to_raw = text,
+                        "cc" => cc_raw = text,
+                        "bcc" => bcc_raw = text,
+                        "subject" => subject = text,
+                        "body" => body = text,
+                        "in_reply_to" if !text.is_empty() => in_reply_to = Some(text),
+                        _ => {}
+                    }
+                }
+            }
+            Ok(None) => break,
+            Err(e) => {
+                eprintln!("[email] multipart error: {e}");
+                return (StatusCode::BAD_REQUEST, "invalid multipart data").into_response();
+            }
+        }
+    }
+
+    let split_addrs = |s: &str| -> Vec<String> {
+        s.split(',').map(|a| a.trim().to_owned()).filter(|a| !a.is_empty()).collect()
+    };
+    let to = split_addrs(&to_raw);
+    let cc = split_addrs(&cc_raw);
+    let bcc = split_addrs(&bcc_raw);
+
+    if account_id.is_empty() {
+        return (StatusCode::BAD_REQUEST, "missing account_id").into_response();
+    }
+
+    let account = match email_db::get_account(&state.db, &account_id, &user.user_id, &state.encryption_key).await {
         Ok(Some(a)) => a,
         Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
         Err(e) => {
@@ -469,8 +517,9 @@ pub async fn send_email(
     if let Err(e) = imap_client::send_email(
         smtp_host, smtp_port,
         &account.username, &account.password,
-        &from, &body.to, &body.subject, &body.body,
-        body.in_reply_to.as_deref(),
+        &from, &to, &cc, &bcc, &subject, &body,
+        in_reply_to.as_deref(),
+        attachments,
     ).await {
         eprintln!("[email] send_email error: {e}");
         return (StatusCode::BAD_GATEWAY, format!("Failed to send: {e}")).into_response();

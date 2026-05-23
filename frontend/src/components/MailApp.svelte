@@ -97,6 +97,9 @@
   let composeSending = false;
   let composeError = '';
   let showComposeCcBcc = false;
+  let composeAttachments: File[] = [];
+  let composeFileInput: HTMLInputElement;
+  let filePickerOpen = false;
 
   // Virtual folder form
   let folderName = '';
@@ -520,6 +523,7 @@
     composeSending = false;
     composeCc = '';
     composeBcc = '';
+    composeAttachments = [];
     showComposeCcBcc = false;
     if (replyTo) {
       composeTo = replyTo.from || '';
@@ -541,19 +545,18 @@
     composeSending = true;
     composeError = '';
     try {
-      const r = await fetch('/api/email/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          account_id: composeAccountId,
-          to: composeTo.split(',').map(s => s.trim()).filter(Boolean),
-          cc: composeCc.split(',').map(s => s.trim()).filter(Boolean),
-          bcc: composeBcc.split(',').map(s => s.trim()).filter(Boolean),
-          subject: composeSubject,
-          body: composeBody,
-          in_reply_to: composeInReplyTo,
-        }),
-      });
+      const fd = new FormData();
+      fd.append('account_id', composeAccountId);
+      fd.append('to', composeTo);
+      fd.append('cc', composeCc);
+      fd.append('bcc', composeBcc);
+      fd.append('subject', composeSubject);
+      fd.append('body', composeBody);
+      if (composeInReplyTo) fd.append('in_reply_to', composeInReplyTo);
+      for (const file of composeAttachments) {
+        fd.append('attachment', file, file.name);
+      }
+      const r = await fetch('/api/email/send', { method: 'POST', body: fd });
       if (!r.ok) {
         const text = await r.text();
         composeError = text || 'Failed to send.';
@@ -564,6 +567,28 @@
       composeError = 'Failed to send.';
     }
     composeSending = false;
+  }
+
+  function openFilePicker() {
+    filePickerOpen = true;
+    composeFileInput.click();
+  }
+
+  function addAttachments(files: FileList | null) {
+    filePickerOpen = false;
+    if (!files) return;
+    composeAttachments = [...composeAttachments, ...Array.from(files)];
+    composeFileInput.value = '';
+  }
+
+  function removeAttachment(index: number) {
+    composeAttachments = composeAttachments.filter((_, i) => i !== index);
+  }
+
+  function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
   // ── Virtual folders ──────────────────────────────────────────────────────
@@ -1321,7 +1346,7 @@
   bind:this={composeDialog}
   class="compose-dialog"
   on:click={(e) => { if (e.target === e.currentTarget) composeDialog?.close(); }}
-  on:cancel={(e) => { e.preventDefault(); composeDialog?.close(); }}
+  on:cancel={(e) => { e.preventDefault(); if (filePickerOpen) { filePickerOpen = false; } else { composeDialog?.close(); } }}
 >
   <article>
     <header class="compose-header">
@@ -1363,14 +1388,39 @@
       <div class="compose-body-row">
         <textarea bind:value={composeBody} rows={10}></textarea>
       </div>
+      {#if composeAttachments.length > 0}
+        <ul class="compose-attachments">
+          {#each composeAttachments as file, i}
+            <li class="compose-attachment-chip">
+              <span class="attachment-icon">📎</span>
+              <span class="attachment-name">{file.name}</span>
+              <span class="attachment-size">{formatFileSize(file.size)}</span>
+              <button type="button" class="attachment-remove" aria-label="Remove" on:click={() => removeAttachment(i)}>✕</button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
       {#if composeError}
         <p class="error compose-error">{composeError}</p>
       {/if}
+      <input
+        bind:this={composeFileInput}
+        type="file"
+        multiple
+        style="display:none"
+        on:change={(e) => addAttachments(e.currentTarget.files)}
+      />
       <footer class="compose-footer">
-        <button type="button" class="secondary outline" on:click={() => composeDialog?.close()}>Discard</button>
-        <button type="submit" class="primary" disabled={composeSending}>
-          {composeSending ? 'Sending…' : 'Send'}
+        <button type="button" class="compose-attach-btn" aria-label="Attach files" on:click={openFilePicker}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          Attach
         </button>
+        <div class="compose-footer-right">
+          <button type="button" class="secondary outline" on:click={() => composeDialog?.close()}>Discard</button>
+          <button type="submit" class="primary" disabled={composeSending}>
+            {composeSending ? 'Sending…' : 'Send'}
+          </button>
+        </div>
       </footer>
     </form>
   </article>
@@ -2354,9 +2404,65 @@
     font-size: 0.85rem;
   }
 
+  .compose-attachments {
+    list-style: none;
+    margin: 0;
+    padding: 0.4rem 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    border-top: 1px solid var(--pico-muted-border-color);
+  }
+
+  .compose-attachment-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: var(--pico-card-sectioning-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 1rem;
+    padding: 0.15rem 0.5rem 0.15rem 0.4rem;
+    font-size: 0.78rem;
+    max-width: 18rem;
+  }
+
+  .attachment-icon {
+    font-size: 0.8rem;
+    line-height: 1;
+  }
+
+  .attachment-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 10rem;
+  }
+
+  .attachment-size {
+    color: var(--pico-muted-color);
+    flex-shrink: 0;
+  }
+
+  .attachment-remove {
+    background: none;
+    border: none;
+    padding: 0 0.1rem;
+    margin: 0;
+    cursor: pointer;
+    color: var(--pico-muted-color);
+    font-size: 0.7rem;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .attachment-remove:hover {
+    color: var(--pico-color);
+  }
+
   .compose-footer {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+    justify-content: space-between;
     gap: 0.5rem;
     padding: 0.6rem 1rem;
     border-top: 1px solid var(--pico-muted-border-color);
@@ -2364,10 +2470,34 @@
     margin: 0;
   }
 
+  .compose-footer-right {
+    display: flex;
+    gap: 0.5rem;
+  }
+
   .compose-footer button {
     margin: 0;
     padding: 0.4rem 1rem;
     font-size: 0.85rem;
+  }
+
+  .compose-attach-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: none;
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    padding: 0.35rem 0.7rem !important;
+    font-size: 0.8rem;
+    color: var(--pico-muted-color);
+    cursor: pointer;
+  }
+
+  .compose-attach-btn:hover {
+    color: var(--pico-color);
+    border-color: var(--pico-color);
+    background: none;
   }
 
   /* FAB */
