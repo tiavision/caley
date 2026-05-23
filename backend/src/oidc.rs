@@ -179,7 +179,13 @@ pub async fn logout_handler(
 /// Handler behind `/auth/oidc`. The OidcLoginLayer wrapping this route forces the
 /// IdP redirect when unauthenticated and exchanges the code on return; by the
 /// time this runs the user is authenticated, so just send them to the app.
-pub async fn oidc_post_login() -> impl IntoResponse {
+pub async fn oidc_post_login(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> impl IntoResponse {
+    if let Err(e) = db::ensure_user(&state.db, &user.user_id, user.display_name.as_deref()).await {
+        eprintln!("ensure_user failed for OIDC user {}: {e}", user.user_id);
+    }
     Redirect::to("/calendar/")
 }
 

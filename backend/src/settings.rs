@@ -90,6 +90,9 @@ pub async fn save_settings(
             .into_response();
     }
 
+    if let Err(e) = crate::db::ensure_user(&state.db, &user.user_id, user.display_name.as_deref()).await {
+        eprintln!("ensure_user error: {e}");
+    }
     if let Err(e) = crate::db::clear_user_cache(&state.db, &user.user_id).await {
         eprintln!("Cache clear error: {e}");
     }

@@ -43,7 +43,8 @@ pub async fn init_db(path: &str) -> anyhow::Result<SqlitePool> {
         // NORMAL is durable under WAL and avoids an fsync on every commit, which
         // otherwise lets a write-heavy email sync starve concurrent calendar syncs.
         .synchronous(SqliteSynchronous::Normal)
-        .busy_timeout(std::time::Duration::from_secs(30));
+        .busy_timeout(std::time::Duration::from_secs(30))
+        .pragma("foreign_keys", "ON");
 
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
@@ -808,20 +809,13 @@ pub async fn replace_calendar_events(
 }
 
 pub async fn delete_user(pool: &SqlitePool, user_id: &str) -> anyhow::Result<()> {
-    let mut tx = pool.begin().await?;
-    sqlx::query("DELETE FROM user_settings WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM caldav_accounts WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM deactivated_calendars WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM cached_calendars WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM cached_events WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM push_subscriptions WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM cached_addressbooks WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM cached_contacts WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM contact_push_subscriptions WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM imap_accounts WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM virtual_folders WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM email_image_whitelist WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
-    tx.commit().await?;
+    // ON DELETE CASCADE propagates to all child tables (caldav_accounts,
+    // cached_events, imap_accounts → cached_messages, virtual_folders →
+    // virtual_folder_rules, etc.).
+    sqlx::query("DELETE FROM user_settings WHERE user_id = ?")
+        .bind(user_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
