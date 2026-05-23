@@ -652,6 +652,7 @@
 <style>
   .contacts-page {
     width: 100%;
+    box-sizing: border-box;
   }
 
   /* Toolbar */
@@ -674,6 +675,7 @@
     gap: 0.5rem;
     flex-wrap: wrap;
     margin-left: auto;
+    padding-right: 1rem;
   }
 
   .contacts-filter-input {

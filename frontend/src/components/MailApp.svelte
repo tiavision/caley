@@ -1286,6 +1286,7 @@
     transition: background 0.12s;
     position: relative;
     z-index: 1;
+    width: 3px;
   }
 
   .resize-handle:hover {

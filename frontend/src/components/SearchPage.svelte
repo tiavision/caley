@@ -110,6 +110,7 @@
 
 <svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} />
 
+<div class="search-page">
 <div class="page-header">
   <h2>{tl('search_heading')}</h2>
 </div>
@@ -198,6 +199,7 @@
     {/each}
   </ul>
 {/if}
+</div>
 
 <EventDetail
   bind:this={eventDetail}
@@ -216,6 +218,11 @@
 />
 
 <style>
+  .search-page {
+    box-sizing: border-box;
+    width: 100%;
+  }
+
   .page-header {
     display: flex;
     align-items: center;

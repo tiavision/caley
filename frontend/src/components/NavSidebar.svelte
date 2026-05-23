@@ -181,7 +181,6 @@
     gap: 0.25rem;
     flex: 1;
   }
-  .nav-items li { margin: 0; padding: 0; }
 
   .nav-item {
     display: flex;
@@ -205,7 +204,6 @@
     flex-shrink: 0;
   }
   .nav-item .label {
-    font-size: 1.125rem;
     font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
