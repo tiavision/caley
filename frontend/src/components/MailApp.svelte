@@ -269,7 +269,7 @@
       if (r.ok) {
         const full = await r.json();
         selectedMessage = full;
-        viewMode = hasRealHtml(full.body_html, full.body_text) ? 'html' : 'text';
+        viewMode = htmlAddsValue(full.body_html) ? 'html' : 'text';
         // Update in list
         messages = messages.map(m =>
           m.uid === msg.uid && m.account_id === msg.account_id && m.mailbox === msg.mailbox ? full : m
@@ -542,11 +542,30 @@
     return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
-  function hasRealHtml(html: string | null, text: string | null): boolean {
-    if (!html) return false;
-    const stripped = html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
-    const textNorm = text?.replace(/\s+/g, ' ').trim() || '';
-    return stripped !== textNorm && stripped.length > 0;
+  // Tags that convey something plain text cannot (links, images, tables, lists,
+  // headings, formatting). Structural wrappers (html/head/body/div/p/span/br/font)
+  // are excluded so "basically plain text" HTML is treated as plain text.
+  const MEANINGFUL_HTML =
+    /<(a\s[^>]*href|img|table|thead|tbody|tr|td|th|ul|ol|li|h[1-6]|blockquote|hr|b|strong|i|em|u|s|strike|code|pre|mark)\b/i;
+
+  function htmlAddsValue(html: string | null): boolean {
+    return !!html && MEANINGFUL_HTML.test(html);
+  }
+
+  type BodySegment = { text: string } | { href: string; text: string };
+
+  function linkifySegments(text: string): BodySegment[] {
+    const re = /(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g;
+    const out: BodySegment[] = [];
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) out.push({ text: text.slice(last, m.index) });
+      out.push({ href: m[0], text: m[0] });
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) out.push({ text: text.slice(last) });
+    return out;
   }
 
   function humanSize(bytes: number): string {
@@ -562,6 +581,9 @@
   }
 
   $: unreadCount = messages.filter(m => !m.is_read).length;
+
+  $: htmlHasValue = htmlAddsValue(selectedMessage?.body_html ?? null);
+  $: bodyTextSegments = linkifySegments(selectedMessage?.body_text ?? '');
 
   $: blockedOrigins = (() => {
     if (!selectedMessage?.body_html) return [];
@@ -751,7 +773,7 @@
           {#if messageLoading && !selectedMessage.body_text && !selectedMessage.body_html}
             <div class="loading">Loading body…</div>
           {:else}
-            {#if hasRealHtml(selectedMessage.body_html, selectedMessage.body_text)}
+            {#if htmlHasValue}
               <div class="view-toggle">
                 <button
                   class:active={viewMode === 'html'}
@@ -764,7 +786,7 @@
               </div>
             {/if}
 
-            {#if viewMode === 'html' && hasRealHtml(selectedMessage.body_html, selectedMessage.body_text)}
+            {#if viewMode === 'html' && htmlHasValue}
               {#if blockedOrigins.length > 0}
                 <div class="images-notice">
                   <span>Images are blocked.</span>
@@ -784,7 +806,7 @@
                 ></iframe>
               {/key}
             {:else if selectedMessage.body_text}
-              <pre class="body-text">{selectedMessage.body_text}</pre>
+              <pre class="body-text">{#each bodyTextSegments as seg}{#if 'href' in seg}<a href={seg.href} target="_blank" rel="noopener noreferrer">{seg.text}</a>{:else}{seg.text}{/if}{/each}</pre>
             {:else}
               <div class="loading">Loading body…</div>
             {/if}
@@ -910,7 +932,7 @@
         </div>
       {/if}
       <div class="detail-body">
-        {#if hasRealHtml(selectedMessage.body_html, selectedMessage.body_text)}
+        {#if htmlHasValue}
           <div class="view-toggle">
             <button
               class:active={viewMode === 'html'}
@@ -923,7 +945,7 @@
           </div>
         {/if}
 
-        {#if viewMode === 'html' && hasRealHtml(selectedMessage.body_html, selectedMessage.body_text)}
+        {#if viewMode === 'html' && htmlHasValue}
           {#if blockedOrigins.length > 0}
             <div class="images-notice">
               <span>Images are blocked.</span>
@@ -943,7 +965,7 @@
             ></iframe>
           {/key}
         {:else if selectedMessage.body_text}
-          <pre class="body-text">{selectedMessage.body_text}</pre>
+          <pre class="body-text">{#each bodyTextSegments as seg}{#if 'href' in seg}<a href={seg.href} target="_blank" rel="noopener noreferrer">{seg.text}</a>{:else}{seg.text}{/if}{/each}</pre>
         {:else}
           <div class="loading">Loading body…</div>
         {/if}
