@@ -614,17 +614,55 @@ fn rewrite_links(html: &str) -> String {
 }
 
 fn strip_tags(html: &str) -> String {
+    const BLOCK: &[&str] = &[
+        "p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "hr",
+    ];
+
     let mut result = String::with_capacity(html.len());
+    let mut tag_buf = String::new();
     let mut in_tag = false;
+
     for c in html.chars() {
         match c {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            c if !in_tag => result.push(c),
-            _ => {}
+            '<' => {
+                in_tag = true;
+                tag_buf.clear();
+            }
+            '>' if in_tag => {
+                in_tag = false;
+                let name = tag_buf
+                    .split_ascii_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_start_matches('/')
+                    .to_ascii_lowercase();
+                if BLOCK.contains(&name.as_str()) {
+                    result.push('\n');
+                }
+            }
+            c if in_tag => tag_buf.push(c),
+            c => result.push(c),
         }
     }
-    result
+
+    // Collapse 3+ consecutive newlines to 2
+    let mut collapsed = String::with_capacity(result.len());
+    let mut newline_count = 0u8;
+    for c in result.chars() {
+        if c == '\n' {
+            newline_count += 1;
+            if newline_count <= 2 {
+                collapsed.push('\n');
+            }
+        } else {
+            newline_count = 0;
+            collapsed.push(c);
+        }
+    }
+
+    collapsed
+        .trim()
+        .to_owned()
         .replace("&amp;", "&")
         .replace("&lt;", "<")
         .replace("&gt;", ">")
