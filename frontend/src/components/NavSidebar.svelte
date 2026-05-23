@@ -194,7 +194,7 @@
   .nav-item:hover { background: var(--pico-muted-border-color, #e0e0e0); }
   .nav-item.active {
     background: var(--pico-primary-background, #e6f2fb);
-    color: var(--pico-primary, #0172ad);
+    color: var(--pico-h3-color);
   }
   .nav-icon {
     display: flex;
