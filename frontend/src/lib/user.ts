@@ -3,7 +3,8 @@ export interface UserInfo {
   status: number;
   display_name?: string;
   has_settings?: boolean;
-  auth_mode?: string;
+  has_caldav?: boolean;
+  oidc_enabled?: boolean;
   map_url?: string;
 }
 

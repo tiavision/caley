@@ -1,14 +1,14 @@
 use axum::{
     extract::{Form, State},
     http::StatusCode,
-    response::{IntoResponse, Json, Redirect, Response},
+    response::{IntoResponse, Json, Response},
 };
 use serde_json::json;
 use tower_sessions::Session;
 use url::Url;
 
 use crate::db::UserSettings;
-use crate::oidc::{AppState, AuthMode, CurrentUser};
+use crate::oidc::{AppState, CurrentUser};
 use crate::sync::SyncTrigger;
 
 #[derive(serde::Deserialize)]
@@ -64,6 +64,11 @@ pub async fn handle_login(
         .flatten()
         .unwrap_or_else(|| form.caldav_username.clone());
 
+    if let Err(e) = crate::db::ensure_user(&state.db, &user_id, Some(&display_name)).await {
+        eprintln!("Database error creating user on login: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to create user"}))).into_response();
+    }
+
     let settings = UserSettings {
         caldav_base_url: form.caldav_base_url,
         caldav_username: form.caldav_username,
@@ -89,11 +94,6 @@ pub async fn handle_login(
     Json(json!({"status": "ok"})).into_response()
 }
 
-pub async fn logout_handler(session: Session) -> impl IntoResponse {
-    session.flush().await.ok();
-    Redirect::to("/settings/")
-}
-
 pub async fn delete_account(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -108,13 +108,7 @@ pub async fn delete_account(
     let user_att_dir = state.data_dir.join("attachments").join(&user.user_id);
     let _ = std::fs::remove_dir_all(&user_att_dir);
 
-    let redirect = match state.auth_mode {
-        AuthMode::Local => {
-            session.flush().await.ok();
-            "/settings/"
-        }
-        AuthMode::Oidc => "/calendar/",
-    };
+    session.flush().await.ok();
 
-    Json(json!({"redirect": redirect})).into_response()
+    Json(json!({"redirect": "/"})).into_response()
 }

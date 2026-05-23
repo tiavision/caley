@@ -36,6 +36,8 @@
   "login_subtitle": "Gib deine CalDAV-Server-Zugangsdaten ein, um dich anzumelden.",
   "login_submit": "Anmelden",
   "login_error": "Anmeldung fehlgeschlagen",
+  "login_or": "oder",
+  "login_oidc_button": "Mit Single Sign-On anmelden",
   "settings_heading": "Einstellungen",
   "settings_subtitle": "Konfiguriere deine CalDAV-Verbindung, um Kalendertermine abzurufen.",
   "settings_deleteAccount": "Konto löschen",

@@ -115,13 +115,35 @@ pub async fn activate_calendar(
     Ok(())
 }
 
+/// Ensure a user-identity row exists. Called on every successful login so that
+/// `user_settings` (referenced by the cache/contacts/email tables) is present
+/// even before any CalDAV account is configured.
+pub async fn ensure_user(
+    pool: &SqlitePool,
+    user_id: &str,
+    display_name: Option<&str>,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO user_settings (user_id, display_name) VALUES (?, ?)
+         ON CONFLICT(user_id) DO NOTHING",
+    )
+    .bind(user_id)
+    .bind(display_name)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Return the user's active CalDAV account. The schema supports multiple
+/// accounts per user; downstream code currently operates on a single one.
 pub async fn get_settings(
     pool: &SqlitePool,
     user_id: &str,
     key: &[u8; 32],
 ) -> anyhow::Result<Option<UserSettings>> {
     let row = sqlx::query(
-        "SELECT caldav_base_url, caldav_username, caldav_password FROM user_settings WHERE user_id = ?",
+        "SELECT caldav_base_url, caldav_username, caldav_password FROM caldav_accounts
+         WHERE user_id = ? ORDER BY sort_order, account_id LIMIT 1",
     )
     .bind(user_id)
     .fetch_optional(pool)
@@ -148,17 +170,20 @@ pub async fn upsert_settings(
     settings: &UserSettings,
     key: &[u8; 32],
 ) -> anyhow::Result<()> {
+    let account_id = format!("{user_id}:default");
     let enc_url = encrypt_field(&settings.caldav_base_url, key)?;
     let enc_user = encrypt_field(&settings.caldav_username, key)?;
     let enc_pass = encrypt_field(&settings.caldav_password, key)?;
     sqlx::query(
-        "INSERT INTO user_settings (user_id, caldav_base_url, caldav_username, caldav_password)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET
+        "INSERT INTO caldav_accounts
+            (account_id, user_id, caldav_base_url, caldav_username, caldav_password)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(account_id) DO UPDATE SET
             caldav_base_url = excluded.caldav_base_url,
             caldav_username = excluded.caldav_username,
             caldav_password = excluded.caldav_password",
     )
+    .bind(account_id)
     .bind(user_id)
     .bind(enc_url)
     .bind(enc_user)
@@ -785,6 +810,7 @@ pub async fn replace_calendar_events(
 pub async fn delete_user(pool: &SqlitePool, user_id: &str) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
     sqlx::query("DELETE FROM user_settings WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM caldav_accounts WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM deactivated_calendars WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM cached_calendars WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM cached_events WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;

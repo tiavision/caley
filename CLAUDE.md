@@ -6,26 +6,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Caley** is a CalDAV calendar viewer. It's a two-package monorepo with independent frontend and backend. Users authenticate (via OIDC or directly with CalDAV credentials), then fetch and view calendar events. Events can be created, edited (including recurring event modifications), and deleted.
 
-## Authentication Modes
+## Authentication
 
-Caley supports two auth modes selected at startup based on env vars:
+CalDAV-credential login is **always** available; OIDC login is **additive** — offered alongside it when configured. Both can authenticate users at the same time. The unified login page lives at `/` (the index): a CalDAV form (server URL, username, password) plus, when OIDC is configured, a "sign in via provider" button.
 
-**OIDC mode** — all three of `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` are set:
-- `axum-oidc` handles the OIDC flow; `OidcLoginLayer` redirects unauthenticated requests to the provider
-- `RequireAuthLayer` checks for `OidcClaims` in request extensions
-- User ID extracted from the configured OIDC claim (`OIDC_USER_ID_CLAIM`)
-- CalDAV credentials configured separately in the settings page after login
+**CalDAV-credential login** (always on):
+- User submits credentials to `POST /auth/login`; they are validated against the CalDAV server (PROPFIND), then saved to the DB and a session is created
+- User ID derived as `username@hostname` (e.g. `user@dav.myurl.tld`); display name fetched via PROPFIND on the principal URL
+- Authenticated state = a `user_id` key in the session
 
-**Local CalDAV login mode** — any OIDC var is absent:
-- No external identity provider needed
-- Users log in at `/settings/` with CalDAV server URL, username, and password
-- User ID derived as `username@hostname` (e.g. `user@dav.myurl.tld`)
-- Display name fetched via PROPFIND on the CalDAV principal URL
-- Credentials validated then saved to DB and session in one step
-- `RequireAuthLayer` checks the session for `user_id`; unauthenticated requests to `/api/` get 401, all other paths redirect to `/settings/`
-- Static assets (paths with a file extension, `/assets/*`) always pass through unauthenticated
+**OIDC login** (when `OIDC_ISSUER` + `OIDC_CLIENT_ID` + `OIDC_CLIENT_SECRET` are all set):
+- The login button links to `/auth/oidc`, which is wrapped by `OidcLoginLayer` and redirects to the provider; on return the code is exchanged on that same route, then the user is sent to `/calendar/`
+- **The IdP redirect URI must be `{APP_BASE_URL}/auth/oidc`** (not `/auth/callback`, which no longer exists)
+- `OidcAuthLayer` wraps the whole app (a safe no-op for CalDAV-only users) so `OidcClaims` are populated when an OIDC session exists
+- User ID extracted from the configured OIDC claim (`OIDC_USER_ID_CLAIM`); CalDAV credentials configured separately in settings after login
 
-The `CurrentUser` struct in `oidc.rs` is the unified extractor used by all handlers — it reads from OIDC claims in OIDC mode or from the session in local mode. No handler takes `OidcClaims` directly.
+**Gating** (`RequireAuthLayer` in `oidc.rs`): public paths (`/`, `/auth/*`, `/logout`, `/api/auth/config`, static assets) always pass; otherwise authenticated = (OIDC claims present) OR (session `user_id` present). Unauthenticated `/api/*` requests get 401 JSON; all other unauthenticated paths redirect to `/`.
+
+`/logout` is unified: it does RP-initiated logout when an OIDC session is present (extracted via `Option<OidcRpInitiatedLogout>`), otherwise just flushes the session.
+
+The `CurrentUser` struct in `oidc.rs` is the unified extractor used by all handlers — it tries OIDC claims first, then the session. No handler takes `OidcClaims` directly. `GET /api/auth/config` is a public endpoint reporting `{ oidc_enabled }` so the login page knows whether to show the OIDC button.
 
 ## Architecture
 
@@ -33,7 +33,7 @@ The `CurrentUser` struct in `oidc.rs` is the unified extractor used by all handl
 - **Language**: Rust (edition 2024)
 - **Framework**: Axum web server
 - **Key Dependencies**:
-  - `axum-oidc`: OIDC authentication middleware (used only in OIDC mode)
+  - `axum-oidc`: OIDC authentication middleware (active when OIDC is configured)
   - `sqlx`: SQLite database (bundled)
   - `ical` + `rrule`: iCalendar parsing and recurrence rules
   - `reqwest`: CalDAV client HTTP requests
@@ -42,29 +42,31 @@ The `CurrentUser` struct in `oidc.rs` is the unified extractor used by all handl
   - `tower-sessions`: In-memory session store
 
 **Key Modules**:
-- `main.rs`: Server setup, routing, conditional OIDC vs local auth middleware stack
+- `main.rs`: Server setup, routing, unified auth middleware stack (CalDAV login always wired; OIDC layers added when configured)
 - `search.rs`: `SearchMode` enum (`Default`, `Trigram`, `Stemmed(Algorithm)`). Parsed from `SEARCH_MODE` env var via `FromStr` — `"German"` etc. deserialised into `rust_stemmers::Algorithm` using serde. `normalize_text()` applies Snowball stemming for `Stemmed` mode; passthrough for others. `build_fts_query()` builds the FTS5 MATCH expression (prefix wildcards for default/stemmed, raw terms for trigram). Used in `AppState`, `SyncManager`, and all db insert paths.
-- `oidc.rs`: `AuthMode` enum, `CurrentUser` extractor, `AppState`, `RequireAuthLayer`, OIDC-specific handlers (`user_info`, `logout_handler`, `auth_callback_handler`)
-- `local_auth.rs`: Local login handler (`handle_login`), logout, `delete_account`, `derive_user_id`
+- `oidc.rs`: `CurrentUser` extractor (claims-then-session), `AppState` (`oidc_enabled: bool`), `RequireAuthLayer`, handlers (`user_info`, `auth_config`, unified `logout_handler`, `oidc_post_login`)
+- `local_auth.rs`: CalDAV login handler (`handle_login`), `delete_account`, `derive_user_id`
 - `caldav.rs`: CalDAV client implementation, iCalendar parsing, event/calendar operations, `get_display_name()`
 - `calendar.rs`: HTTP endpoints for calendar/event operations (list, create, edit, delete)
-- `db.rs`: SQLite schema and operations (user settings, deactivated calendars, event cache). Credentials encrypted with AES-256-GCM. Includes `delete_user()` for account deletion.
+- `db.rs`: SQLite schema and operations (user identity record, CalDAV accounts, deactivated calendars, event cache). CalDAV credentials encrypted with AES-256-GCM. `ensure_user()` creates the identity row on login; `get_settings()`/`upsert_settings()` operate on the user's active CalDAV account; `delete_user()` for account deletion.
 - `settings.rs`: Settings form endpoint, credential validation via test CalDAV connection
 - `crypto.rs`: Encryption/decryption using HKDF-SHA256 key derivation from `ENCRYPTION_KEY` env var
 - `sync.rs`: Background CalDAV sync manager
 - `sse.rs`: Server-sent events for real-time calendar updates
 
 **Database Schema**:
-- `user_settings`: Stores per-user CalDAV credentials (encrypted at rest)
+- `user_settings`: Per-user identity record (`user_id`, `display_name`). Exists for every authenticated user, even with no CalDAV account configured; referenced by the cache/contacts/email tables.
+- `caldav_accounts`: Per-user CalDAV credentials (encrypted at rest), keyed by `account_id` with a `user_id` foreign column. Modelled to hold multiple accounts per user; downstream sync/cache currently use the single active account (`get_settings` returns the first by `sort_order`).
 - `deactivated_calendars`: Tracks which calendars are hidden per user (encrypted hrefs)
 - `cached_calendars`, `cached_events`: Event/calendar cache for fast reads. `cached_events` has `summary_idx`, `description_idx`, `location_idx` columns that hold the FTS-indexed text (stemmed for `de`/`en`, raw otherwise). `events_fts` virtual table indexes these columns.
 - `push_subscriptions`: WebDAV Push notification subscriptions
 - `app_config`: Key/value store for app-level config (currently stores `search_mode` to detect tokenizer changes on restart)
 
 **Routing**:
-- `POST /auth/login` — Local mode login (validates CalDAV credentials, sets session)
-- `/auth/callback` — OIDC callback (OIDC mode only)
-- `/api/user` — Current user info JSON (`display_name`, `has_settings`, `auth_mode`)
+- `POST /auth/login` — CalDAV-credential login (validates credentials, sets session) — always available
+- `/auth/oidc` — OIDC login trigger + callback (only when OIDC configured); IdP redirect URI must point here
+- `/api/auth/config` — Public; reports `{ oidc_enabled }` for the login page
+- `/api/user` — Current user info JSON (`display_name`, `has_settings`, `has_caldav`, `oidc_enabled`)
 - `/api/calendars` — List calendars
 - `/api/calendar/toggle` — Show/hide calendar
 - `/api/calendar` — Get month grid for a single calendar
@@ -73,9 +75,9 @@ The `CurrentUser` struct in `oidc.rs` is the unified extractor used by all handl
 - `/api/settings/form` — Get existing settings JSON
 - `/api/settings` — Save CalDAV credentials (validates connection first)
 - `/api/event` — Create/update/delete events
-- `/api/account` — `DELETE`: delete all user data (and session in local mode)
+- `/api/account` — `DELETE`: delete all user data, flush session, redirect to `/`
 - `/api/push/webhook` — WebDAV Push webhook (public)
-- `/logout` — Logout (OIDC RP-initiated logout in OIDC mode; session flush + redirect in local mode)
+- `/logout` — Unified logout (OIDC RP-initiated logout when an OIDC session is present, otherwise session flush + redirect to `/`)
 - `*` — Fallback: serve frontend static files
 
 ### Frontend (`frontend/`)
@@ -84,12 +86,14 @@ The `CurrentUser` struct in `oidc.rs` is the unified extractor used by all handl
 - **Internationalization**: i18n with English and German translations via `@inlang/paraglide-js`
 
 **Pages** (Vite multi-page build entries):
-- `/` (`index.html`) — Main calendar view; mounts `CalendarApp.svelte`
-- `/settings/` (`settings/index.html`) — Settings page; mounts `SettingsForm.svelte`
+- `/` (`index.html`) — Login page; mounts `LoginPage.svelte`
+- `/calendar/` (`calendar/index.html`) — Main calendar view; mounts `CalendarApp.svelte`
+- `/settings/` (`settings/index.html`) — Settings page (authenticated only); mounts `SettingsForm.svelte`
 
 **Components**:
+- `LoginPage.svelte`: Login form (submits CalDAV credentials to `/auth/login`) plus, when `/api/auth/config` reports `oidc_enabled`, a button linking to `/auth/oidc`. Redirects to `/calendar/` if already authenticated.
 - `CalendarApp.svelte`: Full calendar UI (month grid, week view, event CRUD)
-- `SettingsForm.svelte`: Settings/login form — detects auth state on mount via `/api/user`; shows login form (submits to `/auth/login`) when unauthenticated, settings form (submits to `/api/settings`) when authenticated. Also contains the "Delete account" button.
+- `SettingsForm.svelte`: Authenticated settings page — CalDAV connection form (submits to `/api/settings`), calendars tab, language selector, and the "Delete account" button. No longer handles login.
 
 **Dev Server Proxy**: `vite.config.ts` proxies `/api`, `/auth`, and `/logout` to `http://localhost:3000` (backend).
 
@@ -106,7 +110,7 @@ cargo check                 # Check without building
 **Environment Variables** (set in `backend/.env` or as env vars):
 - `APP_BASE_URL` — Public URL (e.g., `http://localhost:3000` for local dev) **required**
 - `ENCRYPTION_KEY` — Passphrase for deriving AES-256-GCM encryption key **required**
-- `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` — All required for OIDC mode; omit all three for local CalDAV login mode
+- `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` — All three required to enable OIDC login (additive; CalDAV-credential login is always available). Omit them to offer CalDAV login only. When set, register `{APP_BASE_URL}/auth/oidc` as the IdP redirect URI.
 - `CALDAV_PORT` — Listen port (default: `3000`)
 - `OIDC_LOGOUT` — Enable OIDC RP-initiated logout (default: `true`)
 - `OIDC_USER_ID_CLAIM` — OIDC claim for user ID: `sub`, `preferred-username`, `email`, or `name` (default: `sub`)
@@ -136,7 +140,7 @@ No linter, formatter, or test runner configured.
 docker build -t caley .
 ```
 
-**Run (OIDC mode)**:
+**Run (CalDAV login + OIDC)** — register `https://calendar.example.com/auth/oidc` as the IdP redirect URI:
 ```bash
 docker run -p 3000:3000 \
   -v caley-data:/data \
@@ -148,7 +152,7 @@ docker run -p 3000:3000 \
   caley
 ```
 
-**Run (local CalDAV login mode)**:
+**Run (CalDAV login only)** — omit the OIDC vars:
 ```bash
 docker run -p 3000:3000 \
   -v caley-data:/data \
@@ -161,24 +165,17 @@ Multi-stage build: Node builds frontend, Rust builds backend (musl target), fina
 
 ## Local Development Workflow
 
-### OIDC mode
-1. **Start backend**: `cd backend && cargo run` (with OIDC env vars in `backend/.env`)
+1. **Start backend**: `cd backend && cargo run` (`APP_BASE_URL` and `ENCRYPTION_KEY` required; add the OIDC vars to also offer OIDC login)
 2. **Start frontend dev server**: `cd frontend && npm run dev`
 3. **Open browser**: `http://localhost:5173`
-4. **Log in**: Frontend redirects to OIDC provider, then back to `/auth/callback`
-5. **Set up CalDAV**: New users redirected to `/settings` after login
-
-### Local CalDAV login mode
-1. **Start backend**: `cd backend && cargo run` (only `APP_BASE_URL` and `ENCRYPTION_KEY` needed)
-2. **Start frontend dev server**: `cd frontend && npm run dev`
-3. **Open browser**: `http://localhost:5173`
-4. **Log in**: Navigate to `/settings/`, enter CalDAV server URL, username, and password
+4. **Log in** at `/`: enter CalDAV server URL, username, and password, or (if configured) click the OIDC button
+5. **Set up CalDAV** (OIDC users): configure a CalDAV connection in `/settings/` after login
 
 ## Key Implementation Details
 
 ### Auth layer
-- `RequireAuthLayer` in `oidc.rs` carries an `AuthMode` and behaves differently per mode
-- In local mode it checks `session.get::<String>("user_id")` asynchronously
+- `RequireAuthLayer` in `oidc.rs` lets the public allow-list (`/`, `/auth/*`, `/logout`, `/api/auth/config`, static assets) through, then requires either OIDC claims (populated by the broad `OidcAuthLayer`) or a session `user_id`
+- `OidcAuthLayer` wraps the whole app and is a safe no-op when there is no OIDC session; `OidcLoginLayer` wraps only `/auth/oidc` so it doesn't auto-redirect every request to the IdP
 - Static assets (file extension in path, or `/assets/` prefix) always pass through — otherwise the page's own JS/CSS would be redirected
 
 ### CalDAV

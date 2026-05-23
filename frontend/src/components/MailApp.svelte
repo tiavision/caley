@@ -100,7 +100,6 @@
   let folderSaving = false;
 
   let displayName = '';
-  let authMode = '';
 
   // HTML email rendering
   let viewMode: 'html' | 'text' = 'text';
@@ -138,11 +137,10 @@
   onMount(async () => {
     const user = await getUser();
     if (!user.ok) {
-      window.location.href = '/settings/';
+      window.location.href = '/';
       return;
     }
     displayName = user.display_name || '';
-    authMode = user.auth_mode || '';
 
     await loadAll();
     connectSSE();
@@ -804,7 +802,7 @@
       {#if virtualFolders.length > 0}
         <div class="sidebar-section">
           <div class="sidebar-section-header">
-            <span>Folders</span>
+            <span>Virtual Folders</span>
           </div>
           {#each virtualFolders as folder}
             <div
@@ -1062,7 +1060,7 @@
     {#if virtualFolders.length > 0}
       <div class="sidebar-section">
         <div class="sidebar-section-header">
-          <span>Folders</span>
+          <span>Virtual Folders</span>
         </div>
         {#each virtualFolders as folder}
           <div

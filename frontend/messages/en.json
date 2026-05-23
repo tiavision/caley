@@ -36,6 +36,8 @@
   "login_subtitle": "Enter your CalDAV server credentials to sign in.",
   "login_submit": "Sign in",
   "login_error": "Login failed",
+  "login_or": "or",
+  "login_oidc_button": "Sign in with single sign-on",
   "settings_heading": "Settings",
   "settings_subtitle": "Configure your CalDAV connection to fetch calendar events.",
   "settings_deleteAccount": "Delete account",

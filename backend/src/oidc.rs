@@ -28,12 +28,6 @@ pub enum UserIdClaim {
     Name,
 }
 
-#[derive(Clone, Debug)]
-pub enum AuthMode {
-    Oidc,
-    Local,
-}
-
 #[derive(Clone)]
 pub struct AppState {
     pub db: db::Db,
@@ -43,7 +37,7 @@ pub struct AppState {
     pub sync_manager: Arc<crate::sync::SyncManager>,
     pub email_sync_manager: Arc<EmailSyncManager>,
     pub sse_broadcaster: Arc<crate::sse::SseBroadcaster>,
-    pub auth_mode: AuthMode,
+    pub oidc_enabled: bool,
     pub search_mode: SearchMode,
     pub map_url: String,
     pub data_dir: PathBuf,
@@ -61,40 +55,27 @@ impl FromRequestParts<AppState> for CurrentUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        match state.auth_mode {
-            AuthMode::Oidc => {
-                let claims = parts
-                    .extensions
-                    .get::<OidcClaims<EmptyAdditionalClaims>>()
-                    .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized").into_response())?;
-                let user_id = extract_user_id(claims, &state.oidc_user_id_claim)
-                    .ok_or_else(|| {
-                        (StatusCode::INTERNAL_SERVER_ERROR, "Cannot determine user ID from OIDC claims")
-                            .into_response()
-                    })?;
+        // Prefer an OIDC session (claims populated by OidcAuthLayer) when present,
+        // otherwise fall back to a CalDAV-credential session. Both can be active.
+        if let Some(claims) = parts.extensions.get::<OidcClaims<EmptyAdditionalClaims>>() {
+            if let Some(user_id) = extract_user_id(claims, &state.oidc_user_id_claim) {
                 let display_name = claims
                     .name()
                     .and_then(|n| n.get(None).map(|s| s.as_str().to_owned()))
                     .or_else(|| claims.preferred_username().map(|u| u.as_str().to_owned()))
                     .or_else(|| Some(claims.subject().as_str().to_owned()));
-                Ok(CurrentUser { user_id, display_name })
-            }
-            AuthMode::Local => {
-                let session = parts
-                    .extensions
-                    .get::<Session>()
-                    .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized").into_response())?
-                    .clone();
-                let user_id = session
-                    .get::<String>("user_id")
-                    .await
-                    .ok()
-                    .flatten()
-                    .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Unauthorized").into_response())?;
-                let display_name = session.get::<String>("display_name").await.ok().flatten();
-                Ok(CurrentUser { user_id, display_name })
+                return Ok(CurrentUser { user_id, display_name });
             }
         }
+
+        if let Some(session) = parts.extensions.get::<Session>().cloned() {
+            if let Some(user_id) = session.get::<String>("user_id").await.ok().flatten() {
+                let display_name = session.get::<String>("display_name").await.ok().flatten();
+                return Ok(CurrentUser { user_id, display_name });
+            }
+        }
+
+        Err((StatusCode::UNAUTHORIZED, "Unauthorized").into_response())
     }
 }
 
@@ -154,62 +135,68 @@ pub async fn user_info(
 
     let _ = state.sync_manager.ensure_task_for(&user.user_id);
 
-    let auth_mode = match state.auth_mode {
-        AuthMode::Oidc => "oidc",
-        AuthMode::Local => "local",
-    };
-
     Json(json!({
         "display_name": display_name,
         "has_settings": has_settings,
-        "auth_mode": auth_mode,
+        "has_caldav": has_settings,
+        "oidc_enabled": state.oidc_enabled,
         "map_url": state.map_url,
     }))
 }
 
-pub async fn logout_handler(
-    State(state): State<AppState>,
-    logout: OidcRpInitiatedLogout,
-) -> Response {
-    let response = if state.do_oidc_logout {
-        match logout.uri() {
-            Ok(uri) => {
-                let s = uri.to_string();
-                Redirect::to(&s).into_response()
-            }
-            Err(_) => Redirect::to("/").into_response(),
-        }
-    } else {
-        Redirect::to("/").into_response()
-    };
-    let mut response = response;
-    response.extensions_mut().insert(ClearSessionFlag);
-    response
+/// Public endpoint so the login page can decide whether to offer OIDC.
+pub async fn auth_config(State(state): State<AppState>) -> impl IntoResponse {
+    Json(json!({
+        "oidc_enabled": state.oidc_enabled,
+    }))
 }
 
-pub async fn auth_callback_handler(session: Session) -> impl IntoResponse {
-    let target: Option<String> = session.get("auth_target").await.ok().flatten();
-    let _ = session.remove_value("auth_target").await;
-    Redirect::to(target.as_deref().unwrap_or("/calendar/"))
+/// Unified logout for both auth styles. `OidcRpInitiatedLogout` is only present
+/// for users with a valid OIDC session, so it is extracted optionally — a
+/// CalDAV-credential user simply gets a session flush.
+pub async fn logout_handler(
+    State(state): State<AppState>,
+    session: Session,
+    logout: Option<OidcRpInitiatedLogout>,
+) -> Response {
+    match logout {
+        Some(logout) if state.do_oidc_logout => {
+            let mut response = match logout.uri() {
+                Ok(uri) => Redirect::to(&uri.to_string()).into_response(),
+                Err(_) => Redirect::to("/").into_response(),
+            };
+            response.extensions_mut().insert(ClearSessionFlag);
+            session.flush().await.ok();
+            response
+        }
+        _ => {
+            session.flush().await.ok();
+            Redirect::to("/").into_response()
+        }
+    }
+}
+
+/// Handler behind `/auth/oidc`. The OidcLoginLayer wrapping this route forces the
+/// IdP redirect when unauthenticated and exchanges the code on return; by the
+/// time this runs the user is authenticated, so just send them to the app.
+pub async fn oidc_post_login() -> impl IntoResponse {
+    Redirect::to("/calendar/")
 }
 
 #[derive(Clone)]
-pub struct RequireAuthLayer {
-    pub auth_mode: AuthMode,
-}
+pub struct RequireAuthLayer;
 
 impl<S> Layer<S> for RequireAuthLayer {
     type Service = RequireAuthService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        RequireAuthService { inner, auth_mode: self.auth_mode.clone() }
+        RequireAuthService { inner }
     }
 }
 
 #[derive(Clone)]
 pub struct RequireAuthService<S> {
     inner: S,
-    auth_mode: AuthMode,
 }
 
 impl<S> Service<Request<Body>> for RequireAuthService<S>
@@ -228,53 +215,43 @@ where
     fn call(&mut self, request: Request<Body>) -> Self::Future {
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
-        let auth_mode = self.auth_mode.clone();
 
-        match auth_mode {
-            AuthMode::Oidc => {
-                if request.extensions().get::<OidcClaims<EmptyAdditionalClaims>>().is_some() {
-                    return Box::pin(async move { inner.call(request).await });
-                }
-                if request.uri().path() == "/auth/callback" {
-                    return Box::pin(async move { inner.call(request).await });
-                }
-                let session = request.extensions().get::<Session>().cloned();
-                let target = request.uri().to_string();
-                Box::pin(async move {
-                    if let Some(session) = session {
-                        let _ = session.insert("auth_target", target).await;
-                    }
-                    Ok(Redirect::temporary("/auth/callback").into_response())
-                })
-            }
-            AuthMode::Local => {
-                let path = request.uri().path().to_string();
-                // Allow the settings page (login form) and static assets through
-                let is_settings = path.starts_with("/settings");
-                let is_static = path.starts_with("/assets/")
-                    || path.rsplit('/').next().map_or(false, |f| f.contains('.'));
-                if path == "/auth/login" || is_settings || is_static {
-                    return Box::pin(async move { inner.call(request).await });
-                }
-                let session = request.extensions().get::<Session>().cloned();
-                Box::pin(async move {
-                    let authenticated = if let Some(ref session) = session {
-                        session.get::<String>("user_id").await.ok().flatten().is_some()
-                    } else {
-                        false
-                    };
-                    if authenticated {
-                        return inner.call(request).await;
-                    }
-                    if path.starts_with("/api/") {
-                        return Ok((
-                            StatusCode::UNAUTHORIZED,
-                            Json(serde_json::json!({"error": "Unauthorized"})),
-                        ).into_response());
-                    }
-                    Ok(Redirect::temporary("/settings/").into_response())
-                })
-            }
+        let path = request.uri().path().to_string();
+        // Always-public paths: the login page, auth endpoints, and static assets.
+        let is_static = path.starts_with("/assets/")
+            || path.rsplit('/').next().map_or(false, |f| f.contains('.'));
+        if path == "/"
+            || path.starts_with("/auth/")
+            || path == "/logout"
+            || path == "/api/auth/config"
+            || is_static
+        {
+            return Box::pin(async move { inner.call(request).await });
         }
+
+        // Authenticated via OIDC claims (already in extensions) or a CalDAV session.
+        let has_claims = request
+            .extensions()
+            .get::<OidcClaims<EmptyAdditionalClaims>>()
+            .is_some();
+        let session = request.extensions().get::<Session>().cloned();
+        Box::pin(async move {
+            let authenticated = has_claims
+                || match &session {
+                    Some(s) => s.get::<String>("user_id").await.ok().flatten().is_some(),
+                    None => false,
+                };
+            if authenticated {
+                return inner.call(request).await;
+            }
+            if path.starts_with("/api/") {
+                return Ok((
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({"error": "Unauthorized"})),
+                )
+                    .into_response());
+            }
+            Ok(Redirect::temporary("/").into_response())
+        })
     }
 }

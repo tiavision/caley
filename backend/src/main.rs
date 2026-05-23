@@ -23,7 +23,7 @@ use axum_oidc::error::MiddlewareError;
 use axum_oidc::{EmptyAdditionalClaims, OidcAuthLayer, OidcLoginLayer};
 use clap::Parser;
 use dotenvy::dotenv;
-use oidc::{AppState, AuthMode, UserIdClaim};
+use oidc::{AppState, UserIdClaim};
 use search::SearchMode;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -84,8 +84,6 @@ async fn main() -> anyhow::Result<()> {
         && args.oidc_client_id.is_some()
         && args.oidc_client_secret.is_some();
 
-    let auth_mode = if use_oidc { AuthMode::Oidc } else { AuthMode::Local };
-
     let data_dir = PathBuf::from(&args.database_path)
         .parent()
         .map(|p| p.to_path_buf())
@@ -120,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
         sync_manager,
         email_sync_manager,
         sse_broadcaster,
-        auth_mode: auth_mode.clone(),
+        oidc_enabled: use_oidc,
         search_mode,
         map_url: args.map_url,
         data_dir,
@@ -137,6 +135,7 @@ async fn main() -> anyhow::Result<()> {
     let public = Router::new()
         .route("/api/push/webhook", post(sse::push_webhook))
         .route("/api/email/navigate", get(email::navigate))
+        .route("/api/auth/config", get(oidc::auth_config))
         .with_state(state.clone());
 
     // Shared private routes (both auth modes)
@@ -184,6 +183,16 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/email/image-origins", post(email::add_image_origin))
         .route("/api/email/image-origins", delete(email::remove_image_origin));
 
+    // Protected routes plus the always-available CalDAV login + unified logout.
+    // RequireAuthLayer lets the public allow-list through and otherwise requires
+    // either OIDC claims or a CalDAV session.
+    let private = shared_private
+        .route("/auth/login", post(local_auth::handle_login))
+        .route("/logout", get(oidc::logout_handler))
+        .with_state(state.clone())
+        .fallback_service(ServeDir::new(&static_dir))
+        .layer(oidc::RequireAuthLayer);
+
     let app = if use_oidc {
         let oidc_issuer = args.oidc_issuer.unwrap();
         let oidc_client_id = args.oidc_client_id.unwrap();
@@ -199,11 +208,34 @@ async fn main() -> anyhow::Result<()> {
         )
         .await?;
 
-        let private = shared_private
-            .route("/auth/callback", get(oidc::auth_callback_handler))
-            .route("/logout", get(oidc::logout_handler))
+        // Explicit OIDC trigger + callback route. OidcLoginLayer wraps ONLY this
+        // route, so unauthenticated requests elsewhere are not bounced to the IdP.
+        // The IdP redirect URI must be `{APP_BASE_URL}/auth/oidc`.
+        let oidc_trigger = Router::new()
+            .route("/auth/oidc", get(oidc::oidc_post_login))
             .with_state(state)
-            .fallback_service(ServeDir::new(&static_dir))
+            .layer(
+                ServiceBuilder::new()
+                    .layer(HandleErrorLayer::new(|session: Session, err: MiddlewareError| async move {
+                        match err {
+                            MiddlewareError::RequestToken(_) | MiddlewareError::ClaimsVerification(_) => {
+                                session.remove_value("axum-oidc").await.unwrap_or_default();
+                                Redirect::to("/").into_response()
+                            }
+                            _ => err.into_response(),
+                        }
+                    }))
+                    .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new())
+                    .into_inner(),
+            );
+
+        println!("Auth: CalDAV login + OIDC enabled");
+        // OidcAuthLayer wraps everything (safe no-op when no OIDC session) so that
+        // claims are populated before RequireAuthLayer and the trigger route run.
+        Router::new()
+            .merge(public)
+            .merge(oidc_trigger)
+            .merge(private)
             .layer(
                 ServiceBuilder::new()
                     .layer(HandleErrorLayer::new(|session: Session, err: MiddlewareError| async move {
@@ -216,26 +248,11 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }))
                     .layer(oidc_auth_layer)
-                    .layer(HandleErrorLayer::new(|e| async { e }))
-                    .layer(oidc::RequireAuthLayer { auth_mode: AuthMode::Oidc })
-                    .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new())
                     .into_inner(),
-            );
-
-        println!("Auth mode: OIDC");
-        Router::new()
-            .merge(public)
-            .merge(private)
+            )
             .layer(session_layer)
     } else {
-        let private = shared_private
-            .route("/auth/login", post(local_auth::handle_login))
-            .route("/logout", get(local_auth::logout_handler))
-            .with_state(state)
-            .fallback_service(ServeDir::new(&static_dir))
-            .layer(oidc::RequireAuthLayer { auth_mode: AuthMode::Local });
-
-        println!("Auth mode: local CalDAV login (no OIDC configured)");
+        println!("Auth: CalDAV login (OIDC not configured)");
         Router::new()
             .merge(public)
             .merge(private)

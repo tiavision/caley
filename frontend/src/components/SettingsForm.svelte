@@ -18,10 +18,8 @@
   let saving = false;
   let deleting = false;
   let errorMsg = '';
-  // true when the user is not authenticated yet (login mode)
-  let isLoginMode = false;
 
-  // ── Tabs (only shown when authenticated) ──────────────────────────────────
+  // ── Tabs ───────────────────────────────────────────────────────────────────
   let tab: 'settings' | 'calendars' = 'settings';
 
   // ── Calendars tab ─────────────────────────────────────────────────────────
@@ -64,16 +62,15 @@
     locale = getLocale();
     selectedLocale = locale.slice(0, 2);
 
-    // Detect auth state: 401 (or network error) means we're not logged in → login mode
+    // Unauthenticated users are redirected to the login page by the backend;
+    // guard here too in case this page is reached directly.
     const userRes = await getUser();
     if (!userRes.ok) {
-      isLoginMode = true;
-      caldavBaseUrl = localStorage.getItem('caldav_base_url') || '';
-      loading = false;
+      window.location.href = '/';
       return;
     }
 
-    // Authenticated: load existing settings to prefill the form
+    // Load existing settings to prefill the form.
     try {
       const res = await fetch('/api/settings/form');
       if (res.ok) {
@@ -99,18 +96,14 @@
     params.append('caldav_username', caldavUsername);
     params.append('caldav_password', caldavPassword);
 
-    const endpoint = isLoginMode ? '/auth/login' : '/api/settings';
     try {
-      const res = await fetch(endpoint, {
+      const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: params.toString(),
       });
       const data = await res.json();
       if (res.ok && data.status === 'ok') {
-        if (isLoginMode) {
-          localStorage.setItem('caldav_base_url', caldavBaseUrl);
-        }
         window.location.href = '/calendar/';
       } else {
         errorMsg = data.error || tl('event_error');
@@ -137,7 +130,7 @@
 
 <div class="settings-form">
   <div class="settings-header">
-    <h2>{isLoginMode ? tl('login_heading') : tl('settings_heading')}</h2>
+    <h2>{tl('settings_heading')}</h2>
     <span class="locale-group">
       🌐
       <select
@@ -153,7 +146,7 @@
     </span>
   </div>
 
-  {#if !isLoginMode && !loading}
+  {#if !loading}
     <div class="tabs" role="tablist">
       <button
         role="tab"
@@ -172,8 +165,8 @@
 
   {#if loading}
     <p aria-busy="true">{tl('nav_loading')}</p>
-  {:else if isLoginMode || tab === 'settings'}
-    <p>{isLoginMode ? tl('login_subtitle') : tl('settings_subtitle')}</p>
+  {:else if tab === 'settings'}
+    <p>{tl('settings_subtitle')}</p>
     <form onsubmit={(e) => { e.preventDefault(); onSubmit(); }}>
       <label>
         <span>{tl('settings_baseUrl')}</span>
@@ -199,9 +192,8 @@
         <span>{tl('settings_password')}</span>
         <input
           type="password"
-          placeholder={isLoginMode || !hasPassword ? tl('settings_passwordPlaceholder') : tl('settings_passwordHint')}
+          placeholder={!hasPassword ? tl('settings_passwordPlaceholder') : tl('settings_passwordHint')}
           bind:value={caldavPassword}
-          required={isLoginMode}
         />
       </label>
 
@@ -210,16 +202,14 @@
       {/if}
 
       <button type="submit" disabled={saving} aria-busy={saving}>
-        {isLoginMode ? tl('login_submit') : tl('settings_submit')}
+        {tl('settings_submit')}
       </button>
     </form>
 
-    {#if !isLoginMode}
-      <hr />
-      <button class="delete-account-btn" onclick={onDeleteAccount} disabled={deleting} aria-busy={deleting}>
-        {tl('settings_deleteAccount')}
-      </button>
-    {/if}
+    <hr />
+    <button class="delete-account-btn" onclick={onDeleteAccount} disabled={deleting} aria-busy={deleting}>
+      {tl('settings_deleteAccount')}
+    </button>
   {:else}
     <!-- Calendars tab -->
     {#if calendarsLoading}
