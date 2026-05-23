@@ -190,7 +190,7 @@ pub async fn logout_handler(
 pub async fn auth_callback_handler(session: Session) -> impl IntoResponse {
     let target: Option<String> = session.get("auth_target").await.ok().flatten();
     let _ = session.remove_value("auth_target").await;
-    Redirect::to(target.as_deref().unwrap_or("/"))
+    Redirect::to(target.as_deref().unwrap_or("/calendar/"))
 }
 
 #[derive(Clone)]

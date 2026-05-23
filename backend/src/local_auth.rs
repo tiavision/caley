@@ -113,7 +113,7 @@ pub async fn delete_account(
             session.flush().await.ok();
             "/settings/"
         }
-        AuthMode::Oidc => "/",
+        AuthMode::Oidc => "/calendar/",
     };
 
     Json(json!({"redirect": redirect})).into_response()

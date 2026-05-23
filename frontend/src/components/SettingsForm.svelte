@@ -111,7 +111,7 @@
         if (isLoginMode) {
           localStorage.setItem('caldav_base_url', caldavBaseUrl);
         }
-        window.location.href = '/';
+        window.location.href = '/calendar/';
       } else {
         errorMsg = data.error || tl('event_error');
       }
@@ -128,7 +128,7 @@
       const res = await fetch('/api/account', { method: 'DELETE' });
       if (res.ok) {
         const data = await res.json();
-        window.location.href = data.redirect || '/';
+        window.location.href = data.redirect || '/calendar/';
       }
     } catch {}
     deleting = false;
