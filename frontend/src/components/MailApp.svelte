@@ -70,6 +70,11 @@
   let messagesOffset = 0;
   const pageSize = 50;
   let messagesLoading = false;
+  let listScrollEl: HTMLElement;
+
+  let searchQuery = '';
+  let searching = false;
+  let searchDebounce: ReturnType<typeof setTimeout> | null = null;
 
   let selectedMessage: Message | null = null;
   let messageLoading = false;
@@ -246,6 +251,7 @@
     selectedFolderId = null;
     selectedMessage = null;
     messagesOffset = 0;
+    resetSearch();
     sidebarDialog?.close();
     await loadMessages();
   }
@@ -256,7 +262,51 @@
     selectedMailbox = null;
     selectedMessage = null;
     messagesOffset = 0;
+    resetSearch();
     sidebarDialog?.close();
+    await loadMessages();
+  }
+
+  function resetSearch() {
+    if (searchDebounce) { clearTimeout(searchDebounce); searchDebounce = null; }
+    searchQuery = '';
+    searching = false;
+  }
+
+  function onSearchInput() {
+    if (searchDebounce) clearTimeout(searchDebounce);
+    const q = searchQuery.trim();
+    if (q === '') {
+      clearSearch();
+      return;
+    }
+    searchDebounce = setTimeout(() => runSearch(q), 250);
+  }
+
+  async function runSearch(q: string) {
+    let scope = '';
+    if (selectedFolderId) {
+      scope = `&folder_id=${encodeURIComponent(selectedFolderId)}`;
+    } else if (selectedAccountId && selectedMailbox) {
+      scope = `&account_id=${encodeURIComponent(selectedAccountId)}&mailbox=${encodeURIComponent(selectedMailbox)}`;
+    }
+    searching = true;
+    selectedMessage = null;
+    messagesLoading = true;
+    try {
+      const r = await fetch(`/api/email/search?q=${encodeURIComponent(q)}${scope}`);
+      if (r.ok) {
+        const data = await r.json();
+        messages = data.messages || [];
+      }
+    } catch {}
+    messagesLoading = false;
+  }
+
+  async function clearSearch() {
+    if (searchDebounce) { clearTimeout(searchDebounce); searchDebounce = null; }
+    searchQuery = '';
+    searching = false;
     await loadMessages();
   }
 
@@ -279,6 +329,24 @@
       }
     } catch {}
     messagesLoading = false;
+    if (messages.length === 0 && messagesOffset > 0 && totalMessages > 0) {
+      messagesOffset = Math.max(0, (Math.ceil(totalMessages / pageSize) - 1) * pageSize);
+      await loadMessages();
+    }
+  }
+
+  async function nextPage() {
+    if (!hasNext) return;
+    messagesOffset += pageSize;
+    await loadMessages();
+    listScrollEl?.scrollTo({ top: 0 });
+  }
+
+  async function prevPage() {
+    if (!hasPrev) return;
+    messagesOffset = Math.max(0, messagesOffset - pageSize);
+    await loadMessages();
+    listScrollEl?.scrollTo({ top: 0 });
   }
 
   async function openMessage(msg: Message) {
@@ -526,7 +594,7 @@
     sseSource = new EventSource('/api/events/stream');
     sseSource.addEventListener('emails_refetch', async (e) => {
       const data = JSON.parse(e.data);
-      if (data.account_id === selectedAccountId && data.mailbox === selectedMailbox) {
+      if (!searching && data.account_id === selectedAccountId && data.mailbox === selectedMailbox) {
         await loadMessages();
       }
     });
@@ -540,7 +608,9 @@
     });
     sseSource.addEventListener('email_removed', (e) => {
       const data = JSON.parse(e.data);
+      const before = messages.length;
       messages = messages.filter(m => !(m.uid === data.uid && m.account_id === data.account_id));
+      if (messages.length < before) totalMessages = Math.max(0, totalMessages - 1);
     });
     sseSource.addEventListener('accounts_changed', async () => {
       await loadAccounts();
@@ -661,7 +731,10 @@
     : '';
   $: layoutColumns = isMobile ? '1fr' : `${sidebarWidth}px 5px ${listWidth}px 5px 1fr`;
 
-  $: unreadCount = messages.filter(m => !m.is_read).length;
+  $: pageStart = totalMessages === 0 ? 0 : messagesOffset + 1;
+  $: pageEnd = Math.min(messagesOffset + messages.length, totalMessages);
+  $: hasPrev = messagesOffset > 0;
+  $: hasNext = messagesOffset + pageSize < totalMessages;
 
   $: htmlHasValue = htmlAddsValue(selectedMessage?.body_html ?? null);
   $: bodyTextSegments = linkifySegments(selectedMessage?.body_text ?? '');
@@ -757,50 +830,71 @@
         {:else}
           <h2>Mail</h2>
         {/if}
-        {#if totalMessages > 0}
-          <span class="count">{totalMessages} messages{unreadCount > 0 ? `, ${unreadCount} unread` : ''}</span>
+        {#if selectedFolderId || selectedMailbox}
+          <input
+            class="search-input"
+            type="search"
+            placeholder="Search this folder…"
+            bind:value={searchQuery}
+            on:input={onSearchInput}
+          />
+        {/if}
+        {#if searching && !messagesLoading}
+          <span class="count">{messages.length} result{messages.length === 1 ? '' : 's'}</span>
         {/if}
       </div>
 
-      {#if messagesLoading}
-        <div class="loading">Loading…</div>
-      {:else if messages.length === 0}
-        <div class="empty">
-          {#if accounts.length === 0}
-            No accounts configured. Add an IMAP account to get started.
-          {:else if !selectedAccountId && !selectedFolderId}
-            Select a mailbox.
-          {:else}
-            No messages.
-          {/if}
-        </div>
-      {:else}
-        {#each messages as msg}
-          <button
-            class="message-row"
-            class:unread={!msg.is_read}
-            class:selected={selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id}
-            on:click={() => openMessage(msg)}
-          >
-            <div class="message-row-top">
-              <span class="from">{senderName(msg.from)}</span>
-              <span class="date">{formatDate(msg.sent_at)}</span>
-            </div>
-            <div class="message-row-subject-line">
-              <span class="message-row-subject">{msg.subject || '(no subject)'}</span>
-              <span class="message-row-icons">
-                {#if msg.is_flagged}<span class="flag-star" title="Flagged">⭐</span>{/if}
-                {#if msg.has_attachments}<span class="attach-icon" title="Has attachments"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 10.56a4.94 4.94 0 0 1-7-7l9.19-10.56a3.33 3.33 0 0 1 4.7 4.7l-9.2 10.56a1.67 1.67 0 0 1-2.35-2.35l9.2-10.56"/></svg></span>{/if}
-              </span>
-            </div>
-          </button>
-        {/each}
-
-        {#if totalMessages > messages.length + messagesOffset}
-          <button class="load-more" on:click={async () => { messagesOffset += pageSize; await loadMessages(); }}>
-            Load more
-          </button>
+      <div class="message-list-scroll" bind:this={listScrollEl}>
+        {#if messagesLoading}
+          <div class="loading">Loading…</div>
+        {:else if messages.length === 0}
+          <div class="empty">
+            {#if searching}
+              No results for "{searchQuery}".
+            {:else if accounts.length === 0}
+              No accounts configured. Add an IMAP account to get started.
+            {:else if !selectedAccountId && !selectedFolderId}
+              Select a mailbox.
+            {:else}
+              No messages.
+            {/if}
+          </div>
+        {:else}
+          {#each messages as msg}
+            <button
+              class="message-row"
+              class:unread={!msg.is_read}
+              class:selected={selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id}
+              on:click={() => openMessage(msg)}
+            >
+              <div class="message-row-top">
+                <span class="from">{senderName(msg.from)}</span>
+                <span class="date">{formatDate(msg.sent_at)}</span>
+              </div>
+              <div class="message-row-subject-line">
+                <span class="message-row-subject">{msg.subject || '(no subject)'}</span>
+                <span class="message-row-icons">
+                  {#if msg.is_flagged}<span class="flag-star" title="Flagged">⭐</span>{/if}
+                  {#if msg.has_attachments}<span class="attach-icon" title="Has attachments"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 10.56a4.94 4.94 0 0 1-7-7l9.19-10.56a3.33 3.33 0 0 1 4.7 4.7l-9.2 10.56a1.67 1.67 0 0 1-2.35-2.35l9.2-10.56"/></svg></span>{/if}
+                </span>
+              </div>
+            </button>
+          {/each}
         {/if}
+      </div>
+
+      {#if totalMessages > 0 && !searching}
+        <nav class="pagination-bar">
+          <button class="page-btn" on:click={prevPage} disabled={!hasPrev} aria-label="Previous page">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+            Prev
+          </button>
+          <span class="page-status">{pageStart}–{pageEnd} of {totalMessages}</span>
+          <button class="page-btn" on:click={nextPage} disabled={!hasNext} aria-label="Next page">
+            Next
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </nav>
       {/if}
     </section>
 
@@ -1402,15 +1496,20 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 0;
+    margin: 0;
   }
 
-  @media (min-width: 768px) {
-    .message-list {
-      overflow-y: auto;
-    }
+  .message-list-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   .message-list-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
     padding: 0.75rem 1rem;
     border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
     flex-shrink: 0;
@@ -1420,6 +1519,17 @@
     margin: 0;
     font-size: 1rem;
     font-weight: 600;
+  }
+
+  .search-input {
+    width: 100%;
+    margin: 0;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.85rem;
+    height: auto;
+    border: 1px solid var(--pico-muted-border-color, #ddd);
+    border-radius: var(--pico-border-radius, 4px);
+    background: var(--pico-form-element-background-color, transparent);
   }
 
   .count {
@@ -1506,14 +1616,43 @@
     align-items: center;
   }
 
-  .load-more {
-    width: 100%;
-    padding: 0.5rem;
+  .pagination-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-top: 1px solid var(--pico-muted-border-color, #ddd);
+    flex-shrink: 0;
+  }
+
+  .page-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
     border: none;
     background: none;
     cursor: pointer;
-    color: var(--pico-primary, #0172ad);
+    color: var(--pico-muted-color, #bbb);
     font-size: 0.85rem;
+    padding: 0.15rem 0.3rem;
+    line-height: 1;
+    transition: color 0.15s;
+  }
+
+  .page-btn:hover:not(:disabled) {
+    color: var(--pico-color, #333);
+  }
+
+  .page-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .page-status {
+    font-size: 0.8rem;
+    color: var(--pico-muted-color, #888);
+    white-space: nowrap;
   }
 
   /* Message detail */
@@ -2000,6 +2139,17 @@
 
     .resize-handle {
       display: none;
+    }
+
+    .mail-layout {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .message-list {
+      flex: 1;
+      min-height: 0;
     }
 
     .sidebar-toggle {

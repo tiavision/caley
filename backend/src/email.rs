@@ -485,6 +485,9 @@ pub async fn send_email(
 pub struct SearchQuery {
     pub q: String,
     pub limit: Option<i64>,
+    pub account_id: Option<String>,
+    pub mailbox: Option<String>,
+    pub folder_id: Option<String>,
 }
 
 pub async fn search(
@@ -498,7 +501,15 @@ pub async fn search(
     let fts_query = state.search_mode.build_fts_query(&q.q);
     let limit = q.limit.unwrap_or(50).min(200);
 
-    match email_db::search_messages(&state.db, &user.user_id, &fts_query, limit).await {
+    let result = if let Some(folder_id) = q.folder_id.as_deref() {
+        email_db::search_messages_virtual(&state.db, &user.user_id, folder_id, &fts_query, limit).await
+    } else if let (Some(account_id), Some(mailbox)) = (q.account_id.as_deref(), q.mailbox.as_deref()) {
+        email_db::search_messages_mailbox(&state.db, &user.user_id, account_id, mailbox, &fts_query, limit).await
+    } else {
+        email_db::search_messages(&state.db, &user.user_id, &fts_query, limit).await
+    };
+
+    match result {
         Ok(messages) => {
             let list: Vec<_> = messages.iter().map(message_to_json).collect();
             Json(json!({ "messages": list })).into_response()

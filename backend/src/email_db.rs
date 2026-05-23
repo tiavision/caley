@@ -838,6 +838,67 @@ pub async fn search_messages(
     Ok(rows.iter().map(row_to_message).collect())
 }
 
+pub async fn search_messages_mailbox(
+    pool: &SqlitePool,
+    user_id: &str,
+    account_id: &str,
+    mailbox: &str,
+    fts_query: &str,
+    limit: i64,
+) -> Result<Vec<MessageRow>> {
+    let rows = sqlx::query(
+        "SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
+                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments, m.body_text
+         FROM messages_fts f
+         JOIN cached_messages m ON m.rowid = f.rowid
+         JOIN imap_accounts a ON a.account_id = m.account_id
+         WHERE messages_fts MATCH ?
+           AND a.user_id = ?
+           AND m.account_id = ?
+           AND m.mailbox = ?
+         ORDER BY rank
+         LIMIT ?",
+    )
+    .bind(fts_query)
+    .bind(user_id)
+    .bind(account_id)
+    .bind(mailbox)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(row_to_message).collect())
+}
+
+pub async fn search_messages_virtual(
+    pool: &SqlitePool,
+    user_id: &str,
+    folder_id: &str,
+    fts_query: &str,
+    limit: i64,
+) -> Result<Vec<MessageRow>> {
+    let rows = sqlx::query(
+        "SELECT DISTINCT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
+                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments, m.body_text
+         FROM messages_fts f
+         JOIN cached_messages m ON m.rowid = f.rowid
+         JOIN imap_accounts a ON a.account_id = m.account_id
+         JOIN virtual_folder_rules r ON r.folder_id = ?
+             AND (r.account_id = '' OR r.account_id = m.account_id)
+             AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
+         WHERE messages_fts MATCH ?
+           AND a.user_id = ?
+         ORDER BY rank
+         LIMIT ?",
+    )
+    .bind(folder_id)
+    .bind(fts_query)
+    .bind(user_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(row_to_message).collect())
+}
+
 // ── Virtual Folders ───────────────────────────────────────────────────────────
 
 pub struct VirtualFolderRow {
