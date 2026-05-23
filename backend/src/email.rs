@@ -577,6 +577,11 @@ pub async fn proxy_image(
 ) -> Response {
     // CID-based inline attachment lookup
     if let (Some(cid), Some(account_id), Some(mailbox), Some(uid)) = (&q.cid, &q.account_id, &q.mailbox, q.uid) {
+        // Verify the account belongs to the current user before serving its data.
+        match email_db::get_account(&state.db, account_id, &user.user_id, &state.encryption_key).await {
+            Ok(Some(_)) => {}
+            _ => return transparent_pixel(),
+        }
         let att = match email_db::get_attachment_by_cid(&state.db, account_id, mailbox, uid, cid).await {
             Ok(Some(a)) => a,
             _ => return transparent_pixel(),

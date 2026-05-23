@@ -8,7 +8,6 @@ use tokio::net::TcpStream;
 use tokio_rustls::{rustls, TlsConnector};
 
 use crate::email_db::MessageHeader;
-use crate::search::SearchMode;
 
 pub type ImapSession = async_imap::Session<tokio_rustls::client::TlsStream<TcpStream>>;
 
@@ -71,7 +70,6 @@ pub async fn fetch_all_uids(session: &mut ImapSession) -> Result<Vec<u32>> {
 pub async fn fetch_headers(
     session: &mut ImapSession,
     uids: &[u32],
-    search_mode: &SearchMode,
 ) -> Result<Vec<MessageHeader>> {
     if uids.is_empty() {
         return Ok(vec![]);
@@ -114,9 +112,6 @@ pub async fn fetch_headers(
 
         let size = fetch.size.map(|s| s as i64);
 
-        let subject_idx = subject.as_deref().map(|s| search_mode.normalize_text(s));
-        let from_idx = from_addr.as_deref().map(|s| search_mode.normalize_text(s));
-
         headers.push(MessageHeader {
             uid: uid as i64,
             message_id,
@@ -130,8 +125,6 @@ pub async fn fetch_headers(
             has_attachments: false,
             size,
         });
-        let _ = subject_idx;
-        let _ = from_idx;
     }
     Ok(headers)
 }
@@ -142,24 +135,6 @@ pub struct AttachmentPart {
     pub content_type: String,
     pub content_id: Option<String>,
     pub bytes: Vec<u8>,
-}
-
-/// Fetches the full raw body for a single UID.
-/// Returns (raw_bytes, body_text, raw_html, has_attachments, attachments).
-pub async fn fetch_body(
-    session: &mut ImapSession,
-    uid: u32,
-) -> Result<(Vec<u8>, String, Option<String>, bool, Vec<AttachmentPart>)> {
-    let mut stream = session.uid_fetch(uid.to_string(), "(BODY.PEEK[])").await?;
-    if let Some(item) = stream.next().await {
-        let fetch = item?;
-        if let Some(body_bytes) = fetch.body() {
-            let raw = body_bytes.to_vec();
-            let (text, html, has_attach, attachments) = parse_body_bytes(body_bytes)?;
-            return Ok((raw, text, html, has_attach, attachments));
-        }
-    }
-    Ok((Vec::new(), String::new(), None, false, Vec::new()))
 }
 
 /// Fetches full raw bodies for a list of UIDs in one IMAP command.
@@ -196,7 +171,19 @@ pub async fn delete_on_server(session: &mut ImapSession, uid: u32) -> Result<()>
         let mut stream = session.uid_store(&uid_str, "+FLAGS (\\Deleted)").await?;
         while let Some(r) = stream.next().await { let _ = r; }
     }
-    session.expunge().await?;
+    // Expunge only the targeted UID when the server supports UIDPLUS, so other
+    // messages flagged \Deleted aren't purged as collateral; otherwise fall back
+    // to a mailbox-wide EXPUNGE. Both return a stream of untagged responses that
+    // must be polled to completion (and aren't Unpin, so box-pin them) or the
+    // command isn't driven and its responses corrupt the next one.
+    let uidplus = session.capabilities().await?.has_str("UIDPLUS");
+    if uidplus {
+        let mut stream = Box::pin(session.uid_expunge(&uid_str).await?);
+        while let Some(r) = stream.next().await { let _ = r; }
+    } else {
+        let mut stream = Box::pin(session.expunge().await?);
+        while let Some(r) = stream.next().await { let _ = r; }
+    }
     Ok(())
 }
 
@@ -744,8 +731,14 @@ pub async fn send_email(
         .map_err(|e| anyhow!("failed to build email: {e}"))?;
 
     let creds = Credentials::new(username.to_owned(), password.to_owned());
-    let mailer = AsyncSmtpTransport::<Tokio1Executor>::relay(smtp_host)
-        .map_err(|e| anyhow!("SMTP relay error: {e}"))?
+    // Port 465 uses implicit TLS (SMTPS); 587/25 use STARTTLS.
+    let builder = if smtp_port == 465 {
+        AsyncSmtpTransport::<Tokio1Executor>::relay(smtp_host)
+    } else {
+        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(smtp_host)
+    }
+    .map_err(|e| anyhow!("SMTP relay error: {e}"))?;
+    let mailer = builder
         .port(smtp_port)
         .credentials(creds)
         .build();

@@ -193,7 +193,7 @@ pub async fn upsert_mailbox(
          VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(account_id, name) DO UPDATE SET
             delimiter   = excluded.delimiter,
-            uidvalidity = excluded.uidvalidity,
+            uidvalidity = COALESCE(excluded.uidvalidity, cached_mailboxes.uidvalidity),
             subscribed  = excluded.subscribed,
             last_synced = strftime('%s','now')",
     )
@@ -315,8 +315,8 @@ pub async fn update_message_flags(
     Ok(())
 }
 
-pub async fn update_message_body(
-    pool: &SqlitePool,
+pub async fn update_message_body<'e, E>(
+    executor: E,
     account_id: &str,
     mailbox: &str,
     uid: u32,
@@ -324,20 +324,21 @@ pub async fn update_message_body(
     body_html: Option<&str>,
     body_idx: &str,
     has_attachments: bool,
-    size: Option<i64>,
-) -> Result<()> {
+) -> Result<()>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     sqlx::query(
-        "UPDATE cached_messages SET body_text = ?, body_html = ?, body_idx = ?, has_attachments = ?, size = ? WHERE account_id = ? AND mailbox = ? AND uid = ?",
+        "UPDATE cached_messages SET body_text = ?, body_html = ?, body_idx = ?, has_attachments = ? WHERE account_id = ? AND mailbox = ? AND uid = ?",
     )
     .bind(body_text)
     .bind(body_html)
     .bind(body_idx)
     .bind(has_attachments as i64)
-    .bind(size)
     .bind(account_id)
     .bind(mailbox)
     .bind(uid as i64)
-    .execute(pool)
+    .execute(executor)
     .await?;
     Ok(())
 }
@@ -377,6 +378,62 @@ pub async fn delete_messages_by_uids(
     }
     q.execute(pool).await?;
     Ok(())
+}
+
+/// Deletes attachment rows for the given UIDs and returns their on-disk paths
+/// so the caller can unlink the files.
+pub async fn delete_attachments_by_uids(
+    pool: &SqlitePool,
+    account_id: &str,
+    mailbox: &str,
+    uids: &[u32],
+) -> Result<Vec<String>> {
+    if uids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = uids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let select_sql = format!(
+        "SELECT fs_path FROM cached_attachments WHERE account_id = ? AND mailbox = ? AND uid IN ({placeholders})"
+    );
+    let mut sel = sqlx::query(&select_sql).bind(account_id).bind(mailbox);
+    for uid in uids {
+        sel = sel.bind(*uid as i64);
+    }
+    let rows = sel.fetch_all(pool).await?;
+    let paths: Vec<String> = rows.iter().map(|r| r.get::<String, _>(0)).collect();
+
+    let delete_sql = format!(
+        "DELETE FROM cached_attachments WHERE account_id = ? AND mailbox = ? AND uid IN ({placeholders})"
+    );
+    let mut del = sqlx::query(&delete_sql).bind(account_id).bind(mailbox);
+    for uid in uids {
+        del = del.bind(*uid as i64);
+    }
+    del.execute(pool).await?;
+    Ok(paths)
+}
+
+/// Deletes all attachment rows for a mailbox and returns their on-disk paths.
+pub async fn delete_attachments_for_mailbox(
+    pool: &SqlitePool,
+    account_id: &str,
+    mailbox: &str,
+) -> Result<Vec<String>> {
+    let rows = sqlx::query(
+        "SELECT fs_path FROM cached_attachments WHERE account_id = ? AND mailbox = ?",
+    )
+    .bind(account_id)
+    .bind(mailbox)
+    .fetch_all(pool)
+    .await?;
+    let paths: Vec<String> = rows.iter().map(|r| r.get::<String, _>(0)).collect();
+
+    sqlx::query("DELETE FROM cached_attachments WHERE account_id = ? AND mailbox = ?")
+        .bind(account_id)
+        .bind(mailbox)
+        .execute(pool)
+        .await?;
+    Ok(paths)
 }
 
 pub async fn get_cached_uids(
@@ -439,8 +496,8 @@ pub struct AttachmentRow {
     pub content_id: Option<String>,
 }
 
-pub async fn insert_attachment(
-    pool: &SqlitePool,
+pub async fn insert_attachment<'e, E>(
+    executor: E,
     account_id: &str,
     mailbox: &str,
     uid: u32,
@@ -449,7 +506,10 @@ pub async fn insert_attachment(
     size: i64,
     fs_path: &str,
     content_id: Option<&str>,
-) -> Result<()> {
+) -> Result<()>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     sqlx::query(
         "INSERT INTO cached_attachments (account_id, mailbox, uid, filename, content_type, size, fs_path, content_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -462,7 +522,7 @@ pub async fn insert_attachment(
     .bind(size)
     .bind(fs_path)
     .bind(content_id)
-    .execute(pool)
+    .execute(executor)
     .await?;
     Ok(())
 }

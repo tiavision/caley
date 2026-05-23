@@ -311,7 +311,11 @@ impl EmailSyncManager {
 
         // UIDVALIDITY changed → full re-fetch
         if cached_uidvalidity.map_or(false, |v| v != uidvalidity) {
+            let att_paths = email_db::delete_attachments_for_mailbox(&self.db, account_id, mailbox).await?;
             email_db::delete_messages_for_mailbox(&self.db, account_id, mailbox).await?;
+            for path in att_paths {
+                let _ = tokio::fs::remove_file(&path).await;
+            }
             self.broadcaster.send(user_id, SseMessage::EmailsRefetch {
                 account_id: account_id.to_owned(),
                 mailbox: mailbox.to_owned(),
@@ -329,7 +333,11 @@ impl EmailSyncManager {
         // Deleted on server
         let deleted: Vec<u32> = cached_uids.difference(&server_uids).copied().collect();
         if !deleted.is_empty() {
+            let att_paths = email_db::delete_attachments_by_uids(&self.db, account_id, mailbox, &deleted).await?;
             email_db::delete_messages_by_uids(&self.db, account_id, mailbox, &deleted).await?;
+            for path in att_paths {
+                let _ = tokio::fs::remove_file(&path).await;
+            }
             for uid in &deleted {
                 self.broadcaster.send(user_id, SseMessage::EmailRemoved {
                     account_id: account_id.to_owned(),
@@ -342,7 +350,7 @@ impl EmailSyncManager {
         // New on server — fetch headers
         let new_uids: Vec<u32> = server_uids.difference(&cached_uids).copied().collect();
         if !new_uids.is_empty() {
-            let headers = imap_client::fetch_headers(session, &new_uids, &self.search_mode).await?;
+            let headers = imap_client::fetch_headers(session, &new_uids).await?;
             for h in &headers {
                 let subject_idx = h.subject.as_deref().map(|s| self.search_mode.normalize_text(s));
                 let from_idx = h.from_addr.as_deref().map(|s| self.search_mode.normalize_text(s));
@@ -352,15 +360,7 @@ impl EmailSyncManager {
                     from_idx.as_deref(),
                 ).await?;
             }
-            if headers.len() == 1 {
-                let h = &headers[0];
-                self.broadcaster.send(user_id, SseMessage::EmailUpdated {
-                    account_id: account_id.to_owned(),
-                    uid: h.uid as u32,
-                    mailbox: mailbox.to_owned(),
-                    flags: h.flags.as_deref().and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default(),
-                });
-            } else if !headers.is_empty() {
+            if !headers.is_empty() {
                 self.broadcaster.send(user_id, SseMessage::EmailsRefetch {
                     account_id: account_id.to_owned(),
                     mailbox: mailbox.to_owned(),
@@ -378,45 +378,90 @@ impl EmailSyncManager {
 
         if !uids_to_fetch.is_empty() {
             for chunk in uids_to_fetch.chunks(50) {
-                match imap_client::fetch_bodies(session, chunk).await {
-                    Ok(bodies) => {
-                        for (uid, body_text, body_html, has_attach, attachments) in bodies {
-                            let body_idx = self.search_mode.normalize_text(&body_text);
-                            let html = body_html.map(|h| imap_client::rewrite_cid_urls(&h, account_id, mailbox, uid));
-
-                            email_db::update_message_body(
-                                &self.db, account_id, mailbox, uid,
-                                &body_text, html.as_deref(), &body_idx, has_attach, None,
-                            ).await?;
-
-                            if !attachments.is_empty() {
-                                let uid_hash = sha2_hex(format!("{account_id}:{mailbox}:{uid}"));
-                                let att_dir = self.data_dir.join("attachments").join(user_id).join(&uid_hash);
-
-                                for att in attachments {
-                                    let filename = sanitize_filename(att.filename.as_deref().unwrap_or("untitled"));
-                                    tokio::fs::create_dir_all(&att_dir).await?;
-                                    let path = unique_file_path(&att_dir, &filename);
-                                    tokio::fs::write(&path, &att.bytes).await?;
-                                    let fs_path = path.to_string_lossy().to_string();
-                                    email_db::insert_attachment(
-                                        &self.db, account_id, mailbox, uid,
-                                        &filename, &att.content_type, att.bytes.len() as i64,
-                                        &fs_path, att.content_id.as_deref(),
-                                    ).await?;
-                                }
-                            }
-                        }
-                    }
+                let bodies = match imap_client::fetch_bodies(session, chunk).await {
+                    Ok(b) => b,
                     Err(e) => {
                         eprintln!("[email_sync] fetch_bodies error for {mailbox}: {e}");
+                        continue;
+                    }
+                };
+
+                // Write attachment files to disk first (outside the DB transaction) so the
+                // SQLite write lock is held only for the fast DB writes, not file I/O.
+                let mut prepared: Vec<PreparedMessage> = Vec::with_capacity(bodies.len());
+                for (uid, body_text, body_html, has_attach, attachments) in bodies {
+                    let body_idx = self.search_mode.normalize_text(&body_text);
+                    let html = body_html.map(|h| imap_client::rewrite_cid_urls(&h, account_id, mailbox, uid));
+
+                    let mut att_params = Vec::new();
+                    if !attachments.is_empty() {
+                        let uid_hash = sha2_hex(format!("{account_id}:{mailbox}:{uid}"));
+                        let att_dir = self.data_dir.join("attachments").join(user_id).join(&uid_hash);
+                        for att in attachments {
+                            let filename = sanitize_filename(att.filename.as_deref().unwrap_or("untitled"));
+                            tokio::fs::create_dir_all(&att_dir).await?;
+                            let path = unique_file_path(&att_dir, &filename);
+                            tokio::fs::write(&path, &att.bytes).await?;
+                            att_params.push(PreparedAttachment {
+                                filename,
+                                content_type: att.content_type,
+                                size: att.bytes.len() as i64,
+                                fs_path: path.to_string_lossy().to_string(),
+                                content_id: att.content_id,
+                            });
+                        }
+                    }
+
+                    prepared.push(PreparedMessage {
+                        uid,
+                        body_text,
+                        html,
+                        has_attach,
+                        body_idx,
+                        attachments: att_params,
+                    });
+                }
+
+                // Commit all DB writes for the chunk in a single transaction (one fsync
+                // instead of dozens), then yield so concurrent calendar syncs can write.
+                let mut tx = self.db.begin().await?;
+                for m in &prepared {
+                    email_db::update_message_body(
+                        &mut *tx, account_id, mailbox, m.uid,
+                        &m.body_text, m.html.as_deref(), &m.body_idx, m.has_attach,
+                    ).await?;
+                    for att in &m.attachments {
+                        email_db::insert_attachment(
+                            &mut *tx, account_id, mailbox, m.uid,
+                            &att.filename, &att.content_type, att.size,
+                            &att.fs_path, att.content_id.as_deref(),
+                        ).await?;
                     }
                 }
+                tx.commit().await?;
+                tokio::task::yield_now().await;
             }
         }
 
         Ok(())
     }
+}
+
+struct PreparedMessage {
+    uid: u32,
+    body_text: String,
+    html: Option<String>,
+    has_attach: bool,
+    body_idx: String,
+    attachments: Vec<PreparedAttachment>,
+}
+
+struct PreparedAttachment {
+    filename: String,
+    content_type: String,
+    size: i64,
+    fs_path: String,
+    content_id: Option<String>,
 }
 
 fn sha2_hex(input: String) -> String {

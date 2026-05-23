@@ -1,4 +1,4 @@
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Row, SqlitePool};
 use std::collections::HashSet;
 use std::path::Path;
@@ -39,7 +39,11 @@ pub async fn init_db(path: &str) -> anyhow::Result<SqlitePool> {
     let options = SqliteConnectOptions::new()
         .filename(path)
         .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal);
+        .journal_mode(SqliteJournalMode::Wal)
+        // NORMAL is durable under WAL and avoids an fsync on every commit, which
+        // otherwise lets a write-heavy email sync starve concurrent calendar syncs.
+        .synchronous(SqliteSynchronous::Normal)
+        .busy_timeout(std::time::Duration::from_secs(30));
 
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
