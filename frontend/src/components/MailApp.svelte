@@ -724,6 +724,19 @@
     return match ? match[1].trim() : from;
   }
 
+  type FolderKind = 'inbox' | 'sent' | 'drafts' | 'trash' | 'junk' | 'archive' | 'folder';
+
+  function folderKind(name: string): FolderKind {
+    const leaf = (name.split(/[\/.]/).pop() || name).toLowerCase().trim();
+    if (leaf === 'inbox') return 'inbox';
+    if (leaf.includes('sent')) return 'sent';
+    if (leaf.includes('draft')) return 'drafts';
+    if (leaf.includes('trash') || leaf.includes('deleted') || leaf.includes('bin')) return 'trash';
+    if (leaf.includes('junk') || leaf.includes('spam')) return 'junk';
+    if (leaf.includes('archive')) return 'archive';
+    return 'folder';
+  }
+
   $: isSentFolder = !!(selectedMailbox && /sent/i.test(selectedMailbox));
   $: primaryMetaLabel = isSentFolder ? 'To' : 'From';
   $: primaryMetaValue = selectedMessage
@@ -755,6 +768,28 @@
   })();
 </script>
 
+{#snippet folderIcon(kind: string)}
+  <span class="folder-icon">
+    {#if kind === 'inbox'}
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+    {:else if kind === 'sent'}
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+    {:else if kind === 'drafts'}
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+    {:else if kind === 'trash'}
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+    {:else if kind === 'junk'}
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    {:else if kind === 'archive'}
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+    {:else if kind === 'virtual'}
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+    {:else}
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+    {/if}
+  </span>
+{/snippet}
+
 <div class="mail-page">
   <!-- ── Toolbar ────────────────────────────────────────────────────────────── -->
   <div class="mail-toolbar">
@@ -780,7 +815,7 @@
               on:click={() => selectVirtualFolder(folder.folder_id)}
               on:keydown={e => e.key === 'Enter' && selectVirtualFolder(folder.folder_id)}
             >
-              <span class="folder-icon">📂</span>
+              {@render folderIcon('virtual')}
               <span class="folder-name">{folder.display_name}</span>
               <button class="icon-btn delete-btn" on:click|stopPropagation={() => deleteFolder(folder)} title="Remove folder">×</button>
             </div>
@@ -793,7 +828,7 @@
         <div class="sidebar-section">
           <div class="sidebar-section-header">
             <span class="account-name" title={acc.username}>{acc.display_name}</span>
-            <button class="icon-btn" on:click={() => openEditAccount(acc)} title="Edit account">✏</button>
+            <button class="icon-btn" on:click={() => openEditAccount(acc)} title="Edit account"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
             <button class="icon-btn delete-btn" on:click={() => removeAccount(acc)} title="Remove account">×</button>
           </div>
           {#each (mailboxesByAccount[acc.account_id] || []) as mb}
@@ -803,7 +838,7 @@
                 class:active={selectedAccountId === acc.account_id && selectedMailbox === mb.name}
                 on:click={() => selectMailbox(acc.account_id, mb.name)}
               >
-                <span class="folder-icon">{mb.name.toUpperCase() === 'INBOX' ? '📥' : '📁'}</span>
+                {@render folderIcon(folderKind(mb.name))}
                 <span class="folder-name">{mb.name}</span>
               </button>
             {/if}
@@ -1038,7 +1073,7 @@
             on:click={() => selectVirtualFolder(folder.folder_id)}
             on:keydown={e => e.key === 'Enter' && selectVirtualFolder(folder.folder_id)}
           >
-            <span class="folder-icon">📂</span>
+            {@render folderIcon('virtual')}
             <span class="folder-name">{folder.display_name}</span>
             <button class="icon-btn delete-btn" on:click|stopPropagation={() => deleteFolder(folder)} title="Remove folder">×</button>
           </div>
@@ -1050,7 +1085,7 @@
       <div class="sidebar-section">
         <div class="sidebar-section-header">
           <span class="account-name" title={acc.username}>{acc.display_name}</span>
-          <button class="icon-btn" on:click={() => { sidebarDialog?.close(); openEditAccount(acc); }} title="Edit account">✏</button>
+          <button class="icon-btn" on:click={() => { sidebarDialog?.close(); openEditAccount(acc); }} title="Edit account"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
           <button class="icon-btn delete-btn" on:click={() => removeAccount(acc)} title="Remove account">×</button>
         </div>
         {#each (mailboxesByAccount[acc.account_id] || []) as mb}
@@ -1060,7 +1095,7 @@
               class:active={selectedAccountId === acc.account_id && selectedMailbox === mb.name}
               on:click={() => selectMailbox(acc.account_id, mb.name)}
             >
-              <span class="folder-icon">{mb.name.toUpperCase() === 'INBOX' ? '📥' : '📁'}</span>
+              {@render folderIcon(folderKind(mb.name))}
               <span class="folder-name">{mb.name}</span>
             </button>
           {/if}
@@ -1452,11 +1487,19 @@
   }
 
   .folder-icon {
-    font-size: 0.85rem;
+    display: inline-flex;
+    align-items: center;
     flex-shrink: 0;
+    color: var(--pico-muted-color, #888);
+  }
+
+  .sidebar-item.active .folder-icon {
+    color: inherit;
   }
 
   .icon-btn {
+    display: inline-flex;
+    align-items: center;
     background: none;
     border: none;
     cursor: pointer;
