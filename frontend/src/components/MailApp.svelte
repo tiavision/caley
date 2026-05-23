@@ -849,7 +849,7 @@
       <!-- Add account / folder buttons -->
       <div class="sidebar-actions sidebar-add">
         <button class="link-btn" on:click={openAddAccount}>+ Add account</button>
-        <button class="link-btn" on:click={() => { folderName = 'Unified Inbox'; folderDialog?.showModal(); }}>+ Unified inbox</button>
+        <button class="link-btn" on:click={() => { folderName = 'Unified Inbox'; folderDialog?.showModal(); }}>+ Unified folder</button>
       </div>
     </aside>
 
@@ -1120,7 +1120,7 @@
   <article>
     <header>
       <h3>{selectedMessage?.subject || '(no subject)'}</h3>
-      <div class="header-actions">
+      <div class="header-actions email-detail-dialog-header">
         {#if selectedMessage}
           <button
               class="star-btn"
@@ -1175,20 +1175,28 @@
       </div>
       {#if selectedMessage.attachments && selectedMessage.attachments.length > 0}
         <div class="attachments">
-          {#each selectedMessage.attachments as att}
-            <a
-              class="attachment-link"
-              href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
-              download={att.filename}
-            >
-              {att.filename} ({humanSize(att.size)})
-            </a>
-          {/each}
+            <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 10.56a4.94 4.94 0 0 1-7-7l9.19-10.56a3.33 3.33 0 0 1 4.7 4.7l-9.2 10.56a1.67 1.67 0 0 1-2.35-2.35l9.2-10.56"/></svg> {selectedMessage.attachments.length} attachment{selectedMessage.attachments.length === 1 ? '' : 's'}
+              <span class="attachments-caret">{attachmentsExpanded ? '▲' : '▾'}</span>
+            </button>
+            {#if attachmentsExpanded}
+              <div class="attachments-list">
+                {#each selectedMessage.attachments as att}
+                  <a
+                    class="attachment-link"
+                    href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
+                    download={att.filename}
+                  >
+                    {att.filename} ({humanSize(att.size)})
+                  </a>
+                {/each}
+              </div>
+            {/if}
         </div>
       {/if}
       <div class="detail-body">
         {#if viewMode === 'html' && htmlHasValue}
-          {#if blockedOrigins.length > 0}
+          {#if blockedOrigins.length > 0 && !imagesNoticeDismissed}
             <div class="images-notice">
               <span>Images are blocked.</span>
               {#each blockedOrigins as origin}
@@ -1196,6 +1204,7 @@
                   Allow {origin}
                 </button>
               {/each}
+              <button class="dismiss-notice-btn" on:click={() => imagesNoticeDismissed = true} aria-label="Dismiss">×</button>
             </div>
           {/if}
           {#key iframeKey}
@@ -2119,14 +2128,21 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    max-height: 90dvh;
+    max-height: 100%;
+    height: 100%;
+    width: 100%;
+    max-width: 100%;
   }
 
   .email-detail-dialog article header {
-    padding: 1rem 1.5rem;
+    padding: 2rem 2rem 1rem 2rem;
     border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
     margin-bottom: 0;
     flex-shrink: 0;
+  }
+
+  .email-detail-dialog-header {
+    display: flex;
   }
 
   .email-detail-dialog .detail-body {
