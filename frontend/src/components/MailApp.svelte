@@ -790,7 +790,7 @@
               <span class="message-row-subject">{msg.subject || '(no subject)'}</span>
               <span class="message-row-icons">
                 {#if msg.is_flagged}<span class="flag-star" title="Flagged">⭐</span>{/if}
-                {#if msg.has_attachments}<span class="attach-icon" title="Has attachments">📎</span>{/if}
+                {#if msg.has_attachments}<span class="attach-icon" title="Has attachments"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 10.56a4.94 4.94 0 0 1-7-7l9.19-10.56a3.33 3.33 0 0 1 4.7 4.7l-9.2 10.56a1.67 1.67 0 0 1-2.35-2.35l9.2-10.56"/></svg></span>{/if}
               </span>
             </div>
           </button>
@@ -867,7 +867,7 @@
         {#if selectedMessage.attachments && selectedMessage.attachments.length > 0}
           <div class="attachments">
             <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
-              📎 {selectedMessage.attachments.length} attachment{selectedMessage.attachments.length === 1 ? '' : 's'}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 10.56a4.94 4.94 0 0 1-7-7l9.19-10.56a3.33 3.33 0 0 1 4.7 4.7l-9.2 10.56a1.67 1.67 0 0 1-2.35-2.35l9.2-10.56"/></svg> {selectedMessage.attachments.length} attachment{selectedMessage.attachments.length === 1 ? '' : 's'}
               <span class="attachments-caret">{attachmentsExpanded ? '▲' : '▾'}</span>
             </button>
             {#if attachmentsExpanded}
@@ -1497,9 +1497,13 @@
     line-height: 1;
   }
 
-  .flag-star,
-  .attach-icon {
+  .flag-star {
     font-size: 0.75rem;
+  }
+
+  .attach-icon {
+    display: inline-flex;
+    align-items: center;
   }
 
   .load-more {
