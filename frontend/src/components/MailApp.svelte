@@ -112,6 +112,22 @@
   let isMobile = false;
   let mediaQueryListener: ((e: MediaQueryListEvent) => void) | null = null;
 
+  // Resize state
+  let sidebarWidth = 220;
+  let listWidth = 320;
+  let resizing: 'sidebar' | 'list' | null = null;
+  let resizeStartX = 0;
+  let resizeStartWidth = 0;
+
+  // Detail UI state
+  let actionsOpen = false;
+  let metaExpanded = false;
+  let desktopActionsEl: HTMLDivElement;
+  let mobileActionsEl: HTMLDivElement;
+  let actionsMenuPos = { top: 0, right: 0 };
+  let attachmentsExpanded = false;
+  let imagesNoticeDismissed = false;
+
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
   onMount(async () => {
@@ -130,6 +146,9 @@
     isMobile = mql.matches;
     mediaQueryListener = (e: MediaQueryListEvent) => { isMobile = e.matches; };
     mql.addEventListener('change', mediaQueryListener);
+
+    window.addEventListener('mousemove', handleResizeMove);
+    window.addEventListener('mouseup', stopResize);
   });
 
   onDestroy(() => {
@@ -138,6 +157,9 @@
       const mql = window.matchMedia('(max-width: 767px)');
       mql.removeEventListener('change', mediaQueryListener);
     }
+    window.removeEventListener('mousemove', handleResizeMove);
+    window.removeEventListener('mouseup', stopResize);
+    window.removeEventListener('click', handleWindowClick);
   });
 
   // ── Data loading ─────────────────────────────────────────────────────────
@@ -262,6 +284,10 @@
   async function openMessage(msg: Message) {
     messageLoading = true;
     selectedMessage = msg;
+    actionsOpen = false;
+    metaExpanded = false;
+    attachmentsExpanded = false;
+    imagesNoticeDismissed = false;
     viewMode = 'text'; // reset while loading
     try {
       const url = `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
@@ -568,6 +594,54 @@
     return out;
   }
 
+  // ── Resize ───────────────────────────────────────────────────────────────
+
+  function startResize(which: 'sidebar' | 'list', e: MouseEvent) {
+    resizing = which;
+    resizeStartX = e.clientX;
+    resizeStartWidth = which === 'sidebar' ? sidebarWidth : listWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  }
+
+  function handleResizeMove(e: MouseEvent) {
+    if (!resizing) return;
+    const delta = e.clientX - resizeStartX;
+    if (resizing === 'sidebar') {
+      sidebarWidth = Math.max(140, Math.min(400, resizeStartWidth + delta));
+    } else {
+      listWidth = Math.max(180, Math.min(600, resizeStartWidth + delta));
+    }
+  }
+
+  function stopResize() {
+    if (!resizing) return;
+    resizing = null;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }
+
+  // ── Actions dropdown ─────────────────────────────────────────────────────
+
+  function toggleActions(e: MouseEvent) {
+    e.stopPropagation();
+    actionsOpen = !actionsOpen;
+    if (actionsOpen) {
+      setTimeout(() => window.addEventListener('click', handleWindowClick), 0);
+    } else {
+      window.removeEventListener('click', handleWindowClick);
+    }
+  }
+
+  function handleWindowClick(e: MouseEvent) {
+    const target = e.target as Node;
+    if (!desktopActionsEl?.contains(target) && !mobileActionsEl?.contains(target)) {
+      actionsOpen = false;
+      window.removeEventListener('click', handleWindowClick);
+    }
+  }
+
   function humanSize(bytes: number): string {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -579,6 +653,13 @@
     const match = from.match(/^(.+?)\s*<[^>]+>/);
     return match ? match[1].trim() : from;
   }
+
+  $: isSentFolder = !!(selectedMailbox && /sent/i.test(selectedMailbox));
+  $: primaryMetaLabel = isSentFolder ? 'To' : 'From';
+  $: primaryMetaValue = selectedMessage
+    ? (isSentFolder ? selectedMessage.to.join(', ') : (selectedMessage.from || ''))
+    : '';
+  $: layoutColumns = isMobile ? '1fr' : `${sidebarWidth}px 5px ${listWidth}px 5px 1fr`;
 
   $: unreadCount = messages.filter(m => !m.is_read).length;
 
@@ -604,12 +685,11 @@
 <div class="mail-page">
   <!-- ── Toolbar ────────────────────────────────────────────────────────────── -->
   <div class="mail-toolbar">
-    <h1>Mail</h1>
     <button class="sidebar-toggle" on:click={() => sidebarDialog?.showModal()} aria-label="Folders">☰</button>
   </div>
 
   <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
-  <div class="mail-layout">
+  <div class="mail-layout" style="grid-template-columns: {layoutColumns}">
     <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
     <aside class="mail-sidebar">
       <!-- Virtual folders -->
@@ -665,6 +745,8 @@
       </div>
     </aside>
 
+    <div class="resize-handle" role="separator" aria-orientation="vertical" on:mousedown={(e) => startResize('sidebar', e)}></div>
+
     <!-- ── Message list ────────────────────────────────────────────────────── -->
     <section class="message-list">
       <div class="message-list-header">
@@ -704,10 +786,12 @@
               <span class="from">{senderName(msg.from)}</span>
               <span class="date">{formatDate(msg.sent_at)}</span>
             </div>
-            <div class="message-row-subject">{msg.subject || '(no subject)'}</div>
-            <div class="message-row-meta">
-              {#if msg.is_flagged}<span class="flag-star" title="Flagged">⭐</span>{/if}
-              {#if msg.has_attachments}<span title="Has attachments">📎</span>{/if}
+            <div class="message-row-subject-line">
+              <span class="message-row-subject">{msg.subject || '(no subject)'}</span>
+              <span class="message-row-icons">
+                {#if msg.is_flagged}<span class="flag-star" title="Flagged">⭐</span>{/if}
+                {#if msg.has_attachments}<span class="attach-icon" title="Has attachments">📎</span>{/if}
+              </span>
             </div>
           </button>
         {/each}
@@ -720,69 +804,93 @@
       {/if}
     </section>
 
+    <div class="resize-handle" role="separator" aria-orientation="vertical" on:mousedown={(e) => startResize('list', e)}></div>
+
     <!-- ── Message detail (desktop) ─────────────────────────────────────────── -->
     <section class="message-detail">
       {#if messageLoading}
         <div class="loading">Loading message…</div>
       {:else if selectedMessage}
         <div class="detail-header">
-          <div class="detail-subject">{selectedMessage.subject || '(no subject)'}</div>
-          <div class="detail-actions">
-            <button on:click={() => openCompose(selectedMessage!)}>Reply</button>
+          <div class="detail-subject-row">
+            <span class="detail-subject">{selectedMessage.subject || '(no subject)'}</span>
             <button
+              class="star-btn"
+              class:flagged={selectedMessage.is_flagged}
               on:click={() => setFlag(selectedMessage!, '\\Flagged', !selectedMessage!.is_flagged)}
+              aria-label={selectedMessage.is_flagged ? 'Unflag' : 'Flag'}
               title={selectedMessage.is_flagged ? 'Unflag' : 'Flag'}
-            >
-              {selectedMessage.is_flagged ? '⭐ Flagged' : '☆ Flag'}
+            >★</button>
+            <button class="inline-action-btn" on:click={() => openCompose(selectedMessage!)} aria-label="Reply" title="Reply">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
             </button>
-            <button
-              on:click={() => setFlag(selectedMessage!, '\\Seen', !selectedMessage!.is_read)}
-            >
-              {selectedMessage.is_read ? 'Mark unread' : 'Mark read'}
-            </button>
-            <button on:click={() => deleteMessage(selectedMessage!)} class="danger-btn">Delete</button>
+            <div class="actions-wrapper" bind:this={desktopActionsEl}>
+              <button class="actions-toggle" on:click={toggleActions} aria-label="Message actions">Actions <span class="actions-caret">▾</span></button>
+              {#if actionsOpen}
+                <div class="actions-menu" role="menu">
+                  <button role="menuitem" on:click={() => { actionsOpen = false; setFlag(selectedMessage!, '\\Seen', !selectedMessage!.is_read); }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2 4 12 13 22 4"/></svg>
+                    {selectedMessage.is_read ? 'Mark unread' : 'Mark read'}
+                  </button>
+                  {#if htmlHasValue}
+                    <div class="menu-separator"></div>
+                    <button role="menuitem" class:menu-item-active={viewMode === 'html'} on:click={() => { viewMode = 'html'; actionsOpen = false; }}>View as HTML</button>
+                    <button role="menuitem" class:menu-item-active={viewMode === 'text'} on:click={() => { viewMode = 'text'; actionsOpen = false; }}>View as plain text</button>
+                  {/if}
+                  <div class="menu-separator"></div>
+                  <button role="menuitem" class="menu-item-danger" on:click={() => { actionsOpen = false; deleteMessage(selectedMessage!); }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                    Delete
+                  </button>
+                </div>
+              {/if}
+            </div>
           </div>
         </div>
         <div class="detail-meta">
-          <div><strong>From:</strong> {selectedMessage.from || ''}</div>
-          <div><strong>To:</strong> {selectedMessage.to.join(', ')}</div>
-          {#if selectedMessage.cc.length > 0}
-            <div><strong>CC:</strong> {selectedMessage.cc.join(', ')}</div>
+          <div class="meta-primary" tabindex="0" aria-expanded={metaExpanded}
+            on:click={() => metaExpanded = !metaExpanded}
+            on:keydown={e => (e.key === 'Enter' || e.key === ' ') && (metaExpanded = !metaExpanded)}>
+            <span class="meta-label">{primaryMetaLabel}:</span>
+            <span class="meta-value">{primaryMetaValue}</span>
+            <span class="meta-toggle" aria-hidden="true">{metaExpanded ? '▲' : '▼'}</span>
+          </div>
+          {#if metaExpanded}
+            {#if isSentFolder}<div><strong>From:</strong> {selectedMessage.from || ''}</div>{/if}
+            {#if !isSentFolder}<div><strong>To:</strong> {selectedMessage.to.join(', ')}</div>{/if}
+            {#if selectedMessage.cc.length > 0}
+              <div><strong>CC:</strong> {selectedMessage.cc.join(', ')}</div>
+            {/if}
+            <div><strong>Date:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
           {/if}
-          <div><strong>Date:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
         </div>
         {#if selectedMessage.attachments && selectedMessage.attachments.length > 0}
           <div class="attachments">
-            {#each selectedMessage.attachments as att}
-              <a
-                class="attachment-link"
-                href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
-                download={att.filename}
-              >
-                {att.filename} ({humanSize(att.size)})
-              </a>
-            {/each}
+            <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
+              📎 {selectedMessage.attachments.length} attachment{selectedMessage.attachments.length === 1 ? '' : 's'}
+              <span class="attachments-caret">{attachmentsExpanded ? '▲' : '▾'}</span>
+            </button>
+            {#if attachmentsExpanded}
+              <div class="attachments-list">
+                {#each selectedMessage.attachments as att}
+                  <a
+                    class="attachment-link"
+                    href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
+                    download={att.filename}
+                  >
+                    {att.filename} ({humanSize(att.size)})
+                  </a>
+                {/each}
+              </div>
+            {/if}
           </div>
         {/if}
         <div class="detail-body">
           {#if messageLoading && !selectedMessage.body_text && !selectedMessage.body_html}
             <div class="loading">Loading body…</div>
           {:else}
-            {#if htmlHasValue}
-              <div class="view-toggle">
-                <button
-                  class:active={viewMode === 'html'}
-                  on:click={() => viewMode = 'html'}
-                >HTML</button>
-                <button
-                  class:active={viewMode === 'text'}
-                  on:click={() => viewMode = 'text'}
-                >Plain text</button>
-              </div>
-            {/if}
-
             {#if viewMode === 'html' && htmlHasValue}
-              {#if blockedOrigins.length > 0}
+              {#if blockedOrigins.length > 0 && !imagesNoticeDismissed}
                 <div class="images-notice">
                   <span>Images are blocked.</span>
                   {#each blockedOrigins as origin}
@@ -790,6 +898,7 @@
                       Allow {origin}
                     </button>
                   {/each}
+                  <button class="dismiss-notice-btn" on:click={() => imagesNoticeDismissed = true} aria-label="Dismiss">×</button>
                 </div>
               {/if}
               {#key iframeKey}
@@ -883,35 +992,57 @@
     <header>
       <h3>{selectedMessage?.subject || '(no subject)'}</h3>
       <div class="header-actions">
+        {#if selectedMessage}
+          <button
+              class="star-btn"
+              class:flagged={selectedMessage.is_flagged}
+              on:click={() => setFlag(selectedMessage!, '\\Flagged', !selectedMessage!.is_flagged)}
+              aria-label={selectedMessage.is_flagged ? 'Unflag' : 'Flag'}
+              title={selectedMessage.is_flagged ? 'Unflag' : 'Flag'}
+            >★</button>
+            <button class="inline-action-btn" on:click={() => { detailDialog?.close(); openCompose(selectedMessage!); }} aria-label="Reply" title="Reply">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+            </button>
+            <div class="actions-wrapper" bind:this={mobileActionsEl}>
+            <button class="actions-toggle" on:click={toggleActions} aria-label="Message actions">⋮</button>
+            {#if actionsOpen}
+              <div class="actions-menu" role="menu">
+                <button role="menuitem" on:click={() => { actionsOpen = false; setFlag(selectedMessage!, '\\Seen', !selectedMessage!.is_read); }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2 4 12 13 22 4"/></svg>
+                  {selectedMessage.is_read ? 'Mark unread' : 'Mark read'}
+                </button>
+                {#if htmlHasValue}
+                  <div class="menu-separator"></div>
+                  <button role="menuitem" class:menu-item-active={viewMode === 'html'} on:click={() => { viewMode = 'html'; actionsOpen = false; }}>View as HTML</button>
+                  <button role="menuitem" class:menu-item-active={viewMode === 'text'} on:click={() => { viewMode = 'text'; actionsOpen = false; }}>View as plain text</button>
+                {/if}
+                <div class="menu-separator"></div>
+                <button role="menuitem" class="menu-item-danger" on:click={() => { actionsOpen = false; deleteMessage(selectedMessage!); }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                  Delete
+                </button>
+              </div>
+            {/if}
+          </div>
+        {/if}
         <button class="close-btn" aria-label="Close" on:click={closeDetail}></button>
       </div>
     </header>
     {#if selectedMessage}
-      <div class="detail-header">
-        <div class="detail-subject">{selectedMessage.subject || '(no subject)'}</div>
-        <div class="detail-actions">
-          <button on:click={() => { detailDialog?.close(); openCompose(selectedMessage!); }}>Reply</button>
-          <button
-            on:click={() => setFlag(selectedMessage!, '\\Flagged', !selectedMessage!.is_flagged)}
-            title={selectedMessage.is_flagged ? 'Unflag' : 'Flag'}
-          >
-            {selectedMessage.is_flagged ? '⭐ Flagged' : '☆ Flag'}
-          </button>
-          <button
-            on:click={() => setFlag(selectedMessage!, '\\Seen', !selectedMessage!.is_read)}
-          >
-            {selectedMessage.is_read ? 'Mark unread' : 'Mark read'}
-          </button>
-          <button on:click={() => deleteMessage(selectedMessage!)} class="danger-btn">Delete</button>
-        </div>
-      </div>
       <div class="detail-meta">
-        <div><strong>From:</strong> {selectedMessage.from || ''}</div>
-        <div><strong>To:</strong> {selectedMessage.to.join(', ')}</div>
-        {#if selectedMessage.cc.length > 0}
-          <div><strong>CC:</strong> {selectedMessage.cc.join(', ')}</div>
+        <div class="meta-primary">
+          <span class="meta-label">{primaryMetaLabel}:</span>
+          <span class="meta-value">{primaryMetaValue}</span>
+          <button class="meta-toggle" on:click={() => metaExpanded = !metaExpanded} aria-label={metaExpanded ? 'Collapse details' : 'Expand details'}>{metaExpanded ? '▲' : '▼'}</button>
+        </div>
+        {#if metaExpanded}
+          <div><strong>From:</strong> {selectedMessage.from || ''}</div>
+          <div><strong>To:</strong> {selectedMessage.to.join(', ')}</div>
+          {#if selectedMessage.cc.length > 0}
+            <div><strong>CC:</strong> {selectedMessage.cc.join(', ')}</div>
+          {/if}
+          <div><strong>Date:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
         {/if}
-        <div><strong>Date:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
       </div>
       {#if selectedMessage.attachments && selectedMessage.attachments.length > 0}
         <div class="attachments">
@@ -927,19 +1058,6 @@
         </div>
       {/if}
       <div class="detail-body">
-        {#if htmlHasValue}
-          <div class="view-toggle">
-            <button
-              class:active={viewMode === 'html'}
-              on:click={() => viewMode = 'html'}
-            >HTML</button>
-            <button
-              class:active={viewMode === 'text'}
-              on:click={() => viewMode = 'text'}
-            >Plain text</button>
-          </div>
-        {/if}
-
         {#if viewMode === 'html' && htmlHasValue}
           {#if blockedOrigins.length > 0}
             <div class="images-notice">
@@ -1133,6 +1251,9 @@
   .mail-page {
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .mail-toolbar {
@@ -1142,13 +1263,6 @@
     padding: 0.75rem 1rem;
     border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
     flex-shrink: 0;
-  }
-
-  .mail-toolbar h1 {
-    margin: 0;
-    font-size: 1.125rem;
-    font-weight: 600;
-    flex: 1;
   }
 
   .sidebar-toggle {
@@ -1163,14 +1277,24 @@
 
   .mail-layout {
     display: grid;
-    grid-template-columns: 220px 320px 1fr;
     overflow: hidden;
+  }
+
+  .resize-handle {
+    cursor: col-resize;
+    background: var(--pico-muted-border-color, #ddd);
+    transition: background 0.12s;
+    position: relative;
+    z-index: 1;
+  }
+
+  .resize-handle:hover {
+    background: var(--pico-primary, #0172ad);
   }
 
   /* Sidebar */
   .mail-sidebar {
     background: var(--pico-card-background-color, #f4f4f4);
-    border-right: 1px solid var(--pico-muted-border-color, #ddd);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -1274,7 +1398,6 @@
 
   /* Message list */
   .message-list {
-    border-right: 1px solid var(--pico-muted-border-color, #ddd);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1348,7 +1471,15 @@
     flex-shrink: 0;
   }
 
+  .message-row-subject-line {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
   .message-row-subject {
+    flex: 1;
+    min-width: 0;
     font-size: 0.82rem;
     color: var(--pico-secondary, #444);
     overflow: hidden;
@@ -1356,12 +1487,18 @@
     white-space: nowrap;
   }
 
-  .message-row-meta {
-    font-size: 0.7rem;
+  .message-row-icons {
+    display: flex;
+    align-items: center;
+    gap: 0.1rem;
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    line-height: 1;
   }
 
-  .flag-star {
-    font-size: 0.7rem;
+  .flag-star,
+  .attach-icon {
+    font-size: 0.75rem;
   }
 
   .load-more {
@@ -1379,6 +1516,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    margin-bottom: 0;
   }
 
   .detail-header {
@@ -1387,39 +1525,132 @@
     flex-shrink: 0;
   }
 
+  .detail-subject-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
   .detail-subject {
+    flex: 1;
+    min-width: 0;
     font-size: 1.05rem;
     font-weight: 600;
-    margin-bottom: 0.5rem;
   }
 
-  .detail-actions {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+  .actions-wrapper {
+    position: relative;
+    flex-shrink: 0;
   }
 
-  .detail-actions button {
-    padding: 0.25rem 0.6rem;
-    border: 1px solid var(--pico-muted-border-color, #ccc);
+  .actions-toggle {
     background: none;
-    cursor: pointer;
+    border: 1px solid var(--pico-muted-border-color, #ccc);
     border-radius: 4px;
+    cursor: pointer;
+    padding: 0.25rem 0.65rem;
     font-size: 0.8rem;
+    font-weight: 500;
+    line-height: 1.4;
     color: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    white-space: nowrap;
   }
 
-  .detail-actions button:hover {
+  .actions-toggle:hover {
     background: var(--pico-muted-border-color, #f0f0f0);
   }
 
-  .danger-btn {
+  .actions-caret {
+    font-size: 0.7rem;
+    opacity: 0.7;
+  }
+
+  .actions-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    background: var(--pico-background-color, white);
+    border: 1px solid var(--pico-muted-border-color, #ddd);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.14);
+    z-index: 200;
+    min-width: 175px;
+    overflow: hidden;
+  }
+
+  .inline-action-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.15rem 0.25rem;
+    line-height: 1;
+    color: var(--pico-muted-color, #bbb);
+    flex-shrink: 0;
+    transition: color 0.15s;
+  }
+
+  .inline-action-btn:hover {
+    color: var(--pico-color, #333);
+  }
+
+  .star-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 0.1rem 0.25rem;
+    line-height: 1;
+    color: var(--pico-muted-color, #bbb);
+    flex-shrink: 0;
+    transition: color 0.15s;
+  }
+
+  .star-btn.flagged {
+    color: #f5a623;
+  }
+
+  .star-btn:hover {
+    color: #f5a623;
+  }
+
+  .actions-menu button {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    text-align: left;
+    padding: 0.45rem 0.9rem;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: inherit;
+    white-space: nowrap;
+  }
+
+  .actions-menu button:hover {
+    background: var(--pico-muted-border-color, #f5f5f5);
+  }
+
+  .menu-separator {
+    height: 1px;
+    background: var(--pico-muted-border-color, #eee);
+    margin: 0.2rem 0;
+  }
+
+  .menu-item-danger {
     color: var(--pico-del-color, #c0392b) !important;
-    border-color: var(--pico-del-color, #c0392b) !important;
+  }
+
+  .menu-item-active::before {
+    content: '✓ ';
   }
 
   .detail-meta {
-    padding: 0.6rem 1rem;
+    padding: 0.5rem 1rem;
     border-bottom: 1px solid var(--pico-muted-border-color, #eee);
     font-size: 0.82rem;
     color: var(--pico-muted-color, #555);
@@ -1430,13 +1661,77 @@
     margin-bottom: 0.1rem;
   }
 
+  .meta-primary {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+  }
+
+  .meta-label {
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .meta-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .meta-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.65rem;
+    color: var(--pico-muted-color, #aaa);
+    padding: 0.1rem 0.2rem;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+
+  .meta-toggle:hover {
+    color: var(--pico-color, inherit);
+  }
+
   .attachments {
-    padding: 0.5rem 1rem;
+    padding: 0.4rem 1rem;
     border-bottom: 1px solid var(--pico-muted-border-color, #eee);
     flex-shrink: 0;
+  }
+
+  .attachments-toggle {
+    background: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    cursor: pointer;
+    padding: 0 !important;
+    margin: 0 !important;
+    font-size: 0.82rem !important;
+    color: var(--pico-muted-color, #666) !important;
+    display: inline-flex !important;
+    align-items: center;
+    gap: 0.3rem;
+    width: auto !important;
+    min-width: unset !important;
+  }
+
+  .attachments-toggle:hover {
+    color: var(--pico-color, #333) !important;
+  }
+
+  .attachments-caret {
+    font-size: 0.65rem;
+    opacity: 0.7;
+  }
+
+  .attachments-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
   }
 
   .attachment-link {
@@ -1515,6 +1810,26 @@
     padding: 0.5rem 0.75rem;
     margin-bottom: 0.75rem;
     color: var(--pico-muted-color, #666);
+  }
+
+  .dismiss-notice-btn {
+    background: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    cursor: pointer;
+    padding: 0 0.1rem !important;
+    margin: 0 0 0 auto !important;
+    font-size: 1.1rem !important;
+    line-height: 1;
+    color: var(--pico-muted-color, #aaa) !important;
+    width: auto !important;
+    min-width: unset !important;
+    display: inline-flex !important;
+    align-items: center;
+  }
+
+  .dismiss-notice-btn:hover {
+    color: var(--pico-color, #333) !important;
   }
 
   .allow-btn {
@@ -1670,15 +1985,15 @@
 
   /* Responsive */
   @media (max-width: 767px) {
-    .mail-layout {
-      grid-template-columns: 1fr;
-    }
-
     .mail-sidebar {
       display: none;
     }
 
     .message-detail {
+      display: none;
+    }
+
+    .resize-handle {
       display: none;
     }
 
@@ -1699,8 +2014,8 @@
   }
 
   @media (min-width: 768px) {
-    .mail-page {
-      height: calc(100dvh - 2.5rem);
+    .mail-toolbar {
+      display: none;
     }
 
     .mail-layout {

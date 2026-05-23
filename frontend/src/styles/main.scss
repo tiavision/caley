@@ -4,19 +4,36 @@ html {
     margin: 0;
     width: 100%;
     height: 100%;
+    overflow: hidden;
 }
 
 body {
     margin: 0;
     width: 100%;
-    min-height: 100vh;
-    min-height: 100dvh;
+    height: 100dvh;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
 }
 
 main {
     flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    /* Reset Pico's container-fluid padding so app pages fill edge-to-edge */
+    padding: 0;
+}
+
+/* Allow pages that need vertical scroll (settings, contacts, search) to scroll within #app */
+main > #app {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 /* Left nav rail offset — only when the sidebar is present (authenticated). */
@@ -27,6 +44,9 @@ body.nav-collapsed {
 @media (min-width: 768px) {
     body.has-nav main {
         margin-left: var(--nav-width, 15rem);
+        /* Fix: prevent overflow caused by width:100% (from .container-fluid) + margin-left */
+        width: calc(100% - var(--nav-width, 15rem));
+        box-sizing: border-box;
     }
 }
 
@@ -107,4 +127,3 @@ dialog footer {
   gap: 0.5rem;
   margin-top: 1rem;
 }
-
