@@ -98,6 +98,7 @@
   // Virtual folder form
   let folderName = '';
   let folderSaving = false;
+  let folderSelectedMailboxes: Set<string> = new Set();
 
   let displayName = '';
 
@@ -559,18 +560,26 @@
 
   // ── Virtual folders ──────────────────────────────────────────────────────
 
-  async function createUnifiedInbox() {
+  async function createVirtualFolder() {
     folderSaving = true;
     try {
+      const rules = [...folderSelectedMailboxes].map(key => {
+        const sep = key.indexOf('::');
+        return {
+          account_id: key.slice(0, sep) || null,
+          mailbox_pattern: key.slice(sep + 2) || null,
+        };
+      });
       await fetch('/api/email/folder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          display_name: folderName || 'Unified Inbox',
-          rules: [{ account_id: null, mailbox_pattern: 'INBOX' }],
+          display_name: folderName || 'Virtual Folder',
+          rules,
         }),
       });
       folderName = '';
+      folderSelectedMailboxes = new Set();
       folderDialog?.close();
       await loadVirtualFolders();
     } catch {}
@@ -847,7 +856,7 @@
       <!-- Add account / folder buttons -->
       <div class="sidebar-actions sidebar-add">
         <button class="link-btn" on:click={openAddAccount}>+ Add account</button>
-        <button class="link-btn" on:click={() => { folderName = 'Unified Inbox'; folderDialog?.showModal(); }}>+ Unified folder</button>
+        <button class="link-btn" on:click={() => { folderName = ''; folderSelectedMailboxes = new Set(); folderDialog?.showModal(); }}>+ Virtual folder</button>
       </div>
     </aside>
 
@@ -1103,7 +1112,7 @@
 
     <div class="sidebar-actions">
       <button class="link-btn" on:click={() => { sidebarDialog?.close(); openAddAccount(); }}>+ Add account</button>
-      <button class="link-btn" on:click={() => { folderName = 'Unified Inbox'; sidebarDialog?.close(); folderDialog?.showModal(); }}>+ Unified inbox</button>
+      <button class="link-btn" on:click={() => { folderName = ''; folderSelectedMailboxes = new Set(); sidebarDialog?.close(); folderDialog?.showModal(); }}>+ Virtual folder</button>
     </div>
   </div>
 </dialog>
@@ -1349,7 +1358,7 @@
   </article>
 </dialog>
 
-<!-- ── Unified inbox / folder form ────────────────────────────────────────── -->
+<!-- ── Virtual folder form ─────────────────────────────────────────────────── -->
 <dialog
   bind:this={folderDialog}
   on:click={(e) => { if (e.target === e.currentTarget) folderDialog?.close(); }}
@@ -1357,20 +1366,47 @@
 >
   <article>
     <header>
-      <h3>Create unified folder</h3>
+      <h3>Create virtual folder</h3>
       <div class="header-actions">
         <button class="close-btn" aria-label="Close" on:click={() => folderDialog?.close()}></button>
       </div>
     </header>
-    <form on:submit|preventDefault={createUnifiedInbox}>
-      <p>This creates a virtual folder that shows INBOX from all your accounts.</p>
+    <form on:submit|preventDefault={createVirtualFolder}>
       <label>
         Name
-        <input bind:value={folderName} />
+        <input bind:value={folderName} placeholder="Virtual Folder" />
       </label>
+      <p class="folder-mailbox-label">Mailboxes to include</p>
+      <div class="folder-mailbox-list">
+        {#each accounts as acc}
+          {#if (mailboxesByAccount[acc.account_id] || []).filter(mb => mb.subscribed).length > 0}
+            <div class="folder-account-group">
+              <h4>{acc.display_name}</h4>
+              {#each (mailboxesByAccount[acc.account_id] || []).filter(mb => mb.subscribed) as mb}
+                {@const key = `${acc.account_id}::${mb.name}`}
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={folderSelectedMailboxes.has(key)}
+                    on:change={() => {
+                      if (folderSelectedMailboxes.has(key)) folderSelectedMailboxes.delete(key);
+                      else folderSelectedMailboxes.add(key);
+                      folderSelectedMailboxes = folderSelectedMailboxes;
+                    }}
+                  />
+                  {mb.name}
+                </label>
+              {/each}
+            </div>
+          {/if}
+        {/each}
+        {#if accounts.length === 0}
+          <p class="muted">No email accounts configured.</p>
+        {/if}
+      </div>
       <footer>
         <button type="button" class="secondary outline" on:click={() => folderDialog?.close()}>Cancel</button>
-        <button type="submit" class="primary" disabled={folderSaving}>Create</button>
+        <button type="submit" class="primary" disabled={folderSaving || folderSelectedMailboxes.size === 0}>Create</button>
       </footer>
     </form>
   </article>
@@ -1384,6 +1420,42 @@
 </button>
 
 <style>
+  .folder-mailbox-label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    margin: 1rem 0 0.25rem;
+  }
+  .folder-mailbox-list {
+    max-height: 280px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+    border: 1px solid var(--pico-form-element-border-color);
+    border-radius: var(--pico-border-radius);
+    padding: 0.75rem;
+  }
+  .folder-account-group h4 {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--pico-muted-color);
+    margin: 0 0 0.25rem;
+  }
+  .folder-account-group label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    margin-bottom: 0.15rem;
+  }
+  .folder-account-group label input[type="checkbox"] {
+    margin: 0;
+    width: auto;
+  }
+
   .mail-page {
     display: flex;
     flex-direction: column;
