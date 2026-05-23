@@ -847,7 +847,7 @@
       {/each}
 
       <!-- Add account / folder buttons -->
-      <div class="sidebar-actions">
+      <div class="sidebar-actions sidebar-add">
         <button class="link-btn" on:click={openAddAccount}>+ Add account</button>
         <button class="link-btn" on:click={() => { folderName = 'Unified Inbox'; folderDialog?.showModal(); }}>+ Unified inbox</button>
       </div>
@@ -1428,7 +1428,6 @@
     display: flex;
     flex-direction: column;
     overflow-y: auto;
-    padding-bottom: 1rem;
   }
 
   .sidebar-section {
@@ -1441,7 +1440,6 @@
     padding: 0.4rem 0.75rem;
     font-size: 0.75rem;
     font-weight: 600;
-    text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--pico-muted-color, #666);
     gap: 0.25rem;
@@ -1475,7 +1473,6 @@
 
   .sidebar-item.active {
     background: var(--pico-primary-background, #e6f2fb);
-    color: var(--pico-primary, #0172ad);
     font-weight: 500;
   }
 
@@ -1491,10 +1488,6 @@
     align-items: center;
     flex-shrink: 0;
     color: var(--pico-muted-color, #888);
-  }
-
-  .sidebar-item.active .folder-icon {
-    color: inherit;
   }
 
   .icon-btn {
@@ -1522,6 +1515,10 @@
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+  }
+
+  .sidebar-add {
+    margin-top: auto;
   }
 
   .link-btn {
