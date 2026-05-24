@@ -122,7 +122,6 @@
   let accountDialog: HTMLDialogElement;
   let composeDialog: HTMLDialogElement;
   let folderDialog: HTMLDialogElement;
-  let detailDialog: HTMLDialogElement;
   let sidebarDialog: HTMLDialogElement;
 
   let isMobile = false;
@@ -138,8 +137,7 @@
   // Detail UI state
   let actionsOpen = false;
   let metaExpanded = false;
-  let desktopActionsEl: HTMLDivElement;
-  let mobileActionsEl: HTMLDivElement;
+  let actionsEl: HTMLDivElement;
   let actionsMenuPos = { top: 0, right: 0 };
   let attachmentsExpanded = false;
   let imagesNoticeDismissed = false;
@@ -430,13 +428,9 @@
       }
     } catch {}
     messageLoading = false;
-    if (isMobile && !detailDialog?.open) {
-      detailDialog?.showModal();
-    }
   }
 
   function closeDetail() {
-    detailDialog?.close();
     selectedMessage = null;
   }
 
@@ -819,7 +813,7 @@
 
   function handleWindowClick(e: MouseEvent) {
     const target = e.target as Node;
-    if (!desktopActionsEl?.contains(target) && !mobileActionsEl?.contains(target)) {
+    if (!actionsEl?.contains(target)) {
       actionsOpen = false;
       window.removeEventListener('click', handleWindowClick);
     }
@@ -1053,13 +1047,12 @@
 
     <div class="resize-handle" role="separator" aria-orientation="vertical" on:mousedown={(e) => startResize('list', e)}></div>
 
-    <!-- ── Message detail (desktop) ─────────────────────────────────────────── -->
-    <section class="message-detail">
-      {#if messageLoading}
-        <div class="loading">Loading message…</div>
-      {:else if selectedMessage}
+    <!-- ── Message detail ────────────────────────────────────────────────────── -->
+    <section class="message-detail" class:is-open={isMobile && !!selectedMessage}>
+      {#if selectedMessage}
         <div class="detail-header">
           <div class="detail-subject-row">
+            {#if isMobile}<button class="detail-close-btn" aria-label="Back" on:click={closeDetail}>←</button>{/if}
             <span class="detail-subject">{selectedMessage.subject || '(no subject)'}</span>
             <button
               class="star-btn"
@@ -1071,8 +1064,8 @@
             <button class="inline-action-btn" on:click={() => openCompose(selectedMessage!)} aria-label="Reply" title="Reply">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
             </button>
-            <div class="actions-wrapper" bind:this={desktopActionsEl}>
-              <button class="actions-toggle" on:click={toggleActions} aria-label="Message actions">Actions <span class="actions-caret">▾</span></button>
+            <div class="actions-wrapper" bind:this={actionsEl}>
+              <button class="actions-toggle" on:click={toggleActions} aria-label="Message actions">{#if isMobile}⋮{:else}Actions <span class="actions-caret">▾</span>{/if}</button>
               {#if actionsOpen}
                 <div class="actions-menu" role="menu">
                   <button role="menuitem" on:click={() => { actionsOpen = false; setFlag(selectedMessage!, '\\Seen', !selectedMessage!.is_read); }}>
@@ -1098,51 +1091,51 @@
             </div>
           </div>
         </div>
-        <div class="detail-meta">
-          <div class="meta-primary" tabindex="0" aria-expanded={metaExpanded}
-            on:click={() => metaExpanded = !metaExpanded}
-            on:keydown={e => (e.key === 'Enter' || e.key === ' ') && (metaExpanded = !metaExpanded)}>
-            <span class="meta-label">{primaryMetaLabel}:</span>
-            <span class="meta-value">{primaryMetaValue}</span>
-            <span class="meta-toggle" aria-hidden="true">{metaExpanded ? '▲' : '▼'}</span>
-          </div>
-          {#if metaExpanded}
-            {#if isSentFolder}<div><strong>From:</strong> {selectedMessage.from || ''}</div>{/if}
-            {#if !isSentFolder}<div><strong>To:</strong> {selectedMessage.to.join(', ')}</div>{/if}
-            {#if selectedMessage.cc.length > 0}
-              <div><strong>CC:</strong> {selectedMessage.cc.join(', ')}</div>
+        {#if messageLoading && !selectedMessage.body_text && !selectedMessage.body_html}
+          <div class="loading">Loading…</div>
+        {:else}
+          <div class="detail-meta">
+            <div class="meta-primary" tabindex="0" aria-expanded={metaExpanded}
+              on:click={() => metaExpanded = !metaExpanded}
+              on:keydown={e => (e.key === 'Enter' || e.key === ' ') && (metaExpanded = !metaExpanded)}>
+              <span class="meta-label">{primaryMetaLabel}:</span>
+              <span class="meta-value">{primaryMetaValue}</span>
+              <span class="meta-toggle" aria-hidden="true">{metaExpanded ? '▲' : '▼'}</span>
+            </div>
+            {#if metaExpanded}
+              {#if isSentFolder}<div><strong>From:</strong> {selectedMessage.from || ''}</div>{/if}
+              {#if !isSentFolder}<div><strong>To:</strong> {selectedMessage.to.join(', ')}</div>{/if}
+              {#if selectedMessage.cc.length > 0}
+                <div><strong>CC:</strong> {selectedMessage.cc.join(', ')}</div>
+              {/if}
+              <div><strong>Date:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
             {/if}
-            <div><strong>Date:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
+          </div>
+          {#if selectedMessage.attachments && selectedMessage.attachments.length > 0}
+            <div class="attachments">
+              <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                {selectedMessage.attachments.length} attachment{selectedMessage.attachments.length === 1 ? '' : 's'}
+                <span class="attachments-caret">{attachmentsExpanded ? '▲' : '▾'}</span>
+              </button>
+              {#if attachmentsExpanded}
+                <div class="attachments-list">
+                  {#each selectedMessage.attachments as att}
+                    <a
+                      class="compose-attachment-chip attachment-chip-dl"
+                      href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
+                      download={att.filename}
+                    >
+                      <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
+                      <span class="attachment-name" title={att.filename}>{att.filename}</span>
+                      <span class="attachment-size">{humanSize(att.size)}</span>
+                    </a>
+                  {/each}
+                </div>
+              {/if}
+            </div>
           {/if}
-        </div>
-        {#if selectedMessage.attachments && selectedMessage.attachments.length > 0}
-          <div class="attachments">
-            <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-              {selectedMessage.attachments.length} attachment{selectedMessage.attachments.length === 1 ? '' : 's'}
-              <span class="attachments-caret">{attachmentsExpanded ? '▲' : '▾'}</span>
-            </button>
-            {#if attachmentsExpanded}
-              <div class="attachments-list">
-                {#each selectedMessage.attachments as att}
-                  <a
-                    class="compose-attachment-chip attachment-chip-dl"
-                    href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
-                    download={att.filename}
-                  >
-                    <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
-                    <span class="attachment-name" title={att.filename}>{att.filename}</span>
-                    <span class="attachment-size">{humanSize(att.size)}</span>
-                  </a>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        {/if}
-        <div class="detail-body">
-          {#if messageLoading && !selectedMessage.body_text && !selectedMessage.body_html}
-            <div class="loading">Loading body…</div>
-          {:else}
+          <div class="detail-body">
             {#if viewMode === 'html' && htmlHasValue}
               {#if blockedOrigins.length > 0 && !imagesNoticeDismissed}
                 <div class="images-notice">
@@ -1169,8 +1162,8 @@
             {:else}
               <div class="loading">Loading body…</div>
             {/if}
-          {/if}
-        </div>
+          </div>
+        {/if}
       {:else}
         <div class="empty">Select a message.</div>
       {/if}
@@ -1235,128 +1228,6 @@
       <button class="link-btn" on:click={() => { sidebarDialog?.close(); openFolderCreate(); }}>+ Virtual folder</button>
     </div>
   </div>
-</dialog>
-
-<!-- ── Mobile email detail dialog ─────────────────────────────────────────── -->
-<dialog
-  bind:this={detailDialog}
-  class="email-detail-dialog"
-  on:click={(e) => { if (e.target === e.currentTarget) closeDetail(); }}
-  on:cancel={(e) => { e.preventDefault(); closeDetail(); }}
->
-  <article>
-    <header>
-      <h3>{selectedMessage?.subject || '(no subject)'}</h3>
-      <div class="header-actions email-detail-dialog-header">
-        {#if selectedMessage}
-          <button
-              class="star-btn"
-              class:flagged={selectedMessage.is_flagged}
-              on:click={() => setFlag(selectedMessage!, '\\Flagged', !selectedMessage!.is_flagged)}
-              aria-label={selectedMessage.is_flagged ? 'Unflag' : 'Flag'}
-              title={selectedMessage.is_flagged ? 'Unflag' : 'Flag'}
-            >★</button>
-            <button class="inline-action-btn" on:click={() => { detailDialog?.close(); openCompose(selectedMessage!); }} aria-label="Reply" title="Reply">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
-            </button>
-            <div class="actions-wrapper" bind:this={mobileActionsEl}>
-            <button class="actions-toggle" on:click={toggleActions} aria-label="Message actions">⋮</button>
-            {#if actionsOpen}
-              <div class="actions-menu" role="menu">
-                <button role="menuitem" on:click={() => { actionsOpen = false; setFlag(selectedMessage!, '\\Seen', !selectedMessage!.is_read); }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2 4 12 13 22 4"/></svg>
-                  {selectedMessage.is_read ? 'Mark unread' : 'Mark read'}
-                </button>
-                {#if htmlHasValue}
-                  <div class="menu-separator"></div>
-                  <button role="menuitem" class:menu-item-active={viewMode === 'html'} on:click={() => { viewMode = 'html'; actionsOpen = false; }}>View as HTML</button>
-                  <button role="menuitem" class:menu-item-active={viewMode === 'text'} on:click={() => { viewMode = 'text'; actionsOpen = false; }}>View as plain text</button>
-                  {#if emailOrigins.length > 0}
-                    <button role="menuitem" on:click={() => { actionsOpen = false; openOriginsForEmail(); }}>Image sources for this email</button>
-                  {/if}
-                {/if}
-                <div class="menu-separator"></div>
-                <button role="menuitem" class="menu-item-danger" on:click={() => { actionsOpen = false; deleteMessage(selectedMessage!); }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-                  Delete
-                </button>
-              </div>
-            {/if}
-          </div>
-        {/if}
-        <button class="close-btn" aria-label="Close" on:click={closeDetail}></button>
-      </div>
-    </header>
-    {#if selectedMessage}
-      <div class="detail-meta">
-        <div class="meta-primary">
-          <span class="meta-label">{primaryMetaLabel}:</span>
-          <span class="meta-value">{primaryMetaValue}</span>
-          <button class="meta-toggle" on:click={() => metaExpanded = !metaExpanded} aria-label={metaExpanded ? 'Collapse details' : 'Expand details'}>{metaExpanded ? '▲' : '▼'}</button>
-        </div>
-        {#if metaExpanded}
-          <div><strong>From:</strong> {selectedMessage.from || ''}</div>
-          <div><strong>To:</strong> {selectedMessage.to.join(', ')}</div>
-          {#if selectedMessage.cc.length > 0}
-            <div><strong>CC:</strong> {selectedMessage.cc.join(', ')}</div>
-          {/if}
-          <div><strong>Date:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
-        {/if}
-      </div>
-      {#if selectedMessage.attachments && selectedMessage.attachments.length > 0}
-        <div class="attachments">
-          <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-            {selectedMessage.attachments.length} attachment{selectedMessage.attachments.length === 1 ? '' : 's'}
-            <span class="attachments-caret">{attachmentsExpanded ? '▲' : '▾'}</span>
-          </button>
-          {#if attachmentsExpanded}
-            <div class="attachments-list">
-              {#each selectedMessage.attachments as att}
-                <a
-                  class="compose-attachment-chip attachment-chip-dl"
-                  href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
-                  download={att.filename}
-                >
-                  <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
-                  <span class="attachment-name">{att.filename}</span>
-                  <span class="attachment-size">{humanSize(att.size)}</span>
-                </a>
-              {/each}
-            </div>
-          {/if}
-        </div>
-      {/if}
-      <div class="detail-body">
-        {#if viewMode === 'html' && htmlHasValue}
-          {#if blockedOrigins.length > 0 && !imagesNoticeDismissed}
-            <div class="images-notice">
-              <span>Images are blocked.</span>
-              {#each blockedOrigins as origin}
-                <span class="origin-split-btn">
-                  <button class="origin-split-allow" on:click={() => allowOrigin(origin)}>Allow {origin}</button>
-                  <button class="origin-split-block" on:click={() => blockOriginSilently(origin)} title="Block silently"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></button>
-                </span>
-              {/each}
-              <button class="dismiss-notice-btn" on:click={() => imagesNoticeDismissed = true} aria-label="Dismiss">×</button>
-            </div>
-          {/if}
-          {#key iframeKey}
-            <iframe
-              sandbox="allow-popups allow-same-origin"
-              srcdoc={selectedMessage.body_html}
-              title="Email body"
-              class="html-body"
-            ></iframe>
-          {/key}
-        {:else if selectedMessage.body_text}
-          <pre class="body-text">{#each bodyTextSegments as seg}{#if 'href' in seg}<a href={seg.href} target="_blank" rel="noopener noreferrer">{seg.text}</a>{:else}{seg.text}{/if}{/each}</pre>
-        {:else}
-          <div class="loading">Loading body…</div>
-        {/if}
-      </div>
-    {/if}
-  </article>
 </dialog>
 
 <!-- ── Account form dialog ───────────────────────────────────────────────── -->
@@ -2021,6 +1892,21 @@
     gap: 0.5rem;
   }
 
+  .detail-close-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.2rem;
+    line-height: 1;
+    padding: 0.1rem 0.35rem;
+    color: var(--pico-muted-color, #888);
+    flex-shrink: 0;
+  }
+
+  .detail-close-btn:hover {
+    color: var(--pico-color, #333);
+  }
+
   .detail-subject {
     flex: 1;
     min-width: 0;
@@ -2514,41 +2400,6 @@
     background: var(--pico-card-background-color, #f4f4f4);
   }
 
-  .email-detail-dialog {
-    max-width: 48rem;
-    width: 95vw;
-    max-height: 90dvh;
-    padding: 0;
-  }
-
-  .email-detail-dialog article {
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    max-height: 100%;
-    height: 100%;
-    width: 100%;
-    max-width: 100%;
-  }
-
-  .email-detail-dialog article header {
-    padding: 2rem 2rem 1rem 2rem;
-    border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
-    margin-bottom: 0;
-    flex-shrink: 0;
-  }
-
-  .email-detail-dialog-header {
-    display: flex;
-  }
-
-  .email-detail-dialog .detail-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 1rem 1.5rem;
-  }
-
   .compose-dialog {
     max-width: 44rem;
     width: 95vw;
@@ -2793,6 +2644,21 @@
 
     .message-detail {
       display: none;
+    }
+
+    .message-detail.is-open {
+      display: flex;
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: var(--pico-card-background-color, white);
+      overflow-y: auto;
+      box-shadow: inset 0 3px 12px rgba(0,0,0,0.08);
+    }
+
+    .message-detail.is-open .detail-header {
+      background: var(--pico-card-sectioning-background-color);
+      border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
     }
 
     .resize-handle {
