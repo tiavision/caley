@@ -96,6 +96,11 @@
   let accountForm = emptyAccountForm();
   let accountSaving = false;
   let accountError = '';
+  let accountStep: 'basic' | 'details' = 'basic';
+  let autodiscoverResult: { provider_name?: string; imap_host: string; imap_port: number; imap_use_tls: boolean; imap_username: string; smtp_host: string; smtp_port: number } | null = null;
+  let autodiscovering = false;
+  let autodiscoverError = '';
+  let showAdvanced = false;
 
   // Identity form
   function emptyIdentityForm() {
@@ -529,6 +534,10 @@
   function openAddAccount() {
     accountForm = emptyAccountForm();
     accountError = '';
+    accountStep = 'basic';
+    autodiscoverResult = null;
+    autodiscoverError = '';
+    showAdvanced = false;
     accountDialog?.showModal();
   }
 
@@ -547,7 +556,52 @@
       smtp_port: acc.smtp_port || 587,
     };
     accountError = '';
+    accountStep = 'details';
+    autodiscoverResult = null;
+    showAdvanced = true;
     accountDialog?.showModal();
+  }
+
+  async function continueSetup() {
+    autodiscovering = true;
+    autodiscoverError = '';
+    try {
+      const r = await fetch(`/api/email/autodiscover?email=${encodeURIComponent(accountForm.username)}`);
+      if (r.ok) {
+        const data = await r.json();
+        if (data.found) {
+          autodiscoverResult = data;
+          accountForm.host = data.imap_host;
+          accountForm.port = data.imap_port;
+          accountForm.use_tls = data.imap_use_tls;
+          accountForm.username = data.imap_username;
+          accountForm.smtp_host = data.smtp_host;
+          accountForm.smtp_port = data.smtp_port;
+          if (!accountForm.display_name) {
+            accountForm.display_name = data.provider_name || accountForm.username.split('@')[1] || '';
+          }
+          showAdvanced = false;
+        } else {
+          if (!accountForm.display_name) {
+            accountForm.display_name = accountForm.username.split('@')[1] || '';
+          }
+          showAdvanced = true;
+        }
+      } else {
+        if (!accountForm.display_name) {
+          accountForm.display_name = accountForm.username.split('@')[1] || '';
+        }
+        showAdvanced = true;
+      }
+    } catch {
+      autodiscoverError = 'Could not detect settings. Please enter them manually.';
+      if (!accountForm.display_name) {
+        accountForm.display_name = accountForm.username.split('@')[1] || '';
+      }
+      showAdvanced = true;
+    }
+    autodiscovering = false;
+    accountStep = 'details';
   }
 
   async function saveAccount() {
@@ -1428,60 +1482,91 @@
 >
   <article>
     <header>
-      <h3>{accountForm.account_id ? 'Edit account' : 'Add IMAP account'}</h3>
+      <h3>{accountForm.account_id ? 'Edit account' : 'Add email account'}</h3>
       <div class="header-actions">
         <button class="close-btn" aria-label="Close" on:click={() => accountDialog?.close()}></button>
       </div>
     </header>
-    <form on:submit|preventDefault={saveAccount}>
-      <label>
-        Display name
-        <input bind:value={accountForm.display_name} placeholder="e.g. Work" />
-      </label>
-      <label>
-        Your name
-        <input bind:value={accountForm.sender_name} placeholder="e.g. Jane Smith" />
-      </label>
-      <label>
-        IMAP host
-        <input bind:value={accountForm.host} placeholder="imap.example.com" />
-      </label>
-      <label>
-        Port
-        <input type="number" bind:value={accountForm.port} />
-      </label>
-      <label>
-        Username / email
-        <input bind:value={accountForm.username} placeholder="you@example.com" />
-      </label>
-      <label>
-        Password
-        <input type="password" bind:value={accountForm.password} placeholder={accountForm.account_id ? 'Leave blank to keep current' : ''} />
-      </label>
-      <label class="checkbox-label">
-        <input type="checkbox" bind:checked={accountForm.use_tls} /> Use TLS (IMAPS)
-      </label>
-      <details>
-        <summary>SMTP (sending)</summary>
+
+    {#if accountStep === 'basic'}
+      <!-- Step 1: name + email only -->
+      <form on:submit|preventDefault={continueSetup}>
         <label>
-          SMTP host (leave blank to use IMAP host)
-          <input bind:value={accountForm.smtp_host} placeholder="smtp.example.com" />
+          Your name
+          <input bind:value={accountForm.sender_name} placeholder="e.g. Jane Smith" required />
         </label>
         <label>
-          SMTP port
-          <input type="number" bind:value={accountForm.smtp_port} />
+          Email address
+          <input type="email" bind:value={accountForm.username} placeholder="you@example.com" required />
         </label>
-      </details>
-      {#if accountError}
-        <p class="error">{accountError}</p>
-      {/if}
-      <footer>
-        <button type="button" class="secondary outline" on:click={() => accountDialog?.close()}>Cancel</button>
-        <button type="submit" class="primary" disabled={accountSaving}>
-          {accountSaving ? 'Testing connection…' : 'Save'}
-        </button>
-      </footer>
-    </form>
+        {#if autodiscovering}
+          <p class="hint">Detecting settings…</p>
+        {/if}
+        {#if autodiscoverError}
+          <p class="error">{autodiscoverError}</p>
+        {/if}
+        <footer>
+          <button type="button" class="secondary outline" on:click={() => accountDialog?.close()}>Cancel</button>
+          <button type="submit" class="primary" disabled={autodiscovering}>Continue</button>
+        </footer>
+      </form>
+    {:else}
+      <!-- Step 2: password + advanced -->
+      <form on:submit|preventDefault={saveAccount}>
+        {#if autodiscoverResult?.provider_name}
+          <p class="hint">Settings detected for <strong>{autodiscoverResult.provider_name}</strong></p>
+        {:else if !accountForm.account_id}
+          <p class="hint">Enter your server details below.</p>
+        {/if}
+        <label>
+          Password
+          <input type="password" bind:value={accountForm.password} placeholder={accountForm.account_id ? 'Leave blank to keep current' : ''} autocomplete="current-password" />
+        </label>
+        <details bind:open={showAdvanced}>
+          <summary>Advanced settings</summary>
+          <label>
+            Display name
+            <input bind:value={accountForm.display_name} placeholder="e.g. Work" />
+          </label>
+          <label>
+            Username / email
+            <input bind:value={accountForm.username} placeholder="you@example.com" />
+          </label>
+          <label>
+            IMAP host
+            <input bind:value={accountForm.host} placeholder="imap.example.com" required />
+          </label>
+          <label>
+            IMAP port
+            <input type="number" bind:value={accountForm.port} required />
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" bind:checked={accountForm.use_tls} /> Use TLS (IMAPS)
+          </label>
+          <label>
+            SMTP host
+            <input bind:value={accountForm.smtp_host} placeholder="smtp.example.com (leave blank to use IMAP host)" />
+          </label>
+          <label>
+            SMTP port
+            <input type="number" bind:value={accountForm.smtp_port} />
+          </label>
+        </details>
+        {#if accountError}
+          <p class="error">{accountError}</p>
+        {/if}
+        <footer>
+          {#if !accountForm.account_id}
+            <button type="button" class="secondary outline" on:click={() => { accountStep = 'basic'; accountError = ''; }}>Back</button>
+          {:else}
+            <button type="button" class="secondary outline" on:click={() => accountDialog?.close()}>Cancel</button>
+          {/if}
+          <button type="submit" class="primary" disabled={accountSaving}>
+            {accountSaving ? 'Testing connection…' : 'Save'}
+          </button>
+        </footer>
+      </form>
+    {/if}
   </article>
 </dialog>
 

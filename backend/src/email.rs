@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
+use crate::email_autodiscover;
 use crate::email_db;
 use crate::imap_client;
 use crate::oidc::{AppState, CurrentUser};
@@ -1215,5 +1216,41 @@ pub async fn remove_image_blacklist_origin(
             eprintln!("[email] remove_image_blacklist_origin error: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
         }
+    }
+}
+
+// ── Autodiscover ──────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct AutodiscoverQuery {
+    pub email: String,
+}
+
+pub async fn autodiscover_handler(
+    _user: CurrentUser,
+    Query(params): Query<AutodiscoverQuery>,
+) -> impl IntoResponse {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .user_agent(crate::version::USER_AGENT)
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return Json(json!({ "found": false })).into_response(),
+    };
+
+    match email_autodiscover::autodiscover(&params.email, &client).await {
+        Some(r) => Json(json!({
+            "found": true,
+            "provider_name": r.provider_name,
+            "imap_host": r.imap_host,
+            "imap_port": r.imap_port,
+            "imap_use_tls": r.imap_use_tls,
+            "imap_username": r.imap_username,
+            "smtp_host": r.smtp_host,
+            "smtp_port": r.smtp_port,
+        }))
+        .into_response(),
+        None => Json(json!({ "found": false })).into_response(),
     }
 }

@@ -5,6 +5,7 @@ mod contacts;
 mod crypto;
 mod db;
 mod email;
+mod email_autodiscover;
 mod email_db;
 mod email_sync;
 mod imap_client;
@@ -167,6 +168,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/contact/photo", get(contacts::get_contact_photo))
         .route("/api/account", delete(local_auth::delete_account))
         // Email routes
+        .route("/api/email/autodiscover", get(email::autodiscover_handler))
         .route("/api/email/accounts", get(email::list_accounts))
         .route("/api/email/account", post(email::save_account))
         .route("/api/email/account", put(email::save_account))
