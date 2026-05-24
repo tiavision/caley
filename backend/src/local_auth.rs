@@ -167,6 +167,8 @@ pub async fn delete_account(
     user: CurrentUser,
     session: Session,
 ) -> Response {
+    state.email_sync_manager.stop_all_for(&user.user_id).await;
+
     if let Err(e) = crate::db::delete_user(&state.db, &user.user_id).await {
         eprintln!("Error deleting user {}: {e}", user.user_id);
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to delete account"}))).into_response();

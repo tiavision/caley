@@ -108,12 +108,14 @@ pub async fn delete_account(
         }
     }
 
+    state.email_sync_manager.stop_idle_for(&q.account_id);
+    state.email_sync_manager.stop_task_for(&q.account_id);
+
     if let Err(e) = email_db::delete_account(&state.db, &q.account_id, &user.user_id).await {
         eprintln!("[email] delete_account error: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
-    state.email_sync_manager.stop_idle_for(&q.account_id);
-    state.email_sync_manager.stop_task_for(&q.account_id);
+    
     state.sse_broadcaster.send(&user.user_id, SseMessage::AccountsChanged);
     StatusCode::NO_CONTENT.into_response()
 }

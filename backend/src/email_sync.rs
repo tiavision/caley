@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_imap::extensions::idle::IdleResponse;
+use mail_parser::mailbox;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
@@ -105,6 +106,21 @@ impl EmailSyncManager {
     pub fn stop_idle_for(&self, account_id: &str) {
         if let Some(h) = self.idle_tasks.lock().unwrap().remove(account_id) {
             h.abort();
+        }
+    }
+
+    pub async fn stop_all_for(&self, user_id: &str) {
+        let account_ids = match email_db::get_all_account_ids(&self.db, user_id).await {
+            Ok(ids) => ids,
+            Err(e) => {
+                eprintln!("[email_sync] failed to list accounts for {user_id}: {e}");
+                return;
+            }
+        };
+
+        for id in account_ids {
+            self.stop_idle_for(&id);
+            self.stop_task_for(&id);
         }
     }
 
