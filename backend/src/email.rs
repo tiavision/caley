@@ -987,3 +987,55 @@ pub async fn remove_image_origin(
         }
     }
 }
+
+// ── Image origin blacklist API ─────────────────────────────────────────────
+
+pub async fn list_image_blacklist(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> impl IntoResponse {
+    match email_db::get_image_blacklist(&state.db, &user.user_id).await {
+        Ok(origins) => Json(json!({ "origins": origins })).into_response(),
+        Err(e) => {
+            eprintln!("[email] list_image_blacklist error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
+pub async fn add_image_blacklist_origin(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<ImageOriginBody>,
+) -> impl IntoResponse {
+    match url::Url::parse(&body.origin) {
+        Ok(u) if matches!(u.scheme(), "http" | "https") && u.host().is_some() => {}
+        _ => return (StatusCode::BAD_REQUEST, "invalid origin").into_response(),
+    }
+    let origin = {
+        let u = url::Url::parse(&body.origin).unwrap();
+        format!("{}://{}", u.scheme(), u.host_str().unwrap_or(""))
+    };
+
+    match email_db::add_image_blacklist(&state.db, &user.user_id, &origin).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            eprintln!("[email] add_image_blacklist_origin error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
+pub async fn remove_image_blacklist_origin(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<ImageOriginQuery>,
+) -> impl IntoResponse {
+    match email_db::remove_image_blacklist(&state.db, &user.user_id, &q.origin).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            eprintln!("[email] remove_image_blacklist_origin error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}

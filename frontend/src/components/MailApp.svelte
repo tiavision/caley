@@ -111,6 +111,10 @@
   // HTML email rendering
   let viewMode: 'html' | 'text' = 'text';
   let imageOrigins: string[] = [];
+  let blacklistOrigins: string[] = [];
+  let originsEmailOnly = false;
+  let originsFilter = '';
+  let originsDialog: HTMLDialogElement;
   let iframeKey = 0;
 
   // Dialog refs
@@ -175,7 +179,7 @@
   // ── Data loading ─────────────────────────────────────────────────────────
 
   async function loadAll() {
-    await Promise.all([loadAccounts(), loadVirtualFolders(), loadImageOrigins()]);
+    await Promise.all([loadAccounts(), loadVirtualFolders(), loadImageOrigins(), loadBlacklistOrigins()]);
     for (const acc of accounts) {
       await loadMailboxes(acc.account_id);
     }
@@ -248,6 +252,51 @@
       await fetch(`/api/email/image-origins?origin=${encodeURIComponent(origin)}`, { method: 'DELETE' });
       imageOrigins = imageOrigins.filter(o => o !== origin);
     } catch {}
+  }
+
+  async function loadBlacklistOrigins() {
+    try {
+      const r = await fetch('/api/email/image-blacklist');
+      if (r.ok) {
+        const data = await r.json();
+        blacklistOrigins = data.origins || [];
+      }
+    } catch {}
+  }
+
+  async function blockOriginSilently(origin: string) {
+    try {
+      await fetch('/api/email/image-blacklist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ origin }),
+      });
+      blacklistOrigins = [...blacklistOrigins, origin];
+    } catch {}
+  }
+
+  async function unblockOrigin(origin: string) {
+    try {
+      await fetch(`/api/email/image-blacklist?origin=${encodeURIComponent(origin)}`, { method: 'DELETE' });
+      blacklistOrigins = blacklistOrigins.filter(o => o !== origin);
+    } catch {}
+  }
+
+  async function promoteFromBlacklist(origin: string) {
+    await unblockOrigin(origin);
+    await allowOrigin(origin);
+  }
+
+  function openOriginsGlobal() {
+    originsEmailOnly = false;
+    originsFilter = '';
+    originsDialog?.showModal();
+  }
+
+  function openOriginsForEmail() {
+    originsEmailOnly = true;
+    originsFilter = '';
+    originsDialog?.showModal();
   }
 
   async function selectMailbox(accountId: string, mailbox: string) {
@@ -792,7 +841,7 @@
   $: htmlHasValue = htmlAddsValue(selectedMessage?.body_html ?? null);
   $: bodyTextSegments = linkifySegments(selectedMessage?.body_text ?? '');
 
-  $: blockedOrigins = (() => {
+  $: emailOrigins = (() => {
     if (!selectedMessage?.body_html) return [];
     const found = new Set<string>();
     const re = /\/api\/email\/proxy-image\?url=([^"&\s]+)/g;
@@ -804,8 +853,12 @@
         found.add(`${u.protocol}//${u.host}`);
       } catch {}
     }
-    return [...found].filter(o => !imageOrigins.includes(o));
+    return [...found];
   })();
+
+  $: blockedOrigins = emailOrigins.filter(o => !imageOrigins.includes(o) && !blacklistOrigins.includes(o));
+  $: allowedEmailOrigins = emailOrigins.filter(o => imageOrigins.includes(o));
+  $: silentEmailOrigins = emailOrigins.filter(o => blacklistOrigins.includes(o));
 </script>
 
 {#snippet folderIcon(kind: string)}
@@ -1005,6 +1058,9 @@
                     <div class="menu-separator"></div>
                     <button role="menuitem" class:menu-item-active={viewMode === 'html'} on:click={() => { viewMode = 'html'; actionsOpen = false; }}>View as HTML</button>
                     <button role="menuitem" class:menu-item-active={viewMode === 'text'} on:click={() => { viewMode = 'text'; actionsOpen = false; }}>View as plain text</button>
+                    {#if emailOrigins.length > 0}
+                      <button role="menuitem" on:click={() => { actionsOpen = false; openOriginsForEmail(); }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>Image sources for this email</button>
+                    {/if}
                   {/if}
                   <div class="menu-separator"></div>
                   <button role="menuitem" class="menu-item-danger" on:click={() => { actionsOpen = false; deleteMessage(selectedMessage!); }}>
@@ -1063,9 +1119,10 @@
                 <div class="images-notice">
                   <span>Images are blocked.</span>
                   {#each blockedOrigins as origin}
-                    <button class="allow-btn" on:click={() => allowOrigin(origin)}>
-                      Allow {origin}
-                    </button>
+                    <span class="origin-split-btn">
+                      <button class="origin-split-allow" on:click={() => allowOrigin(origin)}>Allow {origin}</button>
+                      <button class="origin-split-block" on:click={() => blockOriginSilently(origin)} title="Block silently"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></button>
+                    </span>
                   {/each}
                   <button class="dismiss-notice-btn" on:click={() => imagesNoticeDismissed = true} aria-label="Dismiss">×</button>
                 </div>
@@ -1184,6 +1241,9 @@
                   <div class="menu-separator"></div>
                   <button role="menuitem" class:menu-item-active={viewMode === 'html'} on:click={() => { viewMode = 'html'; actionsOpen = false; }}>View as HTML</button>
                   <button role="menuitem" class:menu-item-active={viewMode === 'text'} on:click={() => { viewMode = 'text'; actionsOpen = false; }}>View as plain text</button>
+                  {#if emailOrigins.length > 0}
+                    <button role="menuitem" on:click={() => { actionsOpen = false; openOriginsForEmail(); }}>Image sources for this email</button>
+                  {/if}
                 {/if}
                 <div class="menu-separator"></div>
                 <button role="menuitem" class="menu-item-danger" on:click={() => { actionsOpen = false; deleteMessage(selectedMessage!); }}>
@@ -1240,9 +1300,10 @@
             <div class="images-notice">
               <span>Images are blocked.</span>
               {#each blockedOrigins as origin}
-                <button class="allow-btn" on:click={() => allowOrigin(origin)}>
-                  Allow {origin}
-                </button>
+                <span class="origin-split-btn">
+                  <button class="origin-split-allow" on:click={() => allowOrigin(origin)}>Allow {origin}</button>
+                  <button class="origin-split-block" on:click={() => blockOriginSilently(origin)} title="Block silently"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></button>
+                </span>
               {/each}
               <button class="dismiss-notice-btn" on:click={() => imagesNoticeDismissed = true} aria-label="Dismiss">×</button>
             </div>
@@ -1326,20 +1387,86 @@
   </article>
 </dialog>
 
-<!-- ── Trusted image sources panel ────────────────────────────────────────── -->
-{#if imageOrigins.length > 0}
-  <details class="origins-panel">
-    <summary>Trusted image sources ({imageOrigins.length})</summary>
-    <ul class="origins-list">
-      {#each imageOrigins as origin}
-        <li>
-          <span>{origin}</span>
-          <button class="icon-btn delete-btn" on:click={() => revokeOrigin(origin)} title="Remove">×</button>
-        </li>
-      {/each}
-    </ul>
-  </details>
-{/if}
+<!-- ── Image origins trigger button ───────────────────────────────────────── -->
+<button
+  class="origins-trigger"
+  on:click={openOriginsGlobal}
+  title="Manage image sources"
+  aria-label="Manage image sources"
+>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+  {#if imageOrigins.length + blacklistOrigins.length > 0}
+    <span class="origins-badge">{imageOrigins.length + blacklistOrigins.length}</span>
+  {/if}
+</button>
+
+<!-- ── Image origins dialog ────────────────────────────────────────────────── -->
+<dialog
+  bind:this={originsDialog}
+  class="origins-dialog"
+  on:click={(e) => { if (e.target === e.currentTarget) originsDialog?.close(); }}
+>
+  <article>
+    <header>
+      <span>{originsEmailOnly ? 'Image sources - this email' : 'Image sources'}</span>
+      <button class="close-btn" aria-label="Close" on:click={() => originsDialog?.close()}></button>
+    </header>
+    <div class="origins-filter-wrap">
+      <input type="search" class="origins-filter" placeholder="Filter…" bind:value={originsFilter} />
+    </div>
+    <div class="origins-sections">
+      {#if originsEmailOnly}
+        <section class="origins-section">
+          <h6>Blocked</h6>
+          {#if blockedOrigins.filter(o => !originsFilter || o.includes(originsFilter)).length === 0}
+            <p class="origins-empty">{originsFilter ? 'No matches.' : 'None blocked in this email.'}</p>
+          {:else}
+            <ul class="origins-list">
+              {#each blockedOrigins.filter(o => !originsFilter || o.includes(originsFilter)) as origin}
+                <li>
+                  <span>{origin}</span>
+                  <button class="allow-btn" on:click={() => allowOrigin(origin)}>Allow</button>
+                  <button class="icon-btn delete-btn" on:click={() => blockOriginSilently(origin)} title="Block silently">×</button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </section>
+      {/if}
+      <section class="origins-section">
+        <h6>Allowed</h6>
+        {#if (originsEmailOnly ? allowedEmailOrigins : imageOrigins).filter(o => !originsFilter || o.includes(originsFilter)).length === 0}
+          <p class="origins-empty">{originsFilter ? 'No matches.' : 'None yet.'}</p>
+        {:else}
+          <ul class="origins-list">
+            {#each (originsEmailOnly ? allowedEmailOrigins : imageOrigins).filter(o => !originsFilter || o.includes(originsFilter)) as origin}
+              <li>
+                <span>{origin}</span>
+                <button class="icon-btn delete-btn" on:click={() => revokeOrigin(origin)} title="Remove">×</button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+      <section class="origins-section">
+        <h6>Ignored</h6>
+        {#if (originsEmailOnly ? silentEmailOrigins : blacklistOrigins).filter(o => !originsFilter || o.includes(originsFilter)).length === 0}
+          <p class="origins-empty">{originsFilter ? 'No matches.' : 'None yet.'}</p>
+        {:else}
+          <ul class="origins-list">
+            {#each (originsEmailOnly ? silentEmailOrigins : blacklistOrigins).filter(o => !originsFilter || o.includes(originsFilter)) as origin}
+              <li>
+                <span>{origin}</span>
+                <button class="allow-btn" on:click={() => promoteFromBlacklist(origin)} title="Allow">Allow</button>
+                <button class="icon-btn delete-btn" on:click={() => unblockOrigin(origin)} title="Remove">×</button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    </div>
+  </article>
+</dialog>
 
 <!-- ── Compose dialog ─────────────────────────────────────────────────────── -->
 <dialog
@@ -1521,7 +1648,6 @@
   }
   .folder-account-group label input[type="checkbox"] {
     margin: 0;
-    width: auto;
   }
 
   .mail-page {
@@ -2178,6 +2304,45 @@
     color: white;
   }
 
+  .origin-split-btn {
+    display: inline-flex;
+    border: 1px solid var(--pico-primary, #0172ad);
+    border-radius: 3px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .origin-split-allow {
+    padding: 0.2rem 0.6rem;
+    font-size: 0.78rem;
+    background: none;
+    border: none;
+    color: var(--pico-primary, #0172ad);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .origin-split-allow:hover {
+    background: var(--pico-primary, #0172ad);
+    color: white;
+  }
+
+  .origin-split-block {
+    padding: 0.2rem 0.4rem;
+    background: none;
+    border: none;
+    border-left: 1px solid color-mix(in srgb, var(--pico-del-color, #c0392b) 40%, transparent);
+    color: var(--pico-del-color, #c0392b);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+  }
+
+  .origin-split-block:hover {
+    background: var(--pico-del-color, #c0392b);
+    color: white;
+  }
+
   .html-body {
     width: 100%;
     border: none;
@@ -2185,39 +2350,106 @@
     min-height: 0;
   }
 
-  .origins-panel {
+  .origins-trigger {
     position: fixed;
     bottom: 2.75rem;
     right: 6.5rem;
-    transform: translateY(50%);
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.35rem 0.6rem;
     background: var(--pico-background-color, white);
     border: 1px solid var(--pico-muted-border-color, #ccc);
     border-radius: 6px;
-    padding: 0.75rem 1rem;
-    font-size: 0.82rem;
+    font-size: 0.78rem;
+    color: var(--pico-muted-color, #888);
+    cursor: pointer;
     z-index: 50;
-    min-width: 220px;
-    box-shadow: 0 2px 8px rgba(0,0,0,.12);
+    box-shadow: 0 2px 8px rgba(0,0,0,.10);
   }
 
-  .origins-panel summary {
-    cursor: pointer;
-    color: var(--pico-primary, #0172ad);
+  .origins-trigger:hover {
+    color: var(--pico-color, #333);
+    border-color: var(--pico-primary, #0172ad);
+  }
+
+  .origins-badge {
+    background: var(--pico-primary, #0172ad);
+    color: white;
+    border-radius: 99px;
+    font-size: 0.7rem;
+    padding: 0 0.35rem;
+    line-height: 1.4;
+  }
+
+  .origins-dialog {
+    width: 480px;
+    max-width: 95vw;
+  }
+
+  .origins-dialog article {
+    margin: 0;
+  }
+
+  .origins-dialog header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--pico-muted-border-color, #eee);
+    font-weight: 500;
+  }
+
+  .origins-filter-wrap {
+    padding: 0.6rem 1rem 0;
+  }
+
+  .origins-filter {
+    width: 100%;
+    margin: 0;
+  }
+
+  .origins-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 0 1rem 1rem;
+  }
+
+  .origins-section h6 {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--pico-muted-color, #888);
+    margin: 1rem 0 0.4rem;
+  }
+
+  .origins-empty {
     font-size: 0.82rem;
+    color: var(--pico-muted-color, #aaa);
+    margin: 0;
   }
 
   .origins-list {
     list-style: none;
-    padding: 0.5rem 0 0;
+    padding: 0;
     margin: 0;
   }
 
   .origins-list li {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 0.5rem;
-    padding: 0.2rem 0;
+    padding: 0.25rem 0;
+    font-size: 0.84rem;
+  }
+
+  .origins-list li span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* Shared */
@@ -2559,10 +2791,9 @@
       right: 1.5rem;
     }
 
-    .origins-panel {
+    .origins-trigger {
       bottom: 2.25rem;
       right: 5.5rem;
-      transform: translateY(50%);
     }
   }
 

@@ -1030,3 +1030,37 @@ pub async fn remove_image_origin(pool: &SqlitePool, user_id: &str, origin: &str)
     .await?;
     Ok(())
 }
+
+// ── Image origin blacklist ─────────────────────────────────────────────────
+
+pub async fn get_image_blacklist(pool: &SqlitePool, user_id: &str) -> Result<Vec<String>> {
+    let rows = sqlx::query(
+        "SELECT origin FROM email_image_blacklist WHERE user_id = ? ORDER BY origin",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(|r| r.get(0)).collect())
+}
+
+pub async fn add_image_blacklist(pool: &SqlitePool, user_id: &str, origin: &str) -> Result<()> {
+    sqlx::query(
+        "INSERT OR IGNORE INTO email_image_blacklist (user_id, origin) VALUES (?, ?)",
+    )
+    .bind(user_id)
+    .bind(origin)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn remove_image_blacklist(pool: &SqlitePool, user_id: &str, origin: &str) -> Result<()> {
+    sqlx::query(
+        "DELETE FROM email_image_blacklist WHERE user_id = ? AND origin = ?",
+    )
+    .bind(user_id)
+    .bind(origin)
+    .execute(pool)
+    .await?;
+    Ok(())
+}

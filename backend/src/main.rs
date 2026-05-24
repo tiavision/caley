@@ -184,7 +184,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/email/attachment", get(email::download_attachment))
         .route("/api/email/image-origins", get(email::list_image_origins))
         .route("/api/email/image-origins", post(email::add_image_origin))
-        .route("/api/email/image-origins", delete(email::remove_image_origin));
+        .route("/api/email/image-origins", delete(email::remove_image_origin))
+        .route("/api/email/image-blacklist", get(email::list_image_blacklist))
+        .route("/api/email/image-blacklist", post(email::add_image_blacklist_origin))
+        .route("/api/email/image-blacklist", delete(email::remove_image_blacklist_origin));
 
     // Protected routes plus the always-available CalDAV login + unified logout.
     // RequireAuthLayer lets the public allow-list through and otherwise requires
