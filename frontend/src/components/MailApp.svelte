@@ -1080,12 +1080,13 @@
                     {selectedMessage.is_read ? 'Mark unread' : 'Mark read'}
                   </button>
                   {#if htmlHasValue}
-                    <div class="menu-separator"></div>
-                    <button role="menuitem" class:menu-item-active={viewMode === 'html'} on:click={() => { viewMode = 'html'; actionsOpen = false; }}>View as HTML</button>
-                    <button role="menuitem" class:menu-item-active={viewMode === 'text'} on:click={() => { viewMode = 'text'; actionsOpen = false; }}>View as plain text</button>
                     {#if emailOrigins.length > 0}
                       <button role="menuitem" on:click={() => { actionsOpen = false; openOriginsForEmail(); }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>Image sources for this email</button>
                     {/if}
+
+                    <div class="menu-separator"></div>
+                    <button role="menuitem" class:menu-item-active={viewMode === 'html'} on:click={() => { viewMode = 'html'; actionsOpen = false; }}>View as HTML</button>
+                    <button role="menuitem" class:menu-item-active={viewMode === 'text'} on:click={() => { viewMode = 'text'; actionsOpen = false; }}>View as plain text</button>
                   {/if}
                   <div class="menu-separator"></div>
                   <button role="menuitem" class="menu-item-danger" on:click={() => { actionsOpen = false; deleteMessage(selectedMessage!); }}>
@@ -1117,18 +1118,21 @@
         {#if selectedMessage.attachments && selectedMessage.attachments.length > 0}
           <div class="attachments">
             <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 10.56a4.94 4.94 0 0 1-7-7l9.19-10.56a3.33 3.33 0 0 1 4.7 4.7l-9.2 10.56a1.67 1.67 0 0 1-2.35-2.35l9.2-10.56"/></svg> {selectedMessage.attachments.length} attachment{selectedMessage.attachments.length === 1 ? '' : 's'}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+              {selectedMessage.attachments.length} attachment{selectedMessage.attachments.length === 1 ? '' : 's'}
               <span class="attachments-caret">{attachmentsExpanded ? '▲' : '▾'}</span>
             </button>
             {#if attachmentsExpanded}
               <div class="attachments-list">
                 {#each selectedMessage.attachments as att}
                   <a
-                    class="attachment-link"
+                    class="compose-attachment-chip attachment-chip-dl"
                     href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
                     download={att.filename}
                   >
-                    {att.filename} ({humanSize(att.size)})
+                    <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
+                    <span class="attachment-name" title={att.filename}>{att.filename}</span>
+                    <span class="attachment-size">{humanSize(att.size)}</span>
                   </a>
                 {/each}
               </div>
@@ -1301,23 +1305,26 @@
       </div>
       {#if selectedMessage.attachments && selectedMessage.attachments.length > 0}
         <div class="attachments">
-            <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 10.56a4.94 4.94 0 0 1-7-7l9.19-10.56a3.33 3.33 0 0 1 4.7 4.7l-9.2 10.56a1.67 1.67 0 0 1-2.35-2.35l9.2-10.56"/></svg> {selectedMessage.attachments.length} attachment{selectedMessage.attachments.length === 1 ? '' : 's'}
-              <span class="attachments-caret">{attachmentsExpanded ? '▲' : '▾'}</span>
-            </button>
-            {#if attachmentsExpanded}
-              <div class="attachments-list">
-                {#each selectedMessage.attachments as att}
-                  <a
-                    class="attachment-link"
-                    href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
-                    download={att.filename}
-                  >
-                    {att.filename} ({humanSize(att.size)})
-                  </a>
-                {/each}
-              </div>
-            {/if}
+          <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            {selectedMessage.attachments.length} attachment{selectedMessage.attachments.length === 1 ? '' : 's'}
+            <span class="attachments-caret">{attachmentsExpanded ? '▲' : '▾'}</span>
+          </button>
+          {#if attachmentsExpanded}
+            <div class="attachments-list">
+              {#each selectedMessage.attachments as att}
+                <a
+                  class="compose-attachment-chip attachment-chip-dl"
+                  href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
+                  download={att.filename}
+                >
+                  <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
+                  <span class="attachment-name">{att.filename}</span>
+                  <span class="attachment-size">{humanSize(att.size)}</span>
+                </a>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
       <div class="detail-body">
@@ -1545,8 +1552,8 @@
         <ul class="compose-attachments">
           {#each composeAttachments as file, i}
             <li class="compose-attachment-chip">
-              <span class="attachment-icon">📎</span>
-              <span class="attachment-name">{file.name}</span>
+              <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
+              <span class="attachment-name" title={file.name}>{file.name}</span>
               <span class="attachment-size">{formatFileSize(file.size)}</span>
               <button type="button" class="attachment-remove" aria-label="Remove" on:click={() => removeAttachment(i)}>✕</button>
             </li>
@@ -2217,19 +2224,14 @@
     margin-top: 0.4rem;
   }
 
-  .attachment-link {
-    display: inline-block;
-    padding: 0.3rem 0.6rem;
-    border: 1px solid var(--pico-muted-border-color, #ddd);
-    border-radius: 4px;
-    font-size: 0.8rem;
+  .attachment-chip-dl {
     text-decoration: none;
-    color: var(--pico-primary, #2a6496);
-    background: var(--pico-card-background-color, #f8f8f8);
+    color: inherit;
   }
 
-  .attachment-link:hover {
-    background: var(--pico-primary-background, #e8f0f8);
+  .attachment-chip-dl:hover {
+    background: var(--pico-card-background-color);
+    color: inherit;
   }
 
   .detail-body {

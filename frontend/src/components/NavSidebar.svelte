@@ -169,7 +169,9 @@
     cursor: pointer;
     flex-shrink: 0;
   }
+  .nav-collapse-btn svg { transition: transform 0.2s ease; }
   .nav-collapse-btn:hover { color: var(--pico-color, #333); }
+  .nav-rail.collapsed .nav-collapse-btn svg { transform: rotate(180deg); }
 
   .nav-items {
     list-style: none;
