@@ -449,7 +449,10 @@ pub fn sanitize_email_html(html: &str) -> String {
     tag_attrs.insert("col", ["span", "width"].iter().copied().collect());
     tag_attrs.insert("colgroup", ["span"].iter().copied().collect());
 
-    let url_schemes: HashSet<&str> = ["http", "https", "mailto"].iter().copied().collect();
+    // `cid` must be whitelisted here: ammonia strips URL attributes whose scheme
+    // isn't allowed during DOM cleaning, *before* the attribute_filter below runs.
+    // Without it the `cid:` src is dropped and rewrite_cid_urls has nothing to fix.
+    let url_schemes: HashSet<&str> = ["http", "https", "mailto", "cid"].iter().copied().collect();
     let generic_attrs: HashSet<&str> = ["style", "class", "align", "dir"]
         .iter()
         .copied()
@@ -1313,6 +1316,35 @@ mod tests {
         let html = "<style>.x { font-family:\"Hélvética\"; }</style><p>Test</p>";
         let result = sanitize_email_html(html);
         assert!(result.contains("font-family"), "font-family should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_cid_src_survives_sanitization() {
+        let html = "<img src=\"cid:logo@example.com\" alt=\"logo\">";
+        let result = sanitize_email_html(html);
+        assert!(
+            result.contains("cid:logo@example.com"),
+            "cid: src must survive sanitization so rewrite_cid_urls can rewrite it: {result}"
+        );
+    }
+
+    #[test]
+    fn test_cid_src_rewritten_to_proxy() {
+        let html = "<img src=\"cid:logo@example.com\">";
+        let sanitized = sanitize_email_html(html);
+        let rewritten = rewrite_cid_urls(&sanitized, "acct1", "INBOX", 42);
+        assert!(
+            rewritten.contains("/api/email/proxy-image?account_id=acct1"),
+            "cid: src should be rewritten to the proxy endpoint: {rewritten}"
+        );
+        assert!(
+            rewritten.contains("cid=logo%40example.com"),
+            "cid value should be url-encoded in the proxy URL: {rewritten}"
+        );
+        assert!(
+            !rewritten.contains("src=\"cid:"),
+            "no raw cid: src should remain after rewrite: {rewritten}"
+        );
     }
 
     #[test]
