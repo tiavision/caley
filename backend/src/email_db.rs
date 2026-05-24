@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sqlx::{Row, SqlitePool};
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 use crate::crypto;
 
@@ -829,14 +829,17 @@ pub async fn list_messages_virtual(
     limit: i64,
     offset: i64,
 ) -> Result<(Vec<MessageRow>, i64)> {
-    // Virtual folder joins accounts → rules → messages
+    // Virtual folder joins accounts → rules → messages, with optional flag/attachment filters
     let total: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM cached_messages m
          JOIN imap_accounts a ON a.account_id = m.account_id
          JOIN virtual_folder_rules r ON r.folder_id = ?
              AND (r.account_id = '' OR r.account_id = m.account_id)
              AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
-         WHERE a.user_id = ?",
+         JOIN virtual_folders vf ON vf.folder_id = r.folder_id
+         WHERE a.user_id = ?
+           AND (vf.only_flagged = 0 OR EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Flagged'))
+           AND (vf.only_attachments = 0 OR m.has_attachments = 1)",
     )
     .bind(folder_id)
     .bind(user_id)
@@ -851,7 +854,10 @@ pub async fn list_messages_virtual(
          JOIN virtual_folder_rules r ON r.folder_id = ?
              AND (r.account_id = '' OR r.account_id = m.account_id)
              AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
+         JOIN virtual_folders vf ON vf.folder_id = r.folder_id
          WHERE a.user_id = ?
+           AND (vf.only_flagged = 0 OR EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Flagged'))
+           AND (vf.only_attachments = 0 OR m.has_attachments = 1)
          ORDER BY COALESCE(m.sent_at, 0) DESC
          LIMIT ? OFFSET ?",
     )
@@ -924,28 +930,78 @@ fn row_to_message_full(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
     }
 }
 
+pub struct SearchFilters {
+    pub addrs: Vec<String>,
+    pub date_from: Option<i64>,
+    pub date_to: Option<i64>,
+}
+
+impl SearchFilters {
+    pub fn is_empty(&self) -> bool {
+        self.addrs.is_empty() && self.date_from.is_none() && self.date_to.is_none()
+    }
+}
+
+fn push_filter_clauses(qb: &mut QueryBuilder<Sqlite>, filters: &SearchFilters) {
+    if !filters.addrs.is_empty() {
+        qb.push(" AND (");
+        for (i, addr) in filters.addrs.iter().enumerate() {
+            if i > 0 {
+                qb.push(" OR ");
+            }
+            let pattern = format!("%{}%", addr);
+            qb.push("(m.from_addr LIKE ")
+                .push_bind(pattern.clone())
+                .push(" OR m.to_addrs LIKE ")
+                .push_bind(pattern.clone())
+                .push(" OR m.cc_addrs LIKE ")
+                .push_bind(pattern)
+                .push(")");
+        }
+        qb.push(")");
+    }
+    if let Some(ts) = filters.date_from {
+        qb.push(" AND m.sent_at >= ").push_bind(ts);
+    }
+    if let Some(ts) = filters.date_to {
+        qb.push(" AND m.sent_at <= ").push_bind(ts);
+    }
+}
+
 pub async fn search_messages(
     pool: &SqlitePool,
     user_id: &str,
     fts_query: &str,
+    filters: &SearchFilters,
     limit: i64,
 ) -> Result<Vec<MessageRow>> {
-    let rows = sqlx::query(
+    let use_fts = !fts_query.is_empty();
+    let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
-                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments, m.body_text
-         FROM messages_fts f
-         JOIN cached_messages m ON m.rowid = f.rowid
-         JOIN imap_accounts a ON a.account_id = m.account_id
-         WHERE messages_fts MATCH ?
-           AND a.user_id = ?
-         ORDER BY COALESCE(m.sent_at, 0) DESC
-         LIMIT ?",
-    )
-    .bind(fts_query)
-    .bind(user_id)
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
+                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments, m.body_text",
+    );
+    if use_fts {
+        qb.push(
+            " FROM messages_fts f
+              JOIN cached_messages m ON m.rowid = f.rowid
+              JOIN imap_accounts a ON a.account_id = m.account_id
+              WHERE messages_fts MATCH ",
+        )
+        .push_bind(fts_query)
+        .push(" AND a.user_id = ")
+        .push_bind(user_id);
+    } else {
+        qb.push(
+            " FROM cached_messages m
+              JOIN imap_accounts a ON a.account_id = m.account_id
+              WHERE a.user_id = ",
+        )
+        .push_bind(user_id);
+    }
+    push_filter_clauses(&mut qb, filters);
+    qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC LIMIT ")
+        .push_bind(limit);
+    let rows = qb.build().fetch_all(pool).await?;
     Ok(rows.iter().map(row_to_message).collect())
 }
 
@@ -955,28 +1011,40 @@ pub async fn search_messages_mailbox(
     account_id: &str,
     mailbox: &str,
     fts_query: &str,
+    filters: &SearchFilters,
     limit: i64,
 ) -> Result<Vec<MessageRow>> {
-    let rows = sqlx::query(
+    let use_fts = !fts_query.is_empty();
+    let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
-                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments, m.body_text
-         FROM messages_fts f
-         JOIN cached_messages m ON m.rowid = f.rowid
-         JOIN imap_accounts a ON a.account_id = m.account_id
-         WHERE messages_fts MATCH ?
-           AND a.user_id = ?
-           AND m.account_id = ?
-           AND m.mailbox = ?
-         ORDER BY COALESCE(m.sent_at, 0) DESC
-         LIMIT ?",
-    )
-    .bind(fts_query)
-    .bind(user_id)
-    .bind(account_id)
-    .bind(mailbox)
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
+                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments, m.body_text",
+    );
+    if use_fts {
+        qb.push(
+            " FROM messages_fts f
+              JOIN cached_messages m ON m.rowid = f.rowid
+              JOIN imap_accounts a ON a.account_id = m.account_id
+              WHERE messages_fts MATCH ",
+        )
+        .push_bind(fts_query)
+        .push(" AND a.user_id = ")
+        .push_bind(user_id);
+    } else {
+        qb.push(
+            " FROM cached_messages m
+              JOIN imap_accounts a ON a.account_id = m.account_id
+              WHERE a.user_id = ",
+        )
+        .push_bind(user_id);
+    }
+    qb.push(" AND m.account_id = ")
+        .push_bind(account_id)
+        .push(" AND m.mailbox = ")
+        .push_bind(mailbox);
+    push_filter_clauses(&mut qb, filters);
+    qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC LIMIT ")
+        .push_bind(limit);
+    let rows = qb.build().fetch_all(pool).await?;
     Ok(rows.iter().map(row_to_message).collect())
 }
 
@@ -985,28 +1053,54 @@ pub async fn search_messages_virtual(
     user_id: &str,
     folder_id: &str,
     fts_query: &str,
+    filters: &SearchFilters,
     limit: i64,
 ) -> Result<Vec<MessageRow>> {
-    let rows = sqlx::query(
+    let use_fts = !fts_query.is_empty();
+    let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT DISTINCT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
-                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments, m.body_text
-         FROM messages_fts f
-         JOIN cached_messages m ON m.rowid = f.rowid
-         JOIN imap_accounts a ON a.account_id = m.account_id
-         JOIN virtual_folder_rules r ON r.folder_id = ?
-             AND (r.account_id = '' OR r.account_id = m.account_id)
-             AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
-         WHERE messages_fts MATCH ?
-           AND a.user_id = ?
-         ORDER BY COALESCE(m.sent_at, 0) DESC
-         LIMIT ?",
-    )
-    .bind(folder_id)
-    .bind(fts_query)
-    .bind(user_id)
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
+                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments, m.body_text",
+    );
+    if use_fts {
+        qb.push(
+            " FROM messages_fts f
+              JOIN cached_messages m ON m.rowid = f.rowid
+              JOIN imap_accounts a ON a.account_id = m.account_id
+              JOIN virtual_folder_rules r ON r.folder_id = ",
+        )
+        .push_bind(folder_id)
+        .push(
+            " AND (r.account_id = '' OR r.account_id = m.account_id)
+               AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
+              JOIN virtual_folders vf ON vf.folder_id = r.folder_id
+              WHERE messages_fts MATCH ",
+        )
+        .push_bind(fts_query)
+        .push(" AND a.user_id = ")
+        .push_bind(user_id);
+    } else {
+        qb.push(
+            " FROM cached_messages m
+              JOIN imap_accounts a ON a.account_id = m.account_id
+              JOIN virtual_folder_rules r ON r.folder_id = ",
+        )
+        .push_bind(folder_id)
+        .push(
+            " AND (r.account_id = '' OR r.account_id = m.account_id)
+               AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
+              JOIN virtual_folders vf ON vf.folder_id = r.folder_id
+              WHERE a.user_id = ",
+        )
+        .push_bind(user_id);
+    }
+    qb.push(
+        " AND (vf.only_flagged = 0 OR EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Flagged'))
+           AND (vf.only_attachments = 0 OR m.has_attachments = 1)",
+    );
+    push_filter_clauses(&mut qb, filters);
+    qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC LIMIT ")
+        .push_bind(limit);
+    let rows = qb.build().fetch_all(pool).await?;
     Ok(rows.iter().map(row_to_message).collect())
 }
 
@@ -1017,6 +1111,8 @@ pub struct VirtualFolderRow {
     pub display_name: String,
     pub sort_order: i64,
     pub rules: Vec<VirtualFolderRule>,
+    pub only_flagged: bool,
+    pub only_attachments: bool,
 }
 
 pub struct VirtualFolderRule {
@@ -1026,7 +1122,7 @@ pub struct VirtualFolderRule {
 
 pub async fn list_virtual_folders(pool: &SqlitePool, user_id: &str) -> Result<Vec<VirtualFolderRow>> {
     let folders = sqlx::query(
-        "SELECT folder_id, display_name, sort_order FROM virtual_folders WHERE user_id = ? ORDER BY sort_order, display_name",
+        "SELECT folder_id, display_name, sort_order, only_flagged, only_attachments FROM virtual_folders WHERE user_id = ? ORDER BY sort_order, display_name",
     )
     .bind(user_id)
     .fetch_all(pool)
@@ -1045,6 +1141,8 @@ pub async fn list_virtual_folders(pool: &SqlitePool, user_id: &str) -> Result<Ve
             folder_id,
             display_name: f.get(1),
             sort_order: f.get(2),
+            only_flagged: f.get::<i64, _>(3) != 0,
+            only_attachments: f.get::<i64, _>(4) != 0,
             rules: rules
                 .iter()
                 .map(|r| VirtualFolderRule {
@@ -1063,14 +1161,18 @@ pub async fn create_virtual_folder(
     user_id: &str,
     display_name: &str,
     rules: &[(Option<&str>, Option<&str>)],
+    only_flagged: bool,
+    only_attachments: bool,
 ) -> Result<()> {
     let mut tx = pool.begin().await?;
     sqlx::query(
-        "INSERT INTO virtual_folders (folder_id, user_id, display_name) VALUES (?, ?, ?)",
+        "INSERT INTO virtual_folders (folder_id, user_id, display_name, only_flagged, only_attachments) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(folder_id)
     .bind(user_id)
     .bind(display_name)
+    .bind(only_flagged as i64)
+    .bind(only_attachments as i64)
     .execute(&mut *tx)
     .await?;
 
@@ -1094,12 +1196,16 @@ pub async fn update_virtual_folder(
     user_id: &str,
     display_name: &str,
     rules: &[(Option<&str>, Option<&str>)],
+    only_flagged: bool,
+    only_attachments: bool,
 ) -> Result<()> {
     let mut tx = pool.begin().await?;
     let rows = sqlx::query(
-        "UPDATE virtual_folders SET display_name = ? WHERE folder_id = ? AND user_id = ?",
+        "UPDATE virtual_folders SET display_name = ?, only_flagged = ?, only_attachments = ? WHERE folder_id = ? AND user_id = ?",
     )
     .bind(display_name)
+    .bind(only_flagged as i64)
+    .bind(only_attachments as i64)
     .bind(folder_id)
     .bind(user_id)
     .execute(&mut *tx)

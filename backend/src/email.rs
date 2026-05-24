@@ -279,6 +279,8 @@ pub async fn list_virtual_folders(
                     "folder_id": f.folder_id,
                     "display_name": f.display_name,
                     "sort_order": f.sort_order,
+                    "only_flagged": f.only_flagged,
+                    "only_attachments": f.only_attachments,
                     "rules": f.rules.iter().map(|r| json!({
                         "account_id": r.account_id,
                         "mailbox_pattern": r.mailbox_pattern,
@@ -304,6 +306,8 @@ pub struct VirtualFolderRuleBody {
 pub struct VirtualFolderBody {
     pub display_name: String,
     pub rules: Vec<VirtualFolderRuleBody>,
+    pub only_flagged: Option<bool>,
+    pub only_attachments: Option<bool>,
 }
 
 pub async fn create_virtual_folder(
@@ -320,6 +324,8 @@ pub async fn create_virtual_folder(
 
     if let Err(e) = email_db::create_virtual_folder(
         &state.db, &folder_id, &user.user_id, &body.display_name, &rules,
+        body.only_flagged.unwrap_or(false),
+        body.only_attachments.unwrap_or(false),
     ).await {
         eprintln!("[email] create_virtual_folder error: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
@@ -346,6 +352,8 @@ pub async fn update_virtual_folder(
 
     match email_db::update_virtual_folder(
         &state.db, &q.folder_id, &user.user_id, &body.display_name, &rules,
+        body.only_flagged.unwrap_or(false),
+        body.only_attachments.unwrap_or(false),
     ).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) if e.to_string() == "not found" => (StatusCode::NOT_FOUND, "not found").into_response(),
@@ -691,11 +699,14 @@ pub async fn send_email(
 
 #[derive(Deserialize)]
 pub struct SearchQuery {
-    pub q: String,
+    pub q: Option<String>,
     pub limit: Option<i64>,
     pub account_id: Option<String>,
     pub mailbox: Option<String>,
     pub folder_id: Option<String>,
+    pub addrs: Option<String>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
 }
 
 pub async fn search(
@@ -703,18 +714,60 @@ pub async fn search(
     user: CurrentUser,
     Query(q): Query<SearchQuery>,
 ) -> impl IntoResponse {
-    if q.q.trim().is_empty() {
+    let raw_q = q.q.as_deref().unwrap_or("").trim().to_owned();
+    let addrs: Vec<String> = q
+        .addrs
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            s.split(',')
+                .map(|a| a.trim().to_owned())
+                .filter(|a| !a.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let filters = email_db::SearchFilters {
+        addrs,
+        date_from: parse_date_start(q.date_from.as_deref()),
+        date_to: parse_date_end(q.date_to.as_deref()),
+    };
+
+    if raw_q.is_empty() && filters.is_empty() {
         return Json(json!({ "messages": [] })).into_response();
     }
-    let fts_query = state.search_mode.build_fts_query(&q.q);
+
+    let fts_query = if raw_q.is_empty() {
+        String::new()
+    } else {
+        state.search_mode.build_fts_query(&raw_q)
+    };
     let limit = q.limit.unwrap_or(50).min(200);
 
     let result = if let Some(folder_id) = q.folder_id.as_deref() {
-        email_db::search_messages_virtual(&state.db, &user.user_id, folder_id, &fts_query, limit).await
-    } else if let (Some(account_id), Some(mailbox)) = (q.account_id.as_deref(), q.mailbox.as_deref()) {
-        email_db::search_messages_mailbox(&state.db, &user.user_id, account_id, mailbox, &fts_query, limit).await
+        email_db::search_messages_virtual(
+            &state.db,
+            &user.user_id,
+            folder_id,
+            &fts_query,
+            &filters,
+            limit,
+        )
+        .await
+    } else if let (Some(account_id), Some(mailbox)) =
+        (q.account_id.as_deref(), q.mailbox.as_deref())
+    {
+        email_db::search_messages_mailbox(
+            &state.db,
+            &user.user_id,
+            account_id,
+            mailbox,
+            &fts_query,
+            &filters,
+            limit,
+        )
+        .await
     } else {
-        email_db::search_messages(&state.db, &user.user_id, &fts_query, limit).await
+        email_db::search_messages(&state.db, &user.user_id, &fts_query, &filters, limit).await
     };
 
     match result {
@@ -727,6 +780,26 @@ pub async fn search(
             (StatusCode::INTERNAL_SERVER_ERROR, "search error").into_response()
         }
     }
+}
+
+fn parse_date_start(s: Option<&str>) -> Option<i64> {
+    let s = s?.trim();
+    if s.is_empty() {
+        return None;
+    }
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .ok()
+        .map(|d| d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp())
+}
+
+fn parse_date_end(s: Option<&str>) -> Option<i64> {
+    let s = s?.trim();
+    if s.is_empty() {
+        return None;
+    }
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .ok()
+        .map(|d| d.and_hms_opt(23, 59, 59).unwrap().and_utc().timestamp())
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

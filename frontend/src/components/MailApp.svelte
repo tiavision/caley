@@ -40,6 +40,8 @@
     folder_id: string;
     display_name: string;
     sort_order: number;
+    only_flagged: boolean;
+    only_attachments: boolean;
     rules: { account_id: string | null; mailbox_pattern: string | null }[];
   }
 
@@ -90,6 +92,21 @@
   let searchQuery = '';
   let searching = false;
   let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+  // Search filter state
+  let filterAddrOpen = false;
+  let filterDateOpen = false;
+  let filterAddrs: string[] = [];
+  let filterDateFrom = '';
+  let filterDateTo = '';
+  let addrFilterInput = '';
+  let contactsLoaded = false;
+  let contactSuggestions: { name: string; email: string }[] = [];
+  let addrFilterEl: HTMLDivElement;
+  let dateFilterEl: HTMLDivElement;
+  $: filterAddrActive = filterAddrs.length > 0;
+  $: filterDateActive = filterDateFrom !== '' || filterDateTo !== '';
+  $: filterActive = filterAddrActive || filterDateActive;
 
   let selectedMessage: Message | null = null;
   let messageLoading = false;
@@ -142,6 +159,8 @@
   let folderName = '';
   let folderSaving = false;
   let folderSelectedMailboxes: Set<string> = new Set();
+  let folderOnlyFlagged = false;
+  let folderOnlyAttachments = false;
   let editingFolder: VirtualFolder | null = null;
 
   let displayName = '';
@@ -376,25 +395,36 @@
   function onSearchInput() {
     if (searchDebounce) clearTimeout(searchDebounce);
     const q = searchQuery.trim();
-    if (q === '') {
-      clearSearch();
+    if (q === '' && !filterActive) {
+      clearAllFilters();
       return;
     }
-    searchDebounce = setTimeout(() => runSearch(q), 250);
+    searchDebounce = setTimeout(() => runSearch(), 250);
   }
 
-  async function runSearch(q: string) {
+  async function runSearch() {
+    const q = searchQuery.trim();
+    if (q === '' && !filterActive) {
+      await loadMessages();
+      return;
+    }
     let scope = '';
     if (selectedFolderId) {
       scope = `&folder_id=${encodeURIComponent(selectedFolderId)}`;
     } else if (selectedAccountId && selectedMailbox) {
       scope = `&account_id=${encodeURIComponent(selectedAccountId)}&mailbox=${encodeURIComponent(selectedMailbox)}`;
     }
+    let filterParams = '';
+    if (filterAddrs.length > 0) {
+      filterParams += `&addrs=${encodeURIComponent(filterAddrs.join(','))}`;
+    }
+    if (filterDateFrom) filterParams += `&date_from=${encodeURIComponent(filterDateFrom)}`;
+    if (filterDateTo) filterParams += `&date_to=${encodeURIComponent(filterDateTo)}`;
     searching = true;
     selectedMessage = null;
     messagesLoading = true;
     try {
-      const r = await fetch(`/api/email/search?q=${encodeURIComponent(q)}${scope}`);
+      const r = await fetch(`/api/email/search?q=${encodeURIComponent(q)}${scope}${filterParams}`);
       if (r.ok) {
         const data = await r.json();
         messages = data.messages || [];
@@ -403,11 +433,69 @@
     messagesLoading = false;
   }
 
-  async function clearSearch() {
+  async function clearAllFilters() {
     if (searchDebounce) { clearTimeout(searchDebounce); searchDebounce = null; }
     searchQuery = '';
     searching = false;
+    filterAddrs = [];
+    filterDateFrom = '';
+    filterDateTo = '';
+    filterAddrOpen = false;
+    filterDateOpen = false;
     await loadMessages();
+  }
+
+  async function loadContactSuggestions() {
+    if (contactsLoaded) return;
+    try {
+      const r = await fetch('/api/contacts');
+      if (r.ok) {
+        const data = await r.json();
+        const seen = new Set<string>();
+        const suggestions: { name: string; email: string }[] = [];
+        for (const c of (data.contacts || [])) {
+          const emails: { value: string; type_label: string }[] = c.emails || [];
+          for (const e of emails) {
+            if (e.value && !seen.has(e.value.toLowerCase())) {
+              seen.add(e.value.toLowerCase());
+              suggestions.push({ name: c.fn_name || '', email: e.value });
+            }
+          }
+        }
+        contactSuggestions = suggestions;
+        contactsLoaded = true;
+      }
+    } catch {}
+  }
+
+  function toggleAddrFilter() {
+    filterDateOpen = false;
+    filterAddrOpen = !filterAddrOpen;
+    if (filterAddrOpen) {
+      loadContactSuggestions();
+      setTimeout(() => window.addEventListener('click', handleFilterOutsideClick), 0);
+    } else {
+      window.removeEventListener('click', handleFilterOutsideClick);
+    }
+  }
+
+  function toggleDateFilter() {
+    filterAddrOpen = false;
+    filterDateOpen = !filterDateOpen;
+    if (filterDateOpen) {
+      setTimeout(() => window.addEventListener('click', handleFilterOutsideClick), 0);
+    } else {
+      window.removeEventListener('click', handleFilterOutsideClick);
+    }
+  }
+
+  function handleFilterOutsideClick(e: MouseEvent) {
+    const target = e.target as Node;
+    if (!addrFilterEl?.contains(target) && !dateFilterEl?.contains(target)) {
+      filterAddrOpen = false;
+      filterDateOpen = false;
+      window.removeEventListener('click', handleFilterOutsideClick);
+    }
   }
 
   async function loadMessages() {
@@ -843,29 +931,44 @@
     editingFolder = null;
     folderName = '';
     folderSelectedMailboxes = new Set();
+    folderOnlyFlagged = false;
+    folderOnlyAttachments = false;
     folderDialog?.showModal();
   }
 
   function openFolderEdit(folder: VirtualFolder) {
     editingFolder = folder;
     folderName = folder.display_name;
-    folderSelectedMailboxes = new Set(
-      folder.rules.map(r => `${r.account_id ?? ''}::${r.mailbox_pattern ?? ''}`)
-    );
+    folderOnlyFlagged = folder.only_flagged ?? false;
+    folderOnlyAttachments = folder.only_attachments ?? false;
+    // A single rule with both fields null means "all mailboxes" — show nothing checked
+    const isMatchAll = folder.rules.length === 1 &&
+      folder.rules[0].account_id === null &&
+      folder.rules[0].mailbox_pattern === null;
+    folderSelectedMailboxes = isMatchAll
+      ? new Set()
+      : new Set(folder.rules.map(r => `${r.account_id ?? ''}::${r.mailbox_pattern ?? ''}`));
     folderDialog?.showModal();
   }
 
   async function saveVirtualFolder() {
     folderSaving = true;
     try {
-      const rules = [...folderSelectedMailboxes].map(key => {
-        const sep = key.indexOf('::');
-        return {
-          account_id: key.slice(0, sep) || null,
-          mailbox_pattern: key.slice(sep + 2) || null,
-        };
+      const rules = folderSelectedMailboxes.size === 0
+        ? [{ account_id: null, mailbox_pattern: null }]
+        : [...folderSelectedMailboxes].map(key => {
+            const sep = key.indexOf('::');
+            return {
+              account_id: key.slice(0, sep) || null,
+              mailbox_pattern: key.slice(sep + 2) || null,
+            };
+          });
+      const body = JSON.stringify({
+        display_name: folderName || tl('mail_folderNamePlaceholder'),
+        rules,
+        only_flagged: folderOnlyFlagged,
+        only_attachments: folderOnlyAttachments,
       });
-      const body = JSON.stringify({ display_name: folderName || tl('mail_folderNamePlaceholder'), rules });
       if (editingFolder) {
         await fetch(`/api/email/folder?folder_id=${encodeURIComponent(editingFolder.folder_id)}`, {
           method: 'PUT',
@@ -1204,13 +1307,107 @@
           <h2>{tl('nav_mail')}</h2>
         {/if}
         {#if selectedFolderId || selectedMailbox}
-          <input
-            class="search-input"
-            type="search"
-            placeholder={tl('mail_searchPlaceholder')}
-            bind:value={searchQuery}
-            on:input={onSearchInput}
-          />
+          <div class="search-row">
+            <input
+              class="search-input"
+              type="search"
+              placeholder={tl('mail_searchPlaceholder')}
+              bind:value={searchQuery}
+              on:input={onSearchInput}
+            />
+            <div class="search-filter-wrap" bind:this={addrFilterEl}>
+              <button
+                class="filter-icon-btn"
+                class:active={filterAddrActive}
+                title={tl('mail_filterBySender')}
+                on:click|stopPropagation={toggleAddrFilter}
+                aria-pressed={filterAddrActive}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+              </button>
+              {#if filterAddrOpen}
+                <div class="filter-popover" role="dialog" aria-label={tl('mail_filterBySender')}>
+                  <input
+                    class="filter-popover-input"
+                    type="search"
+                    placeholder={tl('mail_filterAddrPlaceholder')}
+                    bind:value={addrFilterInput}
+                  />
+                  {#if filterAddrs.length > 0}
+                    <div class="filter-chips">
+                      {#each filterAddrs as addr}
+                        <span class="filter-chip">
+                          {addr}
+                          <button class="chip-remove" on:click={() => { filterAddrs = filterAddrs.filter(a => a !== addr); runSearch(); }}>×</button>
+                        </span>
+                      {/each}
+                    </div>
+                  {/if}
+                  <div class="filter-suggestions">
+                    {#each contactSuggestions.filter(c =>
+                      !addrFilterInput ||
+                      c.email.toLowerCase().includes(addrFilterInput.toLowerCase()) ||
+                      c.name.toLowerCase().includes(addrFilterInput.toLowerCase())
+                    ).slice(0, 8) as s}
+                      <label class="filter-suggestion-row">
+                        <input
+                          type="checkbox"
+                          checked={filterAddrs.includes(s.email)}
+                          on:change={(e) => {
+                            if ((e.target as HTMLInputElement).checked) {
+                              if (!filterAddrs.includes(s.email)) filterAddrs = [...filterAddrs, s.email];
+                            } else {
+                              filterAddrs = filterAddrs.filter(a => a !== s.email);
+                            }
+                            runSearch();
+                          }}
+                        />
+                        <span class="suggestion-name">{s.name || s.email}</span>
+                        {#if s.name}<span class="suggestion-email">{s.email}</span>{/if}
+                      </label>
+                    {/each}
+                    {#if addrFilterInput && !contactSuggestions.some(c => c.email.toLowerCase() === addrFilterInput.toLowerCase())}
+                      <button class="filter-add-custom" on:click={() => {
+                        const v = addrFilterInput.trim();
+                        if (v && !filterAddrs.includes(v)) { filterAddrs = [...filterAddrs, v]; runSearch(); }
+                        addrFilterInput = '';
+                      }}>
+                        + {tl('mail_filterAddAddr')}: {addrFilterInput}
+                      </button>
+                    {/if}
+                  </div>
+                </div>
+              {/if}
+            </div>
+            <div class="search-filter-wrap" bind:this={dateFilterEl}>
+              <button
+                class="filter-icon-btn"
+                class:active={filterDateActive}
+                title={tl('mail_filterByDate')}
+                on:click|stopPropagation={toggleDateFilter}
+                aria-pressed={filterDateActive}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              </button>
+              {#if filterDateOpen}
+                <div class="filter-popover filter-popover-date" role="dialog" aria-label={tl('mail_filterByDate')}>
+                  <label class="filter-date-label">
+                    {tl('mail_filterDateFrom')}
+                    <input type="date" bind:value={filterDateFrom} on:change={runSearch} />
+                  </label>
+                  <label class="filter-date-label">
+                    {tl('mail_filterDateTo')}
+                    <input type="date" bind:value={filterDateTo} on:change={runSearch} />
+                  </label>
+                  {#if filterDateActive}
+                    <button class="filter-clear-btn" on:click={() => { filterDateFrom = ''; filterDateTo = ''; runSearch(); }}>
+                      {tl('mail_filterClearDate')}
+                    </button>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          </div>
         {/if}
         {#if searching && !messagesLoading}
           <span class="count">{messages.length === 1 ? tl('mail_result1') : tl('mail_resultsN', { n: messages.length })}</span>
@@ -1223,7 +1420,7 @@
         {:else if messages.length === 0}
           <div class="empty">
             {#if searching}
-              {tl('mail_noResults', { q: searchQuery })}
+              {searchQuery.trim() ? tl('mail_noResults', { q: searchQuery }) : tl('mail_noResultsFiltered')}
             {:else if accounts.length === 0}
               {tl('mail_noAccounts')}
             {:else if !selectedAccountId && !selectedFolderId}
@@ -1830,9 +2027,20 @@
           <p class="muted">{tl('mail_noEmailAccounts')}</p>
         {/if}
       </div>
+      <p class="folder-hint">{tl('mail_allMailboxesHint')}</p>
+      <div class="folder-filters">
+        <label>
+          <input type="checkbox" bind:checked={folderOnlyFlagged} />
+          {tl('mail_onlyFlagged')}
+        </label>
+        <label>
+          <input type="checkbox" bind:checked={folderOnlyAttachments} />
+          {tl('mail_onlyWithAttachments')}
+        </label>
+      </div>
       <footer>
         <button type="button" class="secondary outline" on:click={() => folderDialog?.close()}>{tl('mail_cancel')}</button>
-        <button type="submit" class="primary" disabled={folderSaving || folderSelectedMailboxes.size === 0}>{editingFolder ? tl('mail_save') : tl('mail_create')}</button>
+        <button type="submit" class="primary" disabled={folderSaving}>{editingFolder ? tl('mail_save') : tl('mail_create')}</button>
       </footer>
     </form>
   </article>
@@ -1876,6 +2084,24 @@
     font-size: 0.875rem;
     cursor: pointer;
     margin-bottom: 0.15rem;
+  }
+  .folder-hint {
+    font-size: 0.8rem;
+    color: var(--pico-muted-color);
+    margin: 0.25rem 0 0.75rem;
+  }
+  .folder-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+  }
+  .folder-filters label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    cursor: pointer;
   }
   .folder-account-group label input[type="checkbox"] {
     margin: 0;
@@ -2039,7 +2265,7 @@
   .message-list {
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow: clip;
     min-height: 0;
     margin: 0;
   }
@@ -2074,6 +2300,204 @@
     border: 1px solid var(--pico-muted-border-color, #ddd);
     border-radius: var(--pico-border-radius, 4px);
     background: var(--pico-form-element-background-color, transparent);
+  }
+
+  .search-row {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    width: 100%;
+  }
+
+  .search-row .search-input {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+  }
+
+  .search-filter-wrap {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .filter-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--pico-border-radius, 4px);
+    cursor: pointer;
+    color: var(--pico-muted-color, #888);
+    transition: color 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+  }
+
+  .filter-icon-btn:hover {
+    color: var(--pico-color, inherit);
+    border-color: var(--pico-muted-border-color, #ddd);
+  }
+
+  .filter-icon-btn.active {
+    color: var(--pico-primary, #1565c0);
+    border-color: var(--pico-primary, #1565c0);
+  }
+
+  .filter-popover {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 100;
+    background: var(--pico-background-color, #fff);
+    border: 1px solid var(--pico-muted-border-color, #ddd);
+    border-radius: var(--pico-border-radius, 6px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    padding: 0.5rem;
+    min-width: 240px;
+    max-width: 300px;
+  }
+
+  .filter-popover-date {
+    min-width: 180px;
+    max-width: 220px;
+  }
+
+  .filter-popover-input {
+    width: 100%;
+    margin: 0 0 0.4rem;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.82rem;
+    border: 1px solid var(--pico-muted-border-color, #ddd);
+    border-radius: var(--pico-border-radius, 4px);
+    background: var(--pico-form-element-background-color, transparent);
+    box-sizing: border-box;
+  }
+
+  .filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.1rem 0.35rem;
+    border-radius: 999px;
+    background: var(--pico-primary-background, #e3f0fb);
+    color: var(--pico-primary, #1565c0);
+    font-size: 0.75rem;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chip-remove {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    font-size: 0.9rem;
+    color: inherit;
+    opacity: 0.6;
+    flex-shrink: 0;
+  }
+
+  .chip-remove:hover {
+    opacity: 1;
+  }
+
+  .filter-suggestions {
+    max-height: 180px;
+    overflow-y: auto;
+  }
+
+  .filter-suggestion-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.25rem 0.3rem;
+    border-radius: var(--pico-border-radius, 4px);
+    cursor: pointer;
+    font-size: 0.82rem;
+    margin: 0;
+  }
+
+  .filter-suggestion-row:hover {
+    background: var(--pico-muted-border-color, #f5f5f5);
+  }
+
+  .suggestion-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .suggestion-email {
+    color: var(--pico-muted-color, #888);
+    font-size: 0.75rem;
+    flex-shrink: 0;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .filter-add-custom {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.25rem 0.3rem;
+    font-size: 0.82rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--pico-primary, #1565c0);
+    border-radius: var(--pico-border-radius, 4px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .filter-add-custom:hover {
+    background: var(--pico-muted-border-color, #f5f5f5);
+  }
+
+  .filter-date-label {
+    display: flex;
+    flex-direction: column;
+    font-size: 0.8rem;
+    gap: 0.15rem;
+    margin-bottom: 0.5rem;
+    color: var(--pico-muted-color, #666);
+  }
+
+  .filter-date-label input[type='date'] {
+    font-size: 0.82rem;
+    padding: 0.25rem 0.4rem;
+    border: 1px solid var(--pico-muted-border-color, #ddd);
+    border-radius: var(--pico-border-radius, 4px);
+    background: var(--pico-form-element-background-color, transparent);
+    color: var(--pico-color, inherit);
+    margin: 0;
+    height: auto;
+  }
+
+  .filter-clear-btn {
+    font-size: 0.78rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--pico-muted-color, #888);
+    padding: 0;
+    text-decoration: underline;
   }
 
   .count {
