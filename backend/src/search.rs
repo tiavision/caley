@@ -49,11 +49,14 @@ impl SearchMode {
                 .collect::<Vec<_>>()
                 .join(" "),
             Self::Stemmed(algo) => stem_query(q, *algo),
-            Self::Default => q
-                .split_whitespace()
-                .map(|t| format!("\"{}\"*", t.replace('"', "\"\"")))
-                .collect::<Vec<_>>()
-                .join(" "),
+            Self::Default => {
+                let normalized = q.replace(['@', '-', '.'], " ");
+                normalized
+                    .split_whitespace()
+                    .map(|t| format!("\"{}\"*", t.replace('"', "\"\"")))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }
         }
     }
 }
@@ -88,7 +91,8 @@ fn stem_tokens(text: &str, algo: Algorithm) -> String {
 
 fn stem_query(q: &str, algo: Algorithm) -> String {
     let stemmer = Stemmer::create(algo);
-    q.split_whitespace()
+    q.split(|c: char| !c.is_alphanumeric())
+        .filter(|s| !s.is_empty())
         .map(|t| {
             let stemmed = stemmer.stem(&t.to_lowercase()).into_owned();
             format!("\"{}\"*", stemmed.replace('"', "\"\""))

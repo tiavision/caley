@@ -1417,6 +1417,51 @@ pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::
         )
         .execute(pool)
         .await?;
+
+        sqlx::query("DROP TRIGGER IF EXISTS messages_fts_ai").execute(pool).await?;
+        sqlx::query("DROP TRIGGER IF EXISTS messages_fts_ad").execute(pool).await?;
+        sqlx::query("DROP TRIGGER IF EXISTS messages_fts_au").execute(pool).await?;
+        sqlx::query("DROP TABLE IF EXISTS messages_fts").execute(pool).await?;
+
+        sqlx::query(&format!(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+                subject_idx, body_idx, from_idx, to_idx,
+                content='cached_messages',
+                content_rowid='rowid',
+                tokenize='{tokenizer}'
+            )"
+        ))
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON cached_messages BEGIN
+                INSERT INTO messages_fts(rowid, subject_idx, body_idx, from_idx, to_idx)
+                VALUES (new.rowid, new.subject_idx, new.body_idx, new.from_idx, new.to_idx);
+            END",
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON cached_messages BEGIN
+                INSERT INTO messages_fts(messages_fts, rowid, subject_idx, body_idx, from_idx, to_idx)
+                VALUES ('delete', old.rowid, old.subject_idx, old.body_idx, old.from_idx, old.to_idx);
+            END",
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON cached_messages BEGIN
+                INSERT INTO messages_fts(messages_fts, rowid, subject_idx, body_idx, from_idx, to_idx)
+                VALUES ('delete', old.rowid, old.subject_idx, old.body_idx, old.from_idx, old.to_idx);
+                INSERT INTO messages_fts(rowid, subject_idx, body_idx, from_idx, to_idx)
+                VALUES (new.rowid, new.subject_idx, new.body_idx, new.from_idx, new.to_idx);
+            END",
+        )
+        .execute(pool)
+        .await?;
     }
 
     // Re-compute all _idx columns with the new mode.
@@ -1442,6 +1487,43 @@ pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::
     }
 
     sqlx::query("INSERT INTO events_fts(events_fts) VALUES('rebuild')")
+        .execute(pool)
+        .await?;
+
+    let msg_rows = sqlx::query(
+        "SELECT rowid, subject, from_addr, to_addrs, body_text FROM cached_messages",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for row in &msg_rows {
+        let rowid: i64 = row.get(0);
+        let subject: String = row.get::<Option<String>, _>(1).unwrap_or_default();
+        let from_addr: String = row.get::<Option<String>, _>(2).unwrap_or_default();
+        let to_addrs_json: Option<String> = row.get(3);
+        let body_text: String = row.get::<Option<String>, _>(4).unwrap_or_default();
+
+        let to_plain = to_addrs_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str::<Vec<String>>(j).ok())
+            .map(|v| v.join(" "))
+            .unwrap_or_default();
+
+        sqlx::query(
+            "UPDATE cached_messages
+             SET subject_idx = ?, from_idx = ?, to_idx = ?, body_idx = ?
+             WHERE rowid = ?",
+        )
+        .bind(mode.normalize_text(&subject))
+        .bind(mode.normalize_text(&from_addr))
+        .bind(mode.normalize_text(&to_plain))
+        .bind(mode.normalize_text(&body_text))
+        .bind(rowid)
+        .execute(pool)
+        .await?;
+    }
+
+    sqlx::query("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
         .execute(pool)
         .await?;
 

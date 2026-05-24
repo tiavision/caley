@@ -361,12 +361,13 @@ pub async fn upsert_message_header(
     h: &MessageHeader,
     subject_idx: Option<&str>,
     from_idx: Option<&str>,
+    to_idx: Option<&str>,
 ) -> Result<()> {
     sqlx::query(
         "INSERT INTO cached_messages
             (account_id, mailbox, uid, message_id, thread_id, from_addr, to_addrs, cc_addrs,
-             subject, sent_at, flags, has_attachments, size, subject_idx, from_idx)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             subject, sent_at, flags, has_attachments, size, subject_idx, from_idx, to_idx)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(account_id, mailbox, uid) DO UPDATE SET
             message_id      = excluded.message_id,
             thread_id       = excluded.thread_id,
@@ -379,7 +380,8 @@ pub async fn upsert_message_header(
             has_attachments = excluded.has_attachments,
             size            = excluded.size,
             subject_idx     = excluded.subject_idx,
-            from_idx        = excluded.from_idx",
+            from_idx        = excluded.from_idx,
+            to_idx          = excluded.to_idx",
     )
     .bind(account_id)
     .bind(mailbox)
@@ -396,6 +398,7 @@ pub async fn upsert_message_header(
     .bind(h.size)
     .bind(subject_idx)
     .bind(from_idx)
+    .bind(to_idx)
     .execute(pool)
     .await?;
     Ok(())
@@ -932,7 +935,7 @@ pub async fn search_messages(
          JOIN imap_accounts a ON a.account_id = m.account_id
          WHERE messages_fts MATCH ?
            AND a.user_id = ?
-         ORDER BY rank
+         ORDER BY COALESCE(m.sent_at, 0) DESC
          LIMIT ?",
     )
     .bind(fts_query)
@@ -961,7 +964,7 @@ pub async fn search_messages_mailbox(
            AND a.user_id = ?
            AND m.account_id = ?
            AND m.mailbox = ?
-         ORDER BY rank
+         ORDER BY COALESCE(m.sent_at, 0) DESC
          LIMIT ?",
     )
     .bind(fts_query)
@@ -992,7 +995,7 @@ pub async fn search_messages_virtual(
              AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
          WHERE messages_fts MATCH ?
            AND a.user_id = ?
-         ORDER BY rank
+         ORDER BY COALESCE(m.sent_at, 0) DESC
          LIMIT ?",
     )
     .bind(folder_id)

@@ -370,10 +370,14 @@ impl EmailSyncManager {
             for h in &headers {
                 let subject_idx = h.subject.as_deref().map(|s| self.search_mode.normalize_text(s));
                 let from_idx = h.from_addr.as_deref().map(|s| self.search_mode.normalize_text(s));
+                let to_idx = h.to_addrs.as_deref()
+                    .and_then(|json| serde_json::from_str::<Vec<String>>(json).ok())
+                    .map(|addrs| self.search_mode.normalize_text(&addrs.join(" ")));
                 email_db::upsert_message_header(
                     &self.db, account_id, mailbox, h,
                     subject_idx.as_deref(),
                     from_idx.as_deref(),
+                    to_idx.as_deref(),
                 ).await?;
             }
             if !headers.is_empty() {
