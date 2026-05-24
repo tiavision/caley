@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use anyhow::Context;
 use axum::{
     extract::{Query, State},
     http::{header, StatusCode},
@@ -778,6 +779,26 @@ pub struct ProxyImageQuery {
     pub cid: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AllowedImage {
+    Png,
+    Jpeg,
+    Gif,
+    WebP,
+    Avif,
+}
+
+fn detect_allowed_image(data: &[u8]) -> Option<AllowedImage> {
+    match infer::get(data).map(|t| t.mime_type()) {
+        Some("image/png") => Some(AllowedImage::Png),
+        Some("image/jpeg") => Some(AllowedImage::Jpeg),
+        Some("image/gif") => Some(AllowedImage::Gif),
+        Some("image/webp") => Some(AllowedImage::WebP),
+        Some("image/avif") => Some(AllowedImage::Avif),
+        _ => None,
+    }
+}
+
 pub async fn proxy_image(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -850,7 +871,7 @@ pub async fn proxy_image(
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .user_agent(version::USER_AGENT)
-        .redirect(reqwest::redirect::Policy::none())
+        .redirect(reqwest::redirect::Policy::default())
         .build()
     {
         Ok(c) => c,
@@ -873,16 +894,18 @@ pub async fn proxy_image(
         .unwrap_or("")
         .to_ascii_lowercase();
 
-    if !ct.starts_with("image/") || ct.contains("svg") {
-        return transparent_pixel();
-    }
-
     let ct_owned = ct.clone();
     let bytes = match resp.bytes().await {
         Ok(b) => b,
-        Err(e) => {
+        Err(_) => {
             return transparent_pixel();
         }
+    };
+
+    let kind = detect_allowed_image(&bytes);
+    let _ = match kind {
+        Some(k) => k,
+        None => return transparent_pixel()
     };
 
     (
