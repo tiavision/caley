@@ -449,10 +449,13 @@ pub fn sanitize_email_html(html: &str) -> String {
     tag_attrs.insert("col", ["span", "width"].iter().copied().collect());
     tag_attrs.insert("colgroup", ["span"].iter().copied().collect());
 
-    // `cid` must be whitelisted here: ammonia strips URL attributes whose scheme
-    // isn't allowed during DOM cleaning, *before* the attribute_filter below runs.
-    // Without it the `cid:` src is dropped and rewrite_cid_urls has nothing to fix.
-    let url_schemes: HashSet<&str> = ["http", "https", "mailto", "cid"].iter().copied().collect();
+    // `cid`/`data` must be whitelisted here: ammonia strips URL attributes whose
+    // scheme isn't allowed during DOM cleaning, *before* the attribute_filter below
+    // runs. Without `cid` the inline-image src is dropped and rewrite_cid_urls has
+    // nothing to fix; without `data` the data:image/* src is dropped too. The filter
+    // below is what actually constrains where each scheme is permitted.
+    let url_schemes: HashSet<&str> =
+        ["http", "https", "mailto", "cid", "data"].iter().copied().collect();
     let generic_attrs: HashSet<&str> = ["style", "class", "align", "dir"]
         .iter()
         .copied()
@@ -472,8 +475,14 @@ pub fn sanitize_email_html(html: &str) -> String {
                         let encoded: String =
                             url::form_urlencoded::byte_serialize(value.as_bytes()).collect();
                         Some(Cow::Owned(format!("/api/email/proxy-image?url={encoded}")))
-                    } else if value.starts_with("data:image/") {
-                        Some(Cow::Borrowed(value))
+                    } else if let Some(rest) = value.strip_prefix("data:image/") {
+                        // Inline data images are fine, except SVG: it can carry script,
+                        // matching the proxy_image endpoint which also refuses SVG.
+                        if rest.trim_start().to_ascii_lowercase().starts_with("svg") {
+                            None
+                        } else {
+                            Some(Cow::Borrowed(value))
+                        }
                     } else if value.starts_with("cid:") {
                         // Preserved as-is; rewrite_cid_urls rewrites these after sanitization.
                         Some(Cow::Borrowed(value))
@@ -489,7 +498,17 @@ pub fn sanitize_email_html(html: &str) -> String {
                         Some(Cow::Owned(filtered))
                     }
                 }
-                _ => Some(Cow::Borrowed(value)),
+                _ => {
+                    // `data:` is only legitimate on <img src> (handled above). Strip it
+                    // from every other attribute (notably <a href>) so a data:text/html
+                    // payload can't smuggle markup/script past sanitization. Trim + lower
+                    // because Url::parse — and browsers — tolerate leading space and case.
+                    if value.trim_start().to_ascii_lowercase().starts_with("data:") {
+                        None
+                    } else {
+                        Some(Cow::Borrowed(value))
+                    }
+                }
             }
         })
         .clean(html)
@@ -1344,6 +1363,47 @@ mod tests {
         assert!(
             !rewritten.contains("src=\"cid:"),
             "no raw cid: src should remain after rewrite: {rewritten}"
+        );
+    }
+
+    #[test]
+    fn test_data_image_src_preserved() {
+        let html = "<img src=\"data:image/png;base64,iVBORw0KGgo=\">";
+        let result = sanitize_email_html(html);
+        assert!(
+            result.contains("data:image/png;base64,iVBORw0KGgo="),
+            "data:image/png src should survive sanitization: {result}"
+        );
+    }
+
+    #[test]
+    fn test_data_image_svg_src_dropped() {
+        let html = "<img src=\"data:image/svg+xml,<svg onload=alert(1)></svg>\">";
+        let result = sanitize_email_html(html);
+        assert!(
+            !result.contains("data:image/svg"),
+            "data:image/svg src must be dropped (script vector): {result}"
+        );
+    }
+
+    #[test]
+    fn test_data_href_dropped() {
+        let html = "<a href=\"data:text/html,<script>alert(1)</script>\">click</a>";
+        let result = sanitize_email_html(html);
+        assert!(
+            !result.contains("data:text/html"),
+            "data: href must be stripped to prevent XSS: {result}"
+        );
+        assert!(result.contains("click"), "link text should remain: {result}");
+    }
+
+    #[test]
+    fn test_data_href_dropped_with_leading_space_and_case() {
+        let html = "<a href=\" DATA:text/html,<script>alert(1)</script>\">x</a>";
+        let result = sanitize_email_html(html);
+        assert!(
+            !result.to_ascii_lowercase().contains("data:text/html"),
+            "data: href must be stripped regardless of case/leading space: {result}"
         );
     }
 
