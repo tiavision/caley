@@ -406,14 +406,14 @@ pub fn sanitize_email_html(html: &str) -> String {
         "a", "abbr", "b", "blockquote", "br", "cite", "code", "col", "colgroup",
         "del", "div", "dl", "dt", "dd", "em", "font", "h1", "h2", "h3", "h4",
         "h5", "h6", "hr", "i", "img", "ins", "li", "ol", "p", "pre", "s",
-        "small", "span", "strike", "strong", "sub", "sup", "table", "tbody",
-        "td", "tfoot", "th", "thead", "tr", "u", "ul",
+        "small", "span", "strike", "strong", "sub", "sup", "style",
+        "table", "tbody", "td", "tfoot", "th", "thead", "tr", "u", "ul",
     ]
     .iter()
     .copied()
     .collect();
 
-    let clean_content: HashSet<&str> = ["script", "style", "head", "noscript"]
+    let clean_content: HashSet<&str> = ["script", "head", "noscript", "title"]
         .iter()
         .copied()
         .collect();
@@ -492,7 +492,218 @@ pub fn sanitize_email_html(html: &str) -> String {
         .clean(html)
         .to_string();
 
-    rewrite_links(&clean)
+    let with_safe_styles = sanitize_style_elements(&clean);
+    rewrite_links(&with_safe_styles)
+}
+
+/// Sanitizes CSS content inside `<style>` elements, preserving safe layout rules
+/// while blocking all CSS-based attack vectors (url(), @import, expression, etc.).
+fn sanitize_style_content(css: &str) -> String {
+    let mut result = String::with_capacity(css.len());
+    let bytes = css.as_bytes();
+    let len = bytes.len();
+    let mut pos = 0;
+    let mut rule_start = 0;
+
+    while pos < len {
+        if bytes[pos] == b'/' && pos + 1 < len && bytes[pos + 1] == b'*' {
+            if let Some(end_offset) = css[pos + 2..].find("*/") {
+                pos = pos + 2 + end_offset + 2;
+            } else {
+                break;
+            }
+            continue;
+        }
+
+        let lower_from = css[pos..].to_ascii_lowercase();
+        let lower_trimmed = lower_from.trim_start();
+
+        if lower_trimmed.starts_with("@import")
+            || lower_trimmed.starts_with("@font-face")
+            || lower_trimmed.starts_with("@keyframes")
+            || lower_trimmed.starts_with("@-webkit-keyframes")
+            || lower_trimmed.starts_with("@-moz-keyframes")
+            || lower_trimmed.starts_with("@-o-keyframes")
+            || lower_trimmed.starts_with("@-ms-keyframes")
+        {
+            pos = skip_at_rule(css, pos);
+            rule_start = pos;
+            continue;
+        }
+
+        if lower_trimmed.starts_with("@media")
+            || lower_trimmed.starts_with("@supports")
+        {
+            pos = skip_at_rule(css, pos);
+            rule_start = pos;
+            continue;
+        }
+
+        if bytes[pos] == b'{' {
+            pos += 1;
+            let close = find_matching_brace(css, pos);
+            let selector = css[rule_start..pos - 1].trim();
+            let declarations = &css[pos..close];
+            let safe_decls = sanitize_declarations(declarations);
+            if !safe_decls.is_empty() {
+                result.push_str(selector);
+                result.push_str(" { ");
+                result.push_str(&safe_decls);
+                result.push_str(" } ");
+            }
+            pos = close + 1;
+            rule_start = pos;
+            continue;
+        }
+
+        pos += utf8_char_width(bytes[pos]);
+    }
+
+    if rule_start < len {
+        let trailing = css[rule_start..].trim();
+        if !trailing.is_empty() && !trailing.starts_with('@') && !trailing.contains('{') {
+            let safe = sanitize_declarations(trailing);
+            if !safe.is_empty() {
+                result.push_str(&safe);
+            }
+        }
+    }
+
+    result.trim_end().to_owned()
+}
+
+fn utf8_char_width(b: u8) -> usize {
+    match b {
+        0..=0x7F => 1,
+        0xC0..=0xDF => 2,
+        0xE0..=0xEF => 3,
+        0xF0..=0xF7 => 4,
+        _ => 1,
+    }
+}
+
+fn skip_at_rule(css: &str, start: usize) -> usize {
+    let mut pos = start;
+    let bytes = css.as_bytes();
+    let len = bytes.len();
+    while pos < len && bytes[pos] != b'{' && bytes[pos] != b';' {
+        pos += 1;
+    }
+    if pos >= len {
+        return pos;
+    }
+    if bytes[pos] == b';' {
+        return pos + 1;
+    }
+    pos += 1;
+    let mut depth: usize = 1;
+    while pos < len && depth > 0 {
+        if bytes[pos] == b'{' {
+            depth += 1;
+        } else if bytes[pos] == b'}' {
+            depth -= 1;
+        }
+        pos += 1;
+    }
+    pos
+}
+
+fn find_matching_brace(css: &str, after_open: usize) -> usize {
+    let mut depth: usize = 1;
+    let bytes = css.as_bytes();
+    let len = bytes.len();
+    let mut pos = after_open;
+    while pos < len && depth > 0 {
+        if bytes[pos] == b'{' {
+            depth += 1;
+        } else if bytes[pos] == b'}' {
+            depth -= 1;
+        }
+        if depth > 0 {
+            pos += 1;
+        }
+    }
+    pos
+}
+
+fn sanitize_declarations(declarations: &str) -> String {
+    declarations
+        .split(';')
+        .filter_map(|decl| {
+            let trimmed = decl.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+
+            let lower = trimmed.to_ascii_lowercase();
+
+            if lower.contains("expression(") {
+                return None;
+            }
+            if lower.starts_with("-moz-binding") || lower.starts_with("behavior") {
+                return None;
+            }
+            if lower.starts_with("position:") {
+                let value = lower[9..].trim();
+                if value.starts_with("fixed") {
+                    return None;
+                }
+            }
+
+            if contains_url_function(&lower) {
+                return None;
+            }
+
+            Some(trimmed.to_owned())
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Rewrites `<style>` element content through `sanitize_style_content()`.
+fn sanitize_style_elements(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut search_from = 0;
+
+    while search_from < html.len() {
+        let open_start = match html[search_from..].find("<style") {
+            Some(i) => search_from + i,
+            None => {
+                result.push_str(&html[search_from..]);
+                break;
+            }
+        };
+
+        result.push_str(&html[search_from..open_start]);
+
+        let tag_search_from = open_start + 6;
+        let open_end = match html[tag_search_from..].find('>') {
+            Some(i) => tag_search_from + i + 1,
+            None => {
+                result.push_str(&html[open_start..]);
+                break;
+            }
+        };
+
+        let close_tag = match html[open_end..].find("</style>") {
+            Some(i) => open_end + i,
+            None => {
+                result.push_str(&html[open_start..]);
+                break;
+            }
+        };
+
+        let css_content = &html[open_end..close_tag];
+        let safe_content = sanitize_style_content(css_content);
+
+        result.push_str(&html[open_start..open_end]);
+        result.push_str(&safe_content);
+        result.push_str("</style>");
+
+        search_from = close_tag + 8;
+    }
+
+    result
 }
 
 /// Strips CSS declarations containing `url(` (with optional whitespace before `(`).
@@ -805,4 +1016,312 @@ pub async fn send_email(
 
     mailer.send(email).await.map_err(|e| anyhow!("SMTP send failed: {e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_title_tag_stripped_with_content() {
+        let html = "<title>Zalando</title><p>Hello</p>";
+        let result = sanitize_email_html(html);
+        assert!(!result.contains("Zalando"), "title content should be removed: {result}");
+        assert!(result.contains("<p>Hello</p>"), "paragraph should remain: {result}");
+    }
+
+    #[test]
+    fn test_title_with_complex_content() {
+        let html = "<title>DB - Buchungsbestätigung</title><div>Body text</div>";
+        let result = sanitize_email_html(html);
+        assert!(!result.contains("Buchungsbestätigung"), "title content should be removed: {result}");
+        assert!(result.contains("Body text"), "body content should remain: {result}");
+    }
+
+    #[test]
+    fn test_style_element_preserved() {
+        let html = "<style>.preheader { display:none; }</style><div class=\"preheader\">Hidden</div><p>Visible</p>";
+        let result = sanitize_email_html(html);
+        assert!(result.contains("<style>"), "style tag should be preserved: {result}");
+        assert!(result.contains("display:none"), "display:none rule should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_style_import_stripped() {
+        let html = "<style>@import url('https://evil.com/track.css'); .preheader { display:none; }</style>";
+        let result = sanitize_email_html(html);
+        assert!(!result.contains("@import"), "@import should be removed: {result}");
+        assert!(result.contains("display:none"), "display:none should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_style_url_function_stripped() {
+        let html = "<style>.bg { background-image: url('https://example.com/track.png'); } .hide { display:none; }</style>";
+        let result = sanitize_email_html(html);
+        assert!(!result.contains("url("), "url() in style element should be removed: {result}");
+        assert!(result.contains("display:none"), "display:none should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_style_expression_stripped() {
+        let html = "<style>.evil { width: expression(document.cookie); display:none; }</style>";
+        let result = sanitize_email_html(html);
+        assert!(!result.contains("expression"), "expression() should be removed: {result}");
+        assert!(result.contains("display:none"), "display:none should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_style_moz_binding_stripped() {
+        let html = "<style>.x { -moz-binding: url(bad); color: red; }</style>";
+        let result = sanitize_email_html(html);
+        assert!(!result.contains("-moz-binding"), "-moz-binding should be removed: {result}");
+        assert!(result.contains("color: red"), "safe property should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_style_behavior_stripped() {
+        let html = "<style>.x { behavior: url(script.htc); display:none; }</style>";
+        let result = sanitize_email_html(html);
+        assert!(!result.contains("behavior"), "behavior should be removed: {result}");
+        assert!(result.contains("display:none"), "display:none should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_style_position_fixed_stripped() {
+        let html = "<style>.overlay { position: fixed; top: 0; } .safe { position: absolute; top: 10px; }</style>";
+        let result = sanitize_email_html(html);
+        assert!(!result.contains("position: fixed"), "position:fixed should be removed: {result}");
+        assert!(result.contains("position: absolute"), "position:absolute should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_style_font_face_stripped() {
+        let html = "<style>@font-face { font-family: 'Evil'; src: url('https://evil.com/font.woff2'); } .text { font-family: Arial; }</style>";
+        let result = sanitize_email_html(html);
+        assert!(!result.contains("@font-face"), "@font-face should be removed: {result}");
+        assert!(result.contains("font-family: Arial"), "safe font-family should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_style_keyframes_stripped() {
+        let html = "<style>@keyframes slide { from { left: 0; } to { left: 100px; } } .box { color: red; }</style>";
+        let result = sanitize_email_html(html);
+        assert!(!result.contains("@keyframes"), "@keyframes should be removed: {result}");
+        assert!(result.contains("color: red"), "safe rule should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_style_media_queries_stripped() {
+        let html = "<style>@media screen and (max-width: 600px) { .container { width: 100%; } } .container { width: 960px; }</style>";
+        let result = sanitize_email_html(html);
+        assert!(!result.contains("@media"), "@media should be removed: {result}");
+        assert!(result.contains("width: 960px"), "non-media rule should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_style_normal_css_preserved() {
+        let html = "<style>body { color: #333; font-family: Arial, sans-serif; background-color: #fff; } table { border-collapse: collapse; }</style>";
+        let result = sanitize_email_html(html);
+        assert!(result.contains("color: #333"), "color should be preserved: {result}");
+        assert!(result.contains("font-family:"), "font-family should be preserved: {result}");
+        assert!(result.contains("background-color:"), "background-color should be preserved: {result}");
+        assert!(result.contains("border-collapse:"), "border-collapse should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_combined_title_and_style() {
+        let html = "<html><head><title>Zalando</title><style>.preheader{display:none;font-size:1px;color:#fff}</style></head><body><div class=\"preheader\">Zalando</div><p>Your order is confirmed</p></body></html>";
+        let result = sanitize_email_html(html);
+        assert!(!result.contains("<title>"), "title tag should be removed: {result}");
+        let title_text_count = result.matches("Zalando").count();
+        assert!(title_text_count <= 1, "Zalando should appear at most once in preheader div, found {title_text_count} times: {result}");
+        assert!(result.contains("display:none"), "display:none should be preserved: {result}");
+        assert!(result.contains("Your order is confirmed"), "body text should remain: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_content_preserves_safe_rules() {
+        let css = ".hide { display:none; } .text { color:red; font-size:14px; }";
+        let result = sanitize_style_content(css);
+        assert!(result.contains("display:none"), "display:none should be preserved: {result}");
+        assert!(result.contains("color:red"), "color should be preserved: {result}");
+        assert!(result.contains("font-size:14px"), "font-size should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_content_strips_import() {
+        let css = "@import url('evil.css'); .safe { color:blue; }";
+        let result = sanitize_style_content(css);
+        assert!(!result.contains("@import"), "@import should be removed: {result}");
+        assert!(result.contains("color:blue"), "safe rule should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_content_strips_import_without_braces() {
+        let css = "@import 'evil.css'; .safe { color:blue; }";
+        let result = sanitize_style_content(css);
+        assert!(!result.contains("@import"), "@import should be removed: {result}");
+        assert!(result.contains("color:blue"), "safe rule should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_content_strips_font_face() {
+        let css = "@font-face { font-family: 'Test'; src: url('font.woff2'); } .text { font-family: 'Test'; }";
+        let result = sanitize_style_content(css);
+        assert!(!result.contains("@font-face"), "@font-face should be removed: {result}");
+        assert!(result.contains("font-family: 'Test'"), "safe font-family should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_content_strips_keyframes() {
+        let css = "@keyframes x { from { opacity: 0; } to { opacity: 1; } } .faded { opacity: 0; }";
+        let result = sanitize_style_content(css);
+        assert!(!result.contains("@keyframes"), "@keyframes should be removed: {result}");
+        assert!(result.contains("opacity: 0"), "safe opacity rule should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_content_strips_url_in_declarations() {
+        let css = ".bg { background-image: url('https://evil.com/track.png'); color: red; }";
+        let result = sanitize_style_content(css);
+        assert!(!result.contains("url("), "url() should be removed: {result}");
+        assert!(result.contains("color: red"), "safe property should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_content_strips_position_fixed() {
+        let css = ".overlay { position:fixed; top:0; } .safe { position:relative; }";
+        let result = sanitize_style_content(css);
+        assert!(!result.contains("position:fixed"), "position:fixed should be removed: {result}");
+        assert!(result.contains("position:relative"), "position:relative should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_elements_replaces_content() {
+        let html = "<div>before</div><style>.hide{display:none;}</style><div>after</div>";
+        let result = sanitize_style_elements(html);
+        assert!(result.contains("<style>"), "style tag should remain: {result}");
+        assert!(result.contains("display:none"), "safe CSS should remain: {result}");
+        assert!(result.contains("before"), "surrounding content should remain: {result}");
+        assert!(result.contains("after"), "surrounding content should remain: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_elements_multiple_style_blocks() {
+        let html = "<style>.a{color:red;}</style><p>text</p><style>.b{color:blue;}</style>";
+        let result = sanitize_style_elements(html);
+        assert!(result.contains("color:red"), "first style block should be preserved: {result}");
+        assert!(result.contains("color:blue"), "second style block should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_elements_strips_dangerous_content() {
+        let html = "<style>@import url('evil.css'); .safe{color:green;}</style>";
+        let result = sanitize_style_elements(html);
+        assert!(!result.contains("@import"), "@import should be removed: {result}");
+        assert!(result.contains("color:green"), "safe rule should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_content_strips_expression() {
+        let css = ".evil { width: expression(document.cookie); color: blue; }";
+        let result = sanitize_style_content(css);
+        assert!(!result.contains("expression"), "expression() should be removed: {result}");
+        assert!(result.contains("color: blue"), "safe property should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_content_strips_behavior() {
+        let css = ".evil { behavior: url(script.htc); display: block; }";
+        let result = sanitize_style_content(css);
+        assert!(!result.contains("behavior"), "behavior should be removed: {result}");
+        assert!(result.contains("display: block"), "display should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_content_strips_moz_binding() {
+        let css = ".evil { -moz-binding: url(xbl); background: white; }";
+        let result = sanitize_style_content(css);
+        assert!(!result.contains("-moz-binding"), "-moz-binding should be removed: {result}");
+        assert!(result.contains("background: white"), "background should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_content_preserves_position_absolute() {
+        let css = ".safe { position: absolute; top: 10px; }";
+        let result = sanitize_style_content(css);
+        assert!(result.contains("position: absolute"), "position:absolute should be preserved: {result}");
+        assert!(result.contains("top: 10px"), "top should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_declarations_strips_url() {
+        let result = sanitize_declarations("background-image: url(evil.png); color: red");
+        assert!(!result.contains("url("), "url() should be stripped: {result}");
+        assert!(result.contains("color: red"), "safe declaration should remain: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_declarations_strips_css_url_with_spaces() {
+        let result = sanitize_declarations("background: url ( evil.png ); color: blue");
+        assert!(!result.contains("url"), "url() with spaces should be stripped: {result}");
+        assert!(result.contains("color: blue"), "safe declaration should remain: {result}");
+    }
+
+    #[test]
+    fn test_style_with_attributes_preserved() {
+        let html = "<style type=\"text/css\">.hide { display:none; }</style>";
+        let result = sanitize_style_elements(html);
+        assert!(result.contains("display:none"), "display:none should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_empty_style_removed() {
+        let html = "<style>@import url('evil.css');</style><p>Safe</p>";
+        let result = sanitize_style_elements(html);
+        assert!(!result.contains("@import"), "@import should be removed: {result}");
+        // The entire style block should be removed since no content remains
+    }
+
+    #[test]
+    fn test_contains_url_function() {
+        assert!(contains_url_function("background: url(foo.png)"));
+        assert!(contains_url_function("background: url ( foo.png )"));
+        assert!(contains_url_function("list-style-image: url('bullet.png')"));
+        assert!(!contains_url_function("color: red"));
+        assert!(!contains_url_function("border: solid"));
+    }
+
+    #[test]
+    fn test_sanitize_style_content_with_multibyte_utf8() {
+        let css = ".ExternalClass, .ExternalClass p { line-height:\u{2028}100%; } body { color: résumé; }";
+        let result = sanitize_style_content(css);
+        assert!(result.contains("line-height"), "line-height should be preserved: {result}");
+        assert!(result.contains("color:"), "color should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_style_content_with_unicode_selectors() {
+        let css = ".résumé { color: blue; } .über { font-size: 14px; }";
+        let result = sanitize_style_content(css);
+        assert!(result.contains("color: blue"), "color should be preserved: {result}");
+        assert!(result.contains("font-size: 14px"), "font-size should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_sanitize_email_html_with_utf8_in_style() {
+        let html = "<style>.x { font-family:\"Hélvética\"; }</style><p>Test</p>";
+        let result = sanitize_email_html(html);
+        assert!(result.contains("font-family"), "font-family should be preserved: {result}");
+    }
+
+    #[test]
+    fn test_utf8_char_width() {
+        assert_eq!(utf8_char_width(b'a'), 1);
+        assert_eq!(utf8_char_width(b'{'), 1);
+        assert_eq!(utf8_char_width(0xC3), 2); // é = 0xC3 0xA9
+        assert_eq!(utf8_char_width(0xE2), 3); // \u{2028} = 0xE2 0x80 0xA8
+        assert_eq!(utf8_char_width(0xF0), 4); // emoji lead byte
+        assert_eq!(utf8_char_width(0x80), 1); // continuation byte, fallback to 1
+    }
 }
