@@ -2464,13 +2464,11 @@
     gap: 0.3rem;
     padding: 0.35rem 0.6rem;
     background: var(--pico-background-color, white);
-    border: 1px solid var(--pico-muted-border-color, #ccc);
     border-radius: 6px;
     font-size: 0.78rem;
-    color: var(--pico-muted-color, #888);
     cursor: pointer;
     z-index: 50;
-    box-shadow: 0 2px 8px rgba(0,0,0,.10);
+    box-shadow: 0 0.25rem 1rem rgba(0,0,0,0.25);
   }
 
   .origins-trigger:hover {
@@ -2479,12 +2477,7 @@
   }
 
   .origins-badge {
-    background: var(--pico-primary, #0172ad);
-    color: white;
-    border-radius: 99px;
     font-size: 0.7rem;
-    padding: 0 0.35rem;
-    line-height: 1.4;
   }
 
   .origins-dialog {
