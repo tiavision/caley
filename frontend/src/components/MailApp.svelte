@@ -1025,6 +1025,14 @@
     return 'folder';
   }
 
+  const FOLDER_PRIORITY: Record<FolderKind, number> = {
+    inbox: 0, drafts: 1, sent: 2, junk: 3, archive: 4, trash: 5, folder: 6,
+  };
+
+  function folderSortKey(name: string): [number, string] {
+    return [FOLDER_PRIORITY[folderKind(name)], name.toLowerCase()];
+  }
+
   $: isSentFolder = !!(selectedMailbox && /sent/i.test(selectedMailbox));
   $: primaryMetaLabel = isSentFolder ? 'To' : 'From';
   $: primaryMetaValue = selectedMessage
@@ -1125,7 +1133,11 @@
             <button class="icon-btn" on:click={() => openEditAccount(acc)} title="Edit account"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
             <button class="icon-btn delete-btn" on:click={() => removeAccount(acc)} title="Remove account">×</button>
           </div>
-          {#each (mailboxesByAccount[acc.account_id] || []) as mb}
+          {#each (mailboxesByAccount[acc.account_id] || []).toSorted((a, b) => {
+            const [ap, an] = folderSortKey(a.name);
+            const [bp, bn] = folderSortKey(b.name);
+            return ap !== bp ? ap - bp : an.localeCompare(bn);
+          }) as mb}
             {#if mb.subscribed}
               <button
                 class="sidebar-item"
