@@ -652,7 +652,14 @@ pub async fn proxy_image(
             Err(_) => return transparent_pixel(),
         };
 
+        // Only serve inline attachments as images. The content type comes straight
+        // from the (untrusted) MIME part; serving e.g. text/html same-origin would
+        // be a stored-XSS vector if the resource URL were opened directly.
         let ct = att.content_type.unwrap_or_else(|| "application/octet-stream".to_string());
+        let ct_lower = ct.to_ascii_lowercase();
+        if !ct_lower.starts_with("image/") || ct_lower.contains("svg") {
+            return transparent_pixel();
+        }
         return (
             StatusCode::OK,
             [
@@ -689,10 +696,17 @@ pub async fn proxy_image(
         _ => return transparent_pixel(),
     }
 
-    let client = reqwest::Client::builder()
+    // Do not follow redirects: a whitelisted origin could otherwise 302 to an
+    // internal address (e.g. 127.0.0.1 / link-local metadata) that the pre-fetch
+    // is_ssrf_safe() check never sees.
+    let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
-        .unwrap_or_default();
+    {
+        Ok(c) => c,
+        Err(_) => return transparent_pixel(),
+    };
 
     let resp = match client.get(&url).send().await {
         Ok(r) => r,
@@ -771,7 +785,14 @@ pub async fn download_attachment(
     };
 
     let ct = att.content_type.unwrap_or_else(|| "application/octet-stream".to_string());
-    let disposition = format!("attachment; filename=\"{}\"", q.filename.replace('"', "\\\""));
+    // Strip control chars / quotes so the (user-supplied) filename can't break out
+    // of the header value or inject additional headers.
+    let safe_name: String = q
+        .filename
+        .chars()
+        .map(|c| if c.is_control() || c == '"' || c == '\\' { '_' } else { c })
+        .collect();
+    let disposition = format!("attachment; filename=\"{safe_name}\"");
 
     (
         StatusCode::OK,
@@ -799,14 +820,30 @@ async fn is_ssrf_safe(parsed: &url::Url) -> bool {
 
 fn is_private_ip(ip: std::net::IpAddr) -> bool {
     match ip {
-        std::net::IpAddr::V4(v4) => {
-            v4.is_loopback() || v4.is_private() || v4.is_link_local()
-                || v4.is_broadcast() || v4.is_multicast() || v4.is_unspecified()
-        }
+        std::net::IpAddr::V4(v4) => is_private_v4(v4),
         std::net::IpAddr::V6(v6) => {
-            v6.is_loopback() || v6.is_multicast() || v6.is_unspecified()
+            // IPv4-mapped addresses (::ffff:a.b.c.d) connect to the embedded IPv4
+            // host, so apply the v4 rules — otherwise ::ffff:127.0.0.1 bypasses.
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_private_v4(v4);
+            }
+            let seg0 = v6.segments()[0];
+            v6.is_loopback()
+                || v6.is_multicast()
+                || v6.is_unspecified()
+                || (seg0 & 0xfe00) == 0xfc00 // fc00::/7 unique local
+                || (seg0 & 0xffc0) == 0xfe80 // fe80::/10 link-local
         }
     }
+}
+
+fn is_private_v4(v4: std::net::Ipv4Addr) -> bool {
+    v4.is_loopback()
+        || v4.is_private()
+        || v4.is_link_local()
+        || v4.is_broadcast()
+        || v4.is_multicast()
+        || v4.is_unspecified()
 }
 
 fn transparent_pixel() -> Response {

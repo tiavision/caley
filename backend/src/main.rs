@@ -16,7 +16,10 @@ mod sse;
 mod sync;
 
 use axum::error_handling::HandleErrorLayer;
-use axum::response::{IntoResponse, Redirect};
+use axum::extract::Request;
+use axum::http::HeaderValue;
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
 use axum_oidc::error::MiddlewareError;
@@ -259,9 +262,40 @@ async fn main() -> anyhow::Result<()> {
             .layer(session_layer)
     };
 
+    let app = app.layer(middleware::from_fn(security_headers));
+
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port)).await?;
     println!("Listening on {}", listener.local_addr()?);
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+/// Defense-in-depth response headers applied to every response.
+///
+/// The production frontend (Vite build) loads only an external module script, so
+/// `script-src 'self'` is safe; inline `style=` attributes require
+/// `style-src 'unsafe-inline'`. Email HTML is rendered in a sandboxed srcdoc iframe
+/// whose images are proxied to same-origin or `data:`, both covered below.
+async fn security_headers(req: Request, next: Next) -> Response {
+    const CSP: &str = "default-src 'self'; \
+        base-uri 'self'; \
+        object-src 'none'; \
+        frame-ancestors 'none'; \
+        form-action 'self'; \
+        img-src 'self' data:; \
+        style-src 'self' 'unsafe-inline'; \
+        script-src 'self'; \
+        frame-src 'self'";
+
+    let mut resp = next.run(req).await;
+    let h = resp.headers_mut();
+    h.insert("content-security-policy", HeaderValue::from_static(CSP));
+    h.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    h.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    h.insert(
+        "referrer-policy",
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    resp
 }

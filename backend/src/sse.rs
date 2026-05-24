@@ -189,8 +189,10 @@ pub async fn push_webhook(
             axum::http::StatusCode::CREATED.into_response()
         }
         _ => {
+            // Return the same status as a matched token so this public endpoint
+            // can't be used to enumerate valid push tokens.
             eprintln!("[push] webhook token not found in any push_subscriptions table");
-            (axum::http::StatusCode::UNAUTHORIZED, "unknown token").into_response()
+            axum::http::StatusCode::CREATED.into_response()
         }
     }
 }

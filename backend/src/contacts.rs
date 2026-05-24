@@ -1,7 +1,7 @@
 use axum::{
     extract::{Query, State},
     http::{header, StatusCode},
-    response::{IntoResponse, Json, Redirect, Response},
+    response::{IntoResponse, Json, Response},
 };
 use base64::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -267,17 +267,33 @@ pub async fn get_contact_photo(
         None => return StatusCode::NOT_FOUND.into_response(),
     };
 
+    // Remote photo URLs are not redirected to: that would be an open redirect, and
+    // auto-loading them leaks the user's IP to an arbitrary host chosen by the
+    // (untrusted) contact data. Only embedded data: photos are served.
     if photo.starts_with("http://") || photo.starts_with("https://") {
-        return Redirect::temporary(&photo).into_response();
+        return StatusCode::NOT_FOUND.into_response();
     }
 
     // Parse data URI: data:<mime>;base64,<data>
     if let Some(rest) = photo.strip_prefix("data:") {
         if let Some((meta, b64)) = rest.split_once(',') {
             let mime = meta.split(';').next().unwrap_or("application/octet-stream");
+            let mime_lower = mime.to_ascii_lowercase();
+            // The MIME comes from untrusted contact data. Restrict to non-SVG
+            // images so a text/html or image/svg+xml payload can't render as a
+            // same-origin document if the URL is opened directly.
+            if !mime_lower.starts_with("image/") || mime_lower.contains("svg") {
+                return StatusCode::NOT_FOUND.into_response();
+            }
             if let Ok(bytes) = BASE64_STANDARD.decode(b64.trim()) {
                 return (
-                    [(header::CONTENT_TYPE, mime.to_string())],
+                    [
+                        (header::CONTENT_TYPE, mime.to_string()),
+                        (
+                            header::HeaderName::from_static("x-content-type-options"),
+                            "nosniff".to_string(),
+                        ),
+                    ],
                     bytes,
                 ).into_response();
             }

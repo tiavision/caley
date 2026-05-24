@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
 use axum::{
     extract::{Form, State},
     http::StatusCode,
@@ -18,6 +22,54 @@ pub struct LoginForm {
     caldav_password: String,
 }
 
+// ── Login brute-force throttling ────────────────────────────────────────────
+// Keyed by the derived identity (username@host) rather than IP, since brute
+// force targets a specific account and IPs are easily rotated / proxied.
+
+const MAX_LOGIN_ATTEMPTS: u32 = 10;
+const LOGIN_WINDOW: Duration = Duration::from_secs(300);
+
+struct LoginAttempt {
+    count: u32,
+    window_start: Instant,
+}
+
+fn login_attempts() -> &'static Mutex<HashMap<String, LoginAttempt>> {
+    static ATTEMPTS: OnceLock<Mutex<HashMap<String, LoginAttempt>>> = OnceLock::new();
+    ATTEMPTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn login_rate_limited(key: &str) -> bool {
+    let map = login_attempts().lock().unwrap_or_else(|p| p.into_inner());
+    match map.get(key) {
+        Some(a) if a.window_start.elapsed() < LOGIN_WINDOW => a.count >= MAX_LOGIN_ATTEMPTS,
+        _ => false,
+    }
+}
+
+fn record_login_failure(key: &str) {
+    let mut map = login_attempts().lock().unwrap_or_else(|p| p.into_inner());
+    if map.len() > 10_000 {
+        map.retain(|_, a| a.window_start.elapsed() < LOGIN_WINDOW);
+    }
+    let entry = map.entry(key.to_owned()).or_insert_with(|| LoginAttempt {
+        count: 0,
+        window_start: Instant::now(),
+    });
+    if entry.window_start.elapsed() >= LOGIN_WINDOW {
+        entry.count = 0;
+        entry.window_start = Instant::now();
+    }
+    entry.count += 1;
+}
+
+fn clear_login_attempts(key: &str) {
+    login_attempts()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(key);
+}
+
 pub fn derive_user_id(base_url: &str, username: &str) -> String {
     if let Ok(parsed) = Url::parse(base_url) {
         if let Some(host) = parsed.host_str() {
@@ -32,6 +84,16 @@ pub async fn handle_login(
     session: Session,
     Form(form): Form<LoginForm>,
 ) -> Response {
+    let user_id = derive_user_id(&form.caldav_base_url, &form.caldav_username);
+
+    if login_rate_limited(&user_id) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": "Too many login attempts. Please wait and try again."})),
+        )
+            .into_response();
+    }
+
     let client = match crate::caldav::CalDavClient::new(
         form.caldav_base_url.clone(),
         form.caldav_username.clone(),
@@ -48,14 +110,13 @@ pub async fn handle_login(
     };
 
     if let Err(e) = client.calendars().await {
+        record_login_failure(&user_id);
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": format!("Connection test failed: {e}")})),
         )
             .into_response();
     }
-
-    let user_id = derive_user_id(&form.caldav_base_url, &form.caldav_username);
 
     let display_name = client
         .get_display_name()
@@ -80,6 +141,11 @@ pub async fn handle_login(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to save credentials"}))).into_response();
     }
 
+    // Rotate the session ID on the privilege transition to prevent session fixation.
+    if let Err(e) = session.cycle_id().await {
+        eprintln!("Session error: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Session error"}))).into_response();
+    }
     if let Err(e) = session.insert("user_id", &user_id).await {
         eprintln!("Session error: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Session error"}))).into_response();
@@ -87,6 +153,8 @@ pub async fn handle_login(
     if let Err(e) = session.insert("display_name", &display_name).await {
         eprintln!("Session error: {e}");
     }
+
+    clear_login_attempts(&user_id);
 
     state.sync_manager.ensure_task_for(&user_id);
     state.sync_manager.trigger(&user_id, SyncTrigger::Incremental);
