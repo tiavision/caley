@@ -188,7 +188,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/email/image-origins", delete(email::remove_image_origin))
         .route("/api/email/image-blacklist", get(email::list_image_blacklist))
         .route("/api/email/image-blacklist", post(email::add_image_blacklist_origin))
-        .route("/api/email/image-blacklist", delete(email::remove_image_blacklist_origin));
+        .route("/api/email/image-blacklist", delete(email::remove_image_blacklist_origin))
+        .route("/api/email/identities", get(email::list_identities))
+        .route("/api/email/identity", post(email::save_identity))
+        .route("/api/email/identity", put(email::save_identity))
+        .route("/api/email/identity", delete(email::delete_identity));
 
     // Protected routes plus the always-available CalDAV login + unified logout.
     // RequireAuthLayer lets the public allow-list through and otherwise requires

@@ -56,6 +56,7 @@ pub struct AccountBody {
     pub use_tls: Option<bool>,
     pub smtp_host: Option<String>,
     pub smtp_port: Option<u16>,
+    pub sender_name: Option<String>,
 }
 
 pub async fn save_account(
@@ -79,6 +80,18 @@ pub async fn save_account(
         &state.encryption_key,
     ).await {
         eprintln!("[email] save_account error: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+    }
+
+    let identity_name = body.sender_name.as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&body.username);
+    let default_identity_id = format!("default-{account_id}");
+    if let Err(e) = email_db::upsert_identity(
+        &state.db, &default_identity_id, &account_id,
+        &user.user_id, identity_name, &body.username, true,
+    ).await {
+        eprintln!("[email] save_account identity error: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
 
@@ -117,6 +130,89 @@ pub async fn delete_account(
     }
     
     state.sse_broadcaster.send(&user.user_id, SseMessage::AccountsChanged);
+    StatusCode::NO_CONTENT.into_response()
+}
+
+// ── Identities ───────────────────────────────────────────────────────────────
+
+pub async fn list_identities(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> impl IntoResponse {
+    match email_db::list_identities(&state.db, &user.user_id).await {
+        Ok(rows) => {
+            let list: Vec<_> = rows
+                .iter()
+                .map(|i| json!({
+                    "identity_id": i.identity_id,
+                    "account_id":  i.account_id,
+                    "name":        i.name,
+                    "email":       i.email,
+                    "is_default":  i.is_default,
+                    "sort_order":  i.sort_order,
+                }))
+                .collect();
+            Json(json!({ "identities": list })).into_response()
+        }
+        Err(e) => {
+            eprintln!("[email] list_identities error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct IdentityBody {
+    pub identity_id: Option<String>,
+    pub account_id: String,
+    pub name: String,
+    pub email: String,
+    pub is_default: Option<bool>,
+}
+
+pub async fn save_identity(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<IdentityBody>,
+) -> impl IntoResponse {
+    // Verify the account belongs to this user
+    match email_db::get_account(&state.db, &body.account_id, &user.user_id, &state.encryption_key).await {
+        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
+        Err(e) => {
+            eprintln!("[email] save_identity account lookup error: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+        Ok(Some(_)) => {}
+    }
+
+    let identity_id = body.identity_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    let is_default = body.is_default.unwrap_or(false);
+
+    if let Err(e) = email_db::upsert_identity(
+        &state.db, &identity_id, &body.account_id,
+        &user.user_id, &body.name, &body.email, is_default,
+    ).await {
+        eprintln!("[email] save_identity error: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+    }
+
+    Json(json!({ "identity_id": identity_id })).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct IdentityIdQuery {
+    pub identity_id: String,
+}
+
+pub async fn delete_identity(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<IdentityIdQuery>,
+) -> impl IntoResponse {
+    if let Err(e) = email_db::delete_identity(&state.db, &q.identity_id, &user.user_id).await {
+        eprintln!("[email] delete_identity error: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+    }
     StatusCode::NO_CONTENT.into_response()
 }
 
@@ -470,6 +566,7 @@ pub async fn send_email(
     mut multipart: axum::extract::Multipart,
 ) -> impl IntoResponse {
     let mut account_id = String::new();
+    let mut identity_id = String::new();
     let mut to_raw = String::new();
     let mut cc_raw = String::new();
     let mut bcc_raw = String::new();
@@ -497,7 +594,8 @@ pub async fn send_email(
                         Err(_) => continue,
                     };
                     match name.as_str() {
-                        "account_id" => account_id = text,
+                        "account_id"  => account_id  = text,
+                        "identity_id" => identity_id = text,
                         "to" => to_raw = text,
                         "cc" => cc_raw = text,
                         "bcc" => bcc_raw = text,
@@ -523,22 +621,45 @@ pub async fn send_email(
     let cc = split_addrs(&cc_raw);
     let bcc = split_addrs(&bcc_raw);
 
-    if account_id.is_empty() {
-        return (StatusCode::BAD_REQUEST, "missing account_id").into_response();
-    }
-
-    let account = match email_db::get_account(&state.db, &account_id, &user.user_id, &state.encryption_key).await {
-        Ok(Some(a)) => a,
-        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
-        Err(e) => {
-            eprintln!("[email] send_email account lookup: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+    // Resolve identity → account + from header
+    let (account, from) = if !identity_id.is_empty() {
+        let identity = match email_db::get_identity(&state.db, &identity_id, &user.user_id).await {
+            Ok(Some(i)) => i,
+            Ok(None) => return (StatusCode::NOT_FOUND, "identity not found").into_response(),
+            Err(e) => {
+                eprintln!("[email] send_email identity lookup: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+            }
+        };
+        let acc = match email_db::get_account(&state.db, &identity.account_id, &user.user_id, &state.encryption_key).await {
+            Ok(Some(a)) => a,
+            Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
+            Err(e) => {
+                eprintln!("[email] send_email account lookup: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+            }
+        };
+        let from = format!("{} <{}>", identity.name, identity.email);
+        (acc, from)
+    } else {
+        // Fallback: legacy account_id path
+        if account_id.is_empty() {
+            return (StatusCode::BAD_REQUEST, "missing identity_id or account_id").into_response();
         }
+        let acc = match email_db::get_account(&state.db, &account_id, &user.user_id, &state.encryption_key).await {
+            Ok(Some(a)) => a,
+            Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
+            Err(e) => {
+                eprintln!("[email] send_email account lookup: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+            }
+        };
+        let from = format!("{} <{}>", user.display_name.as_deref().unwrap_or(&acc.username), acc.username);
+        (acc, from)
     };
 
     let smtp_host = account.smtp_host.as_deref().unwrap_or(&account.host);
     let smtp_port = account.smtp_port.unwrap_or(587) as u16;
-    let from = format!("{} <{}>", user.display_name.as_deref().unwrap_or(&account.username), account.username);
 
     if let Err(e) = imap_client::send_email(
         smtp_host, smtp_port,

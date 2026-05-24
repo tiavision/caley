@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { getUser } from '../lib/user.ts';
+  import SelectDropdown from './SelectDropdown.svelte';
 
   // ── Types ────────────────────────────────────────────────────────────────
 
@@ -13,6 +14,15 @@
     use_tls: boolean;
     smtp_host: string | null;
     smtp_port: number | null;
+  }
+
+  interface Identity {
+    identity_id: string;
+    account_id: string;
+    name: string;
+    email: string;
+    is_default: boolean;
+    sort_order: number;
   }
 
   interface Mailbox {
@@ -58,6 +68,7 @@
   // ── State ────────────────────────────────────────────────────────────────
 
   let accounts: Account[] = [];
+  let identities: Identity[] = [];
   let mailboxesByAccount: Record<string, Mailbox[]> = {};
   let virtualFolders: VirtualFolder[] = [];
 
@@ -86,13 +97,29 @@
   let accountSaving = false;
   let accountError = '';
 
+  // Identity form
+  function emptyIdentityForm() {
+    return {
+      identity_id: null as string | null,
+      account_id: '',
+      name: '',
+      email: '',
+    };
+  }
+  let identityForm = emptyIdentityForm();
+  let identitySaving = false;
+  let identityError = '';
+  let identityDialog: HTMLDialogElement;
+  let identityAccountId = '';   // which account's identities are being managed
+  let identityMode: 'idle' | 'add' | 'edit' = 'idle';
+
   // Compose form
   let composeTo = '';
   let composeCc = '';
   let composeBcc = '';
   let composeSubject = '';
   let composeBody = '';
-  let composeAccountId = '';
+  let composeIdentityId = '';
   let composeInReplyTo: string | null = null;
   let composeSending = false;
   let composeError = '';
@@ -178,7 +205,7 @@
   // ── Data loading ─────────────────────────────────────────────────────────
 
   async function loadAll() {
-    await Promise.all([loadAccounts(), loadVirtualFolders(), loadImageOrigins(), loadBlacklistOrigins()]);
+    await Promise.all([loadAccounts(), loadIdentities(), loadVirtualFolders(), loadImageOrigins(), loadBlacklistOrigins()]);
     for (const acc of accounts) {
       await loadMailboxes(acc.account_id);
     }
@@ -199,7 +226,16 @@
       if (r.ok) {
         const data = await r.json();
         accounts = data.accounts || [];
-        composeAccountId = accounts[0]?.account_id || '';
+      }
+    } catch {}
+  }
+
+  async function loadIdentities() {
+    try {
+      const r = await fetch('/api/email/identities');
+      if (r.ok) {
+        const data = await r.json();
+        identities = data.identities || [];
       }
     } catch {}
   }
@@ -479,6 +515,7 @@
     return {
       account_id: null as string | null,
       display_name: '',
+      sender_name: '',
       host: '',
       port: 993,
       username: '',
@@ -496,9 +533,11 @@
   }
 
   function openEditAccount(acc: Account) {
+    const defaultIdentity = identities.find(i => i.account_id === acc.account_id && i.is_default);
     accountForm = {
       account_id: acc.account_id,
       display_name: acc.display_name,
+      sender_name: defaultIdentity?.name ?? '',
       host: acc.host,
       port: acc.port,
       username: acc.username,
@@ -521,6 +560,7 @@
         body: JSON.stringify({
           account_id: accountForm.account_id,
           display_name: accountForm.display_name,
+          sender_name: accountForm.sender_name || null,
           host: accountForm.host,
           port: accountForm.port,
           username: accountForm.username,
@@ -536,6 +576,7 @@
       } else {
         accountDialog?.close();
         await loadAccounts();
+        await loadIdentities();
         for (const acc of accounts) {
           await loadMailboxes(acc.account_id);
         }
@@ -560,6 +601,85 @@
     }
   }
 
+  // ── Identity management ──────────────────────────────────────────────────
+
+  function openManageIdentities(accountId: string) {
+    identityAccountId = accountId;
+    identityMode = 'idle';
+    identityForm = emptyIdentityForm();
+    identityForm.account_id = accountId;
+    identityError = '';
+    identityDialog?.showModal();
+  }
+
+  function openEditIdentity(id: Identity) {
+    identityForm = {
+      identity_id: id.identity_id,
+      account_id: id.account_id,
+      name: id.name,
+      email: id.email,
+    };
+    identityMode = 'edit';
+    identityError = '';
+  }
+
+  function cancelIdentityForm() {
+    identityMode = 'idle';
+    identityForm = emptyIdentityForm();
+    identityForm.account_id = identityAccountId;
+    identityError = '';
+  }
+
+  async function saveIdentity() {
+    identitySaving = true;
+    identityError = '';
+    try {
+      const r = await fetch('/api/email/identity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identity_id: identityForm.identity_id,
+          account_id: identityForm.account_id,
+          name: identityForm.name,
+          email: identityForm.email,
+          is_default: false,
+        }),
+      });
+      if (!r.ok) {
+        identityError = (await r.text()) || 'Failed to save identity.';
+      } else {
+        await loadIdentities();
+        identityMode = 'idle';
+        identityForm = emptyIdentityForm();
+        identityForm.account_id = identityAccountId;
+      }
+    } catch {
+      identityError = 'Failed to save identity.';
+    }
+    identitySaving = false;
+  }
+
+  async function setDefaultIdentity(id: Identity) {
+    await fetch('/api/email/identity', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        identity_id: id.identity_id,
+        account_id: id.account_id,
+        name: id.name,
+        email: id.email,
+        is_default: true,
+      }),
+    });
+    await loadIdentities();
+  }
+
+  async function deleteIdentity(id: Identity) {
+    if (!confirm(`Remove identity "${id.name} <${id.email}>"?`)) return;
+    await fetch(`/api/email/identity?identity_id=${encodeURIComponent(id.identity_id)}`, { method: 'DELETE' });
+    await loadIdentities();
+  }
+
   // ── Compose ──────────────────────────────────────────────────────────────
 
   function openCompose(replyTo?: Message) {
@@ -574,13 +694,18 @@
       composeSubject = replyTo.subject?.startsWith('Re:') ? replyTo.subject : `Re: ${replyTo.subject || ''}`;
       composeBody = `\n\n--- Original message ---\nFrom: ${replyTo.from || ''}\n${replyTo.body_text || ''}`;
       composeInReplyTo = replyTo.message_id;
-      composeAccountId = replyTo.account_id;
+      // Try to match the identity that was the recipient of the original message
+      const accountIdentities = identities.filter(i => i.account_id === replyTo.account_id);
+      const toAddresses = (replyTo.to ?? []).map(a => a.toLowerCase());
+      const matched = accountIdentities.find(i => toAddresses.some(a => a.includes(i.email.toLowerCase())));
+      const defaultIdentity = accountIdentities.find(i => i.is_default);
+      composeIdentityId = (matched ?? defaultIdentity ?? identities[0])?.identity_id ?? '';
     } else {
       composeTo = '';
       composeSubject = '';
       composeBody = '';
       composeInReplyTo = null;
-      composeAccountId = accounts[0]?.account_id || '';
+      composeIdentityId = (identities.find(i => i.is_default) ?? identities[0])?.identity_id ?? '';
     }
     composeDialog?.showModal();
   }
@@ -590,7 +715,7 @@
     composeError = '';
     try {
       const fd = new FormData();
-      fd.append('account_id', composeAccountId);
+      fd.append('identity_id', composeIdentityId);
       fd.append('to', composeTo);
       fd.append('cc', composeCc);
       fd.append('bcc', composeBcc);
@@ -940,6 +1065,7 @@
         <div class="sidebar-section">
           <div class="sidebar-section-header">
             <span class="account-name" title={acc.username}>{acc.display_name}</span>
+            <button class="icon-btn" on:click={() => openManageIdentities(acc.account_id)} title="Manage identities"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg></button>
             <button class="icon-btn" on:click={() => openEditAccount(acc)} title="Edit account"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
             <button class="icon-btn delete-btn" on:click={() => removeAccount(acc)} title="Remove account">×</button>
           </div>
@@ -1205,6 +1331,7 @@
       <div class="sidebar-section">
         <div class="sidebar-section-header">
           <span class="account-name" title={acc.username}>{acc.display_name}</span>
+          <button class="icon-btn" on:click={() => { sidebarDialog?.close(); openManageIdentities(acc.account_id); }} title="Manage identities"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg></button>
           <button class="icon-btn" on:click={() => { sidebarDialog?.close(); openEditAccount(acc); }} title="Edit account"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
           <button class="icon-btn delete-btn" on:click={() => removeAccount(acc)} title="Remove account">×</button>
         </div>
@@ -1230,6 +1357,67 @@
   </div>
 </dialog>
 
+<!-- ── Identity management dialog ────────────────────────────────────────── -->
+<dialog
+  bind:this={identityDialog}
+  on:click={(e) => { if (e.target === e.currentTarget) identityDialog?.close(); }}
+  on:cancel={(e) => { e.preventDefault(); identityDialog?.close(); }}
+>
+  <article>
+    <header>
+      <h3>Identities</h3>
+      <div class="header-actions">
+        <button class="close-btn" aria-label="Close" on:click={() => identityDialog?.close()}></button>
+      </div>
+    </header>
+    <div class="identity-list">
+      {#each identities.filter(i => i.account_id === identityAccountId) as id}
+        <div class="identity-row">
+          <div class="identity-info">
+            <span class="identity-name">{id.name}</span>
+            <span class="identity-email">&lt;{id.email}&gt;</span>
+            {#if id.is_default}<span class="identity-default-badge">default</span>{/if}
+          </div>
+          <div class="identity-actions">
+            {#if !id.is_default}
+              <button class="icon-btn" disabled={identityMode !== 'idle'} on:click={() => setDefaultIdentity(id)} title="Set as default">★</button>
+            {/if}
+            <button class="icon-btn" disabled={identityMode !== 'idle'} on:click={() => openEditIdentity(id)} title="Edit">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+            </button>
+            {#if !id.is_default}
+              <button class="icon-btn delete-btn" disabled={identityMode !== 'idle'} on:click={() => deleteIdentity(id)} title="Remove">×</button>
+            {/if}
+          </div>
+        </div>
+      {/each}
+    </div>
+    {#if identityMode === 'idle'}
+      <button class="link-btn identity-add-btn" on:click={() => { identityMode = 'add'; identityForm = emptyIdentityForm(); identityForm.account_id = identityAccountId; }}>+ Add identity</button>
+    {:else}
+      <form on:submit|preventDefault={saveIdentity} class="identity-form">
+        <label>
+          Name
+          <input bind:value={identityForm.name} placeholder="e.g. Jane Smith" required />
+        </label>
+        <label>
+          Email address
+          <input type="email" bind:value={identityForm.email} placeholder="alias@example.com" required />
+        </label>
+        {#if identityError}
+          <p class="error">{identityError}</p>
+        {/if}
+        <footer>
+          <button type="button" class="secondary outline" on:click={cancelIdentityForm}>Cancel</button>
+          <button type="submit" class="primary" disabled={identitySaving}>
+            {identitySaving ? 'Saving…' : (identityMode === 'edit' ? 'Update' : 'Add')}
+          </button>
+        </footer>
+      </form>
+    {/if}
+  </article>
+</dialog>
+
 <!-- ── Account form dialog ───────────────────────────────────────────────── -->
 <dialog
   bind:this={accountDialog}
@@ -1247,6 +1435,10 @@
       <label>
         Display name
         <input bind:value={accountForm.display_name} placeholder="e.g. Work" />
+      </label>
+      <label>
+        Your name
+        <input bind:value={accountForm.sender_name} placeholder="e.g. Jane Smith" />
       </label>
       <label>
         IMAP host
@@ -1385,14 +1577,13 @@
       <button class="close-btn" aria-label="Close" on:click={() => composeDialog?.close()}></button>
     </header>
     <form on:submit|preventDefault={sendEmail} class="compose-form">
-      {#if accounts.length > 1}
+      {#if identities.length > 1}
         <div class="compose-row">
           <span class="compose-label">From</span>
-          <select bind:value={composeAccountId} class="compose-input">
-            {#each accounts as acc}
-              <option value={acc.account_id}>{acc.display_name} &lt;{acc.username}&gt;</option>
-            {/each}
-          </select>
+          <SelectDropdown
+            options={identities.map(id => ({ value: id.identity_id, label: id.name, secondary: `<${id.email}>` }))}
+            bind:value={composeIdentityId}
+          />
         </div>
       {/if}
       <div class="compose-row">
@@ -2433,6 +2624,8 @@
   .compose-form {
     display: flex;
     flex-direction: column;
+    font-size: 0.9rem;
+    color: var(--pico-color);
   }
 
   .compose-row {
@@ -2461,7 +2654,7 @@
     padding: 0.45rem 0 !important;
     margin: 0 !important;
     font-size: 0.9rem;
-    color: var(--pico-color);
+    color: inherit;
   }
 
   .compose-input:focus {
@@ -2634,6 +2827,71 @@
   .fab:hover {
     transform: scale(1.05);
     box-shadow: 0 0.35rem 1.25rem rgba(0,0,0,0.3);
+  }
+
+  /* Identity management */
+  .identity-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+  }
+
+  .identity-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: 4px;
+    background: var(--pico-card-sectioning-background-color, rgba(0,0,0,0.03));
+  }
+
+  .identity-info {
+    flex: 1;
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    overflow: hidden;
+  }
+
+  .identity-name {
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .identity-email {
+    font-size: 0.8rem;
+    color: var(--pico-muted-color, #888);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .identity-default-badge {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    background: var(--pico-primary-background, #1095c1);
+    color: var(--pico-primary-inverse, #fff);
+    white-space: nowrap;
+  }
+
+  .identity-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+  }
+
+  .identity-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+
+  .identity-add-btn {
+    margin-top: 0.5rem;
   }
 
   /* Responsive */

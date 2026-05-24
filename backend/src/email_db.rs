@@ -149,6 +149,111 @@ pub async fn get_all_account_ids(pool: &SqlitePool, user_id: &str) -> Result<Vec
     Ok(rows.iter().map(|r| r.get(0)).collect())
 }
 
+// ── Identities ───────────────────────────────────────────────────────────────
+
+pub struct EmailIdentityRow {
+    pub identity_id: String,
+    pub account_id: String,
+    pub name: String,
+    pub email: String,
+    pub is_default: bool,
+    pub sort_order: i64,
+}
+
+pub async fn list_identities(pool: &SqlitePool, user_id: &str) -> Result<Vec<EmailIdentityRow>> {
+    let rows = sqlx::query(
+        "SELECT identity_id, account_id, name, email, is_default, sort_order
+         FROM email_identities WHERE user_id = ? ORDER BY sort_order, name",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .iter()
+        .map(|r| EmailIdentityRow {
+            identity_id: r.get(0),
+            account_id: r.get(1),
+            name: r.get(2),
+            email: r.get(3),
+            is_default: r.get::<i64, _>(4) != 0,
+            sort_order: r.get(5),
+        })
+        .collect())
+}
+
+pub async fn get_identity(
+    pool: &SqlitePool,
+    identity_id: &str,
+    user_id: &str,
+) -> Result<Option<EmailIdentityRow>> {
+    let r = sqlx::query(
+        "SELECT identity_id, account_id, name, email, is_default, sort_order
+         FROM email_identities WHERE identity_id = ? AND user_id = ?",
+    )
+    .bind(identity_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(r.map(|r| EmailIdentityRow {
+        identity_id: r.get(0),
+        account_id: r.get(1),
+        name: r.get(2),
+        email: r.get(3),
+        is_default: r.get::<i64, _>(4) != 0,
+        sort_order: r.get(5),
+    }))
+}
+
+pub async fn upsert_identity(
+    pool: &SqlitePool,
+    identity_id: &str,
+    account_id: &str,
+    user_id: &str,
+    name: &str,
+    email: &str,
+    is_default: bool,
+) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    if is_default {
+        sqlx::query(
+            "UPDATE email_identities SET is_default = 0 WHERE account_id = ? AND identity_id != ?",
+        )
+        .bind(account_id)
+        .bind(identity_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query(
+        "INSERT INTO email_identities (identity_id, account_id, user_id, name, email, is_default)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(identity_id) DO UPDATE SET
+            name       = excluded.name,
+            email      = excluded.email,
+            is_default = excluded.is_default",
+    )
+    .bind(identity_id)
+    .bind(account_id)
+    .bind(user_id)
+    .bind(name)
+    .bind(email)
+    .bind(is_default as i64)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn delete_identity(pool: &SqlitePool, identity_id: &str, user_id: &str) -> Result<()> {
+    sqlx::query("DELETE FROM email_identities WHERE identity_id = ? AND user_id = ?")
+        .bind(identity_id)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 // ── Mailboxes ─────────────────────────────────────────────────────────────────
 
 pub struct MailboxRow {

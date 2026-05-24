@@ -46,6 +46,7 @@ body {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    --nav-width: 10rem;
 }
 
 main {
@@ -70,12 +71,13 @@ main > #app {
 
 /* Left nav rail offset — only when the sidebar is present (authenticated). */
 body.nav-collapsed {
-    --nav-width: 3.75rem;
+    --nav-width: 2.75rem;
 }
 
 @media (min-width: 768px) {
     body.has-nav main {
-        margin-left: var(--nav-width, 15rem);
+        // margin-left: var(--nav-width, 15rem);
+        margin-left: var(--nav-width);
         /* Fix: prevent overflow caused by width:100% (from .container-fluid) + margin-left */
         width: calc(100% - var(--nav-width, 15rem));
         box-sizing: border-box;
