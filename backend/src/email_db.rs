@@ -977,11 +977,51 @@ pub async fn create_virtual_folder(
     Ok(())
 }
 
+pub async fn update_virtual_folder(
+    pool: &SqlitePool,
+    folder_id: &str,
+    user_id: &str,
+    display_name: &str,
+    rules: &[(Option<&str>, Option<&str>)],
+) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    let rows = sqlx::query(
+        "UPDATE virtual_folders SET display_name = ? WHERE folder_id = ? AND user_id = ?",
+    )
+    .bind(display_name)
+    .bind(folder_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+    if rows.rows_affected() == 0 {
+        return Err(anyhow::anyhow!("not found"));
+    }
+    sqlx::query("DELETE FROM virtual_folder_rules WHERE folder_id = ?")
+        .bind(folder_id)
+        .execute(&mut *tx)
+        .await?;
+    for (account_id, pattern) in rules {
+        sqlx::query(
+            "INSERT OR IGNORE INTO virtual_folder_rules (folder_id, account_id, mailbox_pattern) VALUES (?, ?, ?)",
+        )
+        .bind(folder_id)
+        .bind(account_id.unwrap_or(""))
+        .bind(pattern.unwrap_or(""))
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn delete_virtual_folder(pool: &SqlitePool, folder_id: &str, user_id: &str) -> Result<()> {
     let mut tx = pool.begin().await?;
-    sqlx::query("DELETE FROM virtual_folder_rules WHERE folder_id = ?").bind(folder_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM virtual_folders WHERE folder_id = ? AND user_id = ?")
+    let rows = sqlx::query("DELETE FROM virtual_folders WHERE folder_id = ? AND user_id = ?")
         .bind(folder_id).bind(user_id).execute(&mut *tx).await?;
+    if rows.rows_affected() == 0 {
+        return Ok(());
+    }
+    sqlx::query("DELETE FROM virtual_folder_rules WHERE folder_id = ?").bind(folder_id).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
 }

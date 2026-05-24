@@ -105,6 +105,7 @@
   let folderName = '';
   let folderSaving = false;
   let folderSelectedMailboxes: Set<string> = new Set();
+  let editingFolder: VirtualFolder | null = null;
 
   let displayName = '';
 
@@ -642,7 +643,23 @@
 
   // ── Virtual folders ──────────────────────────────────────────────────────
 
-  async function createVirtualFolder() {
+  function openFolderCreate() {
+    editingFolder = null;
+    folderName = '';
+    folderSelectedMailboxes = new Set();
+    folderDialog?.showModal();
+  }
+
+  function openFolderEdit(folder: VirtualFolder) {
+    editingFolder = folder;
+    folderName = folder.display_name;
+    folderSelectedMailboxes = new Set(
+      folder.rules.map(r => `${r.account_id ?? ''}::${r.mailbox_pattern ?? ''}`)
+    );
+    folderDialog?.showModal();
+  }
+
+  async function saveVirtualFolder() {
     folderSaving = true;
     try {
       const rules = [...folderSelectedMailboxes].map(key => {
@@ -652,14 +669,21 @@
           mailbox_pattern: key.slice(sep + 2) || null,
         };
       });
-      await fetch('/api/email/folder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          display_name: folderName || 'Virtual Folder',
-          rules,
-        }),
-      });
+      const body = JSON.stringify({ display_name: folderName || 'Virtual Folder', rules });
+      if (editingFolder) {
+        await fetch(`/api/email/folder?folder_id=${encodeURIComponent(editingFolder.folder_id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        });
+      } else {
+        await fetch('/api/email/folder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        });
+      }
+      editingFolder = null;
       folderName = '';
       folderSelectedMailboxes = new Set();
       folderDialog?.close();
@@ -910,6 +934,7 @@
             >
               {@render folderIcon('virtual')}
               <span class="folder-name">{folder.display_name}</span>
+              <button class="icon-btn" on:click|stopPropagation={() => openFolderEdit(folder)} title="Edit folder"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
               <button class="icon-btn delete-btn" on:click|stopPropagation={() => deleteFolder(folder)} title="Remove folder">×</button>
             </div>
           {/each}
@@ -942,7 +967,7 @@
       <!-- Add account / folder buttons -->
       <div class="sidebar-actions sidebar-add">
         <button class="link-btn" on:click={openAddAccount}>+ Add account</button>
-        <button class="link-btn" on:click={() => { folderName = ''; folderSelectedMailboxes = new Set(); folderDialog?.showModal(); }}>+ Virtual folder</button>
+        <button class="link-btn" on:click={openFolderCreate}>+ Virtual folder</button>
       </div>
     </aside>
 
@@ -1172,6 +1197,7 @@
           >
             {@render folderIcon('virtual')}
             <span class="folder-name">{folder.display_name}</span>
+            <button class="icon-btn" on:click|stopPropagation={() => { sidebarDialog?.close(); openFolderEdit(folder); }} title="Edit folder"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
             <button class="icon-btn delete-btn" on:click|stopPropagation={() => deleteFolder(folder)} title="Remove folder">×</button>
           </div>
         {/each}
@@ -1202,7 +1228,7 @@
 
     <div class="sidebar-actions">
       <button class="link-btn" on:click={() => { sidebarDialog?.close(); openAddAccount(); }}>+ Add account</button>
-      <button class="link-btn" on:click={() => { folderName = ''; folderSelectedMailboxes = new Set(); sidebarDialog?.close(); folderDialog?.showModal(); }}>+ Virtual folder</button>
+      <button class="link-btn" on:click={() => { sidebarDialog?.close(); openFolderCreate(); }}>+ Virtual folder</button>
     </div>
   </div>
 </dialog>
@@ -1561,12 +1587,12 @@
 >
   <article>
     <header>
-      <h3>Create virtual folder</h3>
+      <h3>{editingFolder ? 'Edit virtual folder' : 'Create virtual folder'}</h3>
       <div class="header-actions">
         <button class="close-btn" aria-label="Close" on:click={() => folderDialog?.close()}></button>
       </div>
     </header>
-    <form on:submit|preventDefault={createVirtualFolder}>
+    <form on:submit|preventDefault={saveVirtualFolder}>
       <label>
         Name
         <input bind:value={folderName} placeholder="Virtual Folder" />
@@ -1601,7 +1627,7 @@
       </div>
       <footer>
         <button type="button" class="secondary outline" on:click={() => folderDialog?.close()}>Cancel</button>
-        <button type="submit" class="primary" disabled={folderSaving || folderSelectedMailboxes.size === 0}>Create</button>
+        <button type="submit" class="primary" disabled={folderSaving || folderSelectedMailboxes.size === 0}>{editingFolder ? 'Save' : 'Create'}</button>
       </footer>
     </form>
   </article>

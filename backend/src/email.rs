@@ -222,6 +222,30 @@ pub struct FolderIdQuery {
     pub folder_id: String,
 }
 
+pub async fn update_virtual_folder(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<FolderIdQuery>,
+    Json(body): Json<VirtualFolderBody>,
+) -> impl IntoResponse {
+    let rules: Vec<(Option<&str>, Option<&str>)> = body
+        .rules
+        .iter()
+        .map(|r| (r.account_id.as_deref(), r.mailbox_pattern.as_deref()))
+        .collect();
+
+    match email_db::update_virtual_folder(
+        &state.db, &q.folder_id, &user.user_id, &body.display_name, &rules,
+    ).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) if e.to_string() == "not found" => (StatusCode::NOT_FOUND, "not found").into_response(),
+        Err(e) => {
+            eprintln!("[email] update_virtual_folder error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
 pub async fn delete_virtual_folder(
     State(state): State<AppState>,
     user: CurrentUser,
