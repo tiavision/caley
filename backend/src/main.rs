@@ -14,6 +14,7 @@ mod search;
 mod settings;
 mod sse;
 mod sync;
+mod version;
 
 use axum::error_handling::HandleErrorLayer;
 use axum::extract::Request;

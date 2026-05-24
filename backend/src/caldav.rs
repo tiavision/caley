@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use crate::version;
+
 #[derive(Serialize)]
 pub struct Calendar {
     pub name: String,
@@ -132,7 +134,7 @@ pub struct CalDavClient {
 impl CalDavClient {
     pub fn new(base_url: String, username: String, password: String) -> anyhow::Result<Self> {
         let client = Client::builder()
-            .user_agent("caley/0.1.0")
+            .user_agent(version::USER_AGENT)
             .redirect(reqwest::redirect::Policy::none())
             .build()?;
         Ok(Self {

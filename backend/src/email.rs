@@ -13,6 +13,7 @@ use crate::email_db;
 use crate::imap_client;
 use crate::oidc::{AppState, CurrentUser};
 use crate::sse::SseMessage;
+use crate::version;
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
 
@@ -848,6 +849,7 @@ pub async fn proxy_image(
     // is_ssrf_safe() check never sees.
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
+        .user_agent(version::USER_AGENT)
         .redirect(reqwest::redirect::Policy::none())
         .build()
     {
@@ -859,6 +861,10 @@ pub async fn proxy_image(
         Ok(r) => r,
         Err(_) => return transparent_pixel(),
     };
+
+    if !resp.status().is_success() {
+        return transparent_pixel();
+    }
 
     let ct = resp
         .headers()
@@ -874,7 +880,9 @@ pub async fn proxy_image(
     let ct_owned = ct.clone();
     let bytes = match resp.bytes().await {
         Ok(b) => b,
-        Err(_) => return transparent_pixel(),
+        Err(e) => {
+            return transparent_pixel();
+        }
     };
 
     (
