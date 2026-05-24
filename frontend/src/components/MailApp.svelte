@@ -134,6 +134,7 @@
   let composeError = '';
   let showComposeCcBcc = false;
   let composeAttachments: File[] = [];
+  let composeReplyAll = false;
   let composeFileInput: HTMLInputElement;
   let filePickerOpen = false;
 
@@ -748,6 +749,7 @@
     composeBcc = '';
     composeAttachments = [];
     showComposeCcBcc = false;
+    composeReplyAll = false;
     if (replyTo) {
       composeTo = replyTo.from || '';
       composeSubject = replyTo.subject?.startsWith('Re:') ? replyTo.subject : `Re: ${replyTo.subject || ''}`;
@@ -767,6 +769,22 @@
       composeIdentityId = (identities.find(i => i.is_default) ?? identities[0])?.identity_id ?? '';
     }
     composeDialog?.showModal();
+  }
+
+  function openComposeReplyAll(replyTo: Message) {
+    openCompose(replyTo);
+    const myIdentity = identities.find(i => i.identity_id === composeIdentityId);
+    const myEmail = myIdentity?.email.toLowerCase() ?? '';
+    const allRecipients = [...(replyTo.to ?? []), ...(replyTo.cc ?? [])];
+    const ccAddresses = allRecipients
+      .filter(addr => {
+        const a = addr.toLowerCase();
+        return !a.includes(myEmail) && a !== (replyTo.from ?? '').toLowerCase();
+      })
+      .join(', ');
+    composeCc = ccAddresses;
+    showComposeCcBcc = ccAddresses.length > 0;
+    composeReplyAll = true;
   }
 
   async function sendEmail() {
@@ -1276,6 +1294,11 @@
               <button class="actions-toggle" on:click={toggleActions} aria-label={tl('mail_messageActions')}>{#if isMobile}⋮{:else}{tl('mail_actions')} <span class="actions-caret">▾</span>{/if}</button>
               {#if actionsOpen}
                 <div class="actions-menu" role="menu">
+                  <button role="menuitem" on:click={() => { actionsOpen = false; openComposeReplyAll(selectedMessage!); }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="8 14 3 9 8 4"/><polyline points="14 14 9 9 14 4"/><path d="M21 20v-7a4 4 0 0 0-4-4H3"/></svg>
+                    {tl('mail_replyAll')}
+                  </button>
+                  <div class="menu-separator"></div>
                   <button role="menuitem" on:click={() => { actionsOpen = false; setFlag(selectedMessage!, '\\Seen', !selectedMessage!.is_read); }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2 4 12 13 22 4"/></svg>
                     {selectedMessage.is_read ? tl('mail_markUnread') : tl('mail_markRead')}
@@ -1686,7 +1709,7 @@
 >
   <article>
     <header class="compose-header">
-      <span class="compose-title">{composeInReplyTo ? tl('mail_reply') : tl('mail_newMessage')}</span>
+      <span class="compose-title">{composeInReplyTo ? (composeReplyAll ? tl('mail_replyAll') : tl('mail_reply')) : tl('mail_newMessage')}</span>
       <button class="close-btn" aria-label={tl('mail_close')} on:click={() => composeDialog?.close()}></button>
     </header>
     <form on:submit|preventDefault={sendEmail} class="compose-form">

@@ -220,6 +220,7 @@
   "mail_unflag": "Unflag",
   "mail_flag": "Flag",
   "mail_reply": "Reply",
+  "mail_replyAll": "Reply All",
   "mail_messageActions": "Message actions",
   "mail_actions": "Actions",
   "mail_markUnread": "Mark unread",

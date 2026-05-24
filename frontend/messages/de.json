@@ -220,6 +220,7 @@
   "mail_unflag": "Markierung entfernen",
   "mail_flag": "Markieren",
   "mail_reply": "Antworten",
+  "mail_replyAll": "Allen antworten",
   "mail_messageActions": "Nachrichtenaktionen",
   "mail_actions": "Aktionen",
   "mail_markUnread": "Als ungelesen markieren",
