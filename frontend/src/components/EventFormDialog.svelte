@@ -806,7 +806,6 @@
 
   /* Alarms */
   .alarm-section { border: none; border-left: 3px solid var(--pico-primary-background); padding: 0 0 0 0.75rem; margin: 0 0 0.75rem; }
-  :global(.alarm-section legend) { font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; color: var(--pico-muted-color); margin-bottom: 0.375rem; }
   .alarm-list { list-style: none; padding: 0; margin: 0 0 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
   .alarm-row { display: flex; align-items: center; gap: 0.5rem; }
   .attendee-row { flex-wrap: nowrap; }
@@ -817,7 +816,6 @@
   .alarm-absolute-fields { flex: 1; }
   :global(.alarm-direction) { flex: 1 1 0; min-width: 0; margin-bottom: 0 !important; }
   :global(.alarm-remove) { font-size: 1rem; line-height: 1; margin-bottom: 0 !important; margin-left: auto; }
-  :global(button.small) { font-size: 0.875rem; padding: 0.25rem 0.75rem; }
 
   /* Recurrence */
   .rrule-options { border-left: 3px solid var(--pico-primary-background); padding-left: 0.75rem; margin-bottom: 0.75rem; display: flex; flex-direction: column; gap: 0.625rem; }

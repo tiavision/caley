@@ -1007,15 +1007,6 @@
     margin: 0 0 0.75rem;
   }
 
-  .contact-field-section legend {
-    font-size: 0.8125rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    font-weight: 600;
-    color: var(--pico-muted-color);
-    margin-bottom: 0.375rem;
-  }
-
   .contact-field-list,
   .contact-addr-list {
     list-style: none;
@@ -1082,8 +1073,6 @@
   .addr-country { flex: 2; min-width: 8rem; }
   .addr-type { flex: 1; min-width: 6rem; }
   .addr-type .type-select { width: 100%; }
-
-  :global(button.small) { font-size: 0.875rem; padding: 0.25rem 0.75rem; }
 
   .remove-btn {
     padding: 0.25rem 0.5rem;
