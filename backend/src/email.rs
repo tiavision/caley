@@ -54,7 +54,7 @@ pub struct AccountBody {
     pub host: String,
     pub port: u16,
     pub username: String,
-    pub password: String,
+    pub password: Option<String>,
     pub use_tls: Option<bool>,
     pub smtp_host: Option<String>,
     pub smtp_port: Option<u16>,
@@ -69,15 +69,25 @@ pub async fn save_account(
     let account_id = body.account_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let use_tls = body.use_tls.unwrap_or(true);
 
+    let password = match body.password.filter(|p| !p.is_empty()) {
+        Some(p) => p,
+        None => {
+            match email_db::get_account(&state.db, &account_id, &user.user_id, &state.encryption_key).await {
+                Ok(Some(existing)) => existing.password,
+                _ => return (StatusCode::BAD_REQUEST, "Password is required for new accounts.").into_response(),
+            }
+        }
+    };
+
     // Validate by attempting to connect
-    if let Err(e) = imap_client::connect(&body.host, body.port, &body.username, &body.password).await {
+    if let Err(e) = imap_client::connect(&body.host, body.port, &body.username, &password).await {
         return (StatusCode::BAD_REQUEST, format!("IMAP connection failed: {e}")).into_response();
     }
 
     if let Err(e) = email_db::upsert_account(
         &state.db, &user.user_id, &account_id,
         &body.display_name, &body.host, body.port,
-        &body.username, &body.password, use_tls,
+        &body.username, &password, use_tls,
         body.smtp_host.as_deref(), body.smtp_port,
         &state.encryption_key,
     ).await {
