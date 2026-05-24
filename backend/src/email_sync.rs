@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_imap::extensions::idle::IdleResponse;
-use mail_parser::mailbox;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
@@ -14,6 +13,7 @@ use crate::search::SearchMode;
 use crate::sse::{SseBroadcaster, SseMessage};
 
 pub enum EmailSyncTrigger {
+    #[allow(dead_code)]
     Full,
     Mailbox(String),
 }

@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use anyhow::Context;
 use axum::{
     extract::{Query, State},
     http::{header, StatusCode},

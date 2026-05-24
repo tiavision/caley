@@ -260,6 +260,7 @@ pub struct MailboxRow {
     pub account_id: String,
     pub name: String,
     pub delimiter: Option<String>,
+    #[allow(dead_code)]
     pub uidvalidity: Option<i64>,
     pub subscribed: bool,
 }
@@ -587,11 +588,13 @@ pub struct MessageRow {
     pub has_attachments: bool,
     pub body_text: Option<String>,
     pub body_html: Option<String>,
+    #[allow(dead_code)]
     pub size: Option<i64>,
 }
 
 // ── Attachments ───────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 pub struct AttachmentRow {
     pub id: i64,
     pub account_id: String,

@@ -926,6 +926,7 @@ pub struct CachedContact {
     pub uid: String,
     pub addressbook_href: String,
     pub href: Option<String>,
+    #[allow(dead_code)]
     pub etag: String,
     pub raw_vcard: String,
     pub fn_name: String,

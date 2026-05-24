@@ -1,7 +1,11 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { getUser } from '../lib/user.ts';
+  import { getLocale, makeTl } from '../lib/i18n.ts';
   import SelectDropdown from './SelectDropdown.svelte';
+
+  let locale = 'en';
+  $: tl = makeTl(locale);
 
   // ── Types ────────────────────────────────────────────────────────────────
 
@@ -183,6 +187,7 @@
       return;
     }
     displayName = user.display_name || '';
+    locale = getLocale();
 
     await loadAll();
     connectSSE();
@@ -503,7 +508,7 @@
   }
 
   async function deleteMessage(msg: Message) {
-    if (!confirm('Delete this message?')) return;
+    if (!confirm(tl('mail_deleteMessageConfirm'))) return;
     await fetch(
       `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`,
       { method: 'DELETE' }
@@ -594,7 +599,7 @@
         showAdvanced = true;
       }
     } catch {
-      autodiscoverError = 'Could not detect settings. Please enter them manually.';
+      autodiscoverError = tl('mail_autodiscoverError');
       if (!accountForm.display_name) {
         accountForm.display_name = accountForm.username.split('@')[1] || '';
       }
@@ -626,7 +631,7 @@
       });
       if (!r.ok) {
         const text = await r.text();
-        accountError = text || 'Failed to save account.';
+        accountError = text || tl('mail_saveAccountError');
       } else {
         accountDialog?.close();
         await loadAccounts();
@@ -636,13 +641,13 @@
         }
       }
     } catch {
-      accountError = 'Failed to save account.';
+      accountError = tl('mail_saveAccountError');
     }
     accountSaving = false;
   }
 
   async function removeAccount(acc: Account) {
-    if (!confirm(`Remove account "${acc.display_name}"? This deletes all cached messages.`)) return;
+    if (!confirm(tl('mail_removeAccountConfirm', { name: acc.display_name }))) return;
     await fetch(`/api/email/account?account_id=${encodeURIComponent(acc.account_id)}`, { method: 'DELETE' });
     await loadAccounts();
     mailboxesByAccount = Object.fromEntries(
@@ -700,7 +705,7 @@
         }),
       });
       if (!r.ok) {
-        identityError = (await r.text()) || 'Failed to save identity.';
+        identityError = (await r.text()) || tl('mail_saveIdentityError');
       } else {
         await loadIdentities();
         identityMode = 'idle';
@@ -708,7 +713,7 @@
         identityForm.account_id = identityAccountId;
       }
     } catch {
-      identityError = 'Failed to save identity.';
+      identityError = tl('mail_saveIdentityError');
     }
     identitySaving = false;
   }
@@ -729,7 +734,7 @@
   }
 
   async function deleteIdentity(id: Identity) {
-    if (!confirm(`Remove identity "${id.name} <${id.email}>"?`)) return;
+    if (!confirm(tl('mail_removeIdentityConfirm', { name: id.name, email: id.email }))) return;
     await fetch(`/api/email/identity?identity_id=${encodeURIComponent(id.identity_id)}`, { method: 'DELETE' });
     await loadIdentities();
   }
@@ -782,12 +787,12 @@
       const r = await fetch('/api/email/send', { method: 'POST', body: fd });
       if (!r.ok) {
         const text = await r.text();
-        composeError = text || 'Failed to send.';
+        composeError = text || tl('mail_sendError');
       } else {
         composeDialog?.close();
       }
     } catch {
-      composeError = 'Failed to send.';
+      composeError = tl('mail_sendError');
     }
     composeSending = false;
   }
@@ -842,7 +847,7 @@
           mailbox_pattern: key.slice(sep + 2) || null,
         };
       });
-      const body = JSON.stringify({ display_name: folderName || 'Virtual Folder', rules });
+      const body = JSON.stringify({ display_name: folderName || tl('mail_folderNamePlaceholder'), rules });
       if (editingFolder) {
         await fetch(`/api/email/folder?folder_id=${encodeURIComponent(editingFolder.folder_id)}`, {
           method: 'PUT',
@@ -1007,7 +1012,7 @@
   }
 
   function senderName(from: string | null): string {
-    if (!from) return '(unknown)';
+    if (!from) return '';
     const match = from.match(/^(.+?)\s*<[^>]+>/);
     return match ? match[1].trim() : from;
   }
@@ -1034,7 +1039,16 @@
   }
 
   $: isSentFolder = !!(selectedMailbox && /sent/i.test(selectedMailbox));
-  $: primaryMetaLabel = isSentFolder ? 'To' : 'From';
+  $: primaryMetaLabel = isSentFolder ? tl('mail_metaTo') : tl('mail_metaFrom');
+  $: FOLDER_NAMES = {
+    inbox: tl('mail_folder_inbox'),
+    sent: tl('mail_folder_sent'),
+    drafts: tl('mail_folder_drafts'),
+    trash: tl('mail_folder_trash'),
+    junk: tl('mail_folder_junk'),
+    archive: tl('mail_folder_archive'),
+    folder: '',
+  };
   $: primaryMetaValue = selectedMessage
     ? (isSentFolder ? selectedMessage.to.join(', ') : (selectedMessage.from || ''))
     : '';
@@ -1093,7 +1107,7 @@
 <div class="mail-page">
   <!-- ── Toolbar ────────────────────────────────────────────────────────────── -->
   <div class="mail-toolbar">
-    <button class="sidebar-toggle" on:click={() => sidebarDialog?.showModal()} aria-label="Folders">☰</button>
+    <button class="sidebar-toggle" on:click={() => sidebarDialog?.showModal()} aria-label={tl('mail_aria_folders')}>☰</button>
   </div>
 
   <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
@@ -1104,7 +1118,7 @@
       {#if virtualFolders.length > 0}
         <div class="sidebar-section">
           <div class="sidebar-section-header">
-            <span>Virtual Folders</span>
+            <span>{tl('mail_virtualFolders')}</span>
           </div>
           {#each virtualFolders as folder}
             <div
@@ -1117,8 +1131,8 @@
             >
               {@render folderIcon('virtual')}
               <span class="folder-name">{folder.display_name}</span>
-              <button class="icon-btn" on:click|stopPropagation={() => openFolderEdit(folder)} title="Edit folder"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
-              <button class="icon-btn delete-btn" on:click|stopPropagation={() => deleteFolder(folder)} title="Remove folder">×</button>
+              <button class="icon-btn" on:click|stopPropagation={() => openFolderEdit(folder)} title={tl('mail_editVirtualFolder')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+              <button class="icon-btn delete-btn" on:click|stopPropagation={() => deleteFolder(folder)} title={tl('mail_removeAttachment')}>×</button>
             </div>
           {/each}
         </div>
@@ -1129,9 +1143,9 @@
         <div class="sidebar-section">
           <div class="sidebar-section-header">
             <span class="account-name" title={acc.username}>{acc.display_name}</span>
-            <button class="icon-btn" on:click={() => openManageIdentities(acc.account_id)} title="Manage identities"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg></button>
-            <button class="icon-btn" on:click={() => openEditAccount(acc)} title="Edit account"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
-            <button class="icon-btn delete-btn" on:click={() => removeAccount(acc)} title="Remove account">×</button>
+            <button class="icon-btn" on:click={() => openManageIdentities(acc.account_id)} title={tl('mail_identities')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg></button>
+            <button class="icon-btn" on:click={() => openEditAccount(acc)} title={tl('mail_editAccountHeading')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+            <button class="icon-btn delete-btn" on:click={() => removeAccount(acc)} title={tl('mail_removeAttachment')}>×</button>
           </div>
           {#each (mailboxesByAccount[acc.account_id] || []).toSorted((a, b) => {
             const [ap, an] = folderSortKey(a.name);
@@ -1145,7 +1159,7 @@
                 on:click={() => selectMailbox(acc.account_id, mb.name)}
               >
                 {@render folderIcon(folderKind(mb.name))}
-                <span class="folder-name">{mb.name}</span>
+                <span class="folder-name">{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
               </button>
             {/if}
           {/each}
@@ -1154,8 +1168,8 @@
 
       <!-- Add account / folder buttons -->
       <div class="sidebar-actions sidebar-add">
-        <button class="link-btn" on:click={openAddAccount}>+ Add account</button>
-        <button class="link-btn" on:click={openFolderCreate}>+ Virtual folder</button>
+        <button class="link-btn" on:click={openAddAccount}>+ {tl('mail_addAccount')}</button>
+        <button class="link-btn" on:click={openFolderCreate}>+ {tl('mail_addVirtualFolder')}</button>
       </div>
     </aside>
 
@@ -1165,39 +1179,39 @@
     <section class="message-list">
       <div class="message-list-header">
         {#if selectedFolderId}
-          <h2>{virtualFolders.find(f => f.folder_id === selectedFolderId)?.display_name || 'Folder'}</h2>
+          <h2>{virtualFolders.find(f => f.folder_id === selectedFolderId)?.display_name || tl('mail_aria_folders')}</h2>
         {:else if selectedMailbox}
-          <h2>{selectedMailbox}</h2>
+          <h2>{FOLDER_NAMES[folderKind(selectedMailbox)] || selectedMailbox}</h2>
         {:else}
-          <h2>Mail</h2>
+          <h2>{tl('nav_mail')}</h2>
         {/if}
         {#if selectedFolderId || selectedMailbox}
           <input
             class="search-input"
             type="search"
-            placeholder="Search this folder…"
+            placeholder={tl('mail_searchPlaceholder')}
             bind:value={searchQuery}
             on:input={onSearchInput}
           />
         {/if}
         {#if searching && !messagesLoading}
-          <span class="count">{messages.length} result{messages.length === 1 ? '' : 's'}</span>
+          <span class="count">{messages.length === 1 ? tl('mail_result1') : tl('mail_resultsN', { n: messages.length })}</span>
         {/if}
       </div>
 
       <div class="message-list-scroll" bind:this={listScrollEl}>
         {#if messagesLoading}
-          <div class="loading">Loading…</div>
+          <div class="loading">{tl('mail_loading')}</div>
         {:else if messages.length === 0}
           <div class="empty">
             {#if searching}
-              No results for "{searchQuery}".
+              {tl('mail_noResults', { q: searchQuery })}
             {:else if accounts.length === 0}
-              No accounts configured. Add an IMAP account to get started.
+              {tl('mail_noAccounts')}
             {:else if !selectedAccountId && !selectedFolderId}
-              Select a mailbox.
+              {tl('mail_selectMailbox')}
             {:else}
-              No messages.
+              {tl('mail_noMessages')}
             {/if}
           </div>
         {:else}
@@ -1209,14 +1223,14 @@
               on:click={() => openMessage(msg)}
             >
               <div class="message-row-top">
-                <span class="from">{senderName(msg.from)}</span>
+                <span class="from">{senderName(msg.from) || tl('mail_unknownSender')}</span>
                 <span class="date">{formatDate(msg.sent_at)}</span>
               </div>
               <div class="message-row-subject-line">
-                <span class="message-row-subject">{msg.subject || '(no subject)'}</span>
+                <span class="message-row-subject">{msg.subject || tl('mail_noSubject')}</span>
                 <span class="message-row-icons">
-                  {#if msg.is_flagged}<span class="flag-star" title="Flagged">⭐</span>{/if}
-                  {#if msg.has_attachments}<span class="attach-icon" title="Has attachments"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 10.56a4.94 4.94 0 0 1-7-7l9.19-10.56a3.33 3.33 0 0 1 4.7 4.7l-9.2 10.56a1.67 1.67 0 0 1-2.35-2.35l9.2-10.56"/></svg></span>{/if}
+                  {#if msg.is_flagged}<span class="flag-star" title={tl('mail_flaggedTitle')}>⭐</span>{/if}
+                  {#if msg.has_attachments}<span class="attach-icon" title={tl('mail_hasAttachments')}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 10.56a4.94 4.94 0 0 1-7-7l9.19-10.56a3.33 3.33 0 0 1 4.7 4.7l-9.2 10.56a1.67 1.67 0 0 1-2.35-2.35l9.2-10.56"/></svg></span>{/if}
                 </span>
               </div>
             </button>
@@ -1226,13 +1240,13 @@
 
       {#if totalMessages > 0 && !searching}
         <nav class="pagination-bar">
-          <button class="page-btn" on:click={prevPage} disabled={!hasPrev} aria-label="Previous page">
+          <button class="page-btn" on:click={prevPage} disabled={!hasPrev} aria-label={tl('mail_prevPageAria')}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
-            Prev
+            {tl('mail_prevPage')}
           </button>
-          <span class="page-status">{pageStart}–{pageEnd} of {totalMessages}</span>
-          <button class="page-btn" on:click={nextPage} disabled={!hasNext} aria-label="Next page">
-            Next
+          <span class="page-status">{tl('mail_pageStatus', { start: pageStart, end: pageEnd, total: totalMessages })}</span>
+          <button class="page-btn" on:click={nextPage} disabled={!hasNext} aria-label={tl('mail_nextPageAria')}>
+            {tl('mail_nextPage')}
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
         </nav>
@@ -1246,39 +1260,39 @@
       {#if selectedMessage}
         <div class="detail-header">
           <div class="detail-subject-row">
-            {#if isMobile}<button class="detail-close-btn" aria-label="Back" on:click={closeDetail}>←</button>{/if}
-            <span class="detail-subject">{selectedMessage.subject || '(no subject)'}</span>
+            {#if isMobile}<button class="detail-close-btn" aria-label={tl('mail_back')} on:click={closeDetail}>←</button>{/if}
+            <span class="detail-subject">{selectedMessage.subject || tl('mail_noSubject')}</span>
             <button
               class="star-btn"
               class:flagged={selectedMessage.is_flagged}
               on:click={() => setFlag(selectedMessage!, '\\Flagged', !selectedMessage!.is_flagged)}
-              aria-label={selectedMessage.is_flagged ? 'Unflag' : 'Flag'}
-              title={selectedMessage.is_flagged ? 'Unflag' : 'Flag'}
+              aria-label={selectedMessage.is_flagged ? tl('mail_unflag') : tl('mail_flag')}
+              title={selectedMessage.is_flagged ? tl('mail_unflag') : tl('mail_flag')}
             >★</button>
-            <button class="inline-action-btn" on:click={() => openCompose(selectedMessage!)} aria-label="Reply" title="Reply">
+            <button class="inline-action-btn" on:click={() => openCompose(selectedMessage!)} aria-label={tl('mail_reply')} title={tl('mail_reply')}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
             </button>
             <div class="actions-wrapper" bind:this={actionsEl}>
-              <button class="actions-toggle" on:click={toggleActions} aria-label="Message actions">{#if isMobile}⋮{:else}Actions <span class="actions-caret">▾</span>{/if}</button>
+              <button class="actions-toggle" on:click={toggleActions} aria-label={tl('mail_messageActions')}>{#if isMobile}⋮{:else}{tl('mail_actions')} <span class="actions-caret">▾</span>{/if}</button>
               {#if actionsOpen}
                 <div class="actions-menu" role="menu">
                   <button role="menuitem" on:click={() => { actionsOpen = false; setFlag(selectedMessage!, '\\Seen', !selectedMessage!.is_read); }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2 4 12 13 22 4"/></svg>
-                    {selectedMessage.is_read ? 'Mark unread' : 'Mark read'}
+                    {selectedMessage.is_read ? tl('mail_markUnread') : tl('mail_markRead')}
                   </button>
                   {#if htmlHasValue}
                     {#if emailOrigins.length > 0}
-                      <button role="menuitem" on:click={() => { actionsOpen = false; openOriginsForEmail(); }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>Image sources for this email</button>
+                      <button role="menuitem" on:click={() => { actionsOpen = false; openOriginsForEmail(); }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>{tl('mail_imageSourcesEmail')}</button>
                     {/if}
 
                     <div class="menu-separator"></div>
-                    <button role="menuitem" class:menu-item-active={viewMode === 'html'} on:click={() => { viewMode = 'html'; actionsOpen = false; }}>View as HTML</button>
-                    <button role="menuitem" class:menu-item-active={viewMode === 'text'} on:click={() => { viewMode = 'text'; actionsOpen = false; }}>View as plain text</button>
+                    <button role="menuitem" class:menu-item-active={viewMode === 'html'} on:click={() => { viewMode = 'html'; actionsOpen = false; }}>{tl('mail_viewAsHtml')}</button>
+                    <button role="menuitem" class:menu-item-active={viewMode === 'text'} on:click={() => { viewMode = 'text'; actionsOpen = false; }}>{tl('mail_viewAsText')}</button>
                   {/if}
                   <div class="menu-separator"></div>
                   <button role="menuitem" class="menu-item-danger" on:click={() => { actionsOpen = false; deleteMessage(selectedMessage!); }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-                    Delete
+                    {tl('mail_delete')}
                   </button>
                 </div>
               {/if}
@@ -1286,7 +1300,7 @@
           </div>
         </div>
         {#if messageLoading && !selectedMessage.body_text && !selectedMessage.body_html}
-          <div class="loading">Loading…</div>
+          <div class="loading">{tl('mail_loading')}</div>
         {:else}
           <div class="detail-meta">
             <div class="meta-primary" tabindex="0" aria-expanded={metaExpanded}
@@ -1297,19 +1311,19 @@
               <span class="meta-toggle" aria-hidden="true">{metaExpanded ? '▲' : '▼'}</span>
             </div>
             {#if metaExpanded}
-              {#if isSentFolder}<div><strong>From:</strong> {selectedMessage.from || ''}</div>{/if}
-              {#if !isSentFolder}<div><strong>To:</strong> {selectedMessage.to.join(', ')}</div>{/if}
+              {#if isSentFolder}<div><strong>{tl('mail_metaFrom')}:</strong> {selectedMessage.from || ''}</div>{/if}
+              {#if !isSentFolder}<div><strong>{tl('mail_metaTo')}:</strong> {selectedMessage.to.join(', ')}</div>{/if}
               {#if selectedMessage.cc.length > 0}
-                <div><strong>CC:</strong> {selectedMessage.cc.join(', ')}</div>
+                <div><strong>{tl('mail_metaCc')}:</strong> {selectedMessage.cc.join(', ')}</div>
               {/if}
-              <div><strong>Date:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
+              <div><strong>{tl('mail_metaDate')}:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
             {/if}
           </div>
           {#if selectedMessage.attachments && selectedMessage.attachments.length > 0}
             <div class="attachments">
               <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-                {selectedMessage.attachments.length} attachment{selectedMessage.attachments.length === 1 ? '' : 's'}
+                {selectedMessage.attachments.length === 1 ? tl('mail_attachment1') : tl('mail_attachmentsN', { n: selectedMessage.attachments.length })}
                 <span class="attachments-caret">{attachmentsExpanded ? '▲' : '▾'}</span>
               </button>
               {#if attachmentsExpanded}
@@ -1333,33 +1347,33 @@
             {#if viewMode === 'html' && htmlHasValue}
               {#if blockedOrigins.length > 0 && !imagesNoticeDismissed}
                 <div class="images-notice">
-                  <span>Images are blocked.</span>
+                  <span>{tl('mail_imagesBlocked')}</span>
                   {#each blockedOrigins as origin}
                     <span class="origin-split-btn">
-                      <button class="origin-split-allow" on:click={() => allowOrigin(origin)}>Allow {origin}</button>
-                      <button class="origin-split-block" on:click={() => blockOriginSilently(origin)} title="Block silently"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></button>
+                      <button class="origin-split-allow" on:click={() => allowOrigin(origin)}>{tl('mail_allowOrigin', { origin })}</button>
+                      <button class="origin-split-block" on:click={() => blockOriginSilently(origin)} title={tl('mail_blockSilently')}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></button>
                     </span>
                   {/each}
-                  <button class="dismiss-notice-btn" on:click={() => imagesNoticeDismissed = true} aria-label="Dismiss">×</button>
+                  <button class="dismiss-notice-btn" on:click={() => imagesNoticeDismissed = true} aria-label={tl('mail_dismiss')}>×</button>
                 </div>
               {/if}
               {#key iframeKey}
                 <iframe
                   sandbox="allow-popups allow-same-origin"
                   srcdoc={selectedMessage.body_html}
-                  title="Email body"
+                  title={tl('nav_mail')}
                   class="html-body"
                 ></iframe>
               {/key}
             {:else if selectedMessage.body_text}
               <pre class="body-text">{#each bodyTextSegments as seg}{#if 'href' in seg}<a href={seg.href} target="_blank" rel="noopener noreferrer">{seg.text}</a>{:else}{seg.text}{/if}{/each}</pre>
             {:else}
-              <div class="loading">Loading body…</div>
+              <div class="loading">{tl('mail_loadingBody')}</div>
             {/if}
           </div>
         {/if}
       {:else}
-        <div class="empty">Select a message.</div>
+        <div class="empty">{tl('mail_selectMessage')}</div>
       {/if}
     </section>
   </div>
@@ -1375,7 +1389,7 @@
     {#if virtualFolders.length > 0}
       <div class="sidebar-section">
         <div class="sidebar-section-header">
-          <span>Virtual Folders</span>
+          <span>{tl('mail_virtualFolders')}</span>
         </div>
         {#each virtualFolders as folder}
           <div
@@ -1388,8 +1402,8 @@
           >
             {@render folderIcon('virtual')}
             <span class="folder-name">{folder.display_name}</span>
-            <button class="icon-btn" on:click|stopPropagation={() => { sidebarDialog?.close(); openFolderEdit(folder); }} title="Edit folder"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
-            <button class="icon-btn delete-btn" on:click|stopPropagation={() => deleteFolder(folder)} title="Remove folder">×</button>
+            <button class="icon-btn" on:click|stopPropagation={() => { sidebarDialog?.close(); openFolderEdit(folder); }} title={tl('mail_editVirtualFolder')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+            <button class="icon-btn delete-btn" on:click|stopPropagation={() => deleteFolder(folder)} title={tl('mail_removeAttachment')}>×</button>
           </div>
         {/each}
       </div>
@@ -1399,9 +1413,9 @@
       <div class="sidebar-section">
         <div class="sidebar-section-header">
           <span class="account-name" title={acc.username}>{acc.display_name}</span>
-          <button class="icon-btn" on:click={() => { sidebarDialog?.close(); openManageIdentities(acc.account_id); }} title="Manage identities"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg></button>
-          <button class="icon-btn" on:click={() => { sidebarDialog?.close(); openEditAccount(acc); }} title="Edit account"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
-          <button class="icon-btn delete-btn" on:click={() => removeAccount(acc)} title="Remove account">×</button>
+          <button class="icon-btn" on:click={() => { sidebarDialog?.close(); openManageIdentities(acc.account_id); }} title={tl('mail_identities')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg></button>
+          <button class="icon-btn" on:click={() => { sidebarDialog?.close(); openEditAccount(acc); }} title={tl('mail_editAccountHeading')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+          <button class="icon-btn delete-btn" on:click={() => removeAccount(acc)} title={tl('mail_removeAttachment')}>×</button>
         </div>
         {#each (mailboxesByAccount[acc.account_id] || []) as mb}
           {#if mb.subscribed}
@@ -1411,7 +1425,7 @@
               on:click={() => selectMailbox(acc.account_id, mb.name)}
             >
               {@render folderIcon(folderKind(mb.name))}
-              <span class="folder-name">{mb.name}</span>
+              <span class="folder-name">{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
             </button>
           {/if}
         {/each}
@@ -1419,8 +1433,8 @@
     {/each}
 
     <div class="sidebar-actions">
-      <button class="link-btn" on:click={() => { sidebarDialog?.close(); openAddAccount(); }}>+ Add account</button>
-      <button class="link-btn" on:click={() => { sidebarDialog?.close(); openFolderCreate(); }}>+ Virtual folder</button>
+      <button class="link-btn" on:click={() => { sidebarDialog?.close(); openAddAccount(); }}>+ {tl('mail_addAccount')}</button>
+      <button class="link-btn" on:click={() => { sidebarDialog?.close(); openFolderCreate(); }}>+ {tl('mail_addVirtualFolder')}</button>
     </div>
   </div>
 </dialog>
@@ -1433,9 +1447,9 @@
 >
   <article>
     <header>
-      <h3>Identities</h3>
+      <h3>{tl('mail_identities')}</h3>
       <div class="header-actions">
-        <button class="close-btn" aria-label="Close" on:click={() => identityDialog?.close()}></button>
+        <button class="close-btn" aria-label={tl('mail_close')} on:click={() => identityDialog?.close()}></button>
       </div>
     </header>
     <div class="identity-list">
@@ -1444,41 +1458,41 @@
           <div class="identity-info">
             <span class="identity-name">{id.name}</span>
             <span class="identity-email">&lt;{id.email}&gt;</span>
-            {#if id.is_default}<span class="identity-default-badge">default</span>{/if}
+            {#if id.is_default}<span class="identity-default-badge">{tl('mail_identityDefault')}</span>{/if}
           </div>
           <div class="identity-actions">
             {#if !id.is_default}
-              <button class="icon-btn" disabled={identityMode !== 'idle'} on:click={() => setDefaultIdentity(id)} title="Set as default">★</button>
+              <button class="icon-btn" disabled={identityMode !== 'idle'} on:click={() => setDefaultIdentity(id)} title={tl('mail_identitySetDefault')}>★</button>
             {/if}
-            <button class="icon-btn" disabled={identityMode !== 'idle'} on:click={() => openEditIdentity(id)} title="Edit">
+            <button class="icon-btn" disabled={identityMode !== 'idle'} on:click={() => openEditIdentity(id)} title={tl('mail_update')}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
             </button>
             {#if !id.is_default}
-              <button class="icon-btn delete-btn" disabled={identityMode !== 'idle'} on:click={() => deleteIdentity(id)} title="Remove">×</button>
+              <button class="icon-btn delete-btn" disabled={identityMode !== 'idle'} on:click={() => deleteIdentity(id)} title={tl('mail_removeAttachment')}>×</button>
             {/if}
           </div>
         </div>
       {/each}
     </div>
     {#if identityMode === 'idle'}
-      <button class="link-btn identity-add-btn" on:click={() => { identityMode = 'add'; identityForm = emptyIdentityForm(); identityForm.account_id = identityAccountId; }}>+ Add identity</button>
+      <button class="link-btn identity-add-btn" on:click={() => { identityMode = 'add'; identityForm = emptyIdentityForm(); identityForm.account_id = identityAccountId; }}>+ {tl('mail_addIdentity')}</button>
     {:else}
       <form on:submit|preventDefault={saveIdentity} class="identity-form">
         <label>
-          Name
-          <input bind:value={identityForm.name} placeholder="e.g. Jane Smith" required />
+          {tl('mail_name')}
+          <input bind:value={identityForm.name} placeholder={tl('mail_namePlaceholder')} required />
         </label>
         <label>
-          Email address
-          <input type="email" bind:value={identityForm.email} placeholder="alias@example.com" required />
+          {tl('mail_emailAddress')}
+          <input type="email" bind:value={identityForm.email} placeholder={tl('mail_aliasPlaceholder')} required />
         </label>
         {#if identityError}
           <p class="error">{identityError}</p>
         {/if}
         <footer>
-          <button type="button" class="secondary outline" on:click={cancelIdentityForm}>Cancel</button>
+          <button type="button" class="secondary outline" on:click={cancelIdentityForm}>{tl('mail_cancel')}</button>
           <button type="submit" class="primary" disabled={identitySaving}>
-            {identitySaving ? 'Saving…' : (identityMode === 'edit' ? 'Update' : 'Add')}
+            {identitySaving ? tl('mail_saving') : (identityMode === 'edit' ? tl('mail_update') : tl('mail_add'))}
           </button>
         </footer>
       </form>
@@ -1494,9 +1508,9 @@
 >
   <article>
     <header>
-      <h3>{accountForm.account_id ? 'Edit account' : 'Add email account'}</h3>
+      <h3>{accountForm.account_id ? tl('mail_editAccountHeading') : tl('mail_addAccountHeading')}</h3>
       <div class="header-actions">
-        <button class="close-btn" aria-label="Close" on:click={() => accountDialog?.close()}></button>
+        <button class="close-btn" aria-label={tl('mail_close')} on:click={() => accountDialog?.close()}></button>
       </div>
     </header>
 
@@ -1504,63 +1518,63 @@
       <!-- Step 1: name + email only -->
       <form on:submit|preventDefault={continueSetup}>
         <label>
-          Your name
-          <input bind:value={accountForm.sender_name} placeholder="e.g. Jane Smith" required />
+          {tl('mail_yourName')}
+          <input bind:value={accountForm.sender_name} placeholder={tl('mail_namePlaceholder')} required />
         </label>
         <label>
-          Email address
-          <input type="email" bind:value={accountForm.username} placeholder="you@example.com" required />
+          {tl('mail_emailAddress')}
+          <input type="email" bind:value={accountForm.username} placeholder={tl('mail_emailPlaceholder')} required />
         </label>
         {#if autodiscovering}
-          <p class="hint">Detecting settings…</p>
+          <p class="hint">{tl('mail_detectingSettings')}</p>
         {/if}
         {#if autodiscoverError}
           <p class="error">{autodiscoverError}</p>
         {/if}
         <footer>
-          <button type="button" class="secondary outline" on:click={() => accountDialog?.close()}>Cancel</button>
-          <button type="submit" class="primary" disabled={autodiscovering}>Continue</button>
+          <button type="button" class="secondary outline" on:click={() => accountDialog?.close()}>{tl('mail_cancel')}</button>
+          <button type="submit" class="primary" disabled={autodiscovering}>{tl('mail_continue')}</button>
         </footer>
       </form>
     {:else}
       <!-- Step 2: password + advanced -->
       <form on:submit|preventDefault={saveAccount}>
         {#if autodiscoverResult?.provider_name}
-          <p class="hint">Settings detected for <strong>{autodiscoverResult.provider_name}</strong></p>
+          <p class="hint">{tl('mail_settingsDetected', { provider: autodiscoverResult.provider_name })}</p>
         {:else if !accountForm.account_id}
-          <p class="hint">Enter your server details below.</p>
+          <p class="hint">{tl('mail_enterServerDetails')}</p>
         {/if}
         <label>
-          Password
-          <input type="password" bind:value={accountForm.password} placeholder={accountForm.account_id ? 'Leave blank to keep current' : ''} autocomplete="current-password" />
+          {tl('mail_password')}
+          <input type="password" bind:value={accountForm.password} placeholder={accountForm.account_id ? tl('mail_passwordPlaceholderKeep') : ''} autocomplete="current-password" />
         </label>
         <details bind:open={showAdvanced}>
-          <summary>Advanced settings</summary>
+          <summary>{tl('mail_advancedSettings')}</summary>
           <label>
-            Display name
-            <input bind:value={accountForm.display_name} placeholder="e.g. Work" />
+            {tl('mail_displayName')}
+            <input bind:value={accountForm.display_name} placeholder={tl('mail_displayNamePlaceholder')} />
           </label>
           <label>
-            Username / email
-            <input bind:value={accountForm.username} placeholder="you@example.com" />
+            {tl('mail_usernameEmail')}
+            <input bind:value={accountForm.username} placeholder={tl('mail_emailPlaceholder')} />
           </label>
           <label>
-            IMAP host
-            <input bind:value={accountForm.host} placeholder="imap.example.com" required />
+            {tl('mail_imapHost')}
+            <input bind:value={accountForm.host} placeholder={tl('mail_imapHostPlaceholder')} required />
           </label>
           <label>
-            IMAP port
+            {tl('mail_imapPort')}
             <input type="number" bind:value={accountForm.port} required />
           </label>
           <label class="checkbox-label">
-            <input type="checkbox" bind:checked={accountForm.use_tls} /> Use TLS (IMAPS)
+            <input type="checkbox" bind:checked={accountForm.use_tls} /> {tl('mail_useTls')}
           </label>
           <label>
-            SMTP host
-            <input bind:value={accountForm.smtp_host} placeholder="smtp.example.com (leave blank to use IMAP host)" />
+            {tl('mail_smtpHost')}
+            <input bind:value={accountForm.smtp_host} placeholder={tl('mail_smtpHostPlaceholder')} />
           </label>
           <label>
-            SMTP port
+            {tl('mail_smtpPort')}
             <input type="number" bind:value={accountForm.smtp_port} />
           </label>
         </details>
@@ -1569,12 +1583,12 @@
         {/if}
         <footer>
           {#if !accountForm.account_id}
-            <button type="button" class="secondary outline" on:click={() => { accountStep = 'basic'; accountError = ''; }}>Back</button>
+            <button type="button" class="secondary outline" on:click={() => { accountStep = 'basic'; accountError = ''; }}>{tl('mail_back')}</button>
           {:else}
-            <button type="button" class="secondary outline" on:click={() => accountDialog?.close()}>Cancel</button>
+            <button type="button" class="secondary outline" on:click={() => accountDialog?.close()}>{tl('mail_cancel')}</button>
           {/if}
           <button type="submit" class="primary" disabled={accountSaving}>
-            {accountSaving ? 'Testing connection…' : 'Save'}
+            {accountSaving ? tl('mail_testingConnection') : tl('mail_save')}
           </button>
         </footer>
       </form>
@@ -1586,8 +1600,8 @@
 <button
   class="origins-trigger"
   on:click={openOriginsGlobal}
-  title="Manage image sources"
-  aria-label="Manage image sources"
+  title={tl('mail_manageImageSources')}
+  aria-label={tl('mail_manageImageSources')}
 >
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
   {#if imageOrigins.length + blacklistOrigins.length > 0}
@@ -1603,25 +1617,25 @@
 >
   <article>
     <header>
-      <span>{originsEmailOnly ? 'Image sources - this email' : 'Image sources'}</span>
-      <button class="close-btn" aria-label="Close" on:click={() => originsDialog?.close()}></button>
+      <span>{originsEmailOnly ? tl('mail_imageSourcesThisEmail') : tl('mail_imageSources')}</span>
+      <button class="close-btn" aria-label={tl('mail_close')} on:click={() => originsDialog?.close()}></button>
     </header>
     <div class="origins-filter-wrap">
-      <input type="search" class="origins-filter" placeholder="Filter…" bind:value={originsFilter} />
+      <input type="search" class="origins-filter" placeholder={tl('mail_originsFilter')} bind:value={originsFilter} />
     </div>
     <div class="origins-sections">
       {#if originsEmailOnly}
         <section class="origins-section">
-          <h6>Blocked</h6>
+          <h6>{tl('mail_originsBlocked')}</h6>
           {#if blockedOrigins.filter(o => !originsFilter || o.includes(originsFilter)).length === 0}
-            <p class="origins-empty">{originsFilter ? 'No matches.' : 'None blocked in this email.'}</p>
+            <p class="origins-empty">{originsFilter ? tl('mail_originsNoMatches') : tl('mail_originsNoneBlockedEmail')}</p>
           {:else}
             <ul class="origins-list">
               {#each blockedOrigins.filter(o => !originsFilter || o.includes(originsFilter)) as origin}
                 <li>
                   <span>{origin}</span>
-                  <button class="allow-btn" on:click={() => allowOrigin(origin)}>Allow</button>
-                  <button class="icon-btn delete-btn" on:click={() => blockOriginSilently(origin)} title="Block silently">×</button>
+                  <button class="allow-btn" on:click={() => allowOrigin(origin)}>{tl('mail_originsAllow')}</button>
+                  <button class="icon-btn delete-btn" on:click={() => blockOriginSilently(origin)} title={tl('mail_blockSilently')}>×</button>
                 </li>
               {/each}
             </ul>
@@ -1629,31 +1643,31 @@
         </section>
       {/if}
       <section class="origins-section">
-        <h6>Allowed</h6>
+        <h6>{tl('mail_originsAllowed')}</h6>
         {#if (originsEmailOnly ? allowedEmailOrigins : imageOrigins).filter(o => !originsFilter || o.includes(originsFilter)).length === 0}
-          <p class="origins-empty">{originsFilter ? 'No matches.' : 'None yet.'}</p>
+          <p class="origins-empty">{originsFilter ? tl('mail_originsNoMatches') : tl('mail_originsNoneYet')}</p>
         {:else}
           <ul class="origins-list">
             {#each (originsEmailOnly ? allowedEmailOrigins : imageOrigins).filter(o => !originsFilter || o.includes(originsFilter)) as origin}
               <li>
                 <span>{origin}</span>
-                <button class="icon-btn delete-btn" on:click={() => revokeOrigin(origin)} title="Remove">×</button>
+                <button class="icon-btn delete-btn" on:click={() => revokeOrigin(origin)} title={tl('mail_removeAttachment')}>×</button>
               </li>
             {/each}
           </ul>
         {/if}
       </section>
       <section class="origins-section">
-        <h6>Ignored</h6>
+        <h6>{tl('mail_originsIgnored')}</h6>
         {#if (originsEmailOnly ? silentEmailOrigins : blacklistOrigins).filter(o => !originsFilter || o.includes(originsFilter)).length === 0}
-          <p class="origins-empty">{originsFilter ? 'No matches.' : 'None yet.'}</p>
+          <p class="origins-empty">{originsFilter ? tl('mail_originsNoMatches') : tl('mail_originsNoneYet')}</p>
         {:else}
           <ul class="origins-list">
             {#each (originsEmailOnly ? silentEmailOrigins : blacklistOrigins).filter(o => !originsFilter || o.includes(originsFilter)) as origin}
               <li>
                 <span>{origin}</span>
-                <button class="allow-btn" on:click={() => promoteFromBlacklist(origin)} title="Allow">Allow</button>
-                <button class="icon-btn delete-btn" on:click={() => unblockOrigin(origin)} title="Remove">×</button>
+                <button class="allow-btn" on:click={() => promoteFromBlacklist(origin)} title={tl('mail_originsAllow')}>{tl('mail_originsAllow')}</button>
+                <button class="icon-btn delete-btn" on:click={() => unblockOrigin(origin)} title={tl('mail_removeAttachment')}>×</button>
               </li>
             {/each}
           </ul>
@@ -1672,13 +1686,13 @@
 >
   <article>
     <header class="compose-header">
-      <span class="compose-title">{composeInReplyTo ? 'Reply' : 'New message'}</span>
-      <button class="close-btn" aria-label="Close" on:click={() => composeDialog?.close()}></button>
+      <span class="compose-title">{composeInReplyTo ? tl('mail_reply') : tl('mail_newMessage')}</span>
+      <button class="close-btn" aria-label={tl('mail_close')} on:click={() => composeDialog?.close()}></button>
     </header>
     <form on:submit|preventDefault={sendEmail} class="compose-form">
       {#if identities.length > 1}
         <div class="compose-row">
-          <span class="compose-label">From</span>
+          <span class="compose-label">{tl('mail_composeFrom')}</span>
           <SelectDropdown
             options={identities.map(id => ({ value: id.identity_id, label: id.name, secondary: `<${id.email}>` }))}
             bind:value={composeIdentityId}
@@ -1686,24 +1700,24 @@
         </div>
       {/if}
       <div class="compose-row">
-        <span class="compose-label">To</span>
-        <input class="compose-input" bind:value={composeTo} placeholder="recipient@example.com, ..." />
+        <span class="compose-label">{tl('mail_composeTo')}</span>
+        <input class="compose-input" bind:value={composeTo} placeholder={tl('mail_composeToPlaceholder')} />
         {#if !showComposeCcBcc}
-          <button type="button" class="ccbcc-toggle" on:click={() => { showComposeCcBcc = true; }}>CC/BCC</button>
+          <button type="button" class="ccbcc-toggle" on:click={() => { showComposeCcBcc = true; }}>{tl('mail_composeCcBcc')}</button>
         {/if}
       </div>
       {#if showComposeCcBcc}
         <div class="compose-row">
-          <span class="compose-label">CC</span>
-          <input class="compose-input" bind:value={composeCc} placeholder="cc@example.com, ..." />
+          <span class="compose-label">{tl('mail_composeCc')}</span>
+          <input class="compose-input" bind:value={composeCc} placeholder={tl('mail_composeCcPlaceholder')} />
         </div>
         <div class="compose-row">
-          <span class="compose-label">BCC</span>
-          <input class="compose-input" bind:value={composeBcc} placeholder="bcc@example.com, ..." />
+          <span class="compose-label">{tl('mail_composeBcc')}</span>
+          <input class="compose-input" bind:value={composeBcc} placeholder={tl('mail_composeBccPlaceholder')} />
         </div>
       {/if}
       <div class="compose-row">
-        <span class="compose-label">Subject</span>
+        <span class="compose-label">{tl('mail_composeSubject')}</span>
         <input class="compose-input" bind:value={composeSubject} />
       </div>
       <div class="compose-body-row">
@@ -1716,7 +1730,7 @@
               <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
               <span class="attachment-name" title={file.name}>{file.name}</span>
               <span class="attachment-size">{formatFileSize(file.size)}</span>
-              <button type="button" class="attachment-remove" aria-label="Remove" on:click={() => removeAttachment(i)}>✕</button>
+              <button type="button" class="attachment-remove" aria-label={tl('mail_removeAttachment')} on:click={() => removeAttachment(i)}>✕</button>
             </li>
           {/each}
         </ul>
@@ -1732,14 +1746,14 @@
         on:change={(e) => addAttachments(e.currentTarget.files)}
       />
       <footer class="compose-footer">
-        <button type="button" class="compose-attach-btn" aria-label="Attach files" on:click={openFilePicker}>
+        <button type="button" class="compose-attach-btn" aria-label={tl('mail_attachFiles')} on:click={openFilePicker}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-          Attach
+          {tl('mail_attach')}
         </button>
         <div class="compose-footer-right">
-          <button type="button" class="secondary outline" on:click={() => composeDialog?.close()}>Discard</button>
+          <button type="button" class="secondary outline" on:click={() => composeDialog?.close()}>{tl('mail_discard')}</button>
           <button type="submit" class="primary" disabled={composeSending}>
-            {composeSending ? 'Sending…' : 'Send'}
+            {composeSending ? tl('mail_sending') : tl('mail_send')}
           </button>
         </div>
       </footer>
@@ -1755,17 +1769,17 @@
 >
   <article>
     <header>
-      <h3>{editingFolder ? 'Edit virtual folder' : 'Create virtual folder'}</h3>
+      <h3>{editingFolder ? tl('mail_editVirtualFolder') : tl('mail_createVirtualFolder')}</h3>
       <div class="header-actions">
-        <button class="close-btn" aria-label="Close" on:click={() => folderDialog?.close()}></button>
+        <button class="close-btn" aria-label={tl('mail_close')} on:click={() => folderDialog?.close()}></button>
       </div>
     </header>
     <form on:submit|preventDefault={saveVirtualFolder}>
       <label>
-        Name
-        <input bind:value={folderName} placeholder="Virtual Folder" />
+        {tl('mail_name')}
+        <input bind:value={folderName} placeholder={tl('mail_folderNamePlaceholder')} />
       </label>
-      <p class="folder-mailbox-label">Mailboxes to include</p>
+      <p class="folder-mailbox-label">{tl('mail_mailboxesToInclude')}</p>
       <div class="folder-mailbox-list">
         {#each accounts as acc}
           {#if (mailboxesByAccount[acc.account_id] || []).filter(mb => mb.subscribed).length > 0}
@@ -1783,26 +1797,26 @@
                       folderSelectedMailboxes = folderSelectedMailboxes;
                     }}
                   />
-                  {mb.name}
+                  {FOLDER_NAMES[folderKind(mb.name)] || mb.name}
                 </label>
               {/each}
             </div>
           {/if}
         {/each}
         {#if accounts.length === 0}
-          <p class="muted">No email accounts configured.</p>
+          <p class="muted">{tl('mail_noEmailAccounts')}</p>
         {/if}
       </div>
       <footer>
-        <button type="button" class="secondary outline" on:click={() => folderDialog?.close()}>Cancel</button>
-        <button type="submit" class="primary" disabled={folderSaving || folderSelectedMailboxes.size === 0}>{editingFolder ? 'Save' : 'Create'}</button>
+        <button type="button" class="secondary outline" on:click={() => folderDialog?.close()}>{tl('mail_cancel')}</button>
+        <button type="submit" class="primary" disabled={folderSaving || folderSelectedMailboxes.size === 0}>{editingFolder ? tl('mail_save') : tl('mail_create')}</button>
       </footer>
     </form>
   </article>
 </dialog>
 
 <!-- ── FAB ────────────────────────────────────────────────────────────────── -->
-<button class="fab" on:click={() => openCompose()} aria-label="Compose">
+<button class="fab" on:click={() => openCompose()} aria-label={tl('mail_newMessage')}>
   <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
   </svg>
