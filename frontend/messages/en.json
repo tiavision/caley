@@ -238,6 +238,7 @@
   "mail_viewAsHtml": "View as HTML",
   "mail_viewAsText": "View as plain text",
   "mail_delete": "Delete",
+  "mail_moveToFolder": "Move to Folder",
   "mail_metaFrom": "From",
   "mail_metaTo": "To",
   "mail_metaCc": "CC",

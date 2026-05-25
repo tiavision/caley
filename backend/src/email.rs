@@ -664,6 +664,59 @@ pub async fn delete_message(
     StatusCode::NO_CONTENT.into_response()
 }
 
+// ── Move ──────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct MoveMessageBody {
+    pub account_id: String,
+    pub mailbox: String,
+    pub uid: u32,
+    pub dest_mailbox: String,
+}
+
+pub async fn move_message(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<MoveMessageBody>,
+) -> impl IntoResponse {
+    let account = match email_db::get_account(&state.db, &body.account_id, &user.user_id, &state.encryption_key).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
+        Err(e) => {
+            eprintln!("[email] move_message account lookup: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+    };
+
+    match imap_client::connect(&account.host, account.port as u16, &account.username, &account.password).await {
+        Ok(mut session) => {
+            if let Ok(_) = imap_client::select_mailbox(&mut session, &body.mailbox).await {
+                if let Err(e) = imap_client::move_message_on_server(&mut session, body.uid, &body.dest_mailbox).await {
+                    eprintln!("[email] move_message_on_server error: {e}");
+                }
+            }
+            let _ = session.logout().await;
+        }
+        Err(e) => eprintln!("[email] connect for move error: {e}"),
+    }
+
+    let _ = tokio::fs::remove_file(eml_path(&state.data_dir, &body.account_id, &body.mailbox, body.uid)).await;
+    let _ = email_db::delete_attachments_for_message(&state.db, &body.account_id, &body.mailbox, body.uid).await;
+    let _ = email_db::delete_message(&state.db, &body.account_id, &body.mailbox, body.uid).await;
+
+    state.sse_broadcaster.send(&user.user_id, SseMessage::EmailRemoved {
+        account_id: body.account_id.clone(),
+        uid: body.uid,
+        mailbox: body.mailbox.clone(),
+    });
+    state.sse_broadcaster.send(&user.user_id, SseMessage::EmailsRefetch {
+        account_id: body.account_id,
+        mailbox: body.dest_mailbox,
+    });
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
 // ── Send ──────────────────────────────────────────────────────────────────────
 
 pub async fn send_email(

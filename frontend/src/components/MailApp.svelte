@@ -201,7 +201,12 @@
 
   // Detail UI state
   let actionsOpen = false;
+  let moveSubmenuOpen = false;
   let metaExpanded = false;
+
+  // Drag & drop state
+  let draggedMessage: Message | null = null;
+  let dragOverMailbox: string | null = null;
   let actionsEl: HTMLDivElement;
   let actionsMenuPos = { top: 0, right: 0 };
   let attachmentsExpanded = false;
@@ -697,6 +702,18 @@
       `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`,
       { method: 'DELETE' }
     );
+    messages = messages.filter(m => !(m.uid === msg.uid && m.account_id === msg.account_id));
+    if (selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id) {
+      closeDetail();
+    }
+  }
+
+  async function moveMessage(msg: Message, destMailbox: string) {
+    await fetch('/api/email/message/move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: msg.account_id, mailbox: msg.mailbox, uid: msg.uid, dest_mailbox: destMailbox }),
+    });
     messages = messages.filter(m => !(m.uid === msg.uid && m.account_id === msg.account_id));
     if (selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id) {
       closeDetail();
@@ -1223,6 +1240,7 @@
     if (actionsOpen) {
       setTimeout(() => window.addEventListener('click', handleWindowClick), 0);
     } else {
+      moveSubmenuOpen = false;
       window.removeEventListener('click', handleWindowClick);
     }
   }
@@ -1231,6 +1249,7 @@
     const target = e.target as Node;
     if (!actionsEl?.contains(target)) {
       actionsOpen = false;
+      moveSubmenuOpen = false;
       window.removeEventListener('click', handleWindowClick);
     }
   }
@@ -1393,7 +1412,12 @@
               <button
                 class="sidebar-item"
                 class:active={selectedAccountId === acc.account_id && selectedMailbox === mb.name}
+                class:drag-target={draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name}
+                class:drag-over={dragOverMailbox === `${acc.account_id}|${mb.name}`}
                 on:click={() => selectMailbox(acc.account_id, mb.name)}
+                on:dragover={(e) => { if (draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name) { e.preventDefault(); dragOverMailbox = `${acc.account_id}|${mb.name}`; } }}
+                on:dragleave={() => { if (dragOverMailbox === `${acc.account_id}|${mb.name}`) dragOverMailbox = null; }}
+                on:drop={() => { if (draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name) { moveMessage(draggedMessage, mb.name); } draggedMessage = null; dragOverMailbox = null; }}
               >
                 {@render folderIcon(folderKind(mb.name))}
                 <span class="folder-name">{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
@@ -1583,6 +1607,9 @@
               class:unread={!msg.is_read}
               class:selected={selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id}
               on:click={() => openMessage(msg)}
+              draggable="true"
+              on:dragstart={(e) => { draggedMessage = msg; if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'; }}
+              on:dragend={() => { draggedMessage = null; dragOverMailbox = null; }}
             >
               <div class="message-row-top">
                 <span class="from">
@@ -1657,6 +1684,22 @@
                     <div class="menu-separator"></div>
                     <button role="menuitem" class:menu-item-active={viewMode === 'html'} on:click={() => { viewMode = 'html'; actionsOpen = false; }}>{tl('mail_viewAsHtml')}</button>
                     <button role="menuitem" class:menu-item-active={viewMode === 'text'} on:click={() => { viewMode = 'text'; actionsOpen = false; }}>{tl('mail_viewAsText')}</button>
+                  {/if}
+                  <div class="menu-separator"></div>
+                  <button role="menuitem" class="move-to-folder-btn" on:click|stopPropagation={() => moveSubmenuOpen = !moveSubmenuOpen}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    {tl('mail_moveToFolder')}
+                    <span class="move-caret">{moveSubmenuOpen ? '▴' : '▾'}</span>
+                  </button>
+                  {#if moveSubmenuOpen}
+                    <div class="move-submenu" role="menu">
+                      {#each (mailboxesByAccount[selectedMessage.account_id] || []).filter(mb => mb.subscribed && mb.name !== selectedMessage.mailbox) as mb}
+                        <button role="menuitem" on:click={() => { actionsOpen = false; moveSubmenuOpen = false; moveMessage(selectedMessage!, mb.name); }}>
+                          {@render folderIcon(folderKind(mb.name))}
+                          <span>{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
+                        </button>
+                      {/each}
+                    </div>
                   {/if}
                   <div class="menu-separator"></div>
                   <button role="menuitem" class="menu-item-danger" on:click={() => { actionsOpen = false; deleteMessage(selectedMessage!); }}>
@@ -1798,7 +1841,12 @@
             <button
               class="sidebar-item"
               class:active={selectedAccountId === acc.account_id && selectedMailbox === mb.name}
+              class:drag-target={draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name}
+              class:drag-over={dragOverMailbox === `${acc.account_id}|${mb.name}`}
               on:click={() => selectMailbox(acc.account_id, mb.name)}
+              on:dragover={(e) => { if (draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name) { e.preventDefault(); dragOverMailbox = `${acc.account_id}|${mb.name}`; } }}
+              on:dragleave={() => { if (dragOverMailbox === `${acc.account_id}|${mb.name}`) dragOverMailbox = null; }}
+              on:drop={() => { if (draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name) { moveMessage(draggedMessage, mb.name); } draggedMessage = null; dragOverMailbox = null; }}
             >
               {@render folderIcon(folderKind(mb.name))}
               <span class="folder-name">{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
@@ -2954,6 +3002,42 @@
 
   .menu-item-active::before {
     content: '✓ ';
+  }
+
+  .move-to-folder-btn {
+    justify-content: space-between !important;
+  }
+
+  .move-to-folder-btn > :first-child {
+    margin-right: 0.25rem;
+  }
+
+  .move-caret {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: var(--pico-muted-color, #888);
+  }
+
+  .move-submenu {
+    max-height: 180px;
+    overflow-y: auto;
+    border-top: 1px solid var(--pico-muted-border-color, #eee);
+    border-bottom: 1px solid var(--pico-muted-border-color, #eee);
+    background: var(--pico-card-background-color, #fafafa);
+  }
+
+  .move-submenu button {
+    padding-left: 1.4rem !important;
+    font-size: 0.82rem !important;
+  }
+
+  .sidebar-item.drag-target {
+    outline: 1px dashed var(--pico-primary, #2563eb);
+  }
+
+  .sidebar-item.drag-over {
+    background: var(--pico-primary-background, #eff6ff);
+    outline: 1px solid var(--pico-primary, #2563eb);
   }
 
   .detail-meta {
