@@ -296,6 +296,30 @@ pub async fn list_virtual_folders(
     }
 }
 
+pub async fn get_unread_counts(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> impl IntoResponse {
+    let mb = email_db::get_unread_counts(&state.db, &user.user_id).await.unwrap_or_default();
+    let folders = email_db::get_unread_counts_virtual(&state.db, &user.user_id).await.unwrap_or_default();
+
+    let mut mailboxes_map: serde_json::Map<String, serde_json::Value> = Default::default();
+    for (acc, mbox, cnt) in mb {
+        mailboxes_map
+            .entry(acc)
+            .or_insert_with(|| json!({}))
+            .as_object_mut()
+            .unwrap()
+            .insert(mbox, json!(cnt));
+    }
+    let folders_map: serde_json::Map<String, serde_json::Value> = folders
+        .into_iter()
+        .map(|(id, cnt)| (id, json!(cnt)))
+        .collect();
+
+    Json(json!({ "mailboxes": mailboxes_map, "folders": folders_map })).into_response()
+}
+
 #[derive(Deserialize)]
 pub struct VirtualFolderRuleBody {
     pub account_id: Option<String>,

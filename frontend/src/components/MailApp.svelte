@@ -77,6 +77,9 @@
   let identities: Identity[] = [];
   let mailboxesByAccount: Record<string, Mailbox[]> = {};
   let virtualFolders: VirtualFolder[] = [];
+  let syncingMailboxes: Set<string> = new Set();
+  let mailboxUnreadCounts: Record<string, Record<string, number>> = {};
+  let folderUnreadCounts: Record<string, number> = {};
 
   let selectedAccountId: string | null = null;
   let selectedMailbox: string | null = null;
@@ -242,7 +245,7 @@
   // ── Data loading ─────────────────────────────────────────────────────────
 
   async function loadAll() {
-    await Promise.all([loadAccounts(), loadIdentities(), loadVirtualFolders(), loadImageOrigins(), loadBlacklistOrigins()]);
+    await Promise.all([loadAccounts(), loadIdentities(), loadVirtualFolders(), loadImageOrigins(), loadBlacklistOrigins(), loadUnreadCounts()]);
     for (const acc of accounts) {
       await loadMailboxes(acc.account_id);
     }
@@ -293,6 +296,17 @@
       if (r.ok) {
         const data = await r.json();
         virtualFolders = data.folders || [];
+      }
+    } catch {}
+  }
+
+  async function loadUnreadCounts() {
+    try {
+      const r = await fetch('/api/email/unread-counts');
+      if (r.ok) {
+        const data = await r.json();
+        mailboxUnreadCounts = data.mailboxes || {};
+        folderUnreadCounts = data.folders || {};
       }
     } catch {}
   }
@@ -1084,6 +1098,7 @@
       if (!searching && data.account_id === selectedAccountId && data.mailbox === selectedMailbox) {
         await loadMessages();
       }
+      loadUnreadCounts();
     });
     sseSource.addEventListener('email_updated', (e) => {
       const data = JSON.parse(e.data);
@@ -1092,12 +1107,14 @@
           ? { ...m, flags: data.flags, is_read: data.flags.includes('\\Seen'), is_flagged: data.flags.includes('\\Flagged') }
           : m
       );
+      loadUnreadCounts();
     });
     sseSource.addEventListener('email_removed', (e) => {
       const data = JSON.parse(e.data);
       const before = messages.length;
       messages = messages.filter(m => !(m.uid === data.uid && m.account_id === data.account_id));
       if (messages.length < before) totalMessages = Math.max(0, totalMessages - 1);
+      loadUnreadCounts();
     });
     sseSource.addEventListener('accounts_changed', async () => {
       await loadAccounts();
@@ -1106,6 +1123,17 @@
     sseSource.addEventListener('mailboxes_changed', async (e) => {
       const data = JSON.parse(e.data);
       await loadMailboxes(data.account_id);
+    });
+    sseSource.addEventListener('sync_started', (e) => {
+      const { account_id, mailbox } = JSON.parse(e.data);
+      syncingMailboxes = new Set([...syncingMailboxes, `${account_id}|${mailbox}`]);
+    });
+    sseSource.addEventListener('sync_completed', (e) => {
+      const { account_id, mailbox } = JSON.parse(e.data);
+      const next = new Set(syncingMailboxes);
+      next.delete(`${account_id}|${mailbox}`);
+      syncingMailboxes = next;
+      loadUnreadCounts();
     });
     sseSource.onerror = () => {
       sseSource?.close();
@@ -1317,6 +1345,7 @@
             <span>{tl('mail_virtualFolders')}</span>
           </div>
           {#each virtualFolders as folder}
+            {@const folderUnread = folderUnreadCounts[folder.folder_id] ?? 0}
             <div
               class="sidebar-item"
               class:active={selectedFolderId === folder.folder_id}
@@ -1327,6 +1356,9 @@
             >
               {@render folderIcon('virtual')}
               <span class="folder-name">{folder.display_name}</span>
+              {#if folderUnread > 0}
+                <span class="unread-badge">{folderUnread > 999 ? '999+' : folderUnread}</span>
+              {/if}
               <button class="icon-btn" on:click|stopPropagation={() => openFolderEdit(folder)} title={tl('mail_editVirtualFolder')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
               <button class="icon-btn delete-btn" on:click|stopPropagation={() => deleteFolder(folder)} title={tl('mail_removeAttachment')}>×</button>
             </div>
@@ -1349,6 +1381,9 @@
             return ap !== bp ? ap - bp : an.localeCompare(bn);
           }) as mb}
             {#if mb.subscribed}
+              {@const syncKey = `${acc.account_id}|${mb.name}`}
+              {@const mbUnread = mailboxUnreadCounts[acc.account_id]?.[mb.name] ?? 0}
+              {@const isSyncing = syncingMailboxes.has(syncKey)}
               <button
                 class="sidebar-item"
                 class:active={selectedAccountId === acc.account_id && selectedMailbox === mb.name}
@@ -1356,6 +1391,11 @@
               >
                 {@render folderIcon(folderKind(mb.name))}
                 <span class="folder-name">{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
+                {#if isSyncing}
+                  <span class="sync-spinner" aria-label="Syncing"></span>
+                {:else if mbUnread > 0}
+                  <span class="unread-badge">{mbUnread > 999 ? '999+' : mbUnread}</span>
+                {/if}
               </button>
             {/if}
           {/each}
@@ -1713,6 +1753,7 @@
           <span>{tl('mail_virtualFolders')}</span>
         </div>
         {#each virtualFolders as folder}
+          {@const folderUnread = folderUnreadCounts[folder.folder_id] ?? 0}
           <div
             class="sidebar-item"
             class:active={selectedFolderId === folder.folder_id}
@@ -1723,6 +1764,9 @@
           >
             {@render folderIcon('virtual')}
             <span class="folder-name">{folder.display_name}</span>
+            {#if folderUnread > 0}
+              <span class="unread-badge">{folderUnread > 999 ? '999+' : folderUnread}</span>
+            {/if}
             <button class="icon-btn" on:click|stopPropagation={() => { sidebarDialog?.close(); openFolderEdit(folder); }} title={tl('mail_editVirtualFolder')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
             <button class="icon-btn delete-btn" on:click|stopPropagation={() => deleteFolder(folder)} title={tl('mail_removeAttachment')}>×</button>
           </div>
@@ -1740,6 +1784,9 @@
         </div>
         {#each (mailboxesByAccount[acc.account_id] || []) as mb}
           {#if mb.subscribed}
+            {@const syncKey = `${acc.account_id}|${mb.name}`}
+            {@const mbUnread = mailboxUnreadCounts[acc.account_id]?.[mb.name] ?? 0}
+            {@const isSyncing = syncingMailboxes.has(syncKey)}
             <button
               class="sidebar-item"
               class:active={selectedAccountId === acc.account_id && selectedMailbox === mb.name}
@@ -1747,6 +1794,11 @@
             >
               {@render folderIcon(folderKind(mb.name))}
               <span class="folder-name">{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
+              {#if isSyncing}
+                <span class="sync-spinner" aria-label="Syncing"></span>
+              {:else if mbUnread > 0}
+                <span class="unread-badge">{mbUnread > 999 ? '999+' : mbUnread}</span>
+              {/if}
             </button>
           {/if}
         {/each}
@@ -3610,5 +3662,34 @@
       flex: 1;
       min-height: 0;
     }
+  }
+
+  .sync-spinner {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid var(--pico-muted-border-color, #ccc);
+    border-top-color: var(--pico-primary, #0172ad);
+    border-radius: 50%;
+    flex-shrink: 0;
+    animation: spin 0.7s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .unread-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--pico-primary, #0172ad);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1;
+    flex-shrink: 0;
   }
 </style>

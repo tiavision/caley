@@ -1387,3 +1387,44 @@ pub async fn remove_image_blacklist(pool: &SqlitePool, user_id: &str, origin: &s
     .await?;
     Ok(())
 }
+
+/// Returns (account_id, mailbox, unread_count) for all mailboxes with at least
+/// one unread message. Unread = \\Seen flag absent from the JSON flags array.
+pub async fn get_unread_counts(pool: &SqlitePool, user_id: &str) -> Result<Vec<(String, String, i64)>> {
+    let rows = sqlx::query(
+        "SELECT m.account_id, m.mailbox, COUNT(*) as cnt
+         FROM cached_messages m
+         JOIN imap_accounts a ON a.account_id = m.account_id
+         WHERE a.user_id = ?
+           AND NOT EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Seen')
+         GROUP BY m.account_id, m.mailbox",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(|r| (r.get(0), r.get(1), r.get(2))).collect())
+}
+
+/// Returns (folder_id, unread_count) for all virtual folders with at least one
+/// unread message. Deduplicates messages matched by multiple rules via DISTINCT.
+pub async fn get_unread_counts_virtual(pool: &SqlitePool, user_id: &str) -> Result<Vec<(String, i64)>> {
+    let rows = sqlx::query(
+        "SELECT sub.folder_id, COUNT(*) FROM (
+             SELECT DISTINCT r.folder_id, m.account_id, m.mailbox, m.uid
+             FROM cached_messages m
+             JOIN imap_accounts a ON a.account_id = m.account_id
+             JOIN virtual_folder_rules r
+                 ON (r.account_id = '' OR r.account_id = m.account_id)
+                 AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
+             JOIN virtual_folders vf ON vf.folder_id = r.folder_id
+             WHERE a.user_id = ?
+               AND (vf.only_flagged = 0 OR EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Flagged'))
+               AND (vf.only_attachments = 0 OR m.has_attachments = 1)
+               AND NOT EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Seen')
+         ) sub GROUP BY sub.folder_id",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(|r| (r.get(0), r.get(1))).collect())
+}

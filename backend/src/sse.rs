@@ -38,6 +38,10 @@ pub enum SseMessage {
     AccountsChanged,
     /// The mailbox list for an account changed
     MailboxesChanged { account_id: String },
+    /// A mailbox sync has started
+    SyncStarted { account_id: String, mailbox: String },
+    /// A mailbox sync has completed (or failed — spinner must always stop)
+    SyncCompleted { account_id: String, mailbox: String },
 }
 
 pub struct SseBroadcaster {
@@ -138,6 +142,16 @@ pub async fn events_stream(
             Ok(SseMessage::MailboxesChanged { account_id }) => {
                 Some(Event::default().event("mailboxes_changed").data(
                     serde_json::json!({ "account_id": account_id }).to_string(),
+                ))
+            }
+            Ok(SseMessage::SyncStarted { account_id, mailbox }) => {
+                Some(Event::default().event("sync_started").data(
+                    serde_json::json!({ "account_id": account_id, "mailbox": mailbox }).to_string(),
+                ))
+            }
+            Ok(SseMessage::SyncCompleted { account_id, mailbox }) => {
+                Some(Event::default().event("sync_completed").data(
+                    serde_json::json!({ "account_id": account_id, "mailbox": mailbox }).to_string(),
                 ))
             }
             Err(_) => None,

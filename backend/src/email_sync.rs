@@ -221,7 +221,16 @@ impl EmailSyncManager {
             if !subscribed {
                 continue;
             }
-            if let Err(e) = self.sync_mailbox_session(&mut session, account_id, &user_id, name).await {
+            self.broadcaster.send(&user_id, SseMessage::SyncStarted {
+                account_id: account_id.to_owned(),
+                mailbox: name.to_owned(),
+            });
+            let result = self.sync_mailbox_session(&mut session, account_id, &user_id, name).await;
+            self.broadcaster.send(&user_id, SseMessage::SyncCompleted {
+                account_id: account_id.to_owned(),
+                mailbox: name.to_owned(),
+            });
+            if let Err(e) = result {
                 eprintln!("[email_sync] mailbox {name} sync error: {e}");
             }
         }
@@ -232,9 +241,17 @@ impl EmailSyncManager {
 
     async fn sync_mailbox(&self, account_id: &str, mailbox: &str) -> anyhow::Result<()> {
         let (mut session, user_id) = self.load_session(account_id).await?;
-        self.sync_mailbox_session(&mut session, account_id, &user_id, mailbox).await?;
+        self.broadcaster.send(&user_id, SseMessage::SyncStarted {
+            account_id: account_id.to_owned(),
+            mailbox: mailbox.to_owned(),
+        });
+        let result = self.sync_mailbox_session(&mut session, account_id, &user_id, mailbox).await;
+        self.broadcaster.send(&user_id, SseMessage::SyncCompleted {
+            account_id: account_id.to_owned(),
+            mailbox: mailbox.to_owned(),
+        });
         let _ = session.logout().await;
-        Ok(())
+        result
     }
 
     // ── IMAP IDLE ─────────────────────────────────────────────────────────────

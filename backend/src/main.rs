@@ -174,6 +174,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/email/account", put(email::save_account))
         .route("/api/email/account", delete(email::delete_account))
         .route("/api/email/mailboxes", get(email::list_mailboxes))
+        .route("/api/email/unread-counts", get(email::get_unread_counts))
         .route("/api/email/folders", get(email::list_virtual_folders))
         .route("/api/email/folder", post(email::create_virtual_folder))
         .route("/api/email/folder", put(email::update_virtual_folder))
