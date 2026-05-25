@@ -55,6 +55,7 @@
     uid: number;
     account_id: string;
     mailbox: string;
+    rowid: number;
     message_id: string | null;
     thread_id: string | null;
     from: string | null;
@@ -87,7 +88,7 @@
 
   let messages: Message[] = [];
   let totalMessages = 0;
-  let messagesOffset = 0;
+  let currentPage = 1;
   const pageSize = 50;
   let messagesLoading = false;
   let listScrollEl: HTMLElement;
@@ -263,13 +264,13 @@
       if (raw) {
         const s = JSON.parse(raw);
         if (s.folderId && virtualFolders.find((f: { id: string }) => f.id === s.folderId)) {
-          await selectVirtualFolder(s.folderId, s.offset || 0);
+          await selectVirtualFolder(s.folderId);
           return;
         }
         if (s.accountId && s.mailbox) {
           const mbs = mailboxesByAccount[s.accountId] || [];
           if (mbs.find((m: { name: string }) => m.name === s.mailbox)) {
-            await selectMailbox(s.accountId, s.mailbox, s.offset || 0);
+            await selectMailbox(s.accountId, s.mailbox);
             return;
           }
         }
@@ -411,12 +412,12 @@
     originsDialog?.showModal();
   }
 
-  async function selectMailbox(accountId: string, mailbox: string, initialOffset = 0) {
+  async function selectMailbox(accountId: string, mailbox: string) {
     selectedAccountId = accountId;
     selectedMailbox = mailbox;
     selectedFolderId = null;
     selectedMessage = null;
-    messagesOffset = initialOffset;
+    currentPage = 1;
     saveNavState();
     resetSearch();
     filterAddrs = [];
@@ -433,12 +434,12 @@
     );
   }
 
-  async function selectVirtualFolder(folderId: string, initialOffset = 0) {
+  async function selectVirtualFolder(folderId: string) {
     selectedFolderId = folderId;
     selectedAccountId = null;
     selectedMailbox = null;
     selectedMessage = null;
-    messagesOffset = initialOffset;
+    currentPage = 1;
     saveNavState();
     resetSearch();
     filterAddrs = [];
@@ -477,29 +478,10 @@
       await loadMessages();
       return;
     }
-    let scope = '';
-    if (selectedFolderId) {
-      scope = `&folder_id=${encodeURIComponent(selectedFolderId)}`;
-    } else if (selectedAccountId && selectedMailbox) {
-      scope = `&account_id=${encodeURIComponent(selectedAccountId)}&mailbox=${encodeURIComponent(selectedMailbox)}`;
-    }
-    let filterParams = '';
-    if (filterAddrs.length > 0) {
-      filterParams += `&addrs=${encodeURIComponent(filterAddrs.join(','))}`;
-    }
-    if (filterDateFrom) filterParams += `&date_from=${encodeURIComponent(filterDateFrom)}`;
-    if (filterDateTo) filterParams += `&date_to=${encodeURIComponent(filterDateTo)}`;
     searching = true;
     selectedMessage = null;
-    messagesLoading = true;
-    try {
-      const r = await fetch(`/api/email/search?q=${encodeURIComponent(q)}${scope}${filterParams}`);
-      if (r.ok) {
-        const data = await r.json();
-        messages = data.messages || [];
-      }
-    } catch {}
-    messagesLoading = false;
+    currentPage = 1;
+    await execSearch('&direction=forward');
   }
 
   async function clearAllFilters() {
@@ -512,6 +494,7 @@
     filterAddrOpen = false;
     filterDateOpen = false;
     removeFilterListeners();
+    currentPage = 1;
     await loadMessages();
   }
 
@@ -619,18 +602,24 @@
     }
   }
 
-  async function loadMessages() {
+  function cursorParams(direction: string, msg?: Message): string {
+    if (!msg) return `&direction=${direction}`;
+    const sa = msg.sent_at != null ? `&cursor_sent_at=${msg.sent_at}` : '';
+    return `${sa}&cursor_rowid=${msg.rowid}&direction=${direction}`;
+  }
+
+  async function loadMessages(params = '') {
     messagesLoading = true;
     try {
-      let url: string;
+      let base: string;
       if (selectedFolderId) {
-        url = `/api/email/messages?folder_id=${encodeURIComponent(selectedFolderId)}&limit=${pageSize}&offset=${messagesOffset}`;
+        base = `/api/email/messages?folder_id=${encodeURIComponent(selectedFolderId)}&limit=${pageSize}`;
       } else if (selectedAccountId && selectedMailbox) {
-        url = `/api/email/messages?account_id=${encodeURIComponent(selectedAccountId)}&mailbox=${encodeURIComponent(selectedMailbox)}&limit=${pageSize}&offset=${messagesOffset}`;
+        base = `/api/email/messages?account_id=${encodeURIComponent(selectedAccountId)}&mailbox=${encodeURIComponent(selectedMailbox)}&limit=${pageSize}`;
       } else {
         return;
       }
-      const r = await fetch(url);
+      const r = await fetch(base + params);
       if (r.ok) {
         const data = await r.json();
         messages = data.messages || [];
@@ -638,49 +627,88 @@
       }
     } catch {}
     messagesLoading = false;
-    if (messages.length === 0 && messagesOffset > 0 && totalMessages > 0) {
-      messagesOffset = Math.max(0, (Math.ceil(totalMessages / pageSize) - 1) * pageSize);
-      await loadMessages();
+  }
+
+  async function execSearch(params = '') {
+    const q = searchQuery.trim();
+    let scope = '';
+    if (selectedFolderId) {
+      scope = `&folder_id=${encodeURIComponent(selectedFolderId)}`;
+    } else if (selectedAccountId && selectedMailbox) {
+      scope = `&account_id=${encodeURIComponent(selectedAccountId)}&mailbox=${encodeURIComponent(selectedMailbox)}`;
     }
+    let filterParams = '';
+    if (filterAddrs.length > 0) filterParams += `&addrs=${encodeURIComponent(filterAddrs.join(','))}`;
+    if (filterDateFrom) filterParams += `&date_from=${encodeURIComponent(filterDateFrom)}`;
+    if (filterDateTo) filterParams += `&date_to=${encodeURIComponent(filterDateTo)}`;
+    messagesLoading = true;
+    try {
+      const r = await fetch(`/api/email/search?q=${encodeURIComponent(q)}${scope}${filterParams}${params}`);
+      if (r.ok) {
+        const data = await r.json();
+        messages = data.messages || [];
+        if (data.total != null) totalMessages = data.total;
+      }
+    } catch {}
+    messagesLoading = false;
   }
 
   async function nextPage() {
     if (!hasNext) return;
-    messagesOffset += pageSize;
-    saveNavState();
-    await loadMessages();
+    const params = cursorParams('forward', messages.at(-1));
+    currentPage++;
+    if (searching) {
+      await execSearch(params);
+    } else {
+      saveNavState();
+      await loadMessages(params);
+    }
     listScrollEl?.scrollTo({ top: 0 });
   }
 
   async function prevPage() {
     if (!hasPrev) return;
-    messagesOffset = Math.max(0, messagesOffset - pageSize);
-    saveNavState();
-    await loadMessages();
+    const params = cursorParams('backward', messages[0]);
+    currentPage--;
+    if (searching) {
+      await execSearch(params);
+    } else {
+      saveNavState();
+      await loadMessages(params);
+    }
     listScrollEl?.scrollTo({ top: 0 });
   }
 
   async function firstPage() {
     if (!hasPrev) return;
-    messagesOffset = 0;
-    saveNavState();
-    await loadMessages();
+    currentPage = 1;
+    if (searching) {
+      await execSearch('&direction=forward');
+    } else {
+      saveNavState();
+      await loadMessages('&direction=forward');
+    }
     listScrollEl?.scrollTo({ top: 0 });
   }
 
   async function lastPage() {
     if (!hasNext) return;
-    messagesOffset = (totalPages - 1) * pageSize;
-    saveNavState();
-    await loadMessages();
+    currentPage = totalPages;
+    if (searching) {
+      await execSearch(`&direction=last&known_total=${totalMessages}`);
+    } else {
+      saveNavState();
+      await loadMessages('&direction=last');
+    }
     listScrollEl?.scrollTo({ top: 0 });
   }
 
   async function goToPage(page: number) {
     const p = Math.max(1, Math.min(page, totalPages));
-    messagesOffset = (p - 1) * pageSize;
+    const off = (p - 1) * pageSize;
+    currentPage = p;
     saveNavState();
-    await loadMessages();
+    await loadMessages(`&offset=${off}`);
     listScrollEl?.scrollTo({ top: 0 });
   }
 
@@ -690,7 +718,6 @@
         accountId: selectedAccountId,
         mailbox: selectedMailbox,
         folderId: selectedFolderId,
-        offset: messagesOffset,
       }));
     } catch {}
   }
@@ -1379,12 +1406,11 @@
     : '';
   $: layoutColumns = isMobile ? '1fr' : `${sidebarWidth}px 5px ${listWidth}px 5px 1fr`;
 
-  $: pageStart = totalMessages === 0 ? 0 : messagesOffset + 1;
-  $: pageEnd = Math.min(messagesOffset + messages.length, totalMessages);
-  $: hasPrev = messagesOffset > 0;
-  $: hasNext = messagesOffset + pageSize < totalMessages;
-  $: totalPages = Math.ceil(totalMessages / pageSize);
-  $: currentPage = totalPages === 0 ? 0 : Math.floor(messagesOffset / pageSize) + 1;
+  $: totalPages = totalMessages === 0 ? 0 : Math.ceil(totalMessages / pageSize);
+  $: hasPrev = currentPage > 1;
+  $: hasNext = currentPage < totalPages;
+  $: pageStart = totalMessages === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  $: pageEnd = Math.min(currentPage * pageSize, totalMessages);
 
   $: htmlHasValue = htmlAddsValue(selectedMessage?.body_html ?? null);
   $: bodyTextSegments = linkifySegments(selectedMessage?.body_text ?? '');
@@ -1659,7 +1685,7 @@
           </div>
         {/if}
         {#if searching && !messagesLoading}
-          <span class="count">{messages.length === 1 ? tl('mail_result1') : tl('mail_resultsN', { n: messages.length })}</span>
+          <span class="count">{messages.length === 1 ? tl('mail_result1') : tl('mail_resultsN', { n: totalMessages })}</span>
         {/if}
       </div>
 
@@ -1707,7 +1733,7 @@
         {/if}
       </div>
 
-      {#if totalMessages > 0 && !searching}
+      {#if totalMessages > 0}
         <nav class="pagination-bar">
           <div class="page-btn-group">
             <button class="page-btn" on:click={firstPage} disabled={!hasPrev} aria-label={tl('mail_firstPageAria')} title={tl('mail_firstPageAria')}>
@@ -1717,7 +1743,7 @@
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
           </div>
-          {#if pageInputActive}
+          {#if !searching && pageInputActive}
             <input
               bind:this={pageInputEl}
               bind:value={pageInputValue}
@@ -1730,10 +1756,14 @@
               on:blur={confirmPageInput}
             />
             <span class="page-status-of">/ {totalPages}</span>
-          {:else}
+          {:else if !searching}
             <button class="page-status page-status-btn" on:click={activatePageInput} title={tl('mail_jumpToPageAria')}>
               {tl('mail_pageStatus', { start: pageStart, end: pageEnd, total: totalMessages })}
             </button>
+          {:else}
+            <span class="page-status">
+              {tl('mail_pageStatus', { start: pageStart, end: pageEnd, total: totalMessages })}
+            </span>
           {/if}
           <div class="page-btn-group">
             <button class="page-btn" on:click={nextPage} disabled={!hasNext} aria-label={tl('mail_nextPageAria')} title={tl('mail_nextPage')}>

@@ -619,9 +619,57 @@ pub struct MessageRow {
     pub flags: Option<String>,
     pub has_attachments: bool,
     pub body_text: Option<String>,
+    pub rowid: i64,
     pub body_html: Option<String>,
     #[allow(dead_code)]
     pub size: Option<i64>,
+}
+
+pub struct PageCursor {
+    pub sent_at: Option<i64>,
+    pub rowid: i64,
+}
+
+pub enum PageDirection {
+    Forward,
+    Backward,
+    Last,
+}
+
+fn push_keyset_forward(qb: &mut QueryBuilder<Sqlite>, cursor: &PageCursor) {
+    match cursor.sent_at {
+        Some(cs) => {
+            qb.push(" AND (m.sent_at < ")
+                .push_bind(cs)
+                .push(" OR (m.sent_at = ")
+                .push_bind(cs)
+                .push(" AND m.rowid < ")
+                .push_bind(cursor.rowid)
+                .push(") OR m.sent_at IS NULL)");
+        }
+        None => {
+            qb.push(" AND m.sent_at IS NULL AND m.rowid < ").push_bind(cursor.rowid);
+        }
+    }
+}
+
+fn push_keyset_backward(qb: &mut QueryBuilder<Sqlite>, cursor: &PageCursor) {
+    match cursor.sent_at {
+        Some(cs) => {
+            qb.push(" AND (m.sent_at > ")
+                .push_bind(cs)
+                .push(" OR (m.sent_at = ")
+                .push_bind(cs)
+                .push(" AND m.rowid > ")
+                .push_bind(cursor.rowid)
+                .push(")");
+        }
+        None => {
+            qb.push(" AND (m.sent_at IS NULL AND m.rowid > ")
+                .push_bind(cursor.rowid)
+                .push(" OR m.sent_at IS NOT NULL)");
+        }
+    }
 }
 
 // ── Attachments ───────────────────────────────────────────────────────────────
@@ -807,7 +855,9 @@ pub async fn list_messages(
     account_id: &str,
     mailbox: &str,
     limit: i64,
-    offset: i64,
+    cursor: Option<PageCursor>,
+    direction: PageDirection,
+    offset: Option<i64>,
 ) -> Result<(Vec<MessageRow>, i64)> {
     let total: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM cached_messages WHERE account_id = ? AND mailbox = ?",
@@ -817,21 +867,65 @@ pub async fn list_messages(
     .fetch_one(pool)
     .await?;
 
-    let rows = sqlx::query(
-        "SELECT uid, account_id, mailbox, message_id, thread_id, from_addr, to_addrs, cc_addrs,
-                subject, sent_at, flags, has_attachments, body_text
-         FROM cached_messages WHERE account_id = ? AND mailbox = ?
-         ORDER BY COALESCE(sent_at, 0) DESC
-         LIMIT ? OFFSET ?",
-    )
-    .bind(account_id)
-    .bind(mailbox)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await?;
+    // Offset-based fallback for jump-to-page
+    if let Some(off) = offset {
+        let rows = sqlx::query(
+            "SELECT uid, account_id, mailbox, message_id, thread_id, from_addr, to_addrs, cc_addrs,
+                    subject, sent_at, flags, has_attachments, body_text, rowid
+             FROM cached_messages
+             WHERE account_id = ? AND mailbox = ?
+             ORDER BY sent_at DESC, rowid DESC
+             LIMIT ? OFFSET ?",
+        )
+        .bind(account_id)
+        .bind(mailbox)
+        .bind(limit)
+        .bind(off)
+        .fetch_all(pool)
+        .await?;
+        return Ok((rows.iter().map(row_to_message).collect(), total));
+    }
 
-    Ok((rows.iter().map(row_to_message).collect(), total))
+    let fetch_limit = match direction {
+        PageDirection::Last => ((total - 1).max(0) % limit) + 1,
+        _ => limit,
+    };
+
+    let mut qb = QueryBuilder::<Sqlite>::new(
+        "SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
+                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
+                m.body_text, m.rowid
+         FROM cached_messages m
+         WHERE m.account_id = ",
+    );
+    qb.push_bind(account_id)
+        .push(" AND m.mailbox = ")
+        .push_bind(mailbox);
+
+    match direction {
+        PageDirection::Forward => {
+            if let Some(ref c) = cursor {
+                push_keyset_forward(&mut qb, c);
+            }
+            qb.push(" ORDER BY m.sent_at DESC, m.rowid DESC LIMIT ").push_bind(fetch_limit);
+        }
+        PageDirection::Backward => {
+            if let Some(ref c) = cursor {
+                push_keyset_backward(&mut qb, c);
+            }
+            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ").push_bind(fetch_limit);
+        }
+        PageDirection::Last => {
+            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ").push_bind(fetch_limit);
+        }
+    }
+
+    let rows = qb.build().fetch_all(pool).await?;
+    let mut messages: Vec<MessageRow> = rows.iter().map(row_to_message).collect();
+    if matches!(direction, PageDirection::Backward | PageDirection::Last) {
+        messages.reverse();
+    }
+    Ok((messages, total))
 }
 
 pub async fn list_messages_virtual(
@@ -839,9 +933,10 @@ pub async fn list_messages_virtual(
     user_id: &str,
     folder_id: &str,
     limit: i64,
-    offset: i64,
+    cursor: Option<PageCursor>,
+    direction: PageDirection,
+    offset: Option<i64>,
 ) -> Result<(Vec<MessageRow>, i64)> {
-    // Virtual folder joins accounts → rules → messages, with optional flag/attachment filters
     let total: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM cached_messages m
          JOIN imap_accounts a ON a.account_id = m.account_id
@@ -858,29 +953,80 @@ pub async fn list_messages_virtual(
     .fetch_one(pool)
     .await?;
 
-    let rows = sqlx::query(
+    if let Some(off) = offset {
+        let rows = sqlx::query(
+            "SELECT DISTINCT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
+                    m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
+                    m.body_text, m.rowid
+             FROM cached_messages m
+             JOIN imap_accounts a ON a.account_id = m.account_id
+             JOIN virtual_folder_rules r ON r.folder_id = ?
+                 AND (r.account_id = '' OR r.account_id = m.account_id)
+                 AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
+             JOIN virtual_folders vf ON vf.folder_id = r.folder_id
+             WHERE a.user_id = ?
+               AND (vf.only_flagged = 0 OR EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Flagged'))
+               AND (vf.only_attachments = 0 OR m.has_attachments = 1)
+             ORDER BY m.sent_at DESC, m.rowid DESC
+             LIMIT ? OFFSET ?",
+        )
+        .bind(folder_id)
+        .bind(user_id)
+        .bind(limit)
+        .bind(off)
+        .fetch_all(pool)
+        .await?;
+        return Ok((rows.iter().map(row_to_message).collect(), total));
+    }
+
+    let fetch_limit = match direction {
+        PageDirection::Last => ((total - 1).max(0) % limit) + 1,
+        _ => limit,
+    };
+
+    let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT DISTINCT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
-                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments, m.body_text
+                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
+                m.body_text, m.rowid
          FROM cached_messages m
          JOIN imap_accounts a ON a.account_id = m.account_id
-         JOIN virtual_folder_rules r ON r.folder_id = ?
-             AND (r.account_id = '' OR r.account_id = m.account_id)
+         JOIN virtual_folder_rules r ON r.folder_id = ",
+    );
+    qb.push_bind(folder_id).push(
+        " AND (r.account_id = '' OR r.account_id = m.account_id)
              AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
          JOIN virtual_folders vf ON vf.folder_id = r.folder_id
-         WHERE a.user_id = ?
-           AND (vf.only_flagged = 0 OR EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Flagged'))
-           AND (vf.only_attachments = 0 OR m.has_attachments = 1)
-         ORDER BY COALESCE(m.sent_at, 0) DESC
-         LIMIT ? OFFSET ?",
-    )
-    .bind(folder_id)
-    .bind(user_id)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await?;
+         WHERE a.user_id = ",
+    );
+    qb.push_bind(user_id).push(
+        " AND (vf.only_flagged = 0 OR EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Flagged'))
+           AND (vf.only_attachments = 0 OR m.has_attachments = 1)",
+    );
 
-    Ok((rows.iter().map(row_to_message).collect(), total))
+    match direction {
+        PageDirection::Forward => {
+            if let Some(ref c) = cursor {
+                push_keyset_forward(&mut qb, c);
+            }
+            qb.push(" ORDER BY m.sent_at DESC, m.rowid DESC LIMIT ").push_bind(fetch_limit);
+        }
+        PageDirection::Backward => {
+            if let Some(ref c) = cursor {
+                push_keyset_backward(&mut qb, c);
+            }
+            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ").push_bind(fetch_limit);
+        }
+        PageDirection::Last => {
+            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ").push_bind(fetch_limit);
+        }
+    }
+
+    let rows = qb.build().fetch_all(pool).await?;
+    let mut messages: Vec<MessageRow> = rows.iter().map(row_to_message).collect();
+    if matches!(direction, PageDirection::Backward | PageDirection::Last) {
+        messages.reverse();
+    }
+    Ok((messages, total))
 }
 
 pub async fn get_message(
@@ -891,7 +1037,7 @@ pub async fn get_message(
 ) -> Result<Option<MessageRow>> {
     let row = sqlx::query(
         "SELECT uid, account_id, mailbox, message_id, thread_id, from_addr, to_addrs, cc_addrs,
-                subject, sent_at, flags, has_attachments, body_text, body_html, size
+                subject, sent_at, flags, has_attachments, body_text, body_html, size, rowid
          FROM cached_messages WHERE account_id = ? AND mailbox = ? AND uid = ?",
     )
     .bind(account_id)
@@ -917,6 +1063,7 @@ fn row_to_message(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
         flags: r.get(10),
         has_attachments: r.get::<i64, _>(11) != 0,
         body_text: r.get(12),
+        rowid: r.get(13),
         body_html: None,
         size: None,
     }
@@ -939,6 +1086,7 @@ fn row_to_message_full(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
         body_text: r.get(12),
         body_html: r.get(13),
         size: r.get(14),
+        rowid: r.get(15),
     }
 }
 
@@ -983,11 +1131,54 @@ pub async fn search_messages(
     fts_query: &str,
     filters: &SearchFilters,
     limit: i64,
-) -> Result<Vec<MessageRow>> {
+    cursor: Option<PageCursor>,
+    direction: PageDirection,
+    known_total: Option<i64>,
+) -> Result<(Vec<MessageRow>, Option<i64>)> {
     let use_fts = !fts_query.is_empty();
+    let need_count = cursor.is_none() && !matches!(direction, PageDirection::Backward);
+
+    let total: Option<i64> = if let Some(kt) = known_total {
+        Some(kt)
+    } else if need_count {
+        let mut cqb = QueryBuilder::<Sqlite>::new("SELECT COUNT(*)");
+        if use_fts {
+            cqb.push(
+                " FROM messages_fts f
+                  JOIN cached_messages m ON m.rowid = f.rowid
+                  JOIN imap_accounts a ON a.account_id = m.account_id
+                  WHERE messages_fts MATCH ",
+            )
+            .push_bind(fts_query)
+            .push(" AND a.user_id = ")
+            .push_bind(user_id);
+        } else {
+            cqb.push(
+                " FROM cached_messages m
+                  JOIN imap_accounts a ON a.account_id = m.account_id
+                  WHERE a.user_id = ",
+            )
+            .push_bind(user_id);
+        }
+        push_filter_clauses(&mut cqb, filters);
+        Some(cqb.build_query_scalar().fetch_one(pool).await?)
+    } else {
+        None
+    };
+
+    let fetch_limit = match direction {
+        PageDirection::Last => {
+            let t = total.unwrap_or(0);
+            ((t - 1).max(0) % limit) + 1
+        }
+        _ => limit,
+    };
+
+    // Data query
     let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
-                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments, m.body_text",
+                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
+                m.body_text, m.rowid",
     );
     if use_fts {
         qb.push(
@@ -1008,10 +1199,29 @@ pub async fn search_messages(
         .push_bind(user_id);
     }
     push_filter_clauses(&mut qb, filters);
-    qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC LIMIT ")
-        .push_bind(limit);
+    match direction {
+        PageDirection::Forward => {
+            if let Some(ref c) = cursor {
+                push_keyset_forward(&mut qb, c);
+            }
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC, m.rowid DESC LIMIT ").push_bind(fetch_limit);
+        }
+        PageDirection::Backward => {
+            if let Some(ref c) = cursor {
+                push_keyset_backward(&mut qb, c);
+            }
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ").push_bind(fetch_limit);
+        }
+        PageDirection::Last => {
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ").push_bind(fetch_limit);
+        }
+    }
     let rows = qb.build().fetch_all(pool).await?;
-    Ok(rows.iter().map(row_to_message).collect())
+    let mut messages: Vec<MessageRow> = rows.iter().map(row_to_message).collect();
+    if matches!(direction, PageDirection::Backward | PageDirection::Last) {
+        messages.reverse();
+    }
+    Ok((messages, total))
 }
 
 pub async fn search_messages_mailbox(
@@ -1022,11 +1232,58 @@ pub async fn search_messages_mailbox(
     fts_query: &str,
     filters: &SearchFilters,
     limit: i64,
-) -> Result<Vec<MessageRow>> {
+    cursor: Option<PageCursor>,
+    direction: PageDirection,
+    known_total: Option<i64>,
+) -> Result<(Vec<MessageRow>, Option<i64>)> {
     let use_fts = !fts_query.is_empty();
+    let need_count = cursor.is_none() && !matches!(direction, PageDirection::Backward);
+
+    let total: Option<i64> = if let Some(kt) = known_total {
+        Some(kt)
+    } else if need_count {
+        let mut cqb = QueryBuilder::<Sqlite>::new("SELECT COUNT(*)");
+        if use_fts {
+            cqb.push(
+                " FROM messages_fts f
+                  JOIN cached_messages m ON m.rowid = f.rowid
+                  JOIN imap_accounts a ON a.account_id = m.account_id
+                  WHERE messages_fts MATCH ",
+            )
+            .push_bind(fts_query)
+            .push(" AND a.user_id = ")
+            .push_bind(user_id);
+        } else {
+            cqb.push(
+                " FROM cached_messages m
+                  JOIN imap_accounts a ON a.account_id = m.account_id
+                  WHERE a.user_id = ",
+            )
+            .push_bind(user_id);
+        }
+        cqb.push(" AND m.account_id = ")
+            .push_bind(account_id)
+            .push(" AND m.mailbox = ")
+            .push_bind(mailbox);
+        push_filter_clauses(&mut cqb, filters);
+        Some(cqb.build_query_scalar().fetch_one(pool).await?)
+    } else {
+        None
+    };
+
+    let fetch_limit = match direction {
+        PageDirection::Last => {
+            let t = total.unwrap_or(0);
+            ((t - 1).max(0) % limit) + 1
+        }
+        _ => limit,
+    };
+
+    // Data query
     let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
-                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments, m.body_text",
+                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
+                m.body_text, m.rowid",
     );
     if use_fts {
         qb.push(
@@ -1051,10 +1308,29 @@ pub async fn search_messages_mailbox(
         .push(" AND m.mailbox = ")
         .push_bind(mailbox);
     push_filter_clauses(&mut qb, filters);
-    qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC LIMIT ")
-        .push_bind(limit);
+    match direction {
+        PageDirection::Forward => {
+            if let Some(ref c) = cursor {
+                push_keyset_forward(&mut qb, c);
+            }
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC, m.rowid DESC LIMIT ").push_bind(fetch_limit);
+        }
+        PageDirection::Backward => {
+            if let Some(ref c) = cursor {
+                push_keyset_backward(&mut qb, c);
+            }
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ").push_bind(fetch_limit);
+        }
+        PageDirection::Last => {
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ").push_bind(fetch_limit);
+        }
+    }
     let rows = qb.build().fetch_all(pool).await?;
-    Ok(rows.iter().map(row_to_message).collect())
+    let mut messages: Vec<MessageRow> = rows.iter().map(row_to_message).collect();
+    if matches!(direction, PageDirection::Backward | PageDirection::Last) {
+        messages.reverse();
+    }
+    Ok((messages, total))
 }
 
 pub async fn search_messages_virtual(
@@ -1064,11 +1340,72 @@ pub async fn search_messages_virtual(
     fts_query: &str,
     filters: &SearchFilters,
     limit: i64,
-) -> Result<Vec<MessageRow>> {
+    cursor: Option<PageCursor>,
+    direction: PageDirection,
+    known_total: Option<i64>,
+) -> Result<(Vec<MessageRow>, Option<i64>)> {
     let use_fts = !fts_query.is_empty();
+    let need_count = cursor.is_none() && !matches!(direction, PageDirection::Backward);
+
+    let total: Option<i64> = if let Some(kt) = known_total {
+        Some(kt)
+    } else if need_count {
+        let mut cqb = QueryBuilder::<Sqlite>::new("SELECT COUNT(DISTINCT m.rowid)");
+        if use_fts {
+            cqb.push(
+                " FROM messages_fts f
+                  JOIN cached_messages m ON m.rowid = f.rowid
+                  JOIN imap_accounts a ON a.account_id = m.account_id
+                  JOIN virtual_folder_rules r ON r.folder_id = ",
+            )
+            .push_bind(folder_id)
+            .push(
+                " AND (r.account_id = '' OR r.account_id = m.account_id)
+                   AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
+                  JOIN virtual_folders vf ON vf.folder_id = r.folder_id
+                  WHERE messages_fts MATCH ",
+            )
+            .push_bind(fts_query)
+            .push(" AND a.user_id = ")
+            .push_bind(user_id);
+        } else {
+            cqb.push(
+                " FROM cached_messages m
+                  JOIN imap_accounts a ON a.account_id = m.account_id
+                  JOIN virtual_folder_rules r ON r.folder_id = ",
+            )
+            .push_bind(folder_id)
+            .push(
+                " AND (r.account_id = '' OR r.account_id = m.account_id)
+                   AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
+                  JOIN virtual_folders vf ON vf.folder_id = r.folder_id
+                  WHERE a.user_id = ",
+            )
+            .push_bind(user_id);
+        }
+        cqb.push(
+            " AND (vf.only_flagged = 0 OR EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Flagged'))
+               AND (vf.only_attachments = 0 OR m.has_attachments = 1)",
+        );
+        push_filter_clauses(&mut cqb, filters);
+        Some(cqb.build_query_scalar().fetch_one(pool).await?)
+    } else {
+        None
+    };
+
+    let fetch_limit = match direction {
+        PageDirection::Last => {
+            let t = total.unwrap_or(0);
+            ((t - 1).max(0) % limit) + 1
+        }
+        _ => limit,
+    };
+
+    // Data query
     let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT DISTINCT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
-                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments, m.body_text",
+                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
+                m.body_text, m.rowid",
     );
     if use_fts {
         qb.push(
@@ -1107,10 +1444,29 @@ pub async fn search_messages_virtual(
            AND (vf.only_attachments = 0 OR m.has_attachments = 1)",
     );
     push_filter_clauses(&mut qb, filters);
-    qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC LIMIT ")
-        .push_bind(limit);
+    match direction {
+        PageDirection::Forward => {
+            if let Some(ref c) = cursor {
+                push_keyset_forward(&mut qb, c);
+            }
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC, m.rowid DESC LIMIT ").push_bind(fetch_limit);
+        }
+        PageDirection::Backward => {
+            if let Some(ref c) = cursor {
+                push_keyset_backward(&mut qb, c);
+            }
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ").push_bind(fetch_limit);
+        }
+        PageDirection::Last => {
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ").push_bind(fetch_limit);
+        }
+    }
     let rows = qb.build().fetch_all(pool).await?;
-    Ok(rows.iter().map(row_to_message).collect())
+    let mut messages: Vec<MessageRow> = rows.iter().map(row_to_message).collect();
+    if matches!(direction, PageDirection::Backward | PageDirection::Last) {
+        messages.reverse();
+    }
+    Ok((messages, total))
 }
 
 pub async fn suggest_addrs(

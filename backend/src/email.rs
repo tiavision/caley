@@ -455,7 +455,24 @@ pub struct ListMessagesQuery {
     pub mailbox: Option<String>,
     pub folder_id: Option<String>,
     pub limit: Option<i64>,
+    // Keyset pagination
+    pub cursor_sent_at: Option<i64>,
+    pub cursor_rowid: Option<i64>,
+    pub direction: Option<String>,
+    // Offset fallback (jump-to-page for folder view only)
     pub offset: Option<i64>,
+}
+
+fn parse_direction(s: Option<&str>) -> email_db::PageDirection {
+    match s {
+        Some("backward") => email_db::PageDirection::Backward,
+        Some("last") => email_db::PageDirection::Last,
+        _ => email_db::PageDirection::Forward,
+    }
+}
+
+fn parse_cursor(sent_at: Option<i64>, rowid: Option<i64>) -> Option<email_db::PageCursor> {
+    rowid.map(|r| email_db::PageCursor { sent_at, rowid: r })
 }
 
 pub async fn list_messages(
@@ -464,10 +481,12 @@ pub async fn list_messages(
     Query(q): Query<ListMessagesQuery>,
 ) -> impl IntoResponse {
     let limit = q.limit.unwrap_or(50).min(200);
-    let offset = q.offset.unwrap_or(0);
+    let cursor = parse_cursor(q.cursor_sent_at, q.cursor_rowid);
+    let direction = parse_direction(q.direction.as_deref());
+    let offset = q.offset;
 
     let result = if let Some(folder_id) = q.folder_id {
-        email_db::list_messages_virtual(&state.db, &user.user_id, &folder_id, limit, offset).await
+        email_db::list_messages_virtual(&state.db, &user.user_id, &folder_id, limit, cursor, direction, offset).await
     } else {
         let account_id = match q.account_id {
             Some(id) => id,
@@ -477,7 +496,7 @@ pub async fn list_messages(
             Some(mb) => mb,
             None => return (StatusCode::BAD_REQUEST, "mailbox required").into_response(),
         };
-        email_db::list_messages(&state.db, &account_id, &mailbox, limit, offset).await
+        email_db::list_messages(&state.db, &account_id, &mailbox, limit, cursor, direction, offset).await
     };
 
     match result {
@@ -839,13 +858,16 @@ pub async fn send_email(
 #[derive(Deserialize)]
 pub struct SearchQuery {
     pub q: Option<String>,
-    pub limit: Option<i64>,
     pub account_id: Option<String>,
     pub mailbox: Option<String>,
     pub folder_id: Option<String>,
     pub addrs: Option<String>,
     pub date_from: Option<String>,
     pub date_to: Option<String>,
+    pub cursor_sent_at: Option<i64>,
+    pub cursor_rowid: Option<i64>,
+    pub direction: Option<String>,
+    pub known_total: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -892,7 +914,7 @@ pub async fn search(
     };
 
     if raw_q.is_empty() && filters.is_empty() {
-        return Json(json!({ "messages": [] })).into_response();
+        return Json(json!({ "messages": [], "total": 0 })).into_response();
     }
 
     let fts_query = if raw_q.is_empty() {
@@ -900,7 +922,9 @@ pub async fn search(
     } else {
         state.search_mode.build_fts_query(&raw_q)
     };
-    let limit = q.limit.unwrap_or(50).min(200);
+    let cursor = parse_cursor(q.cursor_sent_at, q.cursor_rowid);
+    let direction = parse_direction(q.direction.as_deref());
+    let known_total = q.known_total;
 
     let result = if let Some(folder_id) = q.folder_id.as_deref() {
         email_db::search_messages_virtual(
@@ -909,7 +933,10 @@ pub async fn search(
             folder_id,
             &fts_query,
             &filters,
-            limit,
+            50,
+            cursor,
+            direction,
+            known_total,
         )
         .await
     } else if let (Some(account_id), Some(mailbox)) =
@@ -922,17 +949,20 @@ pub async fn search(
             mailbox,
             &fts_query,
             &filters,
-            limit,
+            50,
+            cursor,
+            direction,
+            known_total,
         )
         .await
     } else {
-        email_db::search_messages(&state.db, &user.user_id, &fts_query, &filters, limit).await
+        email_db::search_messages(&state.db, &user.user_id, &fts_query, &filters, 50, cursor, direction, known_total).await
     };
 
     match result {
-        Ok(messages) => {
+        Ok((messages, total)) => {
             let list: Vec<_> = messages.iter().map(message_to_json).collect();
-            Json(json!({ "messages": list })).into_response()
+            Json(json!({ "messages": list, "total": total })).into_response()
         }
         Err(e) => {
             eprintln!("[email] search error: {e}");
@@ -993,6 +1023,7 @@ fn message_to_json_with_attachments(
         "uid": m.uid,
         "account_id": m.account_id,
         "mailbox": m.mailbox,
+        "rowid": m.rowid,
         "message_id": m.message_id,
         "thread_id": m.thread_id,
         "from": m.from_addr,
