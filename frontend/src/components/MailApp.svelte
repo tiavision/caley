@@ -639,8 +639,9 @@
       const r = await fetch(url);
       if (r.ok) {
         const full = await r.json();
-        selectedMessage = full;
         viewMode = htmlAddsValue(full.body_html) ? 'html' : 'text';
+        selectedMessage = full;
+        messageLoading = false;
         // Update in list
         messages = messages.map(m =>
           m.uid === msg.uid && m.account_id === msg.account_id && m.mailbox === msg.mailbox ? full : m
@@ -1662,7 +1663,7 @@
             </div>
           </div>
         </div>
-        {#if messageLoading && !selectedMessage.body_text && !selectedMessage.body_html}
+        {#if messageLoading}
           <div class="loading">{tl('mail_loading')}</div>
         {:else}
           <div class="detail-meta">
