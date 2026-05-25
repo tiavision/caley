@@ -709,6 +709,26 @@ pub struct SearchQuery {
     pub date_to: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct SuggestAddrsQuery {
+    q: Option<String>,
+}
+
+pub async fn suggest_addrs(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<SuggestAddrsQuery>,
+) -> Response {
+    let query = q.q.unwrap_or_default();
+    if query.trim().is_empty() {
+        return Json(json!({ "addrs": [] })).into_response();
+    }
+    match email_db::suggest_addrs(&state.db, &user.user_id, &query, 5).await {
+        Ok(addrs) => Json(json!({ "addrs": addrs })).into_response(),
+        Err(_) => Json(json!({ "addrs": [] })).into_response(),
+    }
+}
+
 pub async fn search(
     State(state): State<AppState>,
     user: CurrentUser,

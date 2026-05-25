@@ -102,6 +102,8 @@
   let addrFilterInput = '';
   let contactsLoaded = false;
   let contactSuggestions: { name: string; email: string }[] = [];
+  let addrDbSuggestions: string[] = [];
+  let addrSuggestDebounce: ReturnType<typeof setTimeout> | null = null;
   let addrFilterEl: HTMLDivElement;
   let dateFilterEl: HTMLDivElement;
   let addrPopoverEl: HTMLDivElement;
@@ -490,6 +492,22 @@
     } catch {}
   }
 
+  async function fetchAddrSuggestions(q: string) {
+    if (!q.trim()) { addrDbSuggestions = []; return; }
+    try {
+      const r = await fetch(`/api/email/suggest-addrs?q=${encodeURIComponent(q)}`);
+      if (r.ok) {
+        const data = await r.json();
+        addrDbSuggestions = data.addrs || [];
+      }
+    } catch {}
+  }
+
+  function onAddrInput() {
+    if (addrSuggestDebounce) clearTimeout(addrSuggestDebounce);
+    addrSuggestDebounce = setTimeout(() => fetchAddrSuggestions(addrFilterInput), 300);
+  }
+
   function computePopoverStyle(anchorEl: HTMLElement, popEl: HTMLElement): string {
     const rect = anchorEl.getBoundingClientRect();
     const width = popEl.offsetWidth;
@@ -526,6 +544,9 @@
         window.addEventListener('click', handleFilterOutsideClick);
         window.addEventListener('resize', positionAddrPopover);
       }, 0);
+    } else {
+      addrDbSuggestions = [];
+      addrFilterInput = '';
     }
   }
 
@@ -1386,6 +1407,7 @@
                     type="search"
                     placeholder={tl('mail_filterAddrPlaceholder')}
                     bind:value={addrFilterInput}
+                    on:input={onAddrInput}
                   />
                   {#if filterAddrs.length > 0}
                     <div class="filter-chips">
@@ -1423,7 +1445,29 @@
                         {#if s.name}<span class="suggestion-email">{s.email}</span>{/if}
                       </label>
                     {/each}
-                    {#if addrFilterInput && !contactSuggestions.some(c => c.email.toLowerCase() === addrFilterInput.toLowerCase())}
+                    {#each addrDbSuggestions.filter(addr =>
+                      !contactSuggestions.some(c => c.email.toLowerCase() === addr) &&
+                      !filterAddrs.includes(addr)
+                    ) as addr}
+                      <label class="filter-suggestion-row">
+                        <input
+                          type="checkbox"
+                          checked={filterAddrs.includes(addr)}
+                          on:change={(e) => {
+                            if ((e.target as HTMLInputElement).checked) {
+                              if (!filterAddrs.includes(addr)) filterAddrs = [...filterAddrs, addr];
+                            } else {
+                              filterAddrs = filterAddrs.filter(a => a !== addr);
+                            }
+                            runSearch();
+                          }}
+                        />
+                        <span class="suggestion-name">{addr}</span>
+                      </label>
+                    {/each}
+                    {#if addrFilterInput
+                      && !contactSuggestions.some(c => c.email.toLowerCase() === addrFilterInput.toLowerCase())
+                      && !addrDbSuggestions.includes(addrFilterInput.toLowerCase())}
                       <button class="filter-add-custom" on:click={() => {
                         const v = addrFilterInput.trim();
                         if (v && !filterAddrs.includes(v)) { filterAddrs = [...filterAddrs, v]; runSearch(); }

@@ -1148,6 +1148,28 @@ pub async fn search_messages_virtual(
     Ok(rows.iter().map(row_to_message).collect())
 }
 
+pub async fn suggest_addrs(
+    pool: &SqlitePool,
+    user_id: &str,
+    query: &str,
+    limit: i64,
+) -> Result<Vec<String>> {
+    let pattern = format!("%{}%", query.to_lowercase());
+    sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT ma.addr
+           FROM message_addresses ma
+           JOIN imap_accounts a ON a.account_id = ma.account_id
+          WHERE a.user_id = ? AND ma.addr LIKE ?
+          LIMIT ?",
+    )
+    .bind(user_id)
+    .bind(&pattern)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(anyhow::Error::from)
+}
+
 // ── Virtual Folders ───────────────────────────────────────────────────────────
 
 pub struct VirtualFolderRow {
