@@ -269,6 +269,7 @@
   "mail_saveIdentityError": "Identität konnte nicht gespeichert werden.",
   "mail_removeIdentityConfirm": "Identität \"{name} <{email}>\" entfernen?",
   "mail_editAccountHeading": "Konto bearbeiten",
+  "mail_exportAccount": "Konto als .tar.gz exportieren",
   "mail_addAccountHeading": "E-Mail-Konto hinzufügen",
   "mail_yourName": "Dein Name",
   "mail_emailPlaceholder": "du@beispiel.de",

@@ -536,60 +536,38 @@ pub async fn delete_messages_by_uids(
     Ok(())
 }
 
-/// Deletes attachment rows for the given UIDs and returns their on-disk paths
-/// so the caller can unlink the files.
 pub async fn delete_attachments_by_uids(
     pool: &SqlitePool,
     account_id: &str,
     mailbox: &str,
     uids: &[u32],
-) -> Result<Vec<String>> {
+) -> Result<()> {
     if uids.is_empty() {
-        return Ok(Vec::new());
+        return Ok(());
     }
     let placeholders = uids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-    let select_sql = format!(
-        "SELECT fs_path FROM cached_attachments WHERE account_id = ? AND mailbox = ? AND uid IN ({placeholders})"
-    );
-    let mut sel = sqlx::query(&select_sql).bind(account_id).bind(mailbox);
-    for uid in uids {
-        sel = sel.bind(*uid as i64);
-    }
-    let rows = sel.fetch_all(pool).await?;
-    let paths: Vec<String> = rows.iter().map(|r| r.get::<String, _>(0)).collect();
-
-    let delete_sql = format!(
+    let sql = format!(
         "DELETE FROM cached_attachments WHERE account_id = ? AND mailbox = ? AND uid IN ({placeholders})"
     );
-    let mut del = sqlx::query(&delete_sql).bind(account_id).bind(mailbox);
+    let mut q = sqlx::query(&sql).bind(account_id).bind(mailbox);
     for uid in uids {
-        del = del.bind(*uid as i64);
+        q = q.bind(*uid as i64);
     }
-    del.execute(pool).await?;
-    Ok(paths)
+    q.execute(pool).await?;
+    Ok(())
 }
 
-/// Deletes all attachment rows for a mailbox and returns their on-disk paths.
 pub async fn delete_attachments_for_mailbox(
     pool: &SqlitePool,
     account_id: &str,
     mailbox: &str,
-) -> Result<Vec<String>> {
-    let rows = sqlx::query(
-        "SELECT fs_path FROM cached_attachments WHERE account_id = ? AND mailbox = ?",
-    )
-    .bind(account_id)
-    .bind(mailbox)
-    .fetch_all(pool)
-    .await?;
-    let paths: Vec<String> = rows.iter().map(|r| r.get::<String, _>(0)).collect();
-
+) -> Result<()> {
     sqlx::query("DELETE FROM cached_attachments WHERE account_id = ? AND mailbox = ?")
         .bind(account_id)
         .bind(mailbox)
         .execute(pool)
         .await?;
-    Ok(paths)
+    Ok(())
 }
 
 pub async fn get_cached_uids(
@@ -641,7 +619,6 @@ pub struct MessageRow {
 
 // ── Attachments ───────────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
 pub struct AttachmentRow {
     pub id: i64,
     pub account_id: String,
@@ -650,7 +627,7 @@ pub struct AttachmentRow {
     pub filename: Option<String>,
     pub content_type: Option<String>,
     pub size: Option<i64>,
-    pub fs_path: String,
+    pub part_index: i64,
     pub content_id: Option<String>,
 }
 
@@ -662,14 +639,14 @@ pub async fn insert_attachment<'e, E>(
     filename: &str,
     content_type: &str,
     size: i64,
-    fs_path: &str,
+    part_index: i64,
     content_id: Option<&str>,
 ) -> Result<()>
 where
     E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
 {
     sqlx::query(
-        "INSERT INTO cached_attachments (account_id, mailbox, uid, filename, content_type, size, fs_path, content_id)
+        "INSERT INTO cached_attachments (account_id, mailbox, uid, filename, content_type, size, part_index, content_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(account_id)
@@ -678,7 +655,7 @@ where
     .bind(filename)
     .bind(content_type)
     .bind(size)
-    .bind(fs_path)
+    .bind(part_index)
     .bind(content_id)
     .execute(executor)
     .await?;
@@ -692,7 +669,7 @@ pub async fn list_attachments(
     uid: u32,
 ) -> Result<Vec<AttachmentRow>> {
     let rows = sqlx::query(
-        "SELECT id, account_id, mailbox, uid, filename, content_type, size, fs_path, content_id
+        "SELECT id, account_id, mailbox, uid, filename, content_type, size, part_index, content_id
          FROM cached_attachments WHERE account_id = ? AND mailbox = ? AND uid = ?",
     )
     .bind(account_id)
@@ -711,7 +688,7 @@ pub async fn list_attachments(
             filename: r.get(4),
             content_type: r.get(5),
             size: r.get(6),
-            fs_path: r.get(7),
+            part_index: r.get(7),
             content_id: r.get(8),
         })
         .collect())
@@ -725,7 +702,7 @@ pub async fn get_attachment_by_cid(
     cid: &str,
 ) -> Result<Option<AttachmentRow>> {
     let row = sqlx::query(
-        "SELECT id, account_id, mailbox, uid, filename, content_type, size, fs_path, content_id
+        "SELECT id, account_id, mailbox, uid, filename, content_type, size, part_index, content_id
          FROM cached_attachments
          WHERE account_id = ? AND mailbox = ? AND uid = ? AND content_id = ?",
     )
@@ -744,7 +721,7 @@ pub async fn get_attachment_by_cid(
         filename: r.get(4),
         content_type: r.get(5),
         size: r.get(6),
-        fs_path: r.get(7),
+        part_index: r.get(7),
         content_id: r.get(8),
     }))
 }
@@ -757,7 +734,7 @@ pub async fn get_attachment_by_filename(
     filename: &str,
 ) -> Result<Option<AttachmentRow>> {
     let row = sqlx::query(
-        "SELECT id, account_id, mailbox, uid, filename, content_type, size, fs_path, content_id
+        "SELECT id, account_id, mailbox, uid, filename, content_type, size, part_index, content_id
          FROM cached_attachments
          WHERE account_id = ? AND mailbox = ? AND uid = ? AND filename = ?",
     )
@@ -776,7 +753,7 @@ pub async fn get_attachment_by_filename(
         filename: r.get(4),
         content_type: r.get(5),
         size: r.get(6),
-        fs_path: r.get(7),
+        part_index: r.get(7),
         content_id: r.get(8),
     }))
 }
@@ -786,56 +763,16 @@ pub async fn delete_attachments_for_message(
     account_id: &str,
     mailbox: &str,
     uid: u32,
-) -> Result<Vec<AttachmentRow>> {
-    let rows = sqlx::query(
-        "SELECT id, account_id, mailbox, uid, filename, content_type, size, fs_path, content_id
-         FROM cached_attachments
-         WHERE account_id = ? AND mailbox = ? AND uid = ?",
-    )
-    .bind(account_id)
-    .bind(mailbox)
-    .bind(uid as i64)
-    .fetch_all(pool)
-    .await?;
-
-    let attachments: Vec<AttachmentRow> = rows
-        .iter()
-        .map(|r| AttachmentRow {
-            id: r.get(0),
-            account_id: r.get(1),
-            mailbox: r.get(2),
-            uid: r.get(3),
-            filename: r.get(4),
-            content_type: r.get(5),
-            size: r.get(6),
-            fs_path: r.get(7),
-            content_id: r.get(8),
-        })
-        .collect();
-
+) -> Result<()> {
     sqlx::query("DELETE FROM cached_attachments WHERE account_id = ? AND mailbox = ? AND uid = ?")
         .bind(account_id)
         .bind(mailbox)
         .bind(uid as i64)
         .execute(pool)
         .await?;
-
-    Ok(attachments)
+    Ok(())
 }
 
-pub async fn get_attachment_paths_for_account(
-    pool: &SqlitePool,
-    account_id: &str,
-) -> Result<Vec<String>> {
-    let rows = sqlx::query(
-        "SELECT fs_path FROM cached_attachments WHERE account_id = ?",
-    )
-    .bind(account_id)
-    .fetch_all(pool)
-    .await?;
-
-    Ok(rows.iter().map(|r: &sqlx::sqlite::SqliteRow| r.get::<String, _>(0)).collect())
-}
 
 pub async fn list_messages(
     pool: &SqlitePool,

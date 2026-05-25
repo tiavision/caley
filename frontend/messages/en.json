@@ -269,6 +269,7 @@
   "mail_saveIdentityError": "Failed to save identity.",
   "mail_removeIdentityConfirm": "Remove identity \"{name} <{email}>\"?",
   "mail_editAccountHeading": "Edit account",
+  "mail_exportAccount": "Export account as .tar.gz",
   "mail_addAccountHeading": "Add email account",
   "mail_yourName": "Your name",
   "mail_emailPlaceholder": "you@example.com",

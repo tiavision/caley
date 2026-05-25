@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS cached_attachments (
     filename     TEXT,
     content_type TEXT,
     size         INTEGER,
-    fs_path      TEXT NOT NULL
+    part_index   INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS virtual_folders (

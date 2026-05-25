@@ -139,15 +139,16 @@ pub struct AttachmentPart {
     pub filename: Option<String>,
     pub content_type: String,
     pub content_id: Option<String>,
-    pub bytes: Vec<u8>,
+    pub size: i64,
+    pub part_index: usize,
 }
 
 /// Fetches full raw bodies for a list of UIDs in one IMAP command.
-/// Returns a vec of (uid, body_text, raw_html, has_attachments, attachments).
+/// Returns a vec of (uid, raw_bytes, body_text, raw_html, has_attachments, attachments).
 pub async fn fetch_bodies(
     session: &mut ImapSession,
     uids: &[u32],
-) -> Result<Vec<(u32, String, Option<String>, bool, Vec<AttachmentPart>)>> {
+) -> Result<Vec<(u32, Vec<u8>, String, Option<String>, bool, Vec<AttachmentPart>)>> {
     if uids.is_empty() {
         return Ok(Vec::new());
     }
@@ -161,8 +162,9 @@ pub async fn fetch_bodies(
             None => continue,
         };
         if let Some(body_bytes) = fetch.body() {
+            let raw = body_bytes.to_vec();
             let (text, html, has_attach, attachments) = parse_body_bytes(body_bytes)?;
-            results.push((uid, text, html, has_attach, attachments));
+            results.push((uid, raw, text, html, has_attach, attachments));
         }
     }
     Ok(results)
@@ -332,7 +334,7 @@ fn parse_body_bytes(bytes: &[u8]) -> Result<(String, Option<String>, bool, Vec<A
 fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
     use mail_parser::MimeHeaders;
     let mut attachments = Vec::new();
-    for part in msg.parts.iter() {
+    for (idx, part) in msg.parts.iter().enumerate() {
         let is_attachment = part.content_disposition().map_or(false, |cd| {
             cd.ctype().to_ascii_lowercase() == "attachment"
         });
@@ -351,13 +353,11 @@ fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
             .attachment_name()
             .map(|s| s.to_owned())
             .or_else(|| {
-                // Use Content-ID as fallback filename for inline images
                 part.content_id().map(|cid| {
                     let safe = cid.trim_start_matches('<').trim_end_matches('>').replace(['/', '\\', ':', ' '], "_");
                     format!("{safe}.bin")
                 })
-            })
-            .unwrap_or_else(|| "untitled".to_string());
+            });
 
         let content_type = part
             .content_type()
@@ -368,19 +368,20 @@ fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
             cid.trim_start_matches('<').trim_end_matches('>').to_owned()
         });
 
-        let bytes = match &part.body {
-            mail_parser::PartType::Binary(b) => b.as_ref().to_vec(),
-            mail_parser::PartType::InlineBinary(b) => b.as_ref().to_vec(),
-            mail_parser::PartType::Text(t) => t.as_bytes().to_vec(),
-            mail_parser::PartType::Html(h) => h.as_bytes().to_vec(),
-            _ => Vec::new(),
-        };
+        let size = match &part.body {
+            mail_parser::PartType::Binary(b) => b.len(),
+            mail_parser::PartType::InlineBinary(b) => b.len(),
+            mail_parser::PartType::Text(t) => t.len(),
+            mail_parser::PartType::Html(h) => h.len(),
+            _ => 0,
+        } as i64;
 
         attachments.push(AttachmentPart {
-            filename: Some(filename),
+            filename,
             content_type,
             content_id,
-            bytes,
+            size,
+            part_index: idx,
         });
     }
     attachments

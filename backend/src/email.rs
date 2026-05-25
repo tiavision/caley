@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use axum::{
+    body::Body,
     extract::{Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Json, Response},
@@ -11,10 +12,34 @@ use uuid::Uuid;
 
 use crate::email_autodiscover;
 use crate::email_db;
+use crate::email_sync::eml_path;
 use crate::imap_client;
 use crate::oidc::{AppState, CurrentUser};
 use crate::sse::SseMessage;
 use crate::version;
+
+fn decompress_eml(bytes: &[u8]) -> std::io::Result<Vec<u8>> {
+    use flate2::read::GzDecoder;
+    use std::io::Read;
+    let mut dec = GzDecoder::new(bytes);
+    let mut out = Vec::new();
+    dec.read_to_end(&mut out)?;
+    Ok(out)
+}
+
+fn extract_part_bytes(eml_bytes: &[u8], part_index: usize) -> Option<Vec<u8>> {
+    use mail_parser::MessageParser;
+    let msg = MessageParser::default().parse(eml_bytes)?;
+    let part = msg.parts.get(part_index)?;
+    let bytes = match &part.body {
+        mail_parser::PartType::Binary(b) => b.as_ref().to_vec(),
+        mail_parser::PartType::InlineBinary(b) => b.as_ref().to_vec(),
+        mail_parser::PartType::Text(t) => t.as_bytes().to_vec(),
+        mail_parser::PartType::Html(h) => h.as_bytes().to_vec(),
+        _ => return None,
+    };
+    Some(bytes)
+}
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
 
@@ -126,12 +151,9 @@ pub async fn delete_account(
     user: CurrentUser,
     Query(q): Query<AccountIdQuery>,
 ) -> impl IntoResponse {
-    // Delete attachment files before the DB transaction removes the records
-    if let Ok(paths) = email_db::get_attachment_paths_for_account(&state.db, &q.account_id).await {
-        for path in paths {
-            let _ = std::fs::remove_file(&path);
-        }
-    }
+    // Delete all .eml files for this account
+    let messages_dir = state.data_dir.join("messages").join(&q.account_id);
+    let _ = tokio::fs::remove_dir_all(&messages_dir).await;
 
     state.email_sync_manager.stop_idle_for(&q.account_id);
     state.email_sync_manager.stop_task_for(&q.account_id);
@@ -584,13 +606,9 @@ pub async fn delete_message(
         Err(e) => eprintln!("[email] connect for delete error: {e}"),
     }
 
-    // Delete attachment files from disk before removing DB rows
-    if let Ok(attachments) = email_db::delete_attachments_for_message(&state.db, &q.account_id, &q.mailbox, q.uid).await {
-        for att in attachments {
-            let _ = std::fs::remove_file(&att.fs_path);
-        }
-    }
-
+    // Delete .eml and DB rows
+    let _ = tokio::fs::remove_file(eml_path(&state.data_dir, &q.account_id, &q.mailbox, q.uid)).await;
+    let _ = email_db::delete_attachments_for_message(&state.db, &q.account_id, &q.mailbox, q.uid).await;
     let _ = email_db::delete_message(&state.db, &q.account_id, &q.mailbox, q.uid).await;
 
     state.sse_broadcaster.send(&user.user_id, SseMessage::EmailRemoved {
@@ -943,9 +961,14 @@ pub async fn proxy_image(
             _ => return transparent_pixel(),
         };
 
-        let bytes = match tokio::fs::read(&att.fs_path).await {
+        let eml = match tokio::fs::read(eml_path(&state.data_dir, account_id, mailbox, uid)).await {
             Ok(b) => b,
             Err(_) => return transparent_pixel(),
+        };
+        let eml = decompress_eml(&eml).unwrap_or_default();
+        let bytes = match extract_part_bytes(&eml, att.part_index as usize) {
+            Some(b) => b,
+            None => return transparent_pixel(),
         };
 
         // Only serve inline attachments as images. The content type comes straight
@@ -1081,12 +1104,23 @@ pub async fn download_attachment(
         }
     };
 
-    let bytes = match tokio::fs::read(&att.fs_path).await {
+    let eml = match tokio::fs::read(eml_path(&state.data_dir, &q.account_id, &q.mailbox, q.uid)).await {
         Ok(b) => b,
         Err(e) => {
             eprintln!("[email] download_attachment read error: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "file read error").into_response();
         }
+    };
+    let eml = match decompress_eml(&eml) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("[email] download_attachment decompress error: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "decompress error").into_response();
+        }
+    };
+    let bytes = match extract_part_bytes(&eml, att.part_index as usize) {
+        Some(b) => b,
+        None => return (StatusCode::NOT_FOUND, "attachment part not found").into_response(),
     };
 
     let ct = att.content_type.unwrap_or_else(|| "application/octet-stream".to_string());
@@ -1109,6 +1143,86 @@ pub async fn download_attachment(
         bytes,
     )
         .into_response()
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct ExportQuery {
+    pub account_id: String,
+}
+
+pub async fn export_account(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<ExportQuery>,
+) -> Response {
+    let account = match email_db::get_account(&state.db, &q.account_id, &user.user_id, &state.encryption_key).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
+        Err(e) => {
+            eprintln!("[email] export_account account lookup error: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+    };
+
+    let rows = match sqlx::query_as::<_, (String, i64)>(
+        "SELECT mailbox, uid FROM cached_messages WHERE account_id = ? ORDER BY mailbox, uid",
+    )
+    .bind(&q.account_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[email] export_account query error: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+    };
+
+    let account_id = q.account_id.clone();
+    let data_dir = state.data_dir.clone();
+    let display_name = account.display_name.replace(['"', '\\', '\0'], "_");
+
+    let (writer, reader) = tokio::io::duplex(128 * 1024);
+
+    tokio::task::spawn_blocking(move || {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use tokio_util::io::SyncIoBridge;
+
+        let sync_writer = SyncIoBridge::new(writer);
+        let gz = GzEncoder::new(sync_writer, Compression::default());
+        let mut tar = tar::Builder::new(gz);
+
+        for (mailbox, uid) in &rows {
+            let path = eml_path(&data_dir, &account_id, mailbox, *uid as u32);
+            let entry_name = format!("{}/{}.eml", mailbox, uid);
+            if let Ok(compressed) = std::fs::read(&path) {
+                if let Ok(bytes) = decompress_eml(&compressed) {
+                    let mut header = tar::Header::new_gnu();
+                    header.set_size(bytes.len() as u64);
+                    header.set_mode(0o644);
+                    header.set_cksum();
+                    let _ = tar.append_data(&mut header, &entry_name, bytes.as_slice());
+                }
+            }
+        }
+        let _ = tar.finish();
+    });
+
+    let stream = tokio_util::io::ReaderStream::new(reader);
+    let filename = format!("{display_name}.tar.gz");
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/gzip")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{filename}\""),
+        )
+        .body(Body::from_stream(stream))
+        .unwrap()
 }
 
 async fn is_ssrf_safe(parsed: &url::Url) -> bool {

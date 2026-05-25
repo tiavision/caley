@@ -188,6 +188,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/email/suggest-addrs", get(email::suggest_addrs))
         .route("/api/email/proxy-image", get(email::proxy_image))
         .route("/api/email/attachment", get(email::download_attachment))
+        .route("/api/email/export", get(email::export_account))
         .route("/api/email/image-origins", get(email::list_image_origins))
         .route("/api/email/image-origins", post(email::add_image_origin))
         .route("/api/email/image-origins", delete(email::remove_image_origin))

@@ -344,11 +344,14 @@ impl EmailSyncManager {
 
         // UIDVALIDITY changed → full re-fetch
         if cached_uidvalidity.map_or(false, |v| v != uidvalidity) {
-            let att_paths = email_db::delete_attachments_for_mailbox(&self.db, account_id, mailbox).await?;
+            email_db::delete_attachments_for_mailbox(&self.db, account_id, mailbox).await?;
             email_db::delete_messages_for_mailbox(&self.db, account_id, mailbox).await?;
-            for path in att_paths {
-                let _ = tokio::fs::remove_file(&path).await;
-            }
+            // Delete the mailbox's entire .eml directory
+            let mailbox_dir = self.data_dir
+                .join("messages")
+                .join(account_id)
+                .join(sha2_hex(mailbox.to_owned()));
+            let _ = tokio::fs::remove_dir_all(&mailbox_dir).await;
             self.broadcaster.send(user_id, SseMessage::EmailsRefetch {
                 account_id: account_id.to_owned(),
                 mailbox: mailbox.to_owned(),
@@ -366,11 +369,11 @@ impl EmailSyncManager {
         // Deleted on server
         let deleted: Vec<u32> = cached_uids.difference(&server_uids).copied().collect();
         if !deleted.is_empty() {
-            let att_paths = email_db::delete_attachments_by_uids(&self.db, account_id, mailbox, &deleted).await?;
-            email_db::delete_messages_by_uids(&self.db, account_id, mailbox, &deleted).await?;
-            for path in att_paths {
-                let _ = tokio::fs::remove_file(&path).await;
+            for &uid in &deleted {
+                let _ = tokio::fs::remove_file(eml_path(&self.data_dir, account_id, mailbox, uid)).await;
             }
+            email_db::delete_attachments_by_uids(&self.db, account_id, mailbox, &deleted).await?;
+            email_db::delete_messages_by_uids(&self.db, account_id, mailbox, &deleted).await?;
             for uid in &deleted {
                 self.broadcaster.send(user_id, SseMessage::EmailRemoved {
                     account_id: account_id.to_owned(),
@@ -427,31 +430,34 @@ impl EmailSyncManager {
                     }
                 };
 
-                // Write attachment files to disk first (outside the DB transaction) so the
+                // Write .eml files to disk first (outside the DB transaction) so the
                 // SQLite write lock is held only for the fast DB writes, not file I/O.
                 let mut prepared: Vec<PreparedMessage> = Vec::with_capacity(bodies.len());
-                for (uid, body_text, body_html, has_attach, attachments) in bodies {
+                for (uid, raw_bytes, body_text, body_html, has_attach, attachments) in bodies {
                     let body_idx = self.search_mode.normalize_text(&body_text);
                     let html = body_html.map(|h| imap_client::rewrite_cid_urls(&h, account_id, mailbox, uid));
 
-                    let mut att_params = Vec::new();
-                    if !attachments.is_empty() {
-                        let uid_hash = sha2_hex(format!("{account_id}:{mailbox}:{uid}"));
-                        let att_dir = self.data_dir.join("attachments").join(user_id).join(&uid_hash);
-                        for att in attachments {
-                            let filename = sanitize_filename(att.filename.as_deref().unwrap_or("untitled"));
-                            tokio::fs::create_dir_all(&att_dir).await?;
-                            let path = unique_file_path(&att_dir, &filename);
-                            tokio::fs::write(&path, &att.bytes).await?;
-                            att_params.push(PreparedAttachment {
-                                filename,
-                                content_type: att.content_type,
-                                size: att.bytes.len() as i64,
-                                fs_path: path.to_string_lossy().to_string(),
-                                content_id: att.content_id,
-                            });
-                        }
+                    let path = eml_path(&self.data_dir, account_id, mailbox, uid);
+                    if let Some(dir) = path.parent() {
+                        tokio::fs::create_dir_all(dir).await?;
                     }
+                    let compressed = {
+                        use flate2::write::GzEncoder;
+                        use flate2::Compression;
+                        use std::io::Write;
+                        let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+                        enc.write_all(&raw_bytes)?;
+                        enc.finish()?
+                    };
+                    tokio::fs::write(&path, compressed).await?;
+
+                    let att_params = attachments.into_iter().map(|att| PreparedAttachment {
+                        filename: att.filename.unwrap_or_else(|| "untitled".to_owned()),
+                        content_type: att.content_type,
+                        size: att.size,
+                        part_index: att.part_index,
+                        content_id: att.content_id,
+                    }).collect();
 
                     prepared.push(PreparedMessage {
                         uid,
@@ -475,7 +481,7 @@ impl EmailSyncManager {
                         email_db::insert_attachment(
                             &mut *tx, account_id, mailbox, m.uid,
                             &att.filename, &att.content_type, att.size,
-                            &att.fs_path, att.content_id.as_deref(),
+                            att.part_index as i64, att.content_id.as_deref(),
                         ).await?;
                     }
                 }
@@ -501,7 +507,7 @@ struct PreparedAttachment {
     filename: String,
     content_type: String,
     size: i64,
-    fs_path: String,
+    part_index: usize,
     content_id: Option<String>,
 }
 
@@ -512,37 +518,12 @@ fn sha2_hex(input: String) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| match c {
-            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-            _ => c,
-        })
-        .collect::<String>()
+/// Deterministic path to the compressed `.eml.gz` file for a given message.
+pub fn eml_path(data_dir: &std::path::Path, account_id: &str, mailbox: &str, uid: u32) -> std::path::PathBuf {
+    data_dir
+        .join("messages")
+        .join(account_id)
+        .join(sha2_hex(mailbox.to_owned()))
+        .join(format!("{uid}.eml.gz"))
 }
 
-fn unique_file_path(dir: &std::path::Path, filename: &str) -> std::path::PathBuf {
-    let path = dir.join(filename);
-    if !path.exists() {
-        return path;
-    }
-    let stem = std::path::Path::new(filename)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("file");
-    let ext = std::path::Path::new(filename)
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
-    for i in 1..=1000 {
-        let candidate = if ext.is_empty() {
-            dir.join(format!("{}_{}", stem, i))
-        } else {
-            dir.join(format!("{}_{}.{}", stem, i, ext))
-        };
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-    dir.join(format!("{}_{}.bin", stem, uuid::Uuid::new_v4()))
-}

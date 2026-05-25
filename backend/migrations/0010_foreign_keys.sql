@@ -301,7 +301,7 @@ CREATE TABLE cached_attachments_new (
     filename     TEXT,
     content_type TEXT,
     size         INTEGER,
-    fs_path      TEXT NOT NULL,
+    part_index   INTEGER NOT NULL DEFAULT 0,
     content_id   TEXT
 );
 INSERT INTO cached_attachments_new SELECT * FROM cached_attachments;
