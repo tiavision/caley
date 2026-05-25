@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::email_autodiscover;
 use crate::email_db;
-use crate::email_sync::eml_path;
+use crate::email_sync::{eml_path, EmailSyncTrigger};
 use crate::imap_client;
 use crate::oidc::{AppState, CurrentUser};
 use crate::sse::SseMessage;
@@ -285,6 +285,31 @@ pub async fn list_mailboxes(
             (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
         }
     }
+}
+
+// ── Sync trigger ─────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct MailboxSyncQuery {
+    pub account_id: String,
+    pub mailbox: String,
+}
+
+pub async fn trigger_mailbox_sync(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<MailboxSyncQuery>,
+) -> impl IntoResponse {
+    match email_db::get_account(&state.db, &q.account_id, &user.user_id, &state.encryption_key).await {
+        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
+        Err(e) => {
+            eprintln!("[email] trigger_mailbox_sync account lookup error: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+        Ok(Some(_)) => {}
+    }
+    state.email_sync_manager.trigger(&q.account_id, EmailSyncTrigger::Mailbox(q.mailbox));
+    StatusCode::ACCEPTED.into_response()
 }
 
 // ── Virtual Folders ───────────────────────────────────────────────────────────

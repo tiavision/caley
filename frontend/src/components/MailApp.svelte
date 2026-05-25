@@ -400,6 +400,10 @@
     removeFilterListeners();
     sidebarDialog?.close();
     await loadMessages();
+    fetch(
+      `/api/email/sync?account_id=${encodeURIComponent(accountId)}&mailbox=${encodeURIComponent(mailbox)}`,
+      { method: 'POST' },
+    );
   }
 
   async function selectVirtualFolder(folderId: string) {
