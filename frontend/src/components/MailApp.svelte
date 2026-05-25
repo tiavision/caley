@@ -687,7 +687,8 @@
   }
 
   async function deleteMessage(msg: Message) {
-    if (!confirm(tl('mail_deleteMessageConfirm'))) return;
+    const inTrash = folderKind(msg.mailbox) === 'trash';
+    if (inTrash && !confirm(tl('mail_deleteMessageConfirm'))) return;
     await fetch(
       `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`,
       { method: 'DELETE' }

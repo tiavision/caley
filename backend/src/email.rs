@@ -594,10 +594,29 @@ pub async fn delete_message(
         }
     };
 
+    let mailbox_leaf = q.mailbox
+        .rsplit(|c| c == '/' || c == '.')
+        .next()
+        .unwrap_or(&q.mailbox)
+        .to_ascii_lowercase();
+    let is_trash = mailbox_leaf.contains("trash")
+        || mailbox_leaf.contains("deleted")
+        || mailbox_leaf.contains("bin");
+
+    let trash_mailbox = if is_trash {
+        None
+    } else {
+        email_db::find_trash_mailbox(&state.db, &q.account_id).await.unwrap_or(None)
+    };
+
     match imap_client::connect(&account.host, account.port as u16, &account.username, &account.password).await {
         Ok(mut session) => {
             if let Ok(_) = imap_client::select_mailbox(&mut session, &q.mailbox).await {
-                if let Err(e) = imap_client::delete_on_server(&mut session, q.uid).await {
+                if let Some(ref trash) = trash_mailbox {
+                    if let Err(e) = imap_client::move_message_on_server(&mut session, q.uid, trash).await {
+                        eprintln!("[email] move_to_trash error: {e}");
+                    }
+                } else if let Err(e) = imap_client::delete_on_server(&mut session, q.uid).await {
                     eprintln!("[email] delete_on_server error: {e}");
                 }
             }

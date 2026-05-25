@@ -170,6 +170,35 @@ pub async fn fetch_bodies(
     Ok(results)
 }
 
+/// Moves a message to `dest_mailbox` using MOVE (RFC 6851) when the server
+/// supports it, otherwise falls back to COPY + \Deleted + EXPUNGE.
+pub async fn move_message_on_server(
+    session: &mut ImapSession,
+    uid: u32,
+    dest_mailbox: &str,
+) -> Result<()> {
+    let uid_str = uid.to_string();
+    let has_move = session.capabilities().await?.has_str("MOVE");
+    if has_move {
+        session.uid_mv(&uid_str, dest_mailbox).await?;
+    } else {
+        session.uid_copy(&uid_str, dest_mailbox).await?;
+        {
+            let mut stream = session.uid_store(&uid_str, "+FLAGS (\\Deleted)").await?;
+            while let Some(r) = stream.next().await { let _ = r; }
+        }
+        let uidplus = session.capabilities().await?.has_str("UIDPLUS");
+        if uidplus {
+            let mut stream = Box::pin(session.uid_expunge(&uid_str).await?);
+            while let Some(r) = stream.next().await { let _ = r; }
+        } else {
+            let mut stream = Box::pin(session.expunge().await?);
+            while let Some(r) = stream.next().await { let _ = r; }
+        }
+    }
+    Ok(())
+}
+
 /// Stores the \Deleted flag and expunges on the server.
 pub async fn delete_on_server(session: &mut ImapSession, uid: u32) -> Result<()> {
     let uid_str = uid.to_string();

@@ -765,6 +765,27 @@ pub async fn get_attachment_by_filename(
     }))
 }
 
+/// Returns the name of the first mailbox that looks like a Trash folder
+/// (leaf name contains "trash", "deleted", or "bin"), or `None` if not found.
+pub async fn find_trash_mailbox(pool: &SqlitePool, account_id: &str) -> Result<Option<String>> {
+    let rows = sqlx::query("SELECT name FROM cached_mailboxes WHERE account_id = ? ORDER BY name")
+        .bind(account_id)
+        .fetch_all(pool)
+        .await?;
+    for row in &rows {
+        let name: String = row.get(0);
+        let leaf = name
+            .rsplit(|c| c == '/' || c == '.')
+            .next()
+            .unwrap_or(&name)
+            .to_ascii_lowercase();
+        if leaf.contains("trash") || leaf.contains("deleted") || leaf.contains("bin") {
+            return Ok(Some(name));
+        }
+    }
+    Ok(None)
+}
+
 pub async fn delete_attachments_for_message(
     pool: &SqlitePool,
     account_id: &str,
