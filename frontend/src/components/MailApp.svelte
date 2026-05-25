@@ -1579,7 +1579,9 @@
               on:click={() => openMessage(msg)}
             >
               <div class="message-row-top">
-                <span class="from">{senderName(msg.from) || tl('mail_unknownSender')}</span>
+                <span class="from">
+                  {#if !msg.is_read}<span class="unread-dot" aria-label="Unread"></span>{/if}{senderName(msg.from) || tl('mail_unknownSender')}
+                </span>
                 <span class="date">{formatDate(msg.sent_at)}</span>
               </div>
               <div class="message-row-subject-line">
@@ -2664,8 +2666,9 @@
   .message-row {
     display: block;
     width: 100%;
-    padding: 0.6rem 1rem;
+    padding: 0.6rem 1rem 0.6rem 1rem;
     border: none;
+    border-left: 3px solid transparent;
     border-bottom: 1px solid var(--pico-muted-border-color, #eee);
     background: none;
     cursor: pointer;
@@ -2681,9 +2684,24 @@
     background: var(--pico-primary-background, #e6f2fb);
   }
 
+  .message-row.unread {
+    border-left-color: var(--pico-primary, #0172ad);
+  }
+
   .message-row.unread .from,
   .message-row.unread .message-row-subject {
     font-weight: 600;
+  }
+
+  .unread-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--pico-primary, #0172ad);
+    margin-right: 5px;
+    vertical-align: middle;
+    flex-shrink: 0;
   }
 
   .message-row-top {
