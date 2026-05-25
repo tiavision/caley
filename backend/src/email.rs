@@ -867,7 +867,7 @@ pub struct SearchQuery {
     pub cursor_sent_at: Option<i64>,
     pub cursor_rowid: Option<i64>,
     pub direction: Option<String>,
-    pub known_total: Option<i64>,
+    pub limit: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -914,7 +914,7 @@ pub async fn search(
     };
 
     if raw_q.is_empty() && filters.is_empty() {
-        return Json(json!({ "messages": [], "total": 0 })).into_response();
+        return Json(json!({ "messages": [] })).into_response();
     }
 
     let fts_query = if raw_q.is_empty() {
@@ -924,7 +924,7 @@ pub async fn search(
     };
     let cursor = parse_cursor(q.cursor_sent_at, q.cursor_rowid);
     let direction = parse_direction(q.direction.as_deref());
-    let known_total = q.known_total;
+    let limit = q.limit.unwrap_or(51).min(200);
 
     let result = if let Some(folder_id) = q.folder_id.as_deref() {
         email_db::search_messages_virtual(
@@ -933,10 +933,9 @@ pub async fn search(
             folder_id,
             &fts_query,
             &filters,
-            50,
+            limit,
             cursor,
             direction,
-            known_total,
         )
         .await
     } else if let (Some(account_id), Some(mailbox)) =
@@ -949,20 +948,19 @@ pub async fn search(
             mailbox,
             &fts_query,
             &filters,
-            50,
+            limit,
             cursor,
             direction,
-            known_total,
         )
         .await
     } else {
-        email_db::search_messages(&state.db, &user.user_id, &fts_query, &filters, 50, cursor, direction, known_total).await
+        email_db::search_messages(&state.db, &user.user_id, &fts_query, &filters, limit, cursor, direction).await
     };
 
     match result {
-        Ok((messages, total)) => {
+        Ok(messages) => {
             let list: Vec<_> = messages.iter().map(message_to_json).collect();
-            Json(json!({ "messages": list, "total": total })).into_response()
+            Json(json!({ "messages": list })).into_response()
         }
         Err(e) => {
             eprintln!("[email] search error: {e}");

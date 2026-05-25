@@ -98,6 +98,7 @@
 
   let searchQuery = '';
   let searching = false;
+  let searchHasNext = false;
   let searchDebounce: ReturnType<typeof setTimeout> | null = null;
 
   // Search filter state
@@ -481,6 +482,7 @@
     searching = true;
     selectedMessage = null;
     currentPage = 1;
+    searchHasNext = false;
     await execSearch('&direction=forward');
   }
 
@@ -643,11 +645,12 @@
     if (filterDateTo) filterParams += `&date_to=${encodeURIComponent(filterDateTo)}`;
     messagesLoading = true;
     try {
-      const r = await fetch(`/api/email/search?q=${encodeURIComponent(q)}${scope}${filterParams}${params}`);
+      const r = await fetch(`/api/email/search?q=${encodeURIComponent(q)}${scope}${filterParams}&limit=${pageSize + 1}${params}`);
       if (r.ok) {
         const data = await r.json();
-        messages = data.messages || [];
-        if (data.total != null) totalMessages = data.total;
+        const msgs: Message[] = data.messages || [];
+        searchHasNext = msgs.length > pageSize;
+        messages = msgs.slice(0, pageSize);
       }
     } catch {}
     messagesLoading = false;
@@ -692,14 +695,10 @@
   }
 
   async function lastPage() {
-    if (!hasNext) return;
+    if (!hasNext || searching) return;
     currentPage = totalPages;
-    if (searching) {
-      await execSearch(`&direction=last&known_total=${totalMessages}`);
-    } else {
-      saveNavState();
-      await loadMessages('&direction=last');
-    }
+    saveNavState();
+    await loadMessages('&direction=last');
     listScrollEl?.scrollTo({ top: 0 });
   }
 
@@ -1408,7 +1407,7 @@
 
   $: totalPages = totalMessages === 0 ? 0 : Math.ceil(totalMessages / pageSize);
   $: hasPrev = currentPage > 1;
-  $: hasNext = currentPage < totalPages;
+  $: hasNext = searching ? searchHasNext : currentPage < totalPages;
   $: pageStart = totalMessages === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   $: pageEnd = Math.min(currentPage * pageSize, totalMessages);
 
@@ -1685,7 +1684,7 @@
           </div>
         {/if}
         {#if searching && !messagesLoading}
-          <span class="count">{messages.length === 1 ? tl('mail_result1') : tl('mail_resultsN', { n: totalMessages })}</span>
+          <span class="count">{messages.length === 1 ? tl('mail_result1') : tl('mail_resultsN', { n: messages.length })}</span>
         {/if}
       </div>
 
@@ -1733,7 +1732,7 @@
         {/if}
       </div>
 
-      {#if totalMessages > 0}
+      {#if searching ? messages.length > 0 : totalMessages > 0}
         <nav class="pagination-bar">
           <div class="page-btn-group">
             <button class="page-btn" on:click={firstPage} disabled={!hasPrev} aria-label={tl('mail_firstPageAria')} title={tl('mail_firstPageAria')}>
@@ -1761,17 +1760,17 @@
               {tl('mail_pageStatus', { start: pageStart, end: pageEnd, total: totalMessages })}
             </button>
           {:else}
-            <span class="page-status">
-              {tl('mail_pageStatus', { start: pageStart, end: pageEnd, total: totalMessages })}
-            </span>
+            <span class="page-status">{currentPage}</span>
           {/if}
           <div class="page-btn-group">
             <button class="page-btn" on:click={nextPage} disabled={!hasNext} aria-label={tl('mail_nextPageAria')} title={tl('mail_nextPage')}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
-            <button class="page-btn" on:click={lastPage} disabled={!hasNext} aria-label={tl('mail_lastPageAria')} title={tl('mail_lastPageAria')}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/><line x1="19" y1="6" x2="19" y2="18"/></svg>
-            </button>
+            {#if !searching}
+              <button class="page-btn" on:click={lastPage} disabled={!hasNext} aria-label={tl('mail_lastPageAria')} title={tl('mail_lastPageAria')}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/><line x1="19" y1="6" x2="19" y2="18"/></svg>
+              </button>
+            {/if}
           </div>
         </nav>
       {/if}
