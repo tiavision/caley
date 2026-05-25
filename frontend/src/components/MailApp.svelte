@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { getUser } from '../lib/user.ts';
   import { getLocale, makeTl } from '../lib/i18n.ts';
   import SelectDropdown from './SelectDropdown.svelte';
@@ -104,6 +104,10 @@
   let contactSuggestions: { name: string; email: string }[] = [];
   let addrFilterEl: HTMLDivElement;
   let dateFilterEl: HTMLDivElement;
+  let addrPopoverEl: HTMLDivElement;
+  let datePopoverEl: HTMLDivElement;
+  let addrPopoverStyle = '';
+  let datePopoverStyle = '';
   $: filterAddrActive = filterAddrs.length > 0;
   $: filterDateActive = filterDateFrom !== '' || filterDateTo !== '';
   $: filterActive = filterAddrActive || filterDateActive;
@@ -230,6 +234,7 @@
     window.removeEventListener('mousemove', handleResizeMove);
     window.removeEventListener('mouseup', stopResize);
     window.removeEventListener('click', handleWindowClick);
+    removeFilterListeners();
   });
 
   // ── Data loading ─────────────────────────────────────────────────────────
@@ -371,6 +376,12 @@
     selectedMessage = null;
     messagesOffset = 0;
     resetSearch();
+    filterAddrs = [];
+    filterDateFrom = '';
+    filterDateTo = '';
+    filterAddrOpen = false;
+    filterDateOpen = false;
+    removeFilterListeners();
     sidebarDialog?.close();
     await loadMessages();
   }
@@ -382,6 +393,12 @@
     selectedMessage = null;
     messagesOffset = 0;
     resetSearch();
+    filterAddrs = [];
+    filterDateFrom = '';
+    filterDateTo = '';
+    filterAddrOpen = false;
+    filterDateOpen = false;
+    removeFilterListeners();
     sidebarDialog?.close();
     await loadMessages();
   }
@@ -392,10 +409,14 @@
     searching = false;
   }
 
+  function anyFilterActive() {
+    return filterAddrs.length > 0 || filterDateFrom !== '' || filterDateTo !== '';
+  }
+
   function onSearchInput() {
     if (searchDebounce) clearTimeout(searchDebounce);
     const q = searchQuery.trim();
-    if (q === '' && !filterActive) {
+    if (q === '' && !anyFilterActive()) {
       clearAllFilters();
       return;
     }
@@ -404,7 +425,7 @@
 
   async function runSearch() {
     const q = searchQuery.trim();
-    if (q === '' && !filterActive) {
+    if (q === '' && !anyFilterActive()) {
       await loadMessages();
       return;
     }
@@ -442,6 +463,7 @@
     filterDateTo = '';
     filterAddrOpen = false;
     filterDateOpen = false;
+    removeFilterListeners();
     await loadMessages();
   }
 
@@ -468,24 +490,56 @@
     } catch {}
   }
 
+  function computePopoverStyle(anchorEl: HTMLElement, popEl: HTMLElement): string {
+    const rect = anchorEl.getBoundingClientRect();
+    const width = popEl.offsetWidth;
+    const top = rect.bottom + 4;
+    const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+    return `position: fixed; top: ${top}px; left: ${left}px; right: auto;`;
+  }
+
+  async function positionAddrPopover() {
+    await tick();
+    if (addrFilterEl && addrPopoverEl) addrPopoverStyle = computePopoverStyle(addrFilterEl, addrPopoverEl);
+  }
+
+  async function positionDatePopover() {
+    await tick();
+    if (dateFilterEl && datePopoverEl) datePopoverStyle = computePopoverStyle(dateFilterEl, datePopoverEl);
+  }
+
+  function removeFilterListeners() {
+    window.removeEventListener('click', handleFilterOutsideClick);
+    window.removeEventListener('resize', positionAddrPopover);
+    window.removeEventListener('resize', positionDatePopover);
+  }
+
   function toggleAddrFilter() {
+    const willOpen = !filterAddrOpen;
     filterDateOpen = false;
-    filterAddrOpen = !filterAddrOpen;
-    if (filterAddrOpen) {
+    filterAddrOpen = willOpen;
+    removeFilterListeners();
+    if (willOpen) {
       loadContactSuggestions();
-      setTimeout(() => window.addEventListener('click', handleFilterOutsideClick), 0);
-    } else {
-      window.removeEventListener('click', handleFilterOutsideClick);
+      positionAddrPopover();
+      setTimeout(() => {
+        window.addEventListener('click', handleFilterOutsideClick);
+        window.addEventListener('resize', positionAddrPopover);
+      }, 0);
     }
   }
 
   function toggleDateFilter() {
+    const willOpen = !filterDateOpen;
     filterAddrOpen = false;
-    filterDateOpen = !filterDateOpen;
-    if (filterDateOpen) {
-      setTimeout(() => window.addEventListener('click', handleFilterOutsideClick), 0);
-    } else {
-      window.removeEventListener('click', handleFilterOutsideClick);
+    filterDateOpen = willOpen;
+    removeFilterListeners();
+    if (willOpen) {
+      positionDatePopover();
+      setTimeout(() => {
+        window.addEventListener('click', handleFilterOutsideClick);
+        window.addEventListener('resize', positionDatePopover);
+      }, 0);
     }
   }
 
@@ -494,7 +548,7 @@
     if (!addrFilterEl?.contains(target) && !dateFilterEl?.contains(target)) {
       filterAddrOpen = false;
       filterDateOpen = false;
-      window.removeEventListener('click', handleFilterOutsideClick);
+      removeFilterListeners();
     }
   }
 
@@ -1326,7 +1380,7 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
               </button>
               {#if filterAddrOpen}
-                <div class="filter-popover" role="dialog" aria-label={tl('mail_filterBySender')}>
+                <div class="filter-popover" role="dialog" aria-label={tl('mail_filterBySender')} bind:this={addrPopoverEl} style={addrPopoverStyle}>
                   <input
                     class="filter-popover-input"
                     type="search"
@@ -1342,13 +1396,16 @@
                         </span>
                       {/each}
                     </div>
+                    <button class="filter-clear-btn" on:click={() => { filterAddrs = []; runSearch(); }}>
+                      {tl('mail_filterClearAddrs')}
+                    </button>
                   {/if}
                   <div class="filter-suggestions">
                     {#each contactSuggestions.filter(c =>
                       !addrFilterInput ||
                       c.email.toLowerCase().includes(addrFilterInput.toLowerCase()) ||
                       c.name.toLowerCase().includes(addrFilterInput.toLowerCase())
-                    ).slice(0, 8) as s}
+                    ).slice(0, 12) as s}
                       <label class="filter-suggestion-row">
                         <input
                           type="checkbox"
@@ -1390,7 +1447,7 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
               </button>
               {#if filterDateOpen}
-                <div class="filter-popover filter-popover-date" role="dialog" aria-label={tl('mail_filterByDate')}>
+                <div class="filter-popover filter-popover-date" role="dialog" aria-label={tl('mail_filterByDate')} bind:this={datePopoverEl} style={datePopoverStyle}>
                   <label class="filter-date-label">
                     {tl('mail_filterDateFrom')}
                     <input type="date" bind:value={filterDateFrom} on:change={runSearch} />
@@ -2265,9 +2322,11 @@
   .message-list {
     display: flex;
     flex-direction: column;
-    overflow: clip;
+    overflow: hidden;
     min-height: 0;
     margin: 0;
+    position: relative;
+    z-index: 2;
   }
 
   .message-list-scroll {
@@ -2283,6 +2342,7 @@
     padding: 0.75rem 1rem;
     border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
     flex-shrink: 0;
+    position: relative;
   }
 
   .message-list-header h2 {
@@ -2316,7 +2376,6 @@
   }
 
   .search-filter-wrap {
-    position: relative;
     flex-shrink: 0;
   }
 
@@ -2356,8 +2415,9 @@
     border-radius: var(--pico-border-radius, 6px);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
     padding: 0.5rem;
-    min-width: 240px;
-    max-width: 300px;
+    min-width: 300px;
+    max-width: 380px;
+    overflow-x: hidden;
   }
 
   .filter-popover-date {
@@ -2415,7 +2475,7 @@
   }
 
   .filter-suggestions {
-    max-height: 180px;
+    max-height: 300px;
     overflow-y: auto;
   }
 
@@ -2481,11 +2541,6 @@
 
   .filter-date-label input[type='date'] {
     font-size: 0.82rem;
-    padding: 0.25rem 0.4rem;
-    border: 1px solid var(--pico-muted-border-color, #ddd);
-    border-radius: var(--pico-border-radius, 4px);
-    background: var(--pico-form-element-background-color, transparent);
-    color: var(--pico-color, inherit);
     margin: 0;
     height: auto;
   }

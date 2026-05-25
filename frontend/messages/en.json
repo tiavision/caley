@@ -211,6 +211,7 @@
   "mail_filterDateFrom": "From",
   "mail_filterDateTo": "To",
   "mail_filterClearDate": "Clear dates",
+  "mail_filterClearAddrs": "Clear contacts",
   "mail_noAccounts": "No accounts configured. Add an IMAP account to get started.",
   "mail_selectMailbox": "Select a mailbox.",
   "mail_noMessages": "No messages.",

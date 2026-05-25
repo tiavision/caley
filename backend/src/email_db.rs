@@ -353,6 +353,10 @@ pub struct MessageHeader {
     pub flags: Option<String>,
     pub has_attachments: bool,
     pub size: Option<i64>,
+    /// Lowercased, display-name-stripped email addresses, by header field.
+    pub from_emails: Vec<String>,
+    pub to_emails: Vec<String>,
+    pub cc_emails: Vec<String>,
 }
 
 pub async fn upsert_message_header(
@@ -402,6 +406,49 @@ pub async fn upsert_message_header(
     .bind(to_idx)
     .execute(pool)
     .await?;
+    Ok(())
+}
+
+/// Replaces the normalized address rows for one message. Delete-then-insert so a
+/// re-fetched UID (header upsert uses ON CONFLICT, which doesn't fire the cascade)
+/// doesn't accumulate duplicate rows.
+pub async fn replace_message_addresses(
+    pool: &SqlitePool,
+    account_id: &str,
+    mailbox: &str,
+    uid: i64,
+    from_emails: &[String],
+    to_emails: &[String],
+    cc_emails: &[String],
+) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM message_addresses WHERE account_id = ? AND mailbox = ? AND uid = ?")
+        .bind(account_id)
+        .bind(mailbox)
+        .bind(uid)
+        .execute(&mut *tx)
+        .await?;
+
+    let rows: Vec<(&str, &String)> = from_emails
+        .iter()
+        .map(|a| ("from", a))
+        .chain(to_emails.iter().map(|a| ("to", a)))
+        .chain(cc_emails.iter().map(|a| ("cc", a)))
+        .collect();
+    if !rows.is_empty() {
+        let mut qb = QueryBuilder::<Sqlite>::new(
+            "INSERT INTO message_addresses (account_id, mailbox, uid, field, addr) ",
+        );
+        qb.push_values(rows, |mut b, (field, addr)| {
+            b.push_bind(account_id)
+                .push_bind(mailbox)
+                .push_bind(uid)
+                .push_bind(field)
+                .push_bind(addr);
+        });
+        qb.build().execute(&mut *tx).await?;
+    }
+    tx.commit().await?;
     Ok(())
 }
 
@@ -944,21 +991,18 @@ impl SearchFilters {
 
 fn push_filter_clauses(qb: &mut QueryBuilder<Sqlite>, filters: &SearchFilters) {
     if !filters.addrs.is_empty() {
-        qb.push(" AND (");
-        for (i, addr) in filters.addrs.iter().enumerate() {
-            if i > 0 {
-                qb.push(" OR ");
-            }
-            let pattern = format!("%{}%", addr);
-            qb.push("(m.from_addr LIKE ")
-                .push_bind(pattern.clone())
-                .push(" OR m.to_addrs LIKE ")
-                .push_bind(pattern.clone())
-                .push(" OR m.cc_addrs LIKE ")
-                .push_bind(pattern)
-                .push(")");
+        qb.push(
+            " AND EXISTS (SELECT 1 FROM message_addresses ma
+                          WHERE ma.account_id = m.account_id
+                            AND ma.mailbox = m.mailbox
+                            AND ma.uid = m.uid
+                            AND ma.addr IN (",
+        );
+        let mut sep = qb.separated(", ");
+        for addr in &filters.addrs {
+            sep.push_bind(addr.trim().to_lowercase());
         }
-        qb.push(")");
+        qb.push("))");
     }
     if let Some(ts) = filters.date_from {
         qb.push(" AND m.sent_at >= ").push_bind(ts);

@@ -379,6 +379,10 @@ impl EmailSyncManager {
                     from_idx.as_deref(),
                     to_idx.as_deref(),
                 ).await?;
+                email_db::replace_message_addresses(
+                    &self.db, account_id, mailbox, h.uid,
+                    &h.from_emails, &h.to_emails, &h.cc_emails,
+                ).await?;
             }
             if !headers.is_empty() {
                 self.broadcaster.send(user_id, SseMessage::EmailsRefetch {

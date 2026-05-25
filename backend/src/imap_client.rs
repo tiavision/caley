@@ -103,12 +103,14 @@ pub async fn fetch_headers(
             .collect::<Vec<_>>();
         let flags_json = serde_json::to_string(&flags).unwrap_or_default();
 
-        let (message_id, thread_id, from_addr, to_addrs, cc_addrs, subject, sent_at) =
-            if let Some(header_bytes) = fetch.header() {
-                parse_header_bytes(header_bytes)
-            } else {
-                Default::default()
-            };
+        let (
+            message_id, thread_id, from_addr, to_addrs, cc_addrs, subject, sent_at,
+            from_emails, to_emails, cc_emails,
+        ) = if let Some(header_bytes) = fetch.header() {
+            parse_header_bytes(header_bytes)
+        } else {
+            Default::default()
+        };
 
         let size = fetch.size.map(|s| s as i64);
 
@@ -124,6 +126,9 @@ pub async fn fetch_headers(
             flags: Some(flags_json),
             has_attachments: false,
             size,
+            from_emails,
+            to_emails,
+            cc_emails,
         });
     }
     Ok(headers)
@@ -215,6 +220,9 @@ fn parse_header_bytes(
     Option<Vec<String>>,      // cc_addrs
     Option<String>,           // subject
     Option<i64>,              // sent_at
+    Vec<String>,              // from_emails (lowercased, name stripped)
+    Vec<String>,              // to_emails
+    Vec<String>,              // cc_emails
 ) {
     use mail_parser::MessageParser;
     let parser = MessageParser::default();
@@ -235,10 +243,16 @@ fn parse_header_bytes(
     });
     let to_addrs = msg.to().map(address_to_strings);
     let cc_addrs = msg.cc().map(address_to_strings);
+    let from_emails = msg.from().map(address_to_emails).unwrap_or_default();
+    let to_emails = msg.to().map(address_to_emails).unwrap_or_default();
+    let cc_emails = msg.cc().map(address_to_emails).unwrap_or_default();
     let subject = msg.subject().map(str::to_owned);
     let sent_at = msg.date().map(|dt| dt.to_timestamp());
 
-    (message_id, thread_id, from_addr, to_addrs, cc_addrs, subject, sent_at)
+    (
+        message_id, thread_id, from_addr, to_addrs, cc_addrs, subject, sent_at,
+        from_emails, to_emails, cc_emails,
+    )
 }
 
 fn hv_first_text(hv: &mail_parser::HeaderValue<'_>) -> Option<String> {
@@ -259,6 +273,24 @@ fn address_to_strings(addr: &mail_parser::Address<'_>) -> Vec<String> {
         mail_parser::Address::Group(groups) => {
             groups.iter().flat_map(|g| g.addresses.iter().map(format_addr)).collect()
         }
+    }
+}
+
+/// Extracts the bare email addresses (lowercased, display name dropped) from an
+/// address header, for the normalized `message_addresses` lookup table.
+fn address_to_emails(addr: &mail_parser::Address<'_>) -> Vec<String> {
+    let emails = |a: &mail_parser::Addr<'_>| {
+        a.address
+            .as_ref()
+            .map(|e| e.trim().to_lowercase())
+            .filter(|e| !e.is_empty())
+    };
+    match addr {
+        mail_parser::Address::List(addrs) => addrs.iter().filter_map(emails).collect(),
+        mail_parser::Address::Group(groups) => groups
+            .iter()
+            .flat_map(|g| g.addresses.iter().filter_map(emails))
+            .collect(),
     }
 }
 
