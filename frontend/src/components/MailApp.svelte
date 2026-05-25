@@ -91,6 +91,9 @@
   const pageSize = 50;
   let messagesLoading = false;
   let listScrollEl: HTMLElement;
+  let pageInputActive = false;
+  let pageInputValue = '';
+  let pageInputEl: HTMLInputElement | null = null;
 
   let searchQuery = '';
   let searching = false;
@@ -254,6 +257,24 @@
     for (const acc of accounts) {
       await loadMailboxes(acc.account_id);
     }
+    // Restore saved folder + page
+    try {
+      const raw = localStorage.getItem('mail-view-state');
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s.folderId && virtualFolders.find((f: { id: string }) => f.id === s.folderId)) {
+          await selectVirtualFolder(s.folderId, s.offset || 0);
+          return;
+        }
+        if (s.accountId && s.mailbox) {
+          const mbs = mailboxesByAccount[s.accountId] || [];
+          if (mbs.find((m: { name: string }) => m.name === s.mailbox)) {
+            await selectMailbox(s.accountId, s.mailbox, s.offset || 0);
+            return;
+          }
+        }
+      }
+    } catch {}
     // Auto-select first inbox
     if (!selectedAccountId && accounts.length > 0) {
       const firstAcc = accounts[0];
@@ -390,12 +411,13 @@
     originsDialog?.showModal();
   }
 
-  async function selectMailbox(accountId: string, mailbox: string) {
+  async function selectMailbox(accountId: string, mailbox: string, initialOffset = 0) {
     selectedAccountId = accountId;
     selectedMailbox = mailbox;
     selectedFolderId = null;
     selectedMessage = null;
-    messagesOffset = 0;
+    messagesOffset = initialOffset;
+    saveNavState();
     resetSearch();
     filterAddrs = [];
     filterDateFrom = '';
@@ -411,12 +433,13 @@
     );
   }
 
-  async function selectVirtualFolder(folderId: string) {
+  async function selectVirtualFolder(folderId: string, initialOffset = 0) {
     selectedFolderId = folderId;
     selectedAccountId = null;
     selectedMailbox = null;
     selectedMessage = null;
-    messagesOffset = 0;
+    messagesOffset = initialOffset;
+    saveNavState();
     resetSearch();
     filterAddrs = [];
     filterDateFrom = '';
@@ -624,6 +647,7 @@
   async function nextPage() {
     if (!hasNext) return;
     messagesOffset += pageSize;
+    saveNavState();
     await loadMessages();
     listScrollEl?.scrollTo({ top: 0 });
   }
@@ -631,8 +655,60 @@
   async function prevPage() {
     if (!hasPrev) return;
     messagesOffset = Math.max(0, messagesOffset - pageSize);
+    saveNavState();
     await loadMessages();
     listScrollEl?.scrollTo({ top: 0 });
+  }
+
+  async function firstPage() {
+    if (!hasPrev) return;
+    messagesOffset = 0;
+    saveNavState();
+    await loadMessages();
+    listScrollEl?.scrollTo({ top: 0 });
+  }
+
+  async function lastPage() {
+    if (!hasNext) return;
+    messagesOffset = (totalPages - 1) * pageSize;
+    saveNavState();
+    await loadMessages();
+    listScrollEl?.scrollTo({ top: 0 });
+  }
+
+  async function goToPage(page: number) {
+    const p = Math.max(1, Math.min(page, totalPages));
+    messagesOffset = (p - 1) * pageSize;
+    saveNavState();
+    await loadMessages();
+    listScrollEl?.scrollTo({ top: 0 });
+  }
+
+  function saveNavState() {
+    try {
+      localStorage.setItem('mail-view-state', JSON.stringify({
+        accountId: selectedAccountId,
+        mailbox: selectedMailbox,
+        folderId: selectedFolderId,
+        offset: messagesOffset,
+      }));
+    } catch {}
+  }
+
+  function activatePageInput() {
+    pageInputActive = true;
+    pageInputValue = String(currentPage);
+    tick().then(() => { pageInputEl?.select(); });
+  }
+
+  function confirmPageInput() {
+    pageInputActive = false;
+    const n = parseInt(pageInputValue, 10);
+    if (!isNaN(n)) goToPage(n);
+  }
+
+  function cancelPageInput() {
+    pageInputActive = false;
   }
 
   async function openMessage(msg: Message) {
@@ -1307,6 +1383,8 @@
   $: pageEnd = Math.min(messagesOffset + messages.length, totalMessages);
   $: hasPrev = messagesOffset > 0;
   $: hasNext = messagesOffset + pageSize < totalMessages;
+  $: totalPages = Math.ceil(totalMessages / pageSize);
+  $: currentPage = totalPages === 0 ? 0 : Math.floor(messagesOffset / pageSize) + 1;
 
   $: htmlHasValue = htmlAddsValue(selectedMessage?.body_html ?? null);
   $: bodyTextSegments = linkifySegments(selectedMessage?.body_text ?? '');
@@ -1631,15 +1709,40 @@
 
       {#if totalMessages > 0 && !searching}
         <nav class="pagination-bar">
-          <button class="page-btn" on:click={prevPage} disabled={!hasPrev} aria-label={tl('mail_prevPageAria')}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
-            {tl('mail_prevPage')}
-          </button>
-          <span class="page-status">{tl('mail_pageStatus', { start: pageStart, end: pageEnd, total: totalMessages })}</span>
-          <button class="page-btn" on:click={nextPage} disabled={!hasNext} aria-label={tl('mail_nextPageAria')}>
-            {tl('mail_nextPage')}
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
-          </button>
+          <div class="page-btn-group">
+            <button class="page-btn" on:click={firstPage} disabled={!hasPrev} aria-label={tl('mail_firstPageAria')} title={tl('mail_firstPageAria')}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="6" x2="5" y2="18"/><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <button class="page-btn" on:click={prevPage} disabled={!hasPrev} aria-label={tl('mail_prevPageAria')} title={tl('mail_prevPage')}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+          </div>
+          {#if pageInputActive}
+            <input
+              bind:this={pageInputEl}
+              bind:value={pageInputValue}
+              class="page-input"
+              type="text"
+              inputmode="numeric"
+              size="3"
+              aria-label={tl('mail_jumpToPageAria')}
+              on:keydown={(e) => { if (e.key === 'Enter') confirmPageInput(); if (e.key === 'Escape') cancelPageInput(); }}
+              on:blur={confirmPageInput}
+            />
+            <span class="page-status-of">/ {totalPages}</span>
+          {:else}
+            <button class="page-status page-status-btn" on:click={activatePageInput} title={tl('mail_jumpToPageAria')}>
+              {tl('mail_pageStatus', { start: pageStart, end: pageEnd, total: totalMessages })}
+            </button>
+          {/if}
+          <div class="page-btn-group">
+            <button class="page-btn" on:click={nextPage} disabled={!hasNext} aria-label={tl('mail_nextPageAria')} title={tl('mail_nextPage')}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            <button class="page-btn" on:click={lastPage} disabled={!hasNext} aria-label={tl('mail_lastPageAria')} title={tl('mail_lastPageAria')}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/><line x1="19" y1="6" x2="19" y2="18"/></svg>
+            </button>
+          </div>
         </nav>
       {/if}
     </section>
@@ -2815,11 +2918,16 @@
   .pagination-bar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
+    justify-content: center;
     padding: 0.5rem 1rem;
     border-top: 1px solid var(--pico-muted-border-color, #ddd);
     flex-shrink: 0;
+  }
+
+  .page-btn-group {
+    display: flex;
+    align-items: center;
+    gap: 0;
   }
 
   .page-btn {
@@ -2849,6 +2957,39 @@
     font-size: 0.8rem;
     color: var(--pico-muted-color, #888);
     white-space: nowrap;
+  }
+
+  .page-status-btn {
+    cursor: pointer;
+    background: none;
+    border: none;
+    border-radius: 3px;
+    padding: 0.1rem 0.2rem;
+    font-size: 0.8rem;
+    color: var(--pico-muted-color, #888);
+    white-space: nowrap;
+    line-height: 1;
+  }
+
+  .page-status-btn:hover {
+    background: color-mix(in srgb, currentColor 10%, transparent);
+  }
+
+  .page-input {
+    width: 2.8rem;
+    text-align: center;
+    font-size: 0.8rem;
+    padding: 0.1rem 0.2rem;
+    border: 1px solid var(--pico-muted-border-color, #ddd);
+    border-radius: 3px;
+    background: var(--pico-background-color);
+    color: var(--pico-color);
+    margin: 0;
+  }
+
+  .page-status-of {
+    font-size: 0.8rem;
+    color: var(--pico-muted-color, #888);
   }
 
   /* Message detail */
