@@ -368,11 +368,14 @@ pub async fn upsert_message_header(
     from_idx: Option<&str>,
     to_idx: Option<&str>,
 ) -> Result<()> {
+    let is_unread = h.flags.as_deref()
+        .map(|f| if f.contains("\\Seen") { 0i64 } else { 1i64 })
+        .unwrap_or(1);
     sqlx::query(
         "INSERT INTO cached_messages
             (account_id, mailbox, uid, message_id, thread_id, from_addr, to_addrs, cc_addrs,
-             subject, sent_at, flags, has_attachments, size, subject_idx, from_idx, to_idx)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             subject, sent_at, flags, has_attachments, size, subject_idx, from_idx, to_idx, is_unread)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(account_id, mailbox, uid) DO UPDATE SET
             message_id      = excluded.message_id,
             thread_id       = excluded.thread_id,
@@ -386,7 +389,8 @@ pub async fn upsert_message_header(
             size            = excluded.size,
             subject_idx     = excluded.subject_idx,
             from_idx        = excluded.from_idx,
-            to_idx          = excluded.to_idx",
+            to_idx          = excluded.to_idx,
+            is_unread       = excluded.is_unread",
     )
     .bind(account_id)
     .bind(mailbox)
@@ -404,6 +408,7 @@ pub async fn upsert_message_header(
     .bind(subject_idx)
     .bind(from_idx)
     .bind(to_idx)
+    .bind(is_unread)
     .execute(pool)
     .await?;
     Ok(())
@@ -459,10 +464,12 @@ pub async fn update_message_flags(
     uid: u32,
     flags: &str,
 ) -> Result<()> {
+    let is_unread = if flags.contains("\\Seen") { 0i64 } else { 1i64 };
     sqlx::query(
-        "UPDATE cached_messages SET flags = ? WHERE account_id = ? AND mailbox = ? AND uid = ?",
+        "UPDATE cached_messages SET flags = ?, is_unread = ? WHERE account_id = ? AND mailbox = ? AND uid = ?",
     )
     .bind(flags)
+    .bind(is_unread)
     .bind(account_id)
     .bind(mailbox)
     .bind(uid as i64)
@@ -1333,7 +1340,7 @@ pub async fn get_unread_counts(pool: &SqlitePool, user_id: &str) -> Result<Vec<(
          FROM cached_messages m
          JOIN imap_accounts a ON a.account_id = m.account_id
          WHERE a.user_id = ?
-           AND NOT EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Seen')
+           AND m.is_unread = 1
          GROUP BY m.account_id, m.mailbox",
     )
     .bind(user_id)
@@ -1355,9 +1362,9 @@ pub async fn get_unread_counts_virtual(pool: &SqlitePool, user_id: &str) -> Resu
                  AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
              JOIN virtual_folders vf ON vf.folder_id = r.folder_id
              WHERE a.user_id = ?
+               AND m.is_unread = 1
                AND (vf.only_flagged = 0 OR EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Flagged'))
                AND (vf.only_attachments = 0 OR m.has_attachments = 1)
-               AND NOT EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Seen')
          ) sub GROUP BY sub.folder_id",
     )
     .bind(user_id)
