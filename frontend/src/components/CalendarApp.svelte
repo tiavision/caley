@@ -483,7 +483,6 @@
     display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;
     position: sticky; top: 0; z-index: 5;
     background: var(--pico-background-color);
-    padding-top: 0.25rem;
   }
   .week-nav-wrapper {
     position: relative;

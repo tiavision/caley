@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { initI18n, getLocale, makeTl } from '../lib/i18n.ts';
   import { getUser, type UserInfo } from '../lib/user.ts';
 
@@ -10,6 +10,7 @@
   let user: UserInfo | null = null;
   let collapsed = false;
   let mobileOpen = false;
+  let mobileHeaderEl: HTMLElement;
 
   const path = window.location.pathname;
 
@@ -26,6 +27,10 @@
       user = u;
       authed = true;
       document.body.classList.add('has-nav');
+      await tick();
+      if (window.innerWidth < 768) {
+        document.querySelector('main > #app')?.prepend(mobileHeaderEl);
+      }
     }
   });
 
@@ -39,11 +44,14 @@
 </script>
 
 {#if authed}
-  <button class="nav-hamburger" onclick={() => (mobileOpen = true)} aria-label="Menu">
-    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
-    </svg>
-  </button>
+  <header class="nav-mobile-header" bind:this={mobileHeaderEl}>
+    <button class="nav-hamburger" onclick={() => (mobileOpen = !mobileOpen)} aria-label="Menu">
+      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
+    </button>
+    <span class="nav-mobile-brand">{tl('app_brand')}</span>
+  </header>
 
   {#if mobileOpen}
     <button type="button" class="nav-backdrop" aria-label="Close menu" onclick={() => (mobileOpen = false)}></button>
@@ -52,6 +60,11 @@
   <nav class="nav-rail" class:collapsed class:open={mobileOpen} aria-label="Primary">
     <div class="nav-brand-row">
       <a href="/" class="nav-brand">{tl('app_brand')}</a>
+      <button class="nav-collapse-btn nav-drawer-close" onclick={() => (mobileOpen = false)} aria-label="Close menu">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
       <button class="nav-collapse-btn" onclick={toggleCollapse} aria-label="Toggle navigation labels">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/>
@@ -235,21 +248,33 @@
   .nav-rail.collapsed .nav-item { justify-content: center; padding: 0.5rem; }
   .nav-rail.collapsed .nav-brand-row { justify-content: center; padding: 0.25rem; }
 
-  /* Mobile drawer + hamburger */
-  .nav-hamburger {
+  /* Mobile header bar — in document flow, scrolls away naturally */
+  .nav-mobile-header {
     display: none;
-    position: fixed;
-    top: 0.5rem;
-    left: 0.5rem;
-    z-index: 101;
+    height: 2rem;
+    align-items: center;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
+    background: var(--pico-background-color, #fff);
+    flex-shrink: 0;
+    margin-bottom: 0.8rem;
+    padding-bottom: 0.8rem;
+  }
+  .nav-mobile-brand {
+    font-size: 1.1rem;
+    font-weight: 700;
+    opacity: 0.8;
+  }
+  .nav-hamburger {
+    display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0.4rem;
-    border: 1px solid var(--pico-muted-border-color, #ddd);
-    border-radius: var(--pico-border-radius, 0.25rem);
-    background: var(--pico-background-color, #fff);
+    padding: 0;
+    border: none;
+    background: none;
     color: var(--pico-color, #333);
     cursor: pointer;
+    flex-shrink: 0;
   }
   .nav-backdrop {
     position: fixed;
@@ -260,15 +285,18 @@
     z-index: 99;
     cursor: pointer;
   }
+  /* Close (✕) button — only shown in mobile drawer */
+  .nav-drawer-close { display: none; }
 
   @media (min-width: 768px) {
-    .nav-hamburger,
+    .nav-mobile-header,
     .nav-backdrop { display: none; }
   }
 
   @media (max-width: 767px) {
-    .nav-hamburger { display: flex; }
+    .nav-mobile-header { display: flex; }
     .nav-collapse-btn { display: none; }
+    .nav-drawer-close { display: flex; }
     .nav-rail {
       width: 15rem;
       transform: translateX(-100%);
