@@ -352,11 +352,17 @@ pub async fn delete_credential(
 
 // ── Trusted PGP public keys ───────────────────────────────────────────────────
 
+#[derive(Deserialize)]
+pub struct PublicKeysQuery {
+    pub email: Option<String>,
+}
+
 pub async fn list_public_keys(
     State(state): State<AppState>,
     user: CurrentUser,
+    Query(q): Query<PublicKeysQuery>,
 ) -> impl IntoResponse {
-    match db::get_pgp_public_keys(&state.db, &user.user_id).await {
+    match db::get_pgp_public_keys(&state.db, &user.user_id, q.email.as_deref()).await {
         Ok(rows) => {
             let list: Vec<serde_json::Value> = rows
                 .into_iter()

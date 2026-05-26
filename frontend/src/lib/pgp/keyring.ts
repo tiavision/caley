@@ -163,15 +163,21 @@ export async function verifySignedMessage(
   const badges: DecryptBadge[] = ['signed'];
 
   const signedBlock = extractSignedBlock(mimeStr);
-  if (!signedBlock) return badges;
+  const detached = extractDetachedSignedMime(mimeStr);
+  if (!signedBlock && !detached) return badges;
   if (publicKeys.length === 0) return [...badges, 'unverified'];
 
   try {
-    const message = await openpgp.createCleartextMessage({ text: signedBlock.text });
-    const result = await openpgp.verify({
-      message,
-      verificationKeys: publicKeys,
-    });
+    const result = detached
+      ? await openpgp.verify({
+        message: await openpgp.createMessage({ binary: new TextEncoder().encode(detached.text) }),
+        signature: await openpgp.readSignature({ armoredSignature: detached.signature }),
+        verificationKeys: publicKeys,
+      })
+      : await openpgp.verify({
+        message: await openpgp.createCleartextMessage({ text: signedBlock!.text }),
+        verificationKeys: publicKeys,
+      });
     let anyVerified = false;
     let anyFailed = false;
     for (const sig of result.signatures) {
@@ -190,6 +196,10 @@ export async function verifySignedMessage(
   }
 
   return badges;
+}
+
+export async function verifiesWithKey(rawMime: Uint8Array, key: openpgp.PublicKey): Promise<boolean> {
+  return (await verifySignedMessage(rawMime, [key])).includes('verified');
 }
 
 // ── MIME parsing helpers ──────────────────────────────────────────────────────
@@ -220,6 +230,25 @@ function extractSignedBlock(mime: string): SignedBlock | null {
   return {
     text: full.slice(0, sigBegin).trim(),
     signature: full.slice(sigBegin),
+  };
+}
+
+function extractDetachedSignedMime(mime: string): SignedBlock | null {
+  const headerEnd = mime.search(/\r?\n\r?\n/);
+  if (headerEnd === -1) return null;
+  const headers = parseHeaders(mime.slice(0, headerEnd));
+  const contentType = headers.get('content-type') ?? '';
+  if (!contentType.toLowerCase().startsWith('multipart/signed')) return null;
+  const boundary = readParameter(contentType, 'boundary');
+  if (!boundary) return null;
+  const parts = splitMultipart(mime.slice(headerEnd).replace(/^\r?\n\r?\n/, ''), boundary);
+  if (parts.length < 2) return null;
+  const signatureBegin = parts[1].indexOf('-----BEGIN PGP SIGNATURE-----');
+  const signatureEnd = parts[1].indexOf('-----END PGP SIGNATURE-----', signatureBegin);
+  if (signatureBegin === -1 || signatureEnd === -1) return null;
+  return {
+    text: `${parts[0]}\r\n`,
+    signature: parts[1].slice(signatureBegin, signatureEnd + '-----END PGP SIGNATURE-----'.length),
   };
 }
 

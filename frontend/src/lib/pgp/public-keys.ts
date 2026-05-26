@@ -28,6 +28,12 @@ export async function listPublicKeys(): Promise<StoredPublicKey[]> {
   return res.json() as Promise<StoredPublicKey[]>;
 }
 
+export async function listPublicKeysForEmail(email: string): Promise<StoredPublicKey[]> {
+  const res = await fetch(`/api/pgp/keys?email=${encodeURIComponent(email)}`);
+  if (!res.ok) throw new Error('list public keys failed');
+  return res.json() as Promise<StoredPublicKey[]>;
+}
+
 export async function readVerificationKeys(records: StoredPublicKey[]): Promise<openpgp.PublicKey[]> {
   const keys: openpgp.PublicKey[] = [];
   for (const record of records) {
@@ -43,9 +49,10 @@ export async function readVerificationKeys(records: StoredPublicKey[]): Promise<
 
 export async function savePublicKey(
   key: openpgp.PublicKey,
-  source: 'imported' | 'message_attachment',
+  source: 'imported' | 'message_attachment' | 'harvested_attachment' | 'harvested_autocrypt',
+  associatedEmail?: string,
 ): Promise<StoredPublicKey> {
-  const fields = describePublicKey(key);
+  const fields = { ...describePublicKey(key), ...(associatedEmail ? { email: associatedEmail } : {}) };
   const record: StoredPublicKey = {
     ...fields,
     is_own: false,

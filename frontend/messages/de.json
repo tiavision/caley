@@ -377,5 +377,14 @@
   "pgp_publicKeyRemoveError": "Öffentlicher Schlüssel konnte nicht entfernt werden.",
   "pgp_trustedKeys": "Vertrauenswürdige Absenderschlüssel",
   "pgp_noKeyEmail": "Keine E-Mail-Adresse",
-  "pgp_confirmRemovePublicKey": "Diesen vertrauenswürdigen öffentlichen Schlüssel entfernen?"
+  "pgp_confirmRemovePublicKey": "Diesen vertrauenswürdigen öffentlichen Schlüssel entfernen?",
+  "pgp_composeEncrypt": "Verschlüsseln",
+  "pgp_composeSign": "Signieren",
+  "pgp_composeProtectedHint": "Geschützte E-Mail wird auf diesem Gerät erstellt.",
+  "pgp_composeIdentityMissing": "Wähle eine Absenderidentität aus.",
+  "pgp_composeNoRecipients": "Füge mindestens einen Empfänger hinzu.",
+  "pgp_composeUnlockSigningKey": "Entsperre den Tresor mit dem Signaturschlüssel für diese Identität.",
+  "pgp_composeMissingKeys": "Fehlende Verschlüsselungsschlüssel für: {emails}",
+  "pgp_sourceAutocrypt": "Aus Autocrypt gelernt (bei erster Verwendung vertraut)",
+  "pgp_sourceSignedAttachment": "Aus verifizierter signierter E-Mail gelernt"
 }

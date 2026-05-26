@@ -684,6 +684,11 @@
               <div class="pgp-key-info pgp-public-key-info">
                 <span>{key.email || tl('pgp_noKeyEmail')}</span>
                 <span class="pgp-fingerprint">{key.fingerprint.slice(0, 16)}…</span>
+                {#if key.source === 'harvested_autocrypt'}
+                  <span class="pgp-key-source">{tl('pgp_sourceAutocrypt')}</span>
+                {:else if key.source === 'harvested_attachment'}
+                  <span class="pgp-key-source">{tl('pgp_sourceSignedAttachment')}</span>
+                {/if}
               </div>
               <div class="pgp-key-actions">
                 <button class="secondary small danger" onclick={() => onPgpRemovePublicKey(key.fingerprint)}>
@@ -854,6 +859,11 @@
     align-items: flex-start;
     flex-direction: column;
     gap: 0.15rem;
+  }
+
+  .pgp-key-source {
+    color: var(--pico-muted-color);
+    font-size: 0.85rem;
   }
 
   .pgp-key-item {

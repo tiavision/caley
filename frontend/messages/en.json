@@ -377,5 +377,14 @@
   "pgp_publicKeyRemoveError": "Failed to remove public key.",
   "pgp_trustedKeys": "Trusted sender keys",
   "pgp_noKeyEmail": "No email address",
-  "pgp_confirmRemovePublicKey": "Remove this trusted public key?"
+  "pgp_confirmRemovePublicKey": "Remove this trusted public key?",
+  "pgp_composeEncrypt": "Encrypt",
+  "pgp_composeSign": "Sign",
+  "pgp_composeProtectedHint": "Protected mail is built on this device.",
+  "pgp_composeIdentityMissing": "Select a sending identity.",
+  "pgp_composeNoRecipients": "Add at least one recipient.",
+  "pgp_composeUnlockSigningKey": "Unlock the vault containing the signing key for this identity.",
+  "pgp_composeMissingKeys": "Missing encryption keys for: {emails}",
+  "pgp_sourceAutocrypt": "Learned from Autocrypt (trusted on first use)",
+  "pgp_sourceSignedAttachment": "Learned from verified signed mail"
 }

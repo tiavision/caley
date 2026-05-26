@@ -1652,14 +1652,31 @@ pub struct PgpPublicKeyRow {
     pub trust: String,
 }
 
-pub async fn get_pgp_public_keys(pool: &Db, user_id: &str) -> anyhow::Result<Vec<PgpPublicKeyRow>> {
-    let rows = sqlx::query(
-        "SELECT fingerprint, email, armored, is_own, source, trust
-         FROM pgp_public_keys WHERE user_id = ? ORDER BY is_own DESC, email, fingerprint",
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
+pub async fn get_pgp_public_keys(
+    pool: &Db,
+    user_id: &str,
+    email: Option<&str>,
+) -> anyhow::Result<Vec<PgpPublicKeyRow>> {
+    let rows = if let Some(email) = email {
+        sqlx::query(
+            "SELECT fingerprint, email, armored, is_own, source, trust
+             FROM pgp_public_keys
+             WHERE user_id = ? AND lower(email) = lower(?)
+             ORDER BY is_own DESC, email, fingerprint",
+        )
+        .bind(user_id)
+        .bind(email)
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query(
+            "SELECT fingerprint, email, armored, is_own, source, trust
+             FROM pgp_public_keys WHERE user_id = ? ORDER BY is_own DESC, email, fingerprint",
+        )
+        .bind(user_id)
+        .fetch_all(pool)
+        .await?
+    };
 
     Ok(rows
         .into_iter()

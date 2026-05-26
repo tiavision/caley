@@ -1114,6 +1114,46 @@ pub async fn send_email(
     Ok(())
 }
 
+/// Relay an already-built RFC 5322 message without reconstructing its MIME headers.
+pub async fn send_raw_email(
+    smtp_host: &str,
+    smtp_port: u16,
+    username: &str,
+    password: &str,
+    from: &str,
+    recipients: &[String],
+    raw_mime: &[u8],
+) -> Result<()> {
+    use lettre::{
+        address::{Address, Envelope},
+        transport::smtp::authentication::Credentials,
+        AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
+    };
+
+    let sender: Address = from.parse().map_err(|e| anyhow!("invalid from address: {e}"))?;
+    let recipient_addresses = recipients
+        .iter()
+        .map(|recipient| recipient.parse::<Address>().map_err(|e| anyhow!("invalid recipient address: {e}")))
+        .collect::<Result<Vec<_>>>()?;
+    let envelope = Envelope::new(Some(sender), recipient_addresses)
+        .map_err(|e| anyhow!("invalid SMTP envelope: {e}"))?;
+
+    let creds = Credentials::new(username.to_owned(), password.to_owned());
+    let builder = if smtp_port == 465 {
+        AsyncSmtpTransport::<Tokio1Executor>::relay(smtp_host)
+    } else {
+        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(smtp_host)
+    }
+    .map_err(|e| anyhow!("SMTP relay error: {e}"))?;
+    let mailer = builder.port(smtp_port).credentials(creds).build();
+
+    mailer
+        .send_raw(&envelope, raw_mime)
+        .await
+        .map_err(|e| anyhow!("SMTP send failed: {e}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

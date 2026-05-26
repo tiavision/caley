@@ -210,6 +210,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/email/message/move", post(email::move_message))
         .route("/api/email/message", delete(email::delete_message))
         .route("/api/email/send", post(email::send_email))
+        .route(
+            "/api/email/send-raw",
+            post(email::send_raw_email)
+                .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
+        )
         .route("/api/email/search", get(email::search))
         .route("/api/email/suggest-addrs", get(email::suggest_addrs))
         .route("/api/email/proxy-image", get(email::proxy_image))

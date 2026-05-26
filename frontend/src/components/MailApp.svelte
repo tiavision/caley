@@ -6,9 +6,11 @@
   import { readVault, decryptPrivateKeys } from '../lib/pgp/vault.ts';
   import { unlock } from '../lib/pgp/webauthn.ts';
   import { deriveKek, b64uDecode } from '../lib/pgp/kek.ts';
-  import { decryptMessage, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
+  import { decryptMessage, verifySignedMessage, verifiesWithKey, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
   import { parsePublicKey, listPublicKeys, readVerificationKeys, savePublicKey } from '../lib/pgp/public-keys.ts';
   import { openVault, getKeys, isUnlocked } from '../lib/pgp/session.ts';
+  import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
+  import { buildProtectedMime, parseEnvelopeAddresses } from '../lib/pgp/compose.ts';
   import DOMPurify from 'dompurify';
 
   let locale = 'en';
@@ -190,6 +192,8 @@
   let showComposeCcBcc = false;
   let composeAttachments: File[] = [];
   let composeReplyAll = false;
+  let composeEncrypt = false;
+  let composeSign = false;
   let composeFileInput: HTMLInputElement;
   let filePickerOpen = false;
 
@@ -260,6 +264,71 @@
     return result;
   }
 
+  function bareMailbox(value: string | null): string {
+    const match = /<([^<>]+)>/.exec(value ?? '');
+    return (match?.[1] ?? value ?? '').trim().toLowerCase();
+  }
+
+  function keyHasEmail(key: { users: { userID?: { email?: string } }[] }, email: string): boolean {
+    return key.users.some(user => user.userID?.email?.trim().toLowerCase() === email.toLowerCase());
+  }
+
+  async function fetchRawMessage(msg: Message): Promise<Uint8Array> {
+    const url = `/api/email/raw?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('raw message fetch failed');
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
+  async function harvestAutocrypt(rawBytes: Uint8Array, msg: Message) {
+    const sender = bareMailbox(msg.from);
+    for (const key of await autocryptKeys(rawBytes, msg.from)) {
+      await savePublicKey(key, 'harvested_autocrypt', sender).catch(() => {});
+    }
+  }
+
+  async function harvestSignedAttachments(
+    rawBytes: Uint8Array,
+    msg: Message,
+    decryptedAttachments: DecryptedAttachment[] | null = null,
+  ): Promise<boolean> {
+    if (!msg.is_signed && !decryptedAttachments) return false;
+    const sender = bareMailbox(msg.from);
+    const candidates = decryptedAttachments
+      ? decryptedAttachments.filter(attachment => isPgpPublicKeyAttachment({
+        filename: attachment.filename,
+        content_type: attachment.contentType,
+        size: attachment.data.byteLength,
+      }))
+      : (msg.attachments ?? []).filter(isPgpPublicKeyAttachment);
+    let harvested = false;
+    for (const candidate of candidates) {
+      try {
+        let bytes: Uint8Array;
+        if ('data' in candidate) {
+          bytes = candidate.data;
+        } else {
+          const url = `/api/email/attachment?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}&filename=${encodeURIComponent(candidate.filename)}`;
+          const response = await fetch(url);
+          if (!response.ok) continue;
+          bytes = new Uint8Array(await response.arrayBuffer());
+        }
+        const key = await parsePublicKey(new TextDecoder().decode(bytes));
+        if (!sender || !keyHasEmail(key, sender)) continue;
+        const valid = msg.is_encrypted
+          ? (await decryptMessage(getKeys(), rawBytes, [key])).badges.includes('verified')
+          : await verifiesWithKey(rawBytes, key);
+        if (valid) {
+          await savePublicKey(key, 'harvested_attachment', sender);
+          harvested = true;
+        }
+      } catch {
+        // A malformed or unverifiable attached key is not harvested.
+      }
+    }
+    return harvested;
+  }
+
   async function pgpUnlock() {
     pgpUnlocking = true;
     pgpUnlockError = '';
@@ -291,10 +360,7 @@
     clearPgpAttachments();
     pgpBadges = [];
     try {
-      const url = `/api/email/raw?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('fetch failed');
-      const rawBytes = new Uint8Array(await res.arrayBuffer());
+      const rawBytes = await fetchRawMessage(msg);
       const verificationKeys = await listPublicKeys()
         .then(readVerificationKeys)
         .catch(() => []);
@@ -312,6 +378,10 @@
           url: URL.createObjectURL(new Blob([attachment.data], { type: 'application/octet-stream' })),
           data: attachment.data,
         }));
+        if (await harvestSignedAttachments(rawBytes, msg, result.attachments)) {
+          const refreshedKeys = await listPublicKeys().then(readVerificationKeys).catch(() => []);
+          pgpBadges = (await decryptMessage(keys, rawBytes, refreshedKeys)).badges;
+        }
         if (result.isHtml) {
           const withInlineImages = insertDecryptedInlineImages(result.plaintext, result.attachments);
           pgpDecryptedHtml = DOMPurify.sanitize(withInlineImages, { FORCE_BODY: true, FORBID_TAGS: ['script', 'style'] });
@@ -981,7 +1051,7 @@
       const url = `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
       const r = await fetch(url);
       if (r.ok) {
-        const full = await r.json();
+        const full = await r.json() as Message;
         viewMode = htmlAddsValue(full.body_html) ? 'html' : 'text';
         selectedMessage = full;
         messageLoading = false;
@@ -992,6 +1062,17 @@
         // Mark as read
         if (!full.is_read) {
           await setFlag(full, '\\Seen', true);
+        }
+        try {
+          const rawBytes = await fetchRawMessage(full);
+          await harvestAutocrypt(rawBytes, full);
+          if (full.is_signed && !full.is_encrypted) {
+            await harvestSignedAttachments(rawBytes, full);
+            const verificationKeys = await listPublicKeys().then(readVerificationKeys).catch(() => []);
+            pgpBadges = await verifySignedMessage(rawBytes, verificationKeys);
+          }
+        } catch {
+          // Reading ordinary mail must not fail when raw/key harvesting is unavailable.
         }
       }
     } catch {}
@@ -1285,6 +1366,8 @@
     composeAttachments = [];
     showComposeCcBcc = false;
     composeReplyAll = false;
+    composeEncrypt = false;
+    composeSign = false;
     if (replyTo) {
       composeTo = replyTo.from || '';
       composeSubject = replyTo.subject?.startsWith('Re:') ? replyTo.subject : `Re: ${replyTo.subject || ''}`;
@@ -1326,26 +1409,90 @@
     composeSending = true;
     composeError = '';
     try {
-      const fd = new FormData();
-      fd.append('identity_id', composeIdentityId);
-      fd.append('to', composeTo);
-      fd.append('cc', composeCc);
-      fd.append('bcc', composeBcc);
-      fd.append('subject', composeSubject);
-      fd.append('body', composeBody);
-      if (composeInReplyTo) fd.append('in_reply_to', composeInReplyTo);
-      for (const file of composeAttachments) {
-        fd.append('attachment', file, file.name);
+      let r: Response;
+      if (composeEncrypt || composeSign) {
+        const identity = identities.find(item => item.identity_id === composeIdentityId);
+        if (!identity) throw new Error(tl('pgp_composeIdentityMissing'));
+        const to = parseEnvelopeAddresses(composeTo);
+        const cc = parseEnvelopeAddresses(composeCc);
+        const bcc = parseEnvelopeAddresses(composeBcc);
+        const allRecipients = [...to, ...cc, ...bcc];
+        if (allRecipients.length === 0) throw new Error(tl('pgp_composeNoRecipients'));
+
+        const signingKey = composeSign
+          ? getKeys().find(key => keyHasEmail(key, identity.email)) ?? null
+          : null;
+        if (composeSign && !signingKey) throw new Error(tl('pgp_composeUnlockSigningKey'));
+
+        const encryptionKeys = [];
+        if (composeEncrypt) {
+          const missing: string[] = [];
+          const usableRecords = (await listPublicKeys()).filter(record => record.trust === 'trusted');
+          const usableKeys = await Promise.all(usableRecords.map(async record => ({
+            record,
+            key: await parsePublicKey(record.armored),
+          })));
+          for (const recipient of allRecipients) {
+            const matching = usableKeys.filter(({ key }) => keyHasEmail(key, recipient));
+            if (matching.length === 0) {
+              missing.push(recipient);
+            } else {
+              for (const { key } of matching) encryptionKeys.push(key);
+            }
+          }
+          let hasOwnKey = false;
+          for (const { record, key } of usableKeys) {
+            if (!record.is_own) continue;
+            if (keyHasEmail(key, identity.email)) {
+              encryptionKeys.push(key);
+              hasOwnKey = true;
+            }
+          }
+          if (!hasOwnKey) missing.push(identity.email);
+          if (missing.length > 0) throw new Error(tl('pgp_composeMissingKeys', { emails: [...new Set(missing)].join(', ') }));
+        }
+        const rawMime = await buildProtectedMime({
+          identity,
+          to,
+          cc,
+          subject: composeSubject,
+          body: composeBody,
+          inReplyTo: composeInReplyTo,
+          attachments: composeAttachments,
+          encrypt: composeEncrypt,
+          sign: composeSign,
+          encryptionKeys,
+          signingKey,
+        });
+        const fd = new FormData();
+        fd.append('identity_id', composeIdentityId);
+        fd.append('envelope_to', JSON.stringify(to));
+        fd.append('envelope_cc', JSON.stringify(cc));
+        fd.append('envelope_bcc', JSON.stringify(bcc));
+        fd.append('raw_mime', new Blob([rawMime], { type: 'message/rfc822' }), 'message.eml');
+        r = await fetch('/api/email/send-raw', { method: 'POST', body: fd });
+      } else {
+        const fd = new FormData();
+        fd.append('identity_id', composeIdentityId);
+        fd.append('to', composeTo);
+        fd.append('cc', composeCc);
+        fd.append('bcc', composeBcc);
+        fd.append('subject', composeSubject);
+        fd.append('body', composeBody);
+        if (composeInReplyTo) fd.append('in_reply_to', composeInReplyTo);
+        for (const file of composeAttachments) {
+          fd.append('attachment', file, file.name);
+        }
+        r = await fetch('/api/email/send', { method: 'POST', body: fd });
       }
-      const r = await fetch('/api/email/send', { method: 'POST', body: fd });
       if (!r.ok) {
         const text = await r.text();
         composeError = text || tl('mail_sendError');
       } else {
         composeDialog?.close();
       }
-    } catch {
-      composeError = tl('mail_sendError');
+    } catch (error) {
+      composeError = error instanceof Error ? error.message : tl('mail_sendError');
     }
     composeSending = false;
   }
@@ -2527,6 +2674,13 @@
       <div class="compose-row">
         <span class="compose-label">{tl('mail_composeSubject')}</span>
         <input class="compose-input" bind:value={composeSubject} />
+      </div>
+      <div class="compose-security">
+        <label><input type="checkbox" bind:checked={composeEncrypt} /> {tl('pgp_composeEncrypt')}</label>
+        <label><input type="checkbox" bind:checked={composeSign} /> {tl('pgp_composeSign')}</label>
+        {#if composeEncrypt || composeSign}
+          <span class="compose-security-note">{tl('pgp_composeProtectedHint')}</span>
+        {/if}
       </div>
       <div class="compose-body-row">
         <textarea bind:value={composeBody} rows={10}></textarea>
@@ -4269,6 +4423,25 @@
     color: var(--pico-del-color);
     font-size: 0.875rem;
     margin: 0.25rem 0;
+  }
+
+  .compose-security {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    padding: 0.25rem 0;
+    font-size: 0.9rem;
+  }
+
+  .compose-security label {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0;
+  }
+
+  .compose-security-note {
+    color: var(--pico-muted-color);
   }
 
   .pgp-success {
