@@ -192,7 +192,7 @@
   let accountDialog: HTMLDialogElement;
   let composeDialog: HTMLDialogElement;
   let folderDialog: HTMLDialogElement;
-  let sidebarDialog: HTMLDialogElement;
+  let sidebarOpen = false;
 
   let isMobile = false;
   let mediaQueryListener: ((e: MediaQueryListEvent) => void) | null = null;
@@ -427,7 +427,7 @@
     filterAddrOpen = false;
     filterDateOpen = false;
     removeFilterListeners();
-    sidebarDialog?.close();
+    sidebarOpen = false;
     await loadMessages();
     fetch(
       `/api/email/sync?account_id=${encodeURIComponent(accountId)}&mailbox=${encodeURIComponent(mailbox)}`,
@@ -449,7 +449,7 @@
     filterAddrOpen = false;
     filterDateOpen = false;
     removeFilterListeners();
-    sidebarDialog?.close();
+    sidebarOpen = false;
     await loadMessages();
   }
 
@@ -1465,15 +1465,13 @@
 {/snippet}
 
 <div class="mail-page">
-  <!-- ── Toolbar ────────────────────────────────────────────────────────────── -->
-  <div class="mail-toolbar">
-    <button class="sidebar-toggle" on:click={() => sidebarDialog?.showModal()} aria-label={tl('mail_aria_folders')}>☰</button>
-  </div>
-
   <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
   <div class="mail-layout" style="grid-template-columns: {layoutColumns}">
     <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
-    <aside class="mail-sidebar">
+    {#if sidebarOpen}
+      <button type="button" class="sidebar-backdrop" aria-label={tl('mail_aria_folders')} on:click={() => (sidebarOpen = false)}></button>
+    {/if}
+    <aside class="mail-sidebar" class:open={sidebarOpen}>
       <!-- Virtual folders -->
       {#if virtualFolders.length > 0}
         <div class="sidebar-section">
@@ -1495,8 +1493,8 @@
               {#if folderUnread > 0}
                 <span class="unread-badge">{folderUnread > 999 ? '999+' : folderUnread}</span>
               {/if}
-              <button class="icon-btn" on:click|stopPropagation={() => openFolderEdit(folder)} title={tl('mail_editVirtualFolder')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
-              <button class="icon-btn delete-btn" on:click|stopPropagation={() => deleteFolder(folder)} title={tl('mail_removeAttachment')}>×</button>
+              <button class="icon-btn" on:click|stopPropagation={() => { sidebarOpen = false; openFolderEdit(folder); }} title={tl('mail_editVirtualFolder')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+              <button class="icon-btn delete-btn" on:click|stopPropagation={() => { sidebarOpen = false; deleteFolder(folder); }} title={tl('mail_removeAttachment')}>×</button>
             </div>
           {/each}
         </div>
@@ -1507,9 +1505,9 @@
         <div class="sidebar-section">
           <div class="sidebar-section-header">
             <span class="account-name" title={acc.username}>{acc.display_name}</span>
-            <button class="icon-btn" on:click={() => openManageIdentities(acc.account_id)} title={tl('mail_identities')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg></button>
-            <button class="icon-btn" on:click={() => openEditAccount(acc)} title={tl('mail_editAccountHeading')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
-            <button class="icon-btn delete-btn" on:click={() => removeAccount(acc)} title={tl('mail_removeAttachment')}>×</button>
+            <button class="icon-btn" on:click={() => { sidebarOpen = false; openManageIdentities(acc.account_id); }} title={tl('mail_identities')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg></button>
+            <button class="icon-btn" on:click={() => { sidebarOpen = false; openEditAccount(acc); }} title={tl('mail_editAccountHeading')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+            <button class="icon-btn delete-btn" on:click={() => { sidebarOpen = false; removeAccount(acc); }} title={tl('mail_removeAttachment')}>×</button>
           </div>
           {#each (mailboxesByAccount[acc.account_id] || []).toSorted((a, b) => {
             const [ap, an] = folderSortKey(a.name);
@@ -1545,8 +1543,8 @@
 
       <!-- Add account / folder buttons -->
       <div class="sidebar-actions sidebar-add">
-        <button class="link-btn" on:click={openAddAccount}>+ {tl('mail_addAccount')}</button>
-        <button class="link-btn" on:click={openFolderCreate}>+ {tl('mail_addVirtualFolder')}</button>
+        <button class="link-btn" on:click={() => { sidebarOpen = false; openAddAccount(); }}>+ {tl('mail_addAccount')}</button>
+        <button class="link-btn" on:click={() => { sidebarOpen = false; openFolderCreate(); }}>+ {tl('mail_addVirtualFolder')}</button>
       </div>
     </aside>
 
@@ -1555,13 +1553,18 @@
     <!-- ── Message list ────────────────────────────────────────────────────── -->
     <section class="message-list">
       <div class="message-list-header">
-        {#if selectedFolderId}
-          <h2>{virtualFolders.find(f => f.folder_id === selectedFolderId)?.display_name || tl('mail_aria_folders')}</h2>
-        {:else if selectedMailbox}
-          <h2>{FOLDER_NAMES[folderKind(selectedMailbox)] || selectedMailbox}</h2>
-        {:else}
-          <h2>{tl('nav_mail')}</h2>
-        {/if}
+        <div class="list-header-row">
+          <button class="folder-toggle" on:click={() => (sidebarOpen = true)} aria-label={tl('mail_aria_folders')}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          </button>
+          {#if selectedFolderId}
+            <h2>{virtualFolders.find(f => f.folder_id === selectedFolderId)?.display_name || tl('mail_aria_folders')}</h2>
+          {:else if selectedMailbox}
+            <h2>{FOLDER_NAMES[folderKind(selectedMailbox)] || selectedMailbox}</h2>
+          {:else}
+            <h2>{tl('nav_mail')}</h2>
+          {/if}
+        </div>
         {#if selectedFolderId || selectedMailbox}
           <div class="search-row">
             <input
@@ -1930,83 +1933,6 @@
     </section>
   </div>
 </div>
-
-<!-- ── Mobile sidebar drawer ──────────────────────────────────────────────── -->
-<dialog
-  bind:this={sidebarDialog}
-  class="sidebar-drawer"
-  on:click={(e) => { if (e.target === e.currentTarget) sidebarDialog?.close(); }}
->
-  <div class="drawer-content">
-    {#if virtualFolders.length > 0}
-      <div class="sidebar-section">
-        <div class="sidebar-section-header">
-          <span>{tl('mail_virtualFolders')}</span>
-        </div>
-        {#each virtualFolders as folder}
-          {@const folderUnread = folderUnreadCounts[folder.folder_id] ?? 0}
-          <div
-            class="sidebar-item"
-            class:active={selectedFolderId === folder.folder_id}
-            role="button"
-            tabindex="0"
-            on:click={() => selectVirtualFolder(folder.folder_id)}
-            on:keydown={e => e.key === 'Enter' && selectVirtualFolder(folder.folder_id)}
-          >
-            {@render folderIcon('virtual')}
-            <span class="folder-name">{folder.display_name}</span>
-            {#if folderUnread > 0}
-              <span class="unread-badge">{folderUnread > 999 ? '999+' : folderUnread}</span>
-            {/if}
-            <button class="icon-btn" on:click|stopPropagation={() => { sidebarDialog?.close(); openFolderEdit(folder); }} title={tl('mail_editVirtualFolder')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
-            <button class="icon-btn delete-btn" on:click|stopPropagation={() => deleteFolder(folder)} title={tl('mail_removeAttachment')}>×</button>
-          </div>
-        {/each}
-      </div>
-    {/if}
-
-    {#each accounts as acc}
-      <div class="sidebar-section">
-        <div class="sidebar-section-header">
-          <span class="account-name" title={acc.username}>{acc.display_name}</span>
-          <button class="icon-btn" on:click={() => { sidebarDialog?.close(); openManageIdentities(acc.account_id); }} title={tl('mail_identities')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg></button>
-          <button class="icon-btn" on:click={() => { sidebarDialog?.close(); openEditAccount(acc); }} title={tl('mail_editAccountHeading')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
-          <button class="icon-btn delete-btn" on:click={() => removeAccount(acc)} title={tl('mail_removeAttachment')}>×</button>
-        </div>
-        {#each (mailboxesByAccount[acc.account_id] || []) as mb}
-          {#if mb.subscribed}
-            {@const syncKey = `${acc.account_id}|${mb.name}`}
-            {@const mbUnread = mailboxUnreadCounts[acc.account_id]?.[mb.name] ?? 0}
-            {@const isSyncing = syncingMailboxes.has(syncKey)}
-            <button
-              class="sidebar-item"
-              class:active={selectedAccountId === acc.account_id && selectedMailbox === mb.name}
-              class:drag-target={draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name}
-              class:drag-over={dragOverMailbox === `${acc.account_id}|${mb.name}`}
-              on:click={() => selectMailbox(acc.account_id, mb.name)}
-              on:dragover={(e) => { if (draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name) { e.preventDefault(); dragOverMailbox = `${acc.account_id}|${mb.name}`; } }}
-              on:dragleave={() => { if (dragOverMailbox === `${acc.account_id}|${mb.name}`) dragOverMailbox = null; }}
-              on:drop={() => { if (draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name) { moveMessage(draggedMessage, mb.name); } draggedMessage = null; dragOverMailbox = null; }}
-            >
-              {@render folderIcon(folderKind(mb.name))}
-              <span class="folder-name">{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
-              {#if isSyncing}
-                <span class="sync-spinner" aria-label="Syncing"></span>
-              {:else if mbUnread > 0}
-                <span class="unread-badge">{mbUnread > 999 ? '999+' : mbUnread}</span>
-              {/if}
-            </button>
-          {/if}
-        {/each}
-      </div>
-    {/each}
-
-    <div class="sidebar-actions">
-      <button class="link-btn" on:click={() => { sidebarDialog?.close(); openAddAccount(); }}>+ {tl('mail_addAccount')}</button>
-      <button class="link-btn" on:click={() => { sidebarDialog?.close(); openFolderCreate(); }}>+ {tl('mail_addVirtualFolder')}</button>
-    </div>
-  </div>
-</dialog>
 
 <!-- ── Identity management dialog ────────────────────────────────────────── -->
 <dialog
@@ -2469,23 +2395,37 @@
     overflow: hidden;
   }
 
-  .mail-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
-    flex-shrink: 0;
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.2);
+    z-index: 60;
+    border: none;
+    padding: 0;
+    cursor: pointer;
   }
 
-  .sidebar-toggle {
+  .folder-toggle {
     display: none;
     background: none;
     border: none;
+    padding: 0.2rem;
     cursor: pointer;
-    font-size: 1.25rem;
-    padding: 0.25rem;
     color: inherit;
+    flex-shrink: 0;
+  }
+
+  .list-header-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .list-header-row h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    flex: 1;
   }
 
   .mail-layout {
@@ -2640,12 +2580,6 @@
     border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
     flex-shrink: 0;
     position: relative;
-  }
-
-  .message-list-header h2 {
-    margin: 0;
-    font-size: 1rem;
-    font-weight: 600;
   }
 
   .search-input {
@@ -3561,31 +3495,6 @@
     font-size: 0.9rem;
   }
 
-  /* Dialog overrides */
-  .sidebar-drawer {
-    margin: 0 auto 0 0;
-    height: 100%;
-    max-height: 100dvh;
-    width: 280px;
-    max-width: 80vw;
-    border-radius: 0;
-    border: none;
-    border-right: 1px solid var(--pico-muted-border-color, #ddd);
-    padding: 0;
-  }
-
-  .sidebar-drawer::backdrop {
-    background: rgba(0,0,0,0.2);
-  }
-
-  .sidebar-drawer .drawer-content {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    overflow-y: auto;
-    background: var(--pico-card-background-color, #f4f4f4);
-  }
-
   .compose-dialog {
     max-width: 44rem;
     width: 95vw;
@@ -3892,7 +3801,21 @@
   /* Responsive */
   @media (max-width: 767px) {
     .mail-sidebar {
-      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 280px;
+      max-width: 80vw;
+      z-index: 61;
+      transform: translateX(-100%);
+      transition: transform 0.25s ease;
+      box-shadow: 0 0 1.5rem rgba(0, 0, 0, 0.25);
+      border-right: 1px solid var(--pico-muted-border-color, #ddd);
+    }
+
+    .mail-sidebar.open {
+      transform: translateX(0);
     }
 
     .message-detail {
@@ -3929,8 +3852,9 @@
       min-height: 0;
     }
 
-    .sidebar-toggle {
-      display: block;
+    .folder-toggle {
+      display: flex;
+      align-items: center;
     }
 
     .fab {
@@ -3945,10 +3869,6 @@
   }
 
   @media (min-width: 768px) {
-    .mail-toolbar {
-      display: none;
-    }
-
     .mail-layout {
       flex: 1;
       min-height: 0;
