@@ -7,6 +7,7 @@
   import { unlock } from '../lib/pgp/webauthn.ts';
   import { deriveKek, b64uDecode } from '../lib/pgp/kek.ts';
   import { decryptMessage, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
+  import { parsePublicKey, listPublicKeys, readVerificationKeys, savePublicKey } from '../lib/pgp/public-keys.ts';
   import { openVault, getKeys, isUnlocked } from '../lib/pgp/session.ts';
   import DOMPurify from 'dompurify';
 
@@ -86,6 +87,13 @@
     return filename === 'encrypted.asc' ||
       (/^(encrypted|message|msg)\.(asc|pgp|gpg)$/.test(filename) &&
         (contentType === 'application/octet-stream' || contentType === 'application/pgp-encrypted'));
+  }
+
+  function isPgpPublicKeyAttachment(attachment: Attachment): boolean {
+    const filename = attachment.filename.toLowerCase();
+    const contentType = attachment.content_type?.split(';', 1)[0].trim().toLowerCase() ?? '';
+    return contentType === 'application/pgp-keys' ||
+      (!isPgpTransportAttachment(attachment) && /\.(asc|pgp|gpg|pub)$/.test(filename));
   }
 
   // ── State ────────────────────────────────────────────────────────────────
@@ -200,10 +208,13 @@
   let pgpDecryptError = '';
   let pgpDecryptedHtml = '';
   let pgpDecryptedText = '';
-  let pgpAttachments: (Attachment & { url: string })[] = [];
+  let pgpAttachments: (Attachment & { url: string; data: Uint8Array })[] = [];
   let pgpBadges: string[] = [];
   let pgpUnlocking = false;
   let pgpUnlockError = '';
+  let pgpPublicKeyImporting = '';
+  let pgpPublicKeyImportError = '';
+  let pgpPublicKeyImportSuccess = '';
   let pgpKeyUnlocked = isUnlocked();
   let pgpDecryptGeneration = 0;
 
@@ -220,6 +231,8 @@
     pgpDecryptedText = '';
     pgpBadges = [];
     pgpDecryptError = '';
+    pgpPublicKeyImportError = '';
+    pgpPublicKeyImportSuccess = '';
     pgpKeyUnlocked = isUnlocked();
     iframeKey++;
   }
@@ -282,7 +295,10 @@
       const res = await fetch(url);
       if (!res.ok) throw new Error('fetch failed');
       const rawBytes = new Uint8Array(await res.arrayBuffer());
-      const result = await decryptMessage(keys, rawBytes);
+      const verificationKeys = await listPublicKeys()
+        .then(readVerificationKeys)
+        .catch(() => []);
+      const result = await decryptMessage(keys, rawBytes, verificationKeys);
       if (generation !== pgpDecryptGeneration || selectedMessage?.uid !== msg.uid ||
           selectedMessage?.account_id !== msg.account_id || selectedMessage?.mailbox !== msg.mailbox) return;
       pgpBadges = result.badges;
@@ -294,6 +310,7 @@
           content_type: attachment.contentType,
           size: attachment.data.byteLength,
           url: URL.createObjectURL(new Blob([attachment.data], { type: 'application/octet-stream' })),
+          data: attachment.data,
         }));
         if (result.isHtml) {
           const withInlineImages = insertDecryptedInlineImages(result.plaintext, result.attachments);
@@ -306,6 +323,32 @@
       if (generation === pgpDecryptGeneration) pgpDecryptError = tl('pgp_decryptFailed');
     }
     if (generation === pgpDecryptGeneration) pgpDecrypting = false;
+  }
+
+  async function importMessagePublicKey(attachment: Attachment, decryptedData?: Uint8Array) {
+    pgpPublicKeyImporting = attachment.filename;
+    pgpPublicKeyImportError = '';
+    pgpPublicKeyImportSuccess = '';
+    try {
+      let bytes = decryptedData;
+      if (!bytes) {
+        if (!selectedMessage) throw new Error('no message');
+        const url = `/api/email/attachment?account_id=${encodeURIComponent(selectedMessage.account_id)}&mailbox=${encodeURIComponent(selectedMessage.mailbox)}&uid=${selectedMessage.uid}&filename=${encodeURIComponent(attachment.filename)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('attachment fetch failed');
+        bytes = new Uint8Array(await res.arrayBuffer());
+      }
+      const armored = new TextDecoder().decode(bytes);
+      const key = await parsePublicKey(armored);
+      await savePublicKey(key, 'message_attachment');
+      pgpPublicKeyImportSuccess = tl('pgp_publicKeyImported');
+      if (selectedMessage?.is_encrypted && getKeys().length > 0) {
+        await pgpDecrypt(selectedMessage);
+      }
+    } catch {
+      pgpPublicKeyImportError = tl('pgp_publicKeyImportError');
+    }
+    pgpPublicKeyImporting = '';
   }
 
   function pgpBadgeLabel(badge: string): string {
@@ -931,6 +974,8 @@
     clearPgpAttachments();
     pgpDecryptError = '';
     pgpBadges = [];
+    pgpPublicKeyImportError = '';
+    pgpPublicKeyImportSuccess = '';
     pgpKeyUnlocked = isUnlocked();
     try {
       const url = `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
@@ -2067,15 +2112,22 @@
               {#if attachmentsExpanded}
                 <div class="attachments-list">
                   {#each visibleServerAttachments as att}
-                    <a
-                      class="compose-attachment-chip attachment-chip-dl"
-                      href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
-                      download={att.filename}
-                    >
-                      <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
-                      <span class="attachment-name" title={att.filename}>{att.filename}</span>
-                      <span class="attachment-size">{humanSize(att.size)}</span>
-                    </a>
+                    <div class="pgp-attachment-row">
+                      <a
+                        class="compose-attachment-chip attachment-chip-dl"
+                        href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
+                        download={att.filename}
+                      >
+                        <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
+                        <span class="attachment-name" title={att.filename}>{att.filename}</span>
+                        <span class="attachment-size">{humanSize(att.size)}</span>
+                      </a>
+                      {#if isPgpPublicKeyAttachment(att)}
+                        <button class="secondary small pgp-import-public-btn" on:click={() => importMessagePublicKey(att)} disabled={pgpPublicKeyImporting === att.filename}>
+                          {pgpPublicKeyImporting === att.filename ? tl('pgp_importing') : tl('pgp_importPublicKeyButton')}
+                        </button>
+                      {/if}
+                    </div>
                   {/each}
                 </div>
               {/if}
@@ -2091,11 +2143,18 @@
               {#if attachmentsExpanded}
                 <div class="attachments-list">
                   {#each pgpAttachments as att}
-                    <a class="compose-attachment-chip attachment-chip-dl" href={att.url} download={att.filename}>
-                      <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
-                      <span class="attachment-name" title={att.filename}>{att.filename}</span>
-                      <span class="attachment-size">{humanSize(att.size)}</span>
-                    </a>
+                    <div class="pgp-attachment-row">
+                      <a class="compose-attachment-chip attachment-chip-dl" href={att.url} download={att.filename}>
+                        <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
+                        <span class="attachment-name" title={att.filename}>{att.filename}</span>
+                        <span class="attachment-size">{humanSize(att.size)}</span>
+                      </a>
+                      {#if isPgpPublicKeyAttachment(att)}
+                        <button class="secondary small pgp-import-public-btn" on:click={() => importMessagePublicKey(att, att.data)} disabled={pgpPublicKeyImporting === att.filename}>
+                          {pgpPublicKeyImporting === att.filename ? tl('pgp_importing') : tl('pgp_importPublicKeyButton')}
+                        </button>
+                      {/if}
+                    </div>
                   {/each}
                 </div>
               {/if}
@@ -2111,6 +2170,8 @@
                   {/each}
                 </div>
               {/if}
+              {#if pgpPublicKeyImportError}<p class="pgp-error">{pgpPublicKeyImportError}</p>{/if}
+              {#if pgpPublicKeyImportSuccess}<p class="pgp-success">{pgpPublicKeyImportSuccess}</p>{/if}
               {#if pgpDecryptedHtml}
                 <!-- Decrypted HTML: sandboxed iframe WITHOUT allow-same-origin -->
                 {#key iframeKey}
@@ -3494,6 +3555,19 @@
     color: inherit;
   }
 
+  .pgp-attachment-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .pgp-import-public-btn {
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0.2rem 0.45rem;
+    font-size: 0.78rem;
+  }
+
   .detail-body {
     flex: 1;
     overflow-y: auto;
@@ -4193,6 +4267,12 @@
 
   .pgp-error {
     color: var(--pico-del-color);
+    font-size: 0.875rem;
+    margin: 0.25rem 0;
+  }
+
+  .pgp-success {
+    color: var(--pico-ins-color);
     font-size: 0.875rem;
     margin: 0.25rem 0;
   }

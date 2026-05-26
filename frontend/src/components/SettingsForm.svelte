@@ -31,6 +31,13 @@
   import { enroll, unlock, resumeEnroll, listCredentials, deleteCredential, type CredentialInfo } from '../lib/pgp/webauthn.ts';
   import { deriveKek, randomBytes, b64uEncode, b64uDecode } from '../lib/pgp/kek.ts';
   import { importPrivateKey, getFingerprint, getPrimaryEmail, extractPublicKey } from '../lib/pgp/keyring.ts';
+  import {
+    parsePublicKey,
+    listPublicKeys,
+    savePublicKey,
+    deletePublicKey,
+    type StoredPublicKey,
+  } from '../lib/pgp/public-keys.ts';
   import { openVault, addKey, removeKey, getWrappingKey, lock, isUnlocked } from '../lib/pgp/session.ts';
   import * as openpgp from 'openpgp';
 
@@ -85,11 +92,19 @@
   let pgpUnlockRevision = 0;
   $: pgpVaultUnlocked = (pgpUnlockRevision, isUnlocked());
 
+  let pgpPublicKeys: StoredPublicKey[] = [];
+  let pgpPublicArmoredKey = '';
+  let pgpPublicImporting = false;
+  let pgpPublicImportError = '';
+  let pgpPublicImportSuccess = '';
+  $: pgpTrustedSenderKeys = pgpPublicKeys.filter(key => !key.is_own);
+
   async function loadVaultStatus() {
     const vault = await readVault().catch(() => null);
     pgpVaultMetadata = vault?.metadata ?? null;
     pgpVaultRecords = vault?.keys ?? [];
     pgpServerCreds = await listCredentials().catch(() => []);
+    pgpPublicKeys = await listPublicKeys().catch(() => []);
     pgpPartialEnrollment = pgpServerCreds.length > 0 && pgpVaultMetadata === null;
   }
 
@@ -296,6 +311,32 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fingerprint, email, armored: pubKeyArmored, is_own: true, source: 'imported' }),
     }).catch(() => {});
+  }
+
+  async function onPgpPublicImport() {
+    pgpPublicImporting = true;
+    pgpPublicImportError = '';
+    pgpPublicImportSuccess = '';
+    try {
+      const key = await parsePublicKey(pgpPublicArmoredKey);
+      const saved = await savePublicKey(key, 'imported');
+      pgpPublicKeys = [...pgpPublicKeys.filter(existing => existing.fingerprint !== saved.fingerprint), saved];
+      pgpPublicArmoredKey = '';
+      pgpPublicImportSuccess = tl('pgp_publicKeyImported');
+    } catch {
+      pgpPublicImportError = tl('pgp_publicKeyImportError');
+    }
+    pgpPublicImporting = false;
+  }
+
+  async function onPgpRemovePublicKey(fingerprint: string) {
+    if (!confirm(tl('pgp_confirmRemovePublicKey'))) return;
+    try {
+      await deletePublicKey(fingerprint);
+      pgpPublicKeys = pgpPublicKeys.filter(key => key.fingerprint !== fingerprint);
+    } catch {
+      pgpPublicImportError = tl('pgp_publicKeyRemoveError');
+    }
   }
 
   function switchTab(t: 'settings' | 'calendars' | 'encryption') {
@@ -621,6 +662,39 @@
         </button>
       {/if}
     {/if}
+
+    <section class="pgp-public-keys">
+      <h3>{tl('pgp_publicKeysHeading')}</h3>
+      <p>{tl('pgp_publicKeysHint')}</p>
+      {#if pgpPublicImportError}<p class="pgp-error">{pgpPublicImportError}</p>{/if}
+      {#if pgpPublicImportSuccess}<p class="pgp-success">{pgpPublicImportSuccess}</p>{/if}
+      <label>
+        <span>{tl('pgp_importArmoredPublicKey')}</span>
+        <textarea rows="5" bind:value={pgpPublicArmoredKey} placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----"></textarea>
+      </label>
+      <button onclick={onPgpPublicImport} disabled={pgpPublicImporting || !pgpPublicArmoredKey} aria-busy={pgpPublicImporting}>
+        {pgpPublicImporting ? tl('pgp_importing') : tl('pgp_importPublicKeyButton')}
+      </button>
+
+      {#if pgpTrustedSenderKeys.length > 0}
+        <h4>{tl('pgp_trustedKeys')}</h4>
+        <ul class="pgp-key-list">
+          {#each pgpTrustedSenderKeys as key (key.fingerprint)}
+            <li class="pgp-key-item">
+              <div class="pgp-key-info pgp-public-key-info">
+                <span>{key.email || tl('pgp_noKeyEmail')}</span>
+                <span class="pgp-fingerprint">{key.fingerprint.slice(0, 16)}…</span>
+              </div>
+              <div class="pgp-key-actions">
+                <button class="secondary small danger" onclick={() => onPgpRemovePublicKey(key.fingerprint)}>
+                  {tl('pgp_removeKey')}
+                </button>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
   {/if}
 </div>
 
@@ -768,6 +842,18 @@
 
   .pgp-vault-state {
     margin-bottom: 1rem;
+  }
+
+  .pgp-public-keys {
+    border-top: 1px solid var(--pico-muted-border-color);
+    margin-top: 1.5rem;
+    padding-top: 1.25rem;
+  }
+
+  .pgp-public-key-info {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.15rem;
   }
 
   .pgp-key-item {

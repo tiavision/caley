@@ -367,5 +367,15 @@
   "pgp_addKeyHeading": "Weiteren Schlüssel hinzufügen",
   "pgp_addToVaultButton": "Zum Tresor hinzufügen",
   "pgp_removeKey": "Entfernen",
-  "pgp_confirmRemoveKey": "Diesen Schlüssel vom Tresor auf diesem Gerät entfernen?"
+  "pgp_confirmRemoveKey": "Diesen Schlüssel vom Tresor auf diesem Gerät entfernen?",
+  "pgp_publicKeysHeading": "Vertrauenswürdige öffentliche Schlüssel",
+  "pgp_publicKeysHint": "Importiere öffentliche Schlüssel von Absendern, deren Signaturen du überprüfen möchtest.",
+  "pgp_importArmoredPublicKey": "Gepanzerter öffentlicher Schlüssel",
+  "pgp_importPublicKeyButton": "Öffentlichen Schlüssel importieren",
+  "pgp_publicKeyImported": "Öffentlicher Schlüssel importiert. Signaturen dieses Schlüssels können nun überprüft werden.",
+  "pgp_publicKeyImportError": "Öffentlicher Schlüssel konnte nicht importiert werden.",
+  "pgp_publicKeyRemoveError": "Öffentlicher Schlüssel konnte nicht entfernt werden.",
+  "pgp_trustedKeys": "Vertrauenswürdige Absenderschlüssel",
+  "pgp_noKeyEmail": "Keine E-Mail-Adresse",
+  "pgp_confirmRemovePublicKey": "Diesen vertrauenswürdigen öffentlichen Schlüssel entfernen?"
 }

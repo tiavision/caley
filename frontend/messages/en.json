@@ -367,5 +367,15 @@
   "pgp_addKeyHeading": "Add another key",
   "pgp_addToVaultButton": "Add to vault",
   "pgp_removeKey": "Remove",
-  "pgp_confirmRemoveKey": "Remove this key from the vault on this device?"
+  "pgp_confirmRemoveKey": "Remove this key from the vault on this device?",
+  "pgp_publicKeysHeading": "Trusted public keys",
+  "pgp_publicKeysHint": "Import public keys for senders whose signatures you want to verify.",
+  "pgp_importArmoredPublicKey": "Armored public key",
+  "pgp_importPublicKeyButton": "Import public key",
+  "pgp_publicKeyImported": "Public key imported. Signatures from this key can now be verified.",
+  "pgp_publicKeyImportError": "Failed to import public key.",
+  "pgp_publicKeyRemoveError": "Failed to remove public key.",
+  "pgp_trustedKeys": "Trusted sender keys",
+  "pgp_noKeyEmail": "No email address",
+  "pgp_confirmRemovePublicKey": "Remove this trusted public key?"
 }

@@ -350,6 +350,95 @@ pub async fn delete_credential(
     }
 }
 
+// ── Trusted PGP public keys ───────────────────────────────────────────────────
+
+pub async fn list_public_keys(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> impl IntoResponse {
+    match db::get_pgp_public_keys(&state.db, &user.user_id).await {
+        Ok(rows) => {
+            let list: Vec<serde_json::Value> = rows
+                .into_iter()
+                .map(|row| {
+                    json!({
+                        "fingerprint": row.fingerprint,
+                        "email": row.email,
+                        "armored": row.armored,
+                        "is_own": row.is_own,
+                        "source": row.source,
+                        "trust": row.trust,
+                    })
+                })
+                .collect();
+            Json(list).into_response()
+        }
+        Err(e) => {
+            eprintln!("[pgp] list public keys: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SavePublicKeyBody {
+    pub fingerprint: String,
+    pub email: String,
+    pub armored: String,
+    pub is_own: Option<bool>,
+    pub source: Option<String>,
+}
+
+pub async fn save_public_key(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<SavePublicKeyBody>,
+) -> impl IntoResponse {
+    if body.fingerprint.trim().is_empty()
+        || !body.armored.contains("-----BEGIN PGP PUBLIC KEY BLOCK-----")
+    {
+        return (StatusCode::BAD_REQUEST, "invalid public key").into_response();
+    }
+
+    let source = body.source.as_deref().unwrap_or("imported");
+    if let Err(e) = db::upsert_pgp_public_key(
+        &state.db,
+        &user.user_id,
+        &body.fingerprint,
+        &body.email,
+        &body.armored,
+        body.is_own.unwrap_or(false),
+        source,
+        "trusted",
+    )
+    .await
+    {
+        eprintln!("[pgp] save public key: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+    }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+#[derive(Deserialize)]
+pub struct DeletePublicKeyBody {
+    pub fingerprint: String,
+}
+
+pub async fn delete_public_key(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<DeletePublicKeyBody>,
+) -> impl IntoResponse {
+    match db::delete_pgp_public_key(&state.db, &user.user_id, &body.fingerprint).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            eprintln!("[pgp] delete public key: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
 // ── Raw email ─────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]

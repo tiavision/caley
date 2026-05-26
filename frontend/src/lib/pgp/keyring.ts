@@ -5,7 +5,7 @@ import * as openpgp from 'openpgp';
 
 export type DecryptBadge =
   | 'encrypted'       // decrypted successfully
-  | 'signed'          // signature present and key found
+  | 'signed'          // signature present
   | 'verified'        // signature cryptographically valid
   | 'unverified'      // signed but key not available
   | 'missing_key'     // encrypted but our private key not present
@@ -59,11 +59,13 @@ export function extractPublicKey(privateKey: openpgp.PrivateKey): string {
  * Decrypt a PGP/MIME or inline PGP message from raw MIME bytes.
  * privateKeys — unlocked in-memory private keys (tried in order)
  * rawMime     — the raw .eml bytes fetched from /api/email/raw
+ * publicKeys  — trusted public keys available for signer verification
  * Returns the decrypted plaintext + signature status badges.
  */
 export async function decryptMessage(
   privateKeys: openpgp.PrivateKey[],
   rawMime: Uint8Array,
+  publicKeys: openpgp.PublicKey[] = [],
 ): Promise<DecryptResult> {
   const mimeStr = new TextDecoder('utf-8', { fatal: false }).decode(rawMime);
   const badges: DecryptBadge[] = [];
@@ -89,6 +91,7 @@ export async function decryptMessage(
     decrypted = await openpgp.decrypt({
       message,
       decryptionKeys: privateKeys,
+      ...(publicKeys.length > 0 ? { verificationKeys: publicKeys } : {}),
       config: { allowUnauthenticatedMessages: false },
     });
   } catch (e) {
@@ -103,19 +106,29 @@ export async function decryptMessage(
   // Check signatures
   if (decrypted.signatures.length > 0) {
     badges.push('signed');
-    let anyVerified = false;
-    let anyFailed = false;
-    for (const sig of decrypted.signatures) {
-      try {
-        await sig.verified;
-        anyVerified = true;
-      } catch {
-        anyFailed = true;
+    const matchingKeys = publicKeys.filter(key =>
+      decrypted.signatures.some(sig =>
+        key.getKeyIDs().some(keyId => keyId.equals(sig.keyID))
+      )
+    );
+
+    if (matchingKeys.length === 0) {
+      badges.push('unverified');
+    } else {
+      let anyVerified = false;
+      let anyFailed = false;
+      for (const sig of decrypted.signatures) {
+        try {
+          await sig.verified;
+          anyVerified = true;
+        } catch {
+          anyFailed = true;
+        }
       }
+      if (anyVerified) badges.push('verified');
+      else if (anyFailed) badges.push('verification_failed');
+      else badges.push('unverified');
     }
-    if (anyVerified) badges.push('verified');
-    else if (anyFailed) badges.push('verification_failed');
-    else badges.push('unverified');
   }
 
   const decryptedText = typeof decrypted.data === 'string'
@@ -151,6 +164,7 @@ export async function verifySignedMessage(
 
   const signedBlock = extractSignedBlock(mimeStr);
   if (!signedBlock) return badges;
+  if (publicKeys.length === 0) return [...badges, 'unverified'];
 
   try {
     const message = await openpgp.createCleartextMessage({ text: signedBlock.text });

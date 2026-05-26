@@ -232,6 +232,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/webauthn/authenticate/finish", post(pgp::authenticate_finish))
         .route("/api/webauthn/credentials", get(pgp::list_credentials))
         .route("/api/webauthn/credential", delete(pgp::delete_credential))
+        .route("/api/pgp/keys", get(pgp::list_public_keys))
+        .route("/api/pgp/key", post(pgp::save_public_key))
+        .route("/api/pgp/key", delete(pgp::delete_public_key))
         .route("/api/email/raw", get(pgp::raw_email));
 
     // Protected routes plus the always-available CalDAV login + unified logout.
