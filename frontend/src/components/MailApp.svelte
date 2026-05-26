@@ -3,6 +3,12 @@
   import { getUser } from '../lib/user.ts';
   import { getLocale, makeTl } from '../lib/i18n.ts';
   import SelectDropdown from './SelectDropdown.svelte';
+  import { readVault } from '../lib/pgp/vault.ts';
+  import { unlock } from '../lib/pgp/webauthn.ts';
+  import { deriveKek, aesDecrypt, b64uDecode } from '../lib/pgp/kek.ts';
+  import { importPrivateKey, decryptMessage } from '../lib/pgp/keyring.ts';
+  import { setKey, getKey, isUnlocked, lock } from '../lib/pgp/session.ts';
+  import DOMPurify from 'dompurify';
 
   let locale = 'en';
   $: tl = makeTl(locale);
@@ -69,6 +75,8 @@
     body_html: string | null;
     is_read: boolean;
     is_flagged: boolean;
+    is_encrypted: boolean;
+    is_signed: boolean;
     attachments: Attachment[];
   }
 
@@ -178,6 +186,83 @@
   let editingFolder: VirtualFolder | null = null;
 
   let displayName = '';
+
+  // PGP decryption state (per selected message)
+  let pgpDecrypting = false;
+  let pgpDecryptError = '';
+  let pgpDecryptedHtml = '';
+  let pgpDecryptedText = '';
+  let pgpBadges: string[] = [];
+  let pgpUnlocking = false;
+  let pgpUnlockError = '';
+  let pgpKeyUnlocked = isUnlocked();
+
+  async function pgpUnlock() {
+    pgpUnlocking = true;
+    pgpUnlockError = '';
+    try {
+      const vault = await readVault();
+      if (!vault) throw new Error('no vault');
+      const { prfOutput } = await unlock(vault.prfSalt);
+      const hkdfSalt = b64uDecode(vault.hkdfSalt);
+      const iv = b64uDecode(vault.iv);
+      const ciphertext = b64uDecode(vault.ciphertext);
+      const kek = await deriveKek(prfOutput, hkdfSalt);
+      const plainBuf = await aesDecrypt(kek, iv, ciphertext);
+      const { armored, passphrase } = JSON.parse(new TextDecoder().decode(plainBuf)) as { armored: string; passphrase: string };
+      const key = await importPrivateKey(armored, passphrase);
+      setKey(key);
+      pgpKeyUnlocked = true;
+      // Auto-decrypt after unlock if we have a selected message
+      if (selectedMessage?.is_encrypted) {
+        await pgpDecrypt(selectedMessage);
+      }
+    } catch {
+      pgpUnlockError = tl('pgp_unlockError');
+    }
+    pgpUnlocking = false;
+  }
+
+  async function pgpDecrypt(msg: Message) {
+    const key = getKey();
+    if (!key) return;
+    pgpDecrypting = true;
+    pgpDecryptError = '';
+    pgpDecryptedHtml = '';
+    pgpDecryptedText = '';
+    pgpBadges = [];
+    try {
+      const url = `/api/email/raw?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('fetch failed');
+      const rawBytes = new Uint8Array(await res.arrayBuffer());
+      const result = await decryptMessage(key, rawBytes);
+      pgpBadges = result.badges;
+      if (result.badges.includes('decrypt_failed') || result.badges.includes('missing_key')) {
+        pgpDecryptError = tl('pgp_decryptFailed');
+      } else if (result.isHtml) {
+        pgpDecryptedHtml = DOMPurify.sanitize(result.plaintext, { FORCE_BODY: true, FORBID_TAGS: ['script', 'style'] });
+      } else {
+        pgpDecryptedText = result.plaintext;
+      }
+    } catch {
+      pgpDecryptError = tl('pgp_decryptFailed');
+    }
+    pgpDecrypting = false;
+  }
+
+  function pgpBadgeLabel(badge: string): string {
+    const map: Record<string, string> = {
+      encrypted: tl('pgp_badgeEncrypted'),
+      signed: tl('pgp_badgeSigned'),
+      verified: tl('pgp_badgeVerified'),
+      unverified: tl('pgp_badgeUnverified'),
+      missing_key: tl('pgp_badgeMissingKey'),
+      unsupported_alg: tl('pgp_badgeUnsupportedAlg'),
+      verification_failed: tl('pgp_badgeVerificationFailed'),
+    };
+    return map[badge] ?? badge;
+  }
 
   // HTML email rendering
   let viewMode: 'html' | 'text' = 'text';
@@ -777,6 +862,11 @@
     attachmentsExpanded = false;
     imagesNoticeDismissed = false;
     viewMode = 'text'; // reset while loading
+    pgpDecryptedHtml = '';
+    pgpDecryptedText = '';
+    pgpDecryptError = '';
+    pgpBadges = [];
+    pgpKeyUnlocked = isUnlocked();
     try {
       const url = `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
       const r = await fetch(url);
@@ -1923,7 +2013,49 @@
             </div>
           {/if}
           <div class="detail-body">
-            {#if viewMode === 'html' && htmlHasValue}
+            {#if selectedMessage.is_encrypted}
+              <!-- PGP encrypted message -->
+              {#if pgpBadges.length > 0}
+                <div class="pgp-badges">
+                  {#each pgpBadges as badge}
+                    <span class="pgp-badge pgp-badge-{badge}">{pgpBadgeLabel(badge)}</span>
+                  {/each}
+                </div>
+              {/if}
+              {#if pgpDecryptedHtml}
+                <!-- Decrypted HTML: sandboxed iframe WITHOUT allow-same-origin -->
+                {#key iframeKey}
+                  <iframe
+                    bind:this={iframeEl}
+                    on:load={fitIframeToContent}
+                    sandbox="allow-popups"
+                    srcdoc={pgpDecryptedHtml}
+                    title={tl('nav_mail')}
+                    class="html-body"
+                  ></iframe>
+                {/key}
+              {:else if pgpDecryptedText}
+                <pre class="body-text">{pgpDecryptedText}</pre>
+              {:else if pgpDecryptError}
+                <p class="pgp-error">{pgpDecryptError}</p>
+              {:else if pgpDecrypting}
+                <p aria-busy="true">{tl('pgp_decrypting')}</p>
+              {:else}
+                <div class="pgp-unlock-prompt">
+                  <p>{tl('pgp_unlockToRead')}</p>
+                  {#if pgpUnlockError}<p class="pgp-error">{pgpUnlockError}</p>{/if}
+                  {#if pgpKeyUnlocked}
+                    <button class="pgp-decrypt-btn" on:click={() => pgpDecrypt(selectedMessage!)} disabled={pgpDecrypting}>
+                      {pgpDecrypting ? tl('pgp_decrypting') : tl('pgp_badgeEncrypted')}
+                    </button>
+                  {:else}
+                    <button class="pgp-decrypt-btn" on:click={pgpUnlock} disabled={pgpUnlocking} aria-busy={pgpUnlocking}>
+                      {pgpUnlocking ? tl('pgp_unlocking') : tl('pgp_unlockButton')}
+                    </button>
+                  {/if}
+                </div>
+              {/if}
+            {:else if viewMode === 'html' && htmlHasValue}
               {#if blockedOrigins.length > 0 && !imagesNoticeDismissed}
                 <div class="images-notice">
                   <span>{tl('mail_imagesBlocked')}</span>
@@ -3937,5 +4069,42 @@
     font-weight: 600;
     line-height: 1;
     flex-shrink: 0;
+  }
+
+  .pgp-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .pgp-badge {
+    font-size: 0.7rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 1rem;
+    font-weight: 600;
+    background: var(--pico-muted-border-color);
+    color: var(--pico-color);
+  }
+
+  .pgp-badge-verified { background: color-mix(in srgb, var(--pico-ins-color) 20%, transparent); color: var(--pico-ins-color); }
+  .pgp-badge-encrypted { background: color-mix(in srgb, var(--pico-primary) 15%, transparent); color: var(--pico-primary); }
+  .pgp-badge-signed { background: color-mix(in srgb, var(--pico-primary) 10%, transparent); color: var(--pico-primary); }
+  .pgp-badge-verification_failed,
+  .pgp-badge-decrypt_failed { background: color-mix(in srgb, var(--pico-del-color) 15%, transparent); color: var(--pico-del-color); }
+
+  .pgp-unlock-prompt {
+    padding: 1.5rem;
+    text-align: center;
+  }
+
+  .pgp-decrypt-btn {
+    margin-top: 0.5rem;
+  }
+
+  .pgp-error {
+    color: var(--pico-del-color);
+    font-size: 0.875rem;
+    margin: 0.25rem 0;
   }
 </style>

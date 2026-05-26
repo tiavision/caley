@@ -15,6 +15,7 @@ use std::{
 };
 use tower::{Layer, Service};
 use tower_sessions::Session;
+use webauthn_rs::Webauthn;
 use crate::caldav::CalDavClient;
 use crate::db;
 use crate::email_sync::EmailSyncManager;
@@ -41,6 +42,7 @@ pub struct AppState {
     pub search_mode: SearchMode,
     pub map_url: String,
     pub data_dir: PathBuf,
+    pub webauthn: Arc<Webauthn>,
 }
 
 pub struct CurrentUser {

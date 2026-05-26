@@ -19,8 +19,15 @@
   let deleting = false;
   let errorMsg = '';
 
+  import { readVault, writeVault, clearVault } from '../lib/pgp/vault.ts';
+  import { enroll, unlock, resumeEnroll, listCredentials, deleteCredential, type CredentialInfo } from '../lib/pgp/webauthn.ts';
+  import { deriveKek, aesEncrypt, aesDecrypt, randomBytes, b64uEncode, b64uDecode } from '../lib/pgp/kek.ts';
+  import { importPrivateKey, reencryptPrivateKey, getFingerprint, getPrimaryEmail, extractPublicKey } from '../lib/pgp/keyring.ts';
+  import { setKey, lock, isUnlocked } from '../lib/pgp/session.ts';
+  import * as openpgp from 'openpgp';
+
   // ── Tabs ───────────────────────────────────────────────────────────────────
-  let tab: 'settings' | 'calendars' = 'settings';
+  let tab: 'settings' | 'calendars' | 'encryption' = 'settings';
 
   // ── Calendars tab ─────────────────────────────────────────────────────────
   let calendars: CalendarJson[] = [];
@@ -46,9 +53,200 @@
     });
   }
 
-  function switchTab(t: 'settings' | 'calendars') {
+  // ── Encryption tab state ──────────────────────────────────────────────────
+  let pgpArmoredKey = '';
+  let pgpPassphrase = '';
+  let pgpDeviceLabel = '';
+  let pgpImporting = false;
+  let pgpImportError = '';
+  let pgpImportedKey: openpgp.PrivateKey | null = null;
+  let pgpEnrolling = false;
+  let pgpEnrollError = '';
+  let pgpEnrolled = false;
+  let pgpFingerprint = '';
+  let pgpVaultPresent = false;
+  let pgpUnlocked = false;
+  let pgpUnlocking = false;
+  let pgpUnlockError = '';
+  let pgpServerCreds: CredentialInfo[] = [];
+  let pgpPartialEnrollment = false; // credential on server but no local vault
+
+  async function loadVaultStatus() {
+    const v = await readVault().catch(() => null);
+    pgpVaultPresent = !!v;
+    if (v) pgpFingerprint = v.fingerprint;
+    pgpUnlocked = isUnlocked();
+    pgpServerCreds = await listCredentials().catch(() => []);
+    pgpPartialEnrollment = pgpServerCreds.length > 0 && !pgpVaultPresent;
+  }
+
+  async function onPgpImport() {
+    pgpImporting = true;
+    pgpImportError = '';
+    pgpImportedKey = null;
+    try {
+      const key = await importPrivateKey(pgpArmoredKey, pgpPassphrase);
+      pgpImportedKey = key;
+      pgpFingerprint = getFingerprint(key);
+    } catch (e: unknown) {
+      const msg = (e instanceof Error) ? e.message : String(e);
+      if (msg.toLowerCase().includes('argon2')) {
+        pgpImportError = tl('pgp_importArgon2Error');
+      } else {
+        pgpImportError = `${tl('pgp_importError')}: ${msg}`;
+      }
+    }
+    pgpImporting = false;
+  }
+
+  async function onPgpEnroll() {
+    if (!pgpImportedKey) return;
+    pgpEnrolling = true;
+    pgpEnrollError = '';
+    try {
+      const result = await enroll(pgpDeviceLabel || 'My device');
+      if (!result.hasPrf) {
+        pgpEnrollError = tl('pgp_enrollNoPrf');
+        pgpEnrolling = false;
+        return;
+      }
+
+      // Derive KEK from PRF output and wrap the private key
+      const hkdfSalt = randomBytes(32);
+      const iv = randomBytes(12);
+      const randomPassphrase = b64uEncode(randomBytes(32));
+      const reencArmed = await reencryptPrivateKey(pgpImportedKey, randomPassphrase);
+
+      const kek = await deriveKek(result.prfOutput, hkdfSalt);
+      const payload = new TextEncoder().encode(JSON.stringify({ armored: reencArmed, passphrase: randomPassphrase }));
+      const ciphertext = await aesEncrypt(kek, iv, payload);
+
+      const prfSalt = b64uEncode(randomBytes(32));
+
+      await writeVault({
+        credentialId: result.credentialId,
+        prfSalt,
+        hkdfSalt: b64uEncode(hkdfSalt),
+        iv: b64uEncode(iv),
+        ciphertext: b64uEncode(ciphertext),
+        fingerprint: pgpFingerprint,
+        deviceLabel: pgpDeviceLabel || 'My device',
+      });
+
+      // Store public key on server
+      const pubKeyArmored = extractPublicKey(pgpImportedKey);
+      const email = getPrimaryEmail(pgpImportedKey);
+      await fetch('/api/pgp/key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fingerprint: pgpFingerprint, email, armored: pubKeyArmored, is_own: true, source: 'imported' }),
+      }).catch(() => {});
+
+      // Load the key into the session
+      setKey(pgpImportedKey);
+      pgpImportedKey = null;
+      pgpArmoredKey = '';
+      pgpPassphrase = '';
+      pgpVaultPresent = true;
+      pgpUnlocked = true;
+      pgpEnrolled = true;
+    } catch (e: unknown) {
+      const msg = (e instanceof Error) ? e.message : String(e);
+      if (msg === 'prf_not_supported') {
+        pgpEnrollError = tl('pgp_enrollNoPrf');
+      } else {
+        pgpEnrollError = `${tl('pgp_enrollError')}: ${msg}`;
+      }
+    }
+    pgpEnrolling = false;
+  }
+
+  async function onPgpResume() {
+    if (!pgpImportedKey) return;
+    pgpEnrolling = true;
+    pgpEnrollError = '';
+    try {
+      const prfSalt = b64uEncode(randomBytes(32));
+      const result = await resumeEnroll(prfSalt);
+
+      const hkdfSalt = randomBytes(32);
+      const iv = randomBytes(12);
+      const randomPassphrase = b64uEncode(randomBytes(32));
+      const reencArmed = await reencryptPrivateKey(pgpImportedKey, randomPassphrase);
+
+      const kek = await deriveKek(result.prfOutput, hkdfSalt);
+      const payload = new TextEncoder().encode(JSON.stringify({ armored: reencArmed, passphrase: randomPassphrase }));
+      const ciphertext = await aesEncrypt(kek, iv, payload);
+
+      await writeVault({
+        credentialId: result.credentialId,
+        prfSalt,
+        hkdfSalt: b64uEncode(hkdfSalt),
+        iv: b64uEncode(iv),
+        ciphertext: b64uEncode(ciphertext),
+        fingerprint: pgpFingerprint,
+        deviceLabel: pgpServerCreds[0]?.device_label ?? 'My device',
+      });
+
+      setKey(pgpImportedKey);
+      pgpImportedKey = null;
+      pgpArmoredKey = '';
+      pgpPassphrase = '';
+      pgpVaultPresent = true;
+      pgpUnlocked = true;
+      pgpPartialEnrollment = false;
+      pgpEnrolled = true;
+    } catch (e: unknown) {
+      const msg = (e instanceof Error) ? e.message : String(e);
+      pgpEnrollError = `${tl('pgp_enrollError')}: ${msg}`;
+    }
+    pgpEnrolling = false;
+  }
+
+  async function onPgpStartOver() {
+    for (const cred of pgpServerCreds) {
+      await deleteCredential(cred.cred_id).catch(() => {});
+    }
+    pgpServerCreds = [];
+    pgpPartialEnrollment = false;
+    pgpEnrollError = '';
+    pgpImportedKey = null;
+  }
+
+  async function onPgpUnlock() {
+    pgpUnlocking = true;
+    pgpUnlockError = '';
+    try {
+      const vault = await readVault();
+      if (!vault) throw new Error('no vault');
+
+      const { prfOutput } = await unlock(vault.prfSalt);
+      const hkdfSalt = b64uDecode(vault.hkdfSalt);
+      const iv = b64uDecode(vault.iv);
+      const ciphertext = b64uDecode(vault.ciphertext);
+
+      const kek = await deriveKek(prfOutput, hkdfSalt);
+      const plainBuf = await aesDecrypt(kek, iv, ciphertext);
+      const { armored, passphrase } = JSON.parse(new TextDecoder().decode(plainBuf)) as { armored: string; passphrase: string };
+
+      const key = await importPrivateKey(armored, passphrase);
+      setKey(key);
+      pgpUnlocked = true;
+    } catch {
+      pgpUnlockError = tl('pgp_unlockError');
+    }
+    pgpUnlocking = false;
+  }
+
+  function onPgpLock() {
+    lock();
+    pgpUnlocked = false;
+  }
+
+  function switchTab(t: 'settings' | 'calendars' | 'encryption') {
     tab = t;
     if (t === 'calendars' && calendars.length === 0) fetchCalendars();
+    if (t === 'encryption') loadVaultStatus();
   }
 
   const localeOptions = [
@@ -160,6 +358,12 @@
         aria-selected={tab === 'calendars'}
         onclick={() => switchTab('calendars')}
       >{tl('cal_calendars')}</button>
+      <button
+        role="tab"
+        class:active={tab === 'encryption'}
+        aria-selected={tab === 'encryption'}
+        onclick={() => switchTab('encryption')}
+      >{tl('pgp_tabEncryption')}</button>
     </div>
   {/if}
 
@@ -239,6 +443,78 @@
           {tl('cal_import')}
         </button>
       </div>
+    {/if}
+  {:else if tab === 'encryption'}
+    <!-- ── Vault status ── -->
+    {#if pgpVaultPresent}
+      <p class="pgp-fingerprint"><strong>{tl('pgp_fingerprint')}:</strong> {pgpFingerprint}</p>
+      {#if pgpEnrolled}
+        <p class="pgp-success">{tl('pgp_enrolled')}</p>
+      {/if}
+      {#if pgpUnlocked}
+        <button onclick={onPgpLock}>{tl('pgp_lockKey')}</button>
+      {:else}
+        <h3>{tl('pgp_unlockHeading')}</h3>
+        {#if pgpUnlockError}<p class="pgp-error">{pgpUnlockError}</p>{/if}
+        <button onclick={onPgpUnlock} disabled={pgpUnlocking} aria-busy={pgpUnlocking}>
+          {pgpUnlocking ? tl('pgp_unlocking') : tl('pgp_unlockButton')}
+        </button>
+      {/if}
+    {:else if pgpPartialEnrollment}
+      <!-- ── Partial enrollment: credential on server, no local vault ── -->
+      <p class="pgp-error">{tl('pgp_partialEnrollment')}</p>
+      {#if pgpEnrollError}<p class="pgp-error">{pgpEnrollError}</p>{/if}
+      <!-- ── Import form (needed to rebuild the vault) ── -->
+      <h3>{tl('pgp_importHeading')}</h3>
+      {#if pgpImportError}<p class="pgp-error">{pgpImportError}</p>{/if}
+      {#if !pgpImportedKey}
+        <label>
+          <span>{tl('pgp_importArmoredKey')}</span>
+          <textarea rows="6" bind:value={pgpArmoredKey} placeholder="-----BEGIN PGP PRIVATE KEY BLOCK-----"></textarea>
+        </label>
+        <label>
+          <span>{tl('pgp_importPassphrase')}</span>
+          <input type="password" bind:value={pgpPassphrase} autocomplete="current-password" />
+        </label>
+        <button onclick={onPgpImport} disabled={pgpImporting || !pgpArmoredKey} aria-busy={pgpImporting}>
+          {pgpImporting ? tl('pgp_importing') : tl('pgp_importButton')}
+        </button>
+      {:else}
+        <p class="pgp-fingerprint"><strong>{tl('pgp_fingerprint')}:</strong> {pgpFingerprint}</p>
+        <button onclick={onPgpResume} disabled={pgpEnrolling} aria-busy={pgpEnrolling}>
+          {pgpEnrolling ? tl('pgp_enrolling') : tl('pgp_resumeEnrollButton')}
+        </button>
+      {/if}
+      <button class="secondary" onclick={onPgpStartOver}>{tl('pgp_startOverButton')}</button>
+    {:else}
+      <!-- ── Import form ── -->
+      <h3>{tl('pgp_importHeading')}</h3>
+      {#if pgpImportError}<p class="pgp-error">{pgpImportError}</p>{/if}
+      {#if !pgpImportedKey}
+        <label>
+          <span>{tl('pgp_importArmoredKey')}</span>
+          <textarea rows="6" bind:value={pgpArmoredKey} placeholder="-----BEGIN PGP PRIVATE KEY BLOCK-----"></textarea>
+        </label>
+        <label>
+          <span>{tl('pgp_importPassphrase')}</span>
+          <input type="password" bind:value={pgpPassphrase} autocomplete="current-password" />
+        </label>
+        <button onclick={onPgpImport} disabled={pgpImporting || !pgpArmoredKey} aria-busy={pgpImporting}>
+          {pgpImporting ? tl('pgp_importing') : tl('pgp_importButton')}
+        </button>
+      {:else}
+        <!-- ── Enroll form (shown after successful import) ── -->
+        <p class="pgp-fingerprint"><strong>{tl('pgp_fingerprint')}:</strong> {pgpFingerprint}</p>
+        <h3>{tl('pgp_enrollHeading')}</h3>
+        {#if pgpEnrollError}<p class="pgp-error">{pgpEnrollError}</p>{/if}
+        <label>
+          <span>{tl('pgp_deviceLabel')}</span>
+          <input type="text" bind:value={pgpDeviceLabel} placeholder={tl('pgp_deviceLabelPlaceholder')} />
+        </label>
+        <button onclick={onPgpEnroll} disabled={pgpEnrolling} aria-busy={pgpEnrolling}>
+          {pgpEnrolling ? tl('pgp_enrolling') : tl('pgp_enrollButton')}
+        </button>
+      {/if}
     {/if}
   {/if}
 </div>
@@ -358,5 +634,21 @@
   .cal-action-btn:hover {
     color: var(--pico-primary);
     border-color: var(--pico-primary);
+  }
+
+  .pgp-error {
+    color: var(--pico-del-color);
+    font-size: 0.9rem;
+  }
+
+  .pgp-success {
+    color: var(--pico-ins-color);
+    font-size: 0.9rem;
+  }
+
+  .pgp-fingerprint {
+    font-family: monospace;
+    font-size: 0.85rem;
+    word-break: break-all;
   }
 </style>

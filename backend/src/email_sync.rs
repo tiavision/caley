@@ -434,8 +434,15 @@ impl EmailSyncManager {
                 // SQLite write lock is held only for the fast DB writes, not file I/O.
                 let mut prepared: Vec<PreparedMessage> = Vec::with_capacity(bodies.len());
                 for (uid, raw_bytes, body_text, body_html, has_attach, attachments) in bodies {
+                    let (is_encrypted, is_signed) = imap_client::detect_pgp(&raw_bytes);
+                    // For encrypted messages, store nothing in FTS-indexed fields.
+                    let (body_text, body_html) = if is_encrypted {
+                        (String::new(), None)
+                    } else {
+                        let html = body_html.map(|h| imap_client::rewrite_cid_urls(&h, account_id, mailbox, uid));
+                        (body_text, html)
+                    };
                     let body_idx = self.search_mode.normalize_text(&body_text);
-                    let html = body_html.map(|h| imap_client::rewrite_cid_urls(&h, account_id, mailbox, uid));
 
                     let path = eml_path(&self.data_dir, account_id, mailbox, uid);
                     if let Some(dir) = path.parent() {
@@ -462,9 +469,11 @@ impl EmailSyncManager {
                     prepared.push(PreparedMessage {
                         uid,
                         body_text,
-                        html,
+                        html: body_html,
                         has_attach,
                         body_idx,
+                        is_encrypted,
+                        is_signed,
                         attachments: att_params,
                     });
                 }
@@ -476,6 +485,7 @@ impl EmailSyncManager {
                     email_db::update_message_body(
                         &mut *tx, account_id, mailbox, m.uid,
                         &m.body_text, m.html.as_deref(), &m.body_idx, m.has_attach,
+                        m.is_encrypted, m.is_signed,
                     ).await?;
                     for att in &m.attachments {
                         email_db::insert_attachment(
@@ -500,6 +510,8 @@ struct PreparedMessage {
     html: Option<String>,
     has_attach: bool,
     body_idx: String,
+    is_encrypted: bool,
+    is_signed: bool,
     attachments: Vec<PreparedAttachment>,
 }
 

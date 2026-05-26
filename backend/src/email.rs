@@ -1035,6 +1035,8 @@ fn message_to_json_with_attachments(
         "body_html": m.body_html,
         "is_read": flags.iter().any(|f| f == "\\Seen"),
         "is_flagged": flags.iter().any(|f| f == "\\Flagged"),
+        "is_encrypted": m.is_encrypted,
+        "is_signed": m.is_signed,
         "attachments": att_list,
     })
 }

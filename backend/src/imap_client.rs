@@ -144,6 +144,18 @@ pub struct AttachmentPart {
 }
 
 /// Fetches full raw bodies for a list of UIDs in one IMAP command.
+/// Detect PGP-encrypted or PGP-signed content in raw message bytes.
+/// Returns (is_encrypted, is_signed).
+pub fn detect_pgp(raw: &[u8]) -> (bool, bool) {
+    let hdr_end = raw.len().min(4096);
+    let hdr = String::from_utf8_lossy(&raw[..hdr_end]).to_ascii_lowercase();
+    let is_encrypted = (hdr.contains("multipart/encrypted") && hdr.contains("application/pgp-encrypted"))
+        || raw.windows(27).any(|w| w == b"-----BEGIN PGP MESSAGE-----");
+    let is_signed = (hdr.contains("multipart/signed") && hdr.contains("application/pgp-signature"))
+        || raw.windows(34).any(|w| w == b"-----BEGIN PGP SIGNED MESSAGE-----");
+    (is_encrypted, is_signed)
+}
+
 /// Returns a vec of (uid, raw_bytes, body_text, raw_html, has_attachments, attachments).
 pub async fn fetch_bodies(
     session: &mut ImapSession,

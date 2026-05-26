@@ -11,6 +11,7 @@ mod email_sync;
 mod imap_client;
 mod local_auth;
 mod oidc;
+mod pgp;
 mod search;
 mod settings;
 mod sse;
@@ -36,6 +37,7 @@ use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
 use tower_sessions::{cookie::SameSite, Expiry, Session, SessionManagerLayer};
 use tower_sessions_sqlx_store::SqliteStore;
+use webauthn_rs::prelude::*;
 
 #[derive(clap::Parser, Debug)]
 struct Cli {
@@ -65,6 +67,8 @@ struct Cli {
     search_mode: String,
     #[arg(long, env = "MAP_URL", default_value = "https://www.openstreetmap.org/search?query={q}")]
     map_url: String,
+    #[arg(long, env = "WEBAUTHN_EXTRA_ORIGINS")]
+    webauthn_extra_origins: Vec<String>,
 }
 
 #[tokio::main]
@@ -115,6 +119,25 @@ async fn main() -> anyhow::Result<()> {
     let session_store = SqliteStore::new(db.clone());
     session_store.migrate().await?;
 
+    // Build the WebAuthn instance from APP_BASE_URL (rp_id = host, origin = full URL).
+    let webauthn = {
+        let origin = url::Url::parse(&args.app_base_url)
+            .map_err(|e| anyhow::anyhow!("Invalid APP_BASE_URL for WebAuthn: {e}"))?;
+        let rp_id = origin
+            .host_str()
+            .ok_or_else(|| anyhow::anyhow!("APP_BASE_URL has no host"))?
+            .to_owned();
+        let mut builder = WebauthnBuilder::new(&rp_id, &origin)
+            .map_err(|e| anyhow::anyhow!("WebauthnBuilder error: {e:?}"))?
+            .rp_name("Caley");
+        for extra in &args.webauthn_extra_origins {
+            let extra_url = url::Url::parse(extra)
+                .map_err(|e| anyhow::anyhow!("Invalid WEBAUTHN_EXTRA_ORIGINS entry: {e}"))?;
+            builder = builder.append_allowed_origin(&extra_url);
+        }
+        Arc::new(builder.build().map_err(|e| anyhow::anyhow!("Webauthn build error: {e:?}"))?)
+    };
+
     let state = AppState {
         db,
         do_oidc_logout: args.oidc_logout,
@@ -127,6 +150,7 @@ async fn main() -> anyhow::Result<()> {
         search_mode,
         map_url: args.map_url,
         data_dir,
+        webauthn,
     };
 
     let static_dir = args.static_dir
@@ -200,7 +224,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/email/identities", get(email::list_identities))
         .route("/api/email/identity", post(email::save_identity))
         .route("/api/email/identity", put(email::save_identity))
-        .route("/api/email/identity", delete(email::delete_identity));
+        .route("/api/email/identity", delete(email::delete_identity))
+        // WebAuthn + PGP endpoints
+        .route("/api/webauthn/register/start", post(pgp::register_start))
+        .route("/api/webauthn/register/finish", post(pgp::register_finish))
+        .route("/api/webauthn/authenticate/start", post(pgp::authenticate_start))
+        .route("/api/webauthn/authenticate/finish", post(pgp::authenticate_finish))
+        .route("/api/webauthn/credentials", get(pgp::list_credentials))
+        .route("/api/webauthn/credential", delete(pgp::delete_credential))
+        .route("/api/email/raw", get(pgp::raw_email));
 
     // Protected routes plus the always-available CalDAV login + unified logout.
     // RequireAuthLayer lets the public allow-list through and otherwise requires
