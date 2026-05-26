@@ -631,7 +631,7 @@
     messagesLoading = false;
   }
 
-  async function execSearch(params = '') {
+  async function execSearch(params = '', goingBackward = false) {
     const q = searchQuery.trim();
     let scope = '';
     if (selectedFolderId) {
@@ -649,8 +649,16 @@
       if (r.ok) {
         const data = await r.json();
         const msgs: Message[] = data.messages || [];
-        searchHasNext = msgs.length > pageSize;
-        messages = msgs.slice(0, pageSize);
+        if (goingBackward) {
+          // The backend fetches ASC+LIMIT then reverses to DESC. If 51 results were
+          // returned, the first element (newest) is the look-ahead for the forward
+          // direction — skip it. searchHasNext is always true: we came from a forward page.
+          searchHasNext = true;
+          messages = msgs.length > pageSize ? msgs.slice(1) : msgs;
+        } else {
+          searchHasNext = msgs.length > pageSize;
+          messages = msgs.slice(0, pageSize);
+        }
       }
     } catch {}
     messagesLoading = false;
@@ -674,7 +682,7 @@
     const params = cursorParams('backward', messages[0]);
     currentPage--;
     if (searching) {
-      await execSearch(params);
+      await execSearch(params, true);
     } else {
       saveNavState();
       await loadMessages(params);
