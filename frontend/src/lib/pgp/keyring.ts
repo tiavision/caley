@@ -39,15 +39,6 @@ export async function importPrivateKey(armored: string, passphrase: string): Pro
   return decrypted;
 }
 
-/** Re-encrypt a private key with a new random passphrase (for vault storage). */
-export async function reencryptPrivateKey(
-  privateKey: openpgp.PrivateKey,
-  newPassphrase: string,
-): Promise<string> {
-  const protected_ = await openpgp.encryptKey({ privateKey, passphrase: newPassphrase });
-  return protected_.armor();
-}
-
 /** Return the primary fingerprint (uppercase hex) of a private or public key. */
 export function getFingerprint(key: openpgp.Key): string {
   return key.getFingerprint().toUpperCase();

@@ -77,6 +77,7 @@ function decodeRequestOptions(json: Record<string, unknown>): PublicKeyCredentia
 
 export interface EnrollResult {
   credentialId: string;
+  prfSalt: string;         // base64url PRF input used to produce prfOutput
   prfOutput: ArrayBuffer;   // raw PRF bytes — used once to wrap the vault, then discarded
   hasPrf: boolean;
 }
@@ -141,7 +142,7 @@ export async function enroll(deviceLabel: string): Promise<EnrollResult> {
     body: JSON.stringify({ credential: credentialToJson(credential as PublicKeyCredential), device_label: deviceLabel, has_prf: true }),
   }).catch(() => {});
 
-  return { credentialId: cred_id, prfOutput, hasPrf: true };
+  return { credentialId: cred_id, prfSalt: prfSaltB64, prfOutput, hasPrf: true };
 }
 
 export interface CredentialInfo {
@@ -196,7 +197,7 @@ export async function resumeEnroll(prfSaltB64: string): Promise<EnrollResult> {
   });
   if (!finishRes.ok) throw new Error('authenticate/finish failed: ' + await finishRes.text());
 
-  return { credentialId: (authCred as PublicKeyCredential).id, prfOutput, hasPrf: true };
+  return { credentialId: (authCred as PublicKeyCredential).id, prfSalt: prfSaltB64, prfOutput, hasPrf: true };
 }
 
 export interface UnlockResult {

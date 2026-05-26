@@ -19,11 +19,19 @@
   let deleting = false;
   let errorMsg = '';
 
-  import { readAllVaults, writeVault, deleteVault, type VaultRecord } from '../lib/pgp/vault.ts';
+  import {
+    readVault,
+    createVault,
+    writePrivateKey,
+    decryptPrivateKeys,
+    deletePrivateKey,
+    type VaultMetadata,
+    type VaultKeyRecord,
+  } from '../lib/pgp/vault.ts';
   import { enroll, unlock, resumeEnroll, listCredentials, deleteCredential, type CredentialInfo } from '../lib/pgp/webauthn.ts';
-  import { deriveKek, aesEncrypt, aesDecrypt, randomBytes, b64uEncode, b64uDecode } from '../lib/pgp/kek.ts';
-  import { importPrivateKey, reencryptPrivateKey, getFingerprint, getPrimaryEmail, extractPublicKey } from '../lib/pgp/keyring.ts';
-  import { setKey, lockKey, lock, isKeyUnlocked, isUnlocked } from '../lib/pgp/session.ts';
+  import { deriveKek, randomBytes, b64uEncode, b64uDecode } from '../lib/pgp/kek.ts';
+  import { importPrivateKey, getFingerprint, getPrimaryEmail, extractPublicKey } from '../lib/pgp/keyring.ts';
+  import { openVault, addKey, removeKey, getWrappingKey, lock, isUnlocked } from '../lib/pgp/session.ts';
   import * as openpgp from 'openpgp';
 
   // ── Tabs ───────────────────────────────────────────────────────────────────
@@ -54,7 +62,8 @@
   }
 
   // ── Encryption tab state ──────────────────────────────────────────────────
-  let pgpVaultRecords: VaultRecord[] = [];
+  let pgpVaultMetadata: VaultMetadata | null = null;
+  let pgpVaultRecords: VaultKeyRecord[] = [];
   let pgpServerCreds: CredentialInfo[] = [];
   let pgpPartialEnrollment = false;
 
@@ -73,23 +82,19 @@
 
   let pgpUnlocking = false;
   let pgpUnlockError = '';
-  // Reactive unlock status derived from session (re-evaluated on relevant state changes)
-  $: pgpUnlockedMap = pgpVaultRecords.reduce((m, v) => {
-    m[v.fingerprint] = isKeyUnlocked(v.fingerprint);
-    return m;
-  }, {} as Record<string, boolean>);
-  $: pgpAllUnlocked = pgpVaultRecords.length > 0 && pgpVaultRecords.every(v => pgpUnlockedMap[v.fingerprint]);
-  $: pgpAnyUnlocked = pgpVaultRecords.some(v => pgpUnlockedMap[v.fingerprint]);
+  let pgpUnlockRevision = 0;
+  $: pgpVaultUnlocked = (pgpUnlockRevision, isUnlocked());
 
   async function loadVaultStatus() {
-    pgpVaultRecords = await readAllVaults().catch(() => []);
+    const vault = await readVault().catch(() => null);
+    pgpVaultMetadata = vault?.metadata ?? null;
+    pgpVaultRecords = vault?.keys ?? [];
     pgpServerCreds = await listCredentials().catch(() => []);
-    pgpPartialEnrollment = pgpServerCreds.length > 0 && pgpVaultRecords.length === 0;
+    pgpPartialEnrollment = pgpServerCreds.length > 0 && pgpVaultMetadata === null;
   }
 
-  // Force re-evaluation of reactive unlock map by reassigning the array.
   function refreshUnlockState() {
-    pgpVaultRecords = [...pgpVaultRecords];
+    pgpUnlockRevision += 1;
   }
 
   async function onPgpImport() {
@@ -112,7 +117,7 @@
     pgpImporting = false;
   }
 
-  async function storeKeyToVault(
+  async function createInitialVault(
     importedKey: openpgp.PrivateKey,
     fingerprint: string,
     credentialId: string,
@@ -120,25 +125,30 @@
     prfOutput: ArrayBuffer,
     deviceLabel: string,
   ) {
-    const hkdfSalt = randomBytes(32);
-    const iv = randomBytes(12);
-    const randomPassphrase = b64uEncode(randomBytes(32));
-    const reencArmed = await reencryptPrivateKey(importedKey, randomPassphrase);
-    const kek = await deriveKek(prfOutput, hkdfSalt);
-    const payload = new TextEncoder().encode(JSON.stringify({ armored: reencArmed, passphrase: randomPassphrase }));
-    const ciphertext = await aesEncrypt(kek, iv, payload);
-
-    const record: VaultRecord = {
+    const metadata: VaultMetadata = {
+      kind: 'metadata',
+      version: 2,
       credentialId,
       prfSalt,
-      hkdfSalt: b64uEncode(hkdfSalt),
-      iv: b64uEncode(iv),
-      ciphertext: b64uEncode(ciphertext),
-      fingerprint,
+      hkdfSalt: b64uEncode(randomBytes(32)),
       deviceLabel,
     };
-    await writeVault(record);
+    const wrappingKey = await deriveKek(prfOutput, b64uDecode(metadata.hkdfSalt));
+    const record = await createVault(metadata, wrappingKey, fingerprint, importedKey);
+    openVault(wrappingKey, new Map([[fingerprint, importedKey]]));
+    pgpVaultMetadata = metadata;
+    refreshUnlockState();
     return record;
+  }
+
+  async function unlockStoredVault(): Promise<CryptoKey> {
+    if (!pgpVaultMetadata) throw new Error('no vault');
+    const { prfOutput } = await unlock(pgpVaultMetadata.prfSalt);
+    const wrappingKey = await deriveKek(prfOutput, b64uDecode(pgpVaultMetadata.hkdfSalt));
+    const keys = await decryptPrivateKeys(wrappingKey, pgpVaultRecords);
+    openVault(wrappingKey, keys);
+    refreshUnlockState();
+    return wrappingKey;
   }
 
   // First enrollment: register WebAuthn credential + store first key.
@@ -154,19 +164,16 @@
         return;
       }
 
-      // Use a fresh prfSalt (stored in vault; used for future unlock/add calls).
-      const prfSalt = b64uEncode(randomBytes(32));
-      const record = await storeKeyToVault(
+      const record = await createInitialVault(
         pgpImportedKey,
         pgpImportedFingerprint,
         result.credentialId,
-        prfSalt,
+        result.prfSalt,
         result.prfOutput,
         pgpDeviceLabel || 'My device',
       );
 
       await uploadPublicKey(pgpImportedKey, pgpImportedFingerprint);
-      setKey(pgpImportedFingerprint, pgpImportedKey);
 
       pgpVaultRecords = [...pgpVaultRecords, record];
       pgpJustEnrolled = pgpImportedFingerprint;
@@ -178,30 +185,26 @@
     pgpEnrolling = false;
   }
 
-  // Add an additional key using the existing device credential (authenticate-only).
+  // Add an additional key under the vault's already-open wrapping key.
   async function onPgpAddKey() {
-    if (!pgpImportedKey || pgpVaultRecords.length === 0) return;
+    if (!pgpImportedKey || !pgpVaultMetadata) return;
     pgpEnrolling = true;
     pgpEnrollError = '';
     try {
-      // Authenticate with the existing prfSalt so all records stay unlockable
-      // with a single WebAuthn touch.
-      const existingPrfSalt = pgpVaultRecords[0].prfSalt;
-      const { prfOutput } = await unlock(existingPrfSalt);
-
-      const record = await storeKeyToVault(
-        pgpImportedKey,
+      const wrappingKey = getWrappingKey() ?? await unlockStoredVault();
+      const record = await writePrivateKey(
+        wrappingKey,
         pgpImportedFingerprint,
-        pgpVaultRecords[0].credentialId,
-        existingPrfSalt,
-        prfOutput,
-        pgpVaultRecords[0].deviceLabel,
+        pgpImportedKey,
       );
 
       await uploadPublicKey(pgpImportedKey, pgpImportedFingerprint);
-      setKey(pgpImportedFingerprint, pgpImportedKey);
+      addKey(pgpImportedFingerprint, pgpImportedKey);
 
-      pgpVaultRecords = [...pgpVaultRecords, record];
+      pgpVaultRecords = [
+        ...pgpVaultRecords.filter(existing => existing.fingerprint !== record.fingerprint),
+        record,
+      ];
       pgpJustEnrolled = pgpImportedFingerprint;
       pgpShowAddForm = false;
       clearImportForm();
@@ -221,17 +224,16 @@
       const prfSalt = b64uEncode(randomBytes(32));
       const result = await resumeEnroll(prfSalt);
 
-      const record = await storeKeyToVault(
+      const record = await createInitialVault(
         pgpImportedKey,
         pgpImportedFingerprint,
         result.credentialId,
-        prfSalt,
+        result.prfSalt,
         result.prfOutput,
         pgpServerCreds[0]?.device_label ?? 'My device',
       );
 
       await uploadPublicKey(pgpImportedKey, pgpImportedFingerprint);
-      setKey(pgpImportedFingerprint, pgpImportedKey);
 
       pgpVaultRecords = [record];
       pgpPartialEnrollment = false;
@@ -254,43 +256,26 @@
     clearImportForm();
   }
 
-  async function onPgpUnlockAll() {
+  async function onPgpUnlockVault() {
     pgpUnlocking = true;
     pgpUnlockError = '';
     try {
-      const { prfOutput } = await unlock(pgpVaultRecords[0].prfSalt);
-      for (const vault of pgpVaultRecords) {
-        try {
-          const kek = await deriveKek(prfOutput, b64uDecode(vault.hkdfSalt));
-          const plainBuf = await aesDecrypt(kek, b64uDecode(vault.iv), b64uDecode(vault.ciphertext));
-          const { armored, passphrase } = JSON.parse(new TextDecoder().decode(plainBuf)) as { armored: string; passphrase: string };
-          const key = await importPrivateKey(armored, passphrase);
-          setKey(vault.fingerprint, key);
-        } catch {
-          // Record encrypted under a different PRF output; skip.
-        }
-      }
-      refreshUnlockState();
+      await unlockStoredVault();
     } catch {
       pgpUnlockError = tl('pgp_unlockError');
     }
     pgpUnlocking = false;
   }
 
-  function onPgpLockKey(fingerprint: string) {
-    lockKey(fingerprint);
-    refreshUnlockState();
-  }
-
-  function onPgpLockAll() {
+  function onPgpLockVault() {
     lock();
     refreshUnlockState();
   }
 
   async function onPgpRemoveKey(fingerprint: string) {
     if (!confirm(tl('pgp_confirmRemoveKey'))) return;
-    await deleteVault(fingerprint).catch(() => {});
-    lockKey(fingerprint);
+    await deletePrivateKey(fingerprint).catch(() => {});
+    removeKey(fingerprint);
     pgpVaultRecords = pgpVaultRecords.filter(v => v.fingerprint !== fingerprint);
   }
 
@@ -541,28 +526,26 @@
       {/if}
       <button class="secondary" onclick={onPgpStartOver}>{tl('pgp_startOverButton')}</button>
 
-    {:else if pgpVaultRecords.length > 0}
-      <!-- ── Enrolled keys list ── -->
-      <h3>{tl('pgp_enrolledKeys')}</h3>
+    {:else if pgpVaultMetadata}
+      <!-- ── Private key vault ── -->
+      <h3>{tl('pgp_vaultHeading')}</h3>
       {#if pgpUnlockError}<p class="pgp-error">{pgpUnlockError}</p>{/if}
+      <p class="pgp-vault-state">
+        <span class="pgp-key-status {pgpVaultUnlocked ? 'unlocked' : 'locked'}">
+          {pgpVaultUnlocked ? tl('pgp_vaultUnlocked') : tl('pgp_vaultLocked')}
+        </span>
+      </p>
+      <h4>{tl('pgp_enrolledKeys')}</h4>
       <ul class="pgp-key-list">
         {#each pgpVaultRecords as record (record.fingerprint)}
           <li class="pgp-key-item">
             <div class="pgp-key-info">
               <span class="pgp-fingerprint">{record.fingerprint.slice(0, 16)}…</span>
-              <span class="pgp-key-status {pgpUnlockedMap[record.fingerprint] ? 'unlocked' : 'locked'}">
-                {pgpUnlockedMap[record.fingerprint] ? tl('pgp_keyUnlocked') : tl('pgp_keyLocked')}
-              </span>
               {#if record.fingerprint === pgpJustEnrolled}
                 <span class="pgp-success">{tl('pgp_enrolled')}</span>
               {/if}
             </div>
             <div class="pgp-key-actions">
-              {#if pgpUnlockedMap[record.fingerprint]}
-                <button class="secondary small" onclick={() => onPgpLockKey(record.fingerprint)}>
-                  {tl('pgp_lockKey')}
-                </button>
-              {/if}
               <button class="secondary small danger" onclick={() => onPgpRemoveKey(record.fingerprint)}>
                 {tl('pgp_removeKey')}
               </button>
@@ -572,13 +555,12 @@
       </ul>
 
       <div class="pgp-global-actions">
-        {#if !pgpAllUnlocked}
-          <button onclick={onPgpUnlockAll} disabled={pgpUnlocking} aria-busy={pgpUnlocking}>
-            {pgpUnlocking ? tl('pgp_unlocking') : tl('pgp_unlockAllButton')}
+        {#if !pgpVaultUnlocked}
+          <button onclick={onPgpUnlockVault} disabled={pgpUnlocking} aria-busy={pgpUnlocking}>
+            {pgpUnlocking ? tl('pgp_unlocking') : tl('pgp_unlockVaultButton')}
           </button>
-        {/if}
-        {#if pgpAnyUnlocked}
-          <button class="secondary" onclick={onPgpLockAll}>{tl('pgp_lockKey')}</button>
+        {:else}
+          <button class="secondary" onclick={onPgpLockVault}>{tl('pgp_lockVault')}</button>
         {/if}
         <button class="secondary" onclick={() => { pgpShowAddForm = !pgpShowAddForm; clearImportForm(); }}>
           {tl('pgp_addKeyButton')}
@@ -605,7 +587,7 @@
         {:else}
           <p class="pgp-fingerprint"><strong>{tl('pgp_fingerprint')}:</strong> {pgpImportedFingerprint}</p>
           <button onclick={onPgpAddKey} disabled={pgpEnrolling} aria-busy={pgpEnrolling}>
-            {pgpEnrolling ? tl('pgp_enrolling') : tl('pgp_enrollButton')}
+            {pgpEnrolling ? tl('pgp_enrolling') : tl('pgp_addToVaultButton')}
           </button>
         {/if}
       {/if}
@@ -782,6 +764,10 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+  }
+
+  .pgp-vault-state {
+    margin-bottom: 1rem;
   }
 
   .pgp-key-item {

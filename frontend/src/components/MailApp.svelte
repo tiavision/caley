@@ -3,11 +3,11 @@
   import { getUser } from '../lib/user.ts';
   import { getLocale, makeTl } from '../lib/i18n.ts';
   import SelectDropdown from './SelectDropdown.svelte';
-  import { readAllVaults } from '../lib/pgp/vault.ts';
+  import { readVault, decryptPrivateKeys } from '../lib/pgp/vault.ts';
   import { unlock } from '../lib/pgp/webauthn.ts';
-  import { deriveKek, aesDecrypt, b64uDecode } from '../lib/pgp/kek.ts';
-  import { importPrivateKey, decryptMessage, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
-  import { setKey, getKeys, isUnlocked, lock } from '../lib/pgp/session.ts';
+  import { deriveKek, b64uDecode } from '../lib/pgp/kek.ts';
+  import { decryptMessage, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
+  import { openVault, getKeys, isUnlocked } from '../lib/pgp/session.ts';
   import DOMPurify from 'dompurify';
 
   let locale = 'en';
@@ -220,7 +220,7 @@
     pgpDecryptedText = '';
     pgpBadges = [];
     pgpDecryptError = '';
-    pgpKeyUnlocked = false;
+    pgpKeyUnlocked = isUnlocked();
     iframeKey++;
   }
 
@@ -251,20 +251,12 @@
     pgpUnlocking = true;
     pgpUnlockError = '';
     try {
-      const vaults = await readAllVaults();
-      if (vaults.length === 0) throw new Error('no vault');
-      const { prfOutput } = await unlock(vaults[0].prfSalt);
-      for (const vault of vaults) {
-        try {
-          const kek = await deriveKek(prfOutput, b64uDecode(vault.hkdfSalt));
-          const plainBuf = await aesDecrypt(kek, b64uDecode(vault.iv), b64uDecode(vault.ciphertext));
-          const { armored, passphrase } = JSON.parse(new TextDecoder().decode(plainBuf)) as { armored: string; passphrase: string };
-          const key = await importPrivateKey(armored, passphrase);
-          setKey(vault.fingerprint, key);
-        } catch {
-          // Record encrypted with a different PRF output; skip.
-        }
-      }
+      const vault = await readVault();
+      if (!vault) throw new Error('no vault');
+      const { prfOutput } = await unlock(vault.metadata.prfSalt);
+      const wrappingKey = await deriveKek(prfOutput, b64uDecode(vault.metadata.hkdfSalt));
+      const keys = await decryptPrivateKeys(wrappingKey, vault.keys);
+      openVault(wrappingKey, keys);
       pgpKeyUnlocked = true;
       if (selectedMessage?.is_encrypted) {
         await pgpDecrypt(selectedMessage);
@@ -2147,7 +2139,7 @@
                     </button>
                   {:else}
                     <button class="pgp-decrypt-btn" on:click={pgpUnlock} disabled={pgpUnlocking} aria-busy={pgpUnlocking}>
-                      {pgpUnlocking ? tl('pgp_unlocking') : tl('pgp_unlockButton')}
+                      {pgpUnlocking ? tl('pgp_unlocking') : tl('pgp_unlockVaultButton')}
                     </button>
                   {/if}
                 </div>
