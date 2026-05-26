@@ -197,6 +197,30 @@
   let isMobile = false;
   let mediaQueryListener: ((e: MediaQueryListEvent) => void) | null = null;
 
+  let iframeEl: HTMLIFrameElement | null = null;
+  let iframeResizeObserver: ResizeObserver | null = null;
+
+  function fitIframeToContent() {
+    if (!iframeEl || !isMobile) return;
+    iframeResizeObserver?.disconnect();
+    try {
+      const doc = iframeEl.contentDocument;
+      if (!doc) return;
+      const setHeight = () => {
+        const h = doc.documentElement.scrollHeight;
+        if (h > 0 && iframeEl) iframeEl.style.height = h + 'px';
+      };
+      setHeight();
+      iframeResizeObserver = new ResizeObserver(setHeight);
+      iframeResizeObserver.observe(doc.documentElement);
+    } catch {}
+  }
+
+  $: if (!isMobile && iframeEl) {
+    iframeEl.style.height = '';
+    iframeResizeObserver?.disconnect();
+  }
+
   // Resize state
   let sidebarWidth = 220;
   let listWidth = 320;
@@ -1914,6 +1938,8 @@
               {/if}
               {#key iframeKey}
                 <iframe
+                  bind:this={iframeEl}
+                  on:load={fitIframeToContent}
                   sandbox="allow-popups allow-same-origin"
                   srcdoc={selectedMessage.body_html}
                   title={tl('nav_mail')}
@@ -3835,6 +3861,15 @@
     .message-detail.is-open .detail-header {
       background: var(--pico-card-sectioning-background-color);
       border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
+    }
+
+    .detail-body {
+      flex: none;
+      overflow-y: visible;
+    }
+
+    .html-body {
+      flex: none;
     }
 
     .resize-handle {
