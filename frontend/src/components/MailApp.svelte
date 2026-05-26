@@ -6,7 +6,7 @@
   import { readAllVaults } from '../lib/pgp/vault.ts';
   import { unlock } from '../lib/pgp/webauthn.ts';
   import { deriveKek, aesDecrypt, b64uDecode } from '../lib/pgp/kek.ts';
-  import { importPrivateKey, decryptMessage } from '../lib/pgp/keyring.ts';
+  import { importPrivateKey, decryptMessage, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
   import { setKey, getKeys, isUnlocked, lock } from '../lib/pgp/session.ts';
   import DOMPurify from 'dompurify';
 
@@ -78,6 +78,14 @@
     is_encrypted: boolean;
     is_signed: boolean;
     attachments: Attachment[];
+  }
+
+  function isPgpTransportAttachment(attachment: Attachment): boolean {
+    const filename = attachment.filename.toLowerCase();
+    const contentType = attachment.content_type?.split(';', 1)[0].trim().toLowerCase() ?? '';
+    return filename === 'encrypted.asc' ||
+      (/^(encrypted|message|msg)\.(asc|pgp|gpg)$/.test(filename) &&
+        (contentType === 'application/octet-stream' || contentType === 'application/pgp-encrypted'));
   }
 
   // ── State ────────────────────────────────────────────────────────────────
@@ -192,10 +200,52 @@
   let pgpDecryptError = '';
   let pgpDecryptedHtml = '';
   let pgpDecryptedText = '';
+  let pgpAttachments: (Attachment & { url: string })[] = [];
   let pgpBadges: string[] = [];
   let pgpUnlocking = false;
   let pgpUnlockError = '';
   let pgpKeyUnlocked = isUnlocked();
+  let pgpDecryptGeneration = 0;
+
+  function clearPgpAttachments() {
+    for (const attachment of pgpAttachments) URL.revokeObjectURL(attachment.url);
+    pgpAttachments = [];
+  }
+
+  function clearPgpContent() {
+    pgpDecryptGeneration++;
+    pgpDecrypting = false;
+    clearPgpAttachments();
+    pgpDecryptedHtml = '';
+    pgpDecryptedText = '';
+    pgpBadges = [];
+    pgpDecryptError = '';
+    pgpKeyUnlocked = false;
+    iframeKey++;
+  }
+
+  function clearPgpContentWhenHidden() {
+    if (document.hidden) clearPgpContent();
+  }
+
+  function attachmentDataUrl(attachment: DecryptedAttachment): string {
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < attachment.data.length; offset += chunkSize) {
+      binary += String.fromCharCode(...attachment.data.subarray(offset, offset + chunkSize));
+    }
+    return `data:${attachment.contentType};base64,${btoa(binary)}`;
+  }
+
+  function insertDecryptedInlineImages(html: string, attachments: DecryptedAttachment[]): string {
+    let result = html;
+    for (const attachment of attachments) {
+      if (!attachment.contentId || !/^image\/(png|jpeg|gif|webp|avif)$/i.test(attachment.contentType)) continue;
+      const escapedCid = attachment.contentId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      result = result.replace(new RegExp(`cid:${escapedCid}`, 'gi'), attachmentDataUrl(attachment));
+    }
+    return result;
+  }
 
   async function pgpUnlock() {
     pgpUnlocking = true;
@@ -228,10 +278,12 @@
   async function pgpDecrypt(msg: Message) {
     const keys = getKeys();
     if (keys.length === 0) return;
+    const generation = ++pgpDecryptGeneration;
     pgpDecrypting = true;
     pgpDecryptError = '';
     pgpDecryptedHtml = '';
     pgpDecryptedText = '';
+    clearPgpAttachments();
     pgpBadges = [];
     try {
       const url = `/api/email/raw?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
@@ -239,18 +291,29 @@
       if (!res.ok) throw new Error('fetch failed');
       const rawBytes = new Uint8Array(await res.arrayBuffer());
       const result = await decryptMessage(keys, rawBytes);
+      if (generation !== pgpDecryptGeneration || selectedMessage?.uid !== msg.uid ||
+          selectedMessage?.account_id !== msg.account_id || selectedMessage?.mailbox !== msg.mailbox) return;
       pgpBadges = result.badges;
-      if (result.badges.includes('decrypt_failed') || result.badges.includes('missing_key')) {
+      if (result.badges.includes('decrypt_failed') || result.badges.includes('missing_key') || result.badges.includes('unsupported_alg')) {
         pgpDecryptError = tl('pgp_decryptFailed');
-      } else if (result.isHtml) {
-        pgpDecryptedHtml = DOMPurify.sanitize(result.plaintext, { FORCE_BODY: true, FORBID_TAGS: ['script', 'style'] });
       } else {
-        pgpDecryptedText = result.plaintext;
+        pgpAttachments = result.attachments.map(attachment => ({
+          filename: attachment.filename,
+          content_type: attachment.contentType,
+          size: attachment.data.byteLength,
+          url: URL.createObjectURL(new Blob([attachment.data], { type: 'application/octet-stream' })),
+        }));
+        if (result.isHtml) {
+          const withInlineImages = insertDecryptedInlineImages(result.plaintext, result.attachments);
+          pgpDecryptedHtml = DOMPurify.sanitize(withInlineImages, { FORCE_BODY: true, FORBID_TAGS: ['script', 'style'] });
+        } else {
+          pgpDecryptedText = result.plaintext;
+        }
       }
     } catch {
-      pgpDecryptError = tl('pgp_decryptFailed');
+      if (generation === pgpDecryptGeneration) pgpDecryptError = tl('pgp_decryptFailed');
     }
-    pgpDecrypting = false;
+    if (generation === pgpDecryptGeneration) pgpDecrypting = false;
   }
 
   function pgpBadgeLabel(badge: string): string {
@@ -349,6 +412,8 @@
 
     window.addEventListener('mousemove', handleResizeMove);
     window.addEventListener('mouseup', stopResize);
+    document.addEventListener('visibilitychange', clearPgpContentWhenHidden);
+    window.addEventListener('pagehide', clearPgpContent);
   });
 
   onDestroy(() => {
@@ -360,7 +425,10 @@
     window.removeEventListener('mousemove', handleResizeMove);
     window.removeEventListener('mouseup', stopResize);
     window.removeEventListener('click', handleWindowClick);
+    document.removeEventListener('visibilitychange', clearPgpContentWhenHidden);
+    window.removeEventListener('pagehide', clearPgpContent);
     removeFilterListeners();
+    clearPgpAttachments();
   });
 
   // ── Data loading ─────────────────────────────────────────────────────────
@@ -858,6 +926,8 @@
 
   async function openMessage(msg: Message) {
     messageLoading = true;
+    pgpDecryptGeneration++;
+    pgpDecrypting = false;
     selectedMessage = msg;
     actionsOpen = false;
     metaExpanded = false;
@@ -866,6 +936,7 @@
     viewMode = 'text'; // reset while loading
     pgpDecryptedHtml = '';
     pgpDecryptedText = '';
+    clearPgpAttachments();
     pgpDecryptError = '';
     pgpBadges = [];
     pgpKeyUnlocked = isUnlocked();
@@ -891,6 +962,7 @@
   }
 
   function closeDetail() {
+    clearPgpAttachments();
     selectedMessage = null;
   }
 
@@ -1537,6 +1609,9 @@
 
   $: htmlHasValue = htmlAddsValue(selectedMessage?.body_html ?? null);
   $: bodyTextSegments = linkifySegments(selectedMessage?.body_text ?? '');
+  $: visibleServerAttachments = selectedMessage?.attachments.filter(att =>
+    !selectedMessage?.is_encrypted || !isPgpTransportAttachment(att)
+  ) ?? [];
 
   $: emailOrigins = (() => {
     if (!selectedMessage?.body_html) return [];
@@ -1851,7 +1926,7 @@
                 <span class="message-row-subject">{msg.subject || tl('mail_noSubject')}</span>
                 <span class="message-row-icons">
                   {#if msg.is_flagged}<span class="flag-star" title={tl('mail_flaggedTitle')}>⭐</span>{/if}
-                  {#if msg.has_attachments}<span class="attach-icon" title={tl('mail_hasAttachments')}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 10.56a4.94 4.94 0 0 1-7-7l9.19-10.56a3.33 3.33 0 0 1 4.7 4.7l-9.2 10.56a1.67 1.67 0 0 1-2.35-2.35l9.2-10.56"/></svg></span>{/if}
+                  {#if msg.has_attachments && !msg.is_encrypted}<span class="attach-icon" title={tl('mail_hasAttachments')}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 10.56a4.94 4.94 0 0 1-7-7l9.19-10.56a3.33 3.33 0 0 1 4.7 4.7l-9.2 10.56a1.67 1.67 0 0 1-2.35-2.35l9.2-10.56"/></svg></span>{/if}
                 </span>
               </div>
             </button>
@@ -1990,21 +2065,41 @@
               <div><strong>{tl('mail_metaDate')}:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
             {/if}
           </div>
-          {#if selectedMessage.attachments && selectedMessage.attachments.length > 0}
+          {#if visibleServerAttachments.length > 0}
             <div class="attachments">
               <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-                {selectedMessage.attachments.length === 1 ? tl('mail_attachment1') : tl('mail_attachmentsN', { n: selectedMessage.attachments.length })}
+                {visibleServerAttachments.length === 1 ? tl('mail_attachment1') : tl('mail_attachmentsN', { n: visibleServerAttachments.length })}
                 <span class="attachments-caret">{attachmentsExpanded ? '▲' : '▾'}</span>
               </button>
               {#if attachmentsExpanded}
                 <div class="attachments-list">
-                  {#each selectedMessage.attachments as att}
+                  {#each visibleServerAttachments as att}
                     <a
                       class="compose-attachment-chip attachment-chip-dl"
                       href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
                       download={att.filename}
                     >
+                      <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
+                      <span class="attachment-name" title={att.filename}>{att.filename}</span>
+                      <span class="attachment-size">{humanSize(att.size)}</span>
+                    </a>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          {/if}
+          {#if selectedMessage.is_encrypted && pgpAttachments.length > 0}
+            <div class="attachments">
+              <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                {pgpAttachments.length === 1 ? tl('mail_attachment1') : tl('mail_attachmentsN', { n: pgpAttachments.length })}
+                <span class="attachments-caret">{attachmentsExpanded ? '▲' : '▾'}</span>
+              </button>
+              {#if attachmentsExpanded}
+                <div class="attachments-list">
+                  {#each pgpAttachments as att}
+                    <a class="compose-attachment-chip attachment-chip-dl" href={att.url} download={att.filename}>
                       <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
                       <span class="attachment-name" title={att.filename}>{att.filename}</span>
                       <span class="attachment-size">{humanSize(att.size)}</span>

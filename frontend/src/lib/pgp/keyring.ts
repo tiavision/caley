@@ -17,6 +17,14 @@ export interface DecryptResult {
   plaintext: string;
   isHtml: boolean;
   badges: DecryptBadge[];
+  attachments: DecryptedAttachment[];
+}
+
+export interface DecryptedAttachment {
+  filename: string;
+  contentType: string;
+  contentId: string | null;
+  data: Uint8Array;
 }
 
 function hasArgon2(err: unknown): boolean {
@@ -72,7 +80,7 @@ export async function decryptMessage(
   // Extract the PGP block from the MIME structure.
   const pgpBlock = extractPgpBlock(mimeStr);
   if (!pgpBlock) {
-    return { plaintext: mimeStr, isHtml: false, badges: [] };
+    return { plaintext: mimeStr, isHtml: false, badges: [], attachments: [] };
   }
 
   let message: openpgp.Message<string | Uint8Array>;
@@ -80,9 +88,9 @@ export async function decryptMessage(
     message = await openpgp.readMessage({ armoredMessage: pgpBlock.ciphertext });
   } catch (e) {
     if (hasArgon2(e)) {
-      return { plaintext: '', isHtml: false, badges: ['unsupported_alg'] };
+      return { plaintext: '', isHtml: false, badges: ['unsupported_alg'], attachments: [] };
     }
-    return { plaintext: '', isHtml: false, badges: ['decrypt_failed'] };
+    return { plaintext: '', isHtml: false, badges: ['decrypt_failed'], attachments: [] };
   }
 
   let decrypted: openpgp.DecryptMessageResult;
@@ -94,9 +102,9 @@ export async function decryptMessage(
     });
   } catch (e) {
     if (hasArgon2(e)) {
-      return { plaintext: '', isHtml: false, badges: ['unsupported_alg'] };
+      return { plaintext: '', isHtml: false, badges: ['unsupported_alg'], attachments: [] };
     }
-    return { plaintext: '', isHtml: false, badges: ['decrypt_failed'] };
+    return { plaintext: '', isHtml: false, badges: ['decrypt_failed'], attachments: [] };
   }
 
   badges.push('encrypted');
@@ -119,15 +127,25 @@ export async function decryptMessage(
     else badges.push('unverified');
   }
 
-  const plaintext = typeof decrypted.data === 'string'
+  const decryptedText = typeof decrypted.data === 'string'
     ? decrypted.data
     : new TextDecoder().decode(decrypted.data as Uint8Array);
 
-  // Detect if decrypted payload is HTML (PGP/MIME inner part)
-  const isHtml = plaintext.trimStart().toLowerCase().startsWith('<!doctype html') ||
-    plaintext.trimStart().toLowerCase().startsWith('<html');
+  // PGP/MIME plaintext is itself a MIME entity. Parse it in the browser: the
+  // server cannot see inner bodies or attachments without the private key.
+  const inner = parseDecryptedMime(decryptedText);
+  if (inner) {
+    if (inner.html !== null) {
+      return { plaintext: inner.html, isHtml: true, badges, attachments: inner.attachments };
+    }
+    return { plaintext: inner.text ?? '', isHtml: false, badges, attachments: inner.attachments };
+  }
 
-  return { plaintext, isHtml, badges };
+  // Inline PGP commonly decrypts to an ordinary body rather than a MIME entity.
+  const isHtml = decryptedText.trimStart().toLowerCase().startsWith('<!doctype html') ||
+    decryptedText.trimStart().toLowerCase().startsWith('<html');
+
+  return { plaintext: decryptedText, isHtml, badges, attachments: [] };
 }
 
 /**
@@ -198,4 +216,177 @@ function extractSignedBlock(mime: string): SignedBlock | null {
     text: full.slice(0, sigBegin).trim(),
     signature: full.slice(sigBegin),
   };
+}
+
+// ── Decrypted MIME parsing ───────────────────────────────────────────────────
+
+interface ParsedDecryptedMime {
+  text: string | null;
+  html: string | null;
+  attachments: DecryptedAttachment[];
+}
+
+interface MimeEntity {
+  headers: Map<string, string>;
+  body: string;
+  contentType: string;
+  children: MimeEntity[];
+}
+
+function parseDecryptedMime(raw: string): ParsedDecryptedMime | null {
+  const entity = parseEntity(raw);
+  if (!entity || entity.headers.size === 0) return null;
+
+  const parsed: ParsedDecryptedMime = { text: null, html: null, attachments: [] };
+  collectMimeContent(entity, parsed);
+  return parsed;
+}
+
+function parseEntity(raw: string): MimeEntity | null {
+  const match = /\r?\n\r?\n/.exec(raw);
+  if (!match) return null;
+  const headers = parseHeaders(raw.slice(0, match.index));
+  const body = raw.slice(match.index + match[0].length);
+  const contentTypeHeader = headers.get('content-type') ?? 'text/plain; charset=utf-8';
+  const contentType = contentTypeHeader.split(';', 1)[0].trim().toLowerCase();
+  const boundary = readParameter(contentTypeHeader, 'boundary');
+  const children: MimeEntity[] = [];
+
+  if (contentType.startsWith('multipart/') && boundary) {
+    for (const part of splitMultipart(body, boundary)) {
+      const child = parseEntity(part);
+      if (child) children.push(child);
+    }
+  }
+
+  return { headers, body, contentType, children };
+}
+
+function parseHeaders(raw: string): Map<string, string> {
+  const headers = new Map<string, string>();
+  const unfolded = raw.replace(/\r?\n[ \t]+/g, ' ');
+  for (const line of unfolded.split(/\r?\n/)) {
+    const colon = line.indexOf(':');
+    if (colon <= 0) continue;
+    headers.set(line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim());
+  }
+  return headers;
+}
+
+function readParameter(value: string, parameter: string): string | null {
+  const pattern = new RegExp(`(?:^|;)\\s*${parameter}(\\*)?\\s*=\\s*(?:"([^"]*)"|([^;]*))`, 'i');
+  const match = pattern.exec(value);
+  if (!match) return null;
+  const raw = (match[2] ?? match[3] ?? '').trim();
+  if (match[1]) {
+    const encoded = raw.replace(/^[^']*'[^']*'/, '');
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return encoded;
+    }
+  }
+  return decodeMimeWords(raw);
+}
+
+function splitMultipart(body: string, boundary: string): string[] {
+  const parts: string[] = [];
+  const lines = body.split(/\r?\n/);
+  const marker = `--${boundary}`;
+  let current: string[] | null = null;
+  for (const line of lines) {
+    if (line === marker || line === `${marker}--`) {
+      if (current) parts.push(current.join('\r\n'));
+      current = line.endsWith('--') ? null : [];
+      if (line.endsWith('--')) break;
+      continue;
+    }
+    if (current) current.push(line);
+  }
+  return parts;
+}
+
+function collectMimeContent(entity: MimeEntity, parsed: ParsedDecryptedMime) {
+  if (entity.children.length > 0) {
+    for (const child of entity.children) collectMimeContent(child, parsed);
+    return;
+  }
+
+  const disposition = entity.headers.get('content-disposition') ?? '';
+  const filename = readParameter(disposition, 'filename') ?? readParameter(entity.headers.get('content-type') ?? '', 'name');
+  const contentId = (entity.headers.get('content-id') ?? '').replace(/^<|>$/g, '') || null;
+  const dispositionType = disposition.split(';', 1)[0].trim().toLowerCase();
+  const bytes = decodeEntityBody(entity);
+  const isAttachment = dispositionType === 'attachment' || filename !== null ||
+    (dispositionType === 'inline' && entity.contentType.startsWith('image/'));
+
+  if (isAttachment) {
+    parsed.attachments.push({
+      filename: filename ?? contentId ?? 'attachment',
+      contentType: entity.contentType || 'application/octet-stream',
+      contentId,
+      data: bytes,
+    });
+    return;
+  }
+
+  const text = decodeText(bytes, readParameter(entity.headers.get('content-type') ?? '', 'charset'));
+  if (entity.contentType === 'text/html' && parsed.html === null) {
+    parsed.html = text;
+  } else if (entity.contentType === 'text/plain' && parsed.text === null) {
+    parsed.text = text;
+  }
+}
+
+function decodeEntityBody(entity: MimeEntity): Uint8Array {
+  const encoding = (entity.headers.get('content-transfer-encoding') ?? '').toLowerCase();
+  if (encoding === 'base64') {
+    try {
+      const decoded = atob(entity.body.replace(/\s/g, ''));
+      return Uint8Array.from(decoded, c => c.charCodeAt(0));
+    } catch {
+      return new Uint8Array();
+    }
+  }
+  if (encoding === 'quoted-printable') return decodeQuotedPrintable(entity.body);
+  return new TextEncoder().encode(entity.body);
+}
+
+function decodeQuotedPrintable(value: string): Uint8Array {
+  const bytes: number[] = [];
+  const unwrapped = value.replace(/=\r?\n/g, '');
+  for (let i = 0; i < unwrapped.length;) {
+    const encoded = /^=([0-9a-f]{2})/i.exec(unwrapped.slice(i));
+    if (encoded) {
+      bytes.push(parseInt(encoded[1], 16));
+      i += 3;
+      continue;
+    }
+    const codePoint = unwrapped.codePointAt(i)!;
+    const char = String.fromCodePoint(codePoint);
+    bytes.push(...new TextEncoder().encode(char));
+    i += char.length;
+  }
+  return Uint8Array.from(bytes);
+}
+
+function decodeText(bytes: Uint8Array, charset: string | null): string {
+  try {
+    return new TextDecoder(charset || 'utf-8').decode(bytes);
+  } catch {
+    return new TextDecoder().decode(bytes);
+  }
+}
+
+function decodeMimeWords(value: string): string {
+  return value.replace(/=\?([^?]+)\?([bq])\?([^?]*)\?=/gi, (_all, charset: string, mode: string, encoded: string) => {
+    try {
+      const bytes = mode.toLowerCase() === 'b'
+        ? Uint8Array.from(atob(encoded), c => c.charCodeAt(0))
+        : decodeQuotedPrintable(encoded.replace(/_/g, ' '));
+      return decodeText(bytes, charset);
+    } catch {
+      return encoded;
+    }
+  });
 }
