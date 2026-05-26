@@ -1,51 +1,71 @@
-// In-memory session holder for the unlocked private key.
+// In-memory session holder for unlocked private keys.
 // Cleared on logout, explicit lock, inactivity (5-minute timer), and tab
 // hide/unload. JS cannot zero memory — we drop references only.
 
 import type * as openpgp from 'openpgp';
 
-interface Session {
+interface SessionEntry {
   privateKey: openpgp.PrivateKey;
   inactivityTimer: ReturnType<typeof setTimeout>;
 }
 
-let session: Session | null = null;
+const sessions = new Map<string, SessionEntry>();
 const INACTIVITY_MS = 5 * 60 * 1000;
 
-function clearTimer() {
-  if (session) clearTimeout(session.inactivityTimer);
+function clearEntryTimer(fingerprint: string) {
+  const entry = sessions.get(fingerprint);
+  if (entry) clearTimeout(entry.inactivityTimer);
 }
 
-function resetTimer() {
-  if (!session) return;
-  clearTimer();
-  session.inactivityTimer = setTimeout(lock, INACTIVITY_MS);
+function resetEntryTimer(fingerprint: string) {
+  const entry = sessions.get(fingerprint);
+  if (!entry) return;
+  clearTimeout(entry.inactivityTimer);
+  entry.inactivityTimer = setTimeout(() => lockKey(fingerprint), INACTIVITY_MS);
 }
 
-export function setKey(key: openpgp.PrivateKey) {
-  clearTimer();
-  session = {
+export function setKey(fingerprint: string, key: openpgp.PrivateKey) {
+  clearEntryTimer(fingerprint);
+  sessions.set(fingerprint, {
     privateKey: key,
-    inactivityTimer: setTimeout(lock, INACTIVITY_MS),
-  };
+    inactivityTimer: setTimeout(() => lockKey(fingerprint), INACTIVITY_MS),
+  });
 }
 
-export function getKey(): openpgp.PrivateKey | null {
-  if (!session) return null;
-  resetTimer();
-  return session.privateKey;
+export function getKeys(): openpgp.PrivateKey[] {
+  const keys: openpgp.PrivateKey[] = [];
+  for (const [fp, entry] of sessions) {
+    resetEntryTimer(fp);
+    keys.push(entry.privateKey);
+  }
+  return keys;
+}
+
+export function getKey(fingerprint: string): openpgp.PrivateKey | null {
+  const entry = sessions.get(fingerprint);
+  if (!entry) return null;
+  resetEntryTimer(fingerprint);
+  return entry.privateKey;
+}
+
+export function lockKey(fingerprint: string) {
+  clearEntryTimer(fingerprint);
+  sessions.delete(fingerprint);
 }
 
 export function lock() {
-  clearTimer();
-  session = null;
+  for (const fp of sessions.keys()) clearEntryTimer(fp);
+  sessions.clear();
 }
 
 export function isUnlocked(): boolean {
-  return session !== null;
+  return sessions.size > 0;
 }
 
-// Wire to visibility / unload events (fire once per module load).
+export function isKeyUnlocked(fingerprint: string): boolean {
+  return sessions.has(fingerprint);
+}
+
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) lock();

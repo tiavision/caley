@@ -358,5 +358,13 @@
   "pgp_badgeVerificationFailed": "Signatur ungültig",
   "pgp_decryptFailed": "Entschlüsselung fehlgeschlagen.",
   "pgp_unlockToRead": "Diese Nachricht ist verschlüsselt. Entsperre deinen Schlüssel, um sie zu lesen.",
-  "pgp_decrypting": "Wird entschlüsselt…"
+  "pgp_decrypting": "Wird entschlüsselt…",
+  "pgp_enrolledKeys": "Registrierte Schlüssel",
+  "pgp_addKeyButton": "Schlüssel hinzufügen",
+  "pgp_addKeyHeading": "Weiteren Schlüssel hinzufügen",
+  "pgp_unlockAllButton": "Alle Schlüssel entsperren",
+  "pgp_removeKey": "Entfernen",
+  "pgp_confirmRemoveKey": "Diesen Schlüssel vom Tresor auf diesem Gerät entfernen?",
+  "pgp_keyUnlocked": "Entsperrt",
+  "pgp_keyLocked": "Gesperrt"
 }

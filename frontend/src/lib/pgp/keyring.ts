@@ -58,12 +58,12 @@ export function extractPublicKey(privateKey: openpgp.PrivateKey): string {
 
 /**
  * Decrypt a PGP/MIME or inline PGP message from raw MIME bytes.
- * privateKey  — the unlocked in-memory private key
+ * privateKeys — unlocked in-memory private keys (tried in order)
  * rawMime     — the raw .eml bytes fetched from /api/email/raw
  * Returns the decrypted plaintext + signature status badges.
  */
 export async function decryptMessage(
-  privateKey: openpgp.PrivateKey,
+  privateKeys: openpgp.PrivateKey[],
   rawMime: Uint8Array,
 ): Promise<DecryptResult> {
   const mimeStr = new TextDecoder('utf-8', { fatal: false }).decode(rawMime);
@@ -89,7 +89,7 @@ export async function decryptMessage(
   try {
     decrypted = await openpgp.decrypt({
       message,
-      decryptionKeys: [privateKey],
+      decryptionKeys: privateKeys,
       config: { allowUnauthenticatedMessages: false },
     });
   } catch (e) {

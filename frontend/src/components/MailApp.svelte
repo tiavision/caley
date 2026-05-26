@@ -3,11 +3,11 @@
   import { getUser } from '../lib/user.ts';
   import { getLocale, makeTl } from '../lib/i18n.ts';
   import SelectDropdown from './SelectDropdown.svelte';
-  import { readVault } from '../lib/pgp/vault.ts';
+  import { readAllVaults } from '../lib/pgp/vault.ts';
   import { unlock } from '../lib/pgp/webauthn.ts';
   import { deriveKek, aesDecrypt, b64uDecode } from '../lib/pgp/kek.ts';
   import { importPrivateKey, decryptMessage } from '../lib/pgp/keyring.ts';
-  import { setKey, getKey, isUnlocked, lock } from '../lib/pgp/session.ts';
+  import { setKey, getKeys, isUnlocked, lock } from '../lib/pgp/session.ts';
   import DOMPurify from 'dompurify';
 
   let locale = 'en';
@@ -201,19 +201,21 @@
     pgpUnlocking = true;
     pgpUnlockError = '';
     try {
-      const vault = await readVault();
-      if (!vault) throw new Error('no vault');
-      const { prfOutput } = await unlock(vault.prfSalt);
-      const hkdfSalt = b64uDecode(vault.hkdfSalt);
-      const iv = b64uDecode(vault.iv);
-      const ciphertext = b64uDecode(vault.ciphertext);
-      const kek = await deriveKek(prfOutput, hkdfSalt);
-      const plainBuf = await aesDecrypt(kek, iv, ciphertext);
-      const { armored, passphrase } = JSON.parse(new TextDecoder().decode(plainBuf)) as { armored: string; passphrase: string };
-      const key = await importPrivateKey(armored, passphrase);
-      setKey(key);
+      const vaults = await readAllVaults();
+      if (vaults.length === 0) throw new Error('no vault');
+      const { prfOutput } = await unlock(vaults[0].prfSalt);
+      for (const vault of vaults) {
+        try {
+          const kek = await deriveKek(prfOutput, b64uDecode(vault.hkdfSalt));
+          const plainBuf = await aesDecrypt(kek, b64uDecode(vault.iv), b64uDecode(vault.ciphertext));
+          const { armored, passphrase } = JSON.parse(new TextDecoder().decode(plainBuf)) as { armored: string; passphrase: string };
+          const key = await importPrivateKey(armored, passphrase);
+          setKey(vault.fingerprint, key);
+        } catch {
+          // Record encrypted with a different PRF output; skip.
+        }
+      }
       pgpKeyUnlocked = true;
-      // Auto-decrypt after unlock if we have a selected message
       if (selectedMessage?.is_encrypted) {
         await pgpDecrypt(selectedMessage);
       }
@@ -224,8 +226,8 @@
   }
 
   async function pgpDecrypt(msg: Message) {
-    const key = getKey();
-    if (!key) return;
+    const keys = getKeys();
+    if (keys.length === 0) return;
     pgpDecrypting = true;
     pgpDecryptError = '';
     pgpDecryptedHtml = '';
@@ -236,7 +238,7 @@
       const res = await fetch(url);
       if (!res.ok) throw new Error('fetch failed');
       const rawBytes = new Uint8Array(await res.arrayBuffer());
-      const result = await decryptMessage(key, rawBytes);
+      const result = await decryptMessage(keys, rawBytes);
       pgpBadges = result.badges;
       if (result.badges.includes('decrypt_failed') || result.badges.includes('missing_key')) {
         pgpDecryptError = tl('pgp_decryptFailed');

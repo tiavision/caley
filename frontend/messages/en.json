@@ -358,5 +358,13 @@
   "pgp_badgeVerificationFailed": "Signature invalid",
   "pgp_decryptFailed": "Decryption failed.",
   "pgp_unlockToRead": "This message is encrypted. Unlock your key to read it.",
-  "pgp_decrypting": "Decrypting…"
+  "pgp_decrypting": "Decrypting…",
+  "pgp_enrolledKeys": "Enrolled keys",
+  "pgp_addKeyButton": "Add key",
+  "pgp_addKeyHeading": "Add another key",
+  "pgp_unlockAllButton": "Unlock all keys",
+  "pgp_removeKey": "Remove",
+  "pgp_confirmRemoveKey": "Remove this key from the vault on this device?",
+  "pgp_keyUnlocked": "Unlocked",
+  "pgp_keyLocked": "Locked"
 }
