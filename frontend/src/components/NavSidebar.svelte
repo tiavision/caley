@@ -50,7 +50,10 @@
         <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
       </svg>
     </button>
-    <span class="nav-mobile-brand">{tl('app_brand')}</span>
+    <span class="nav-mobile-brand">
+      <img class="nav-mobile-logo" src="/icons/favicon-48x48.png" alt="" aria-hidden="true" />
+      {tl('app_brand')}
+    </span>
   </header>
 
   {#if mobileOpen}
@@ -59,7 +62,10 @@
 
   <nav class="nav-rail" class:collapsed class:open={mobileOpen} aria-label="Primary">
     <div class="nav-brand-row">
-      <a href="/" class="nav-brand">{tl('app_brand')}</a>
+      <a href="/" class="nav-brand">
+        <img class="nav-brand-logo" src="/icons/favicon-48x48.png" alt="" aria-hidden="true" />
+        {tl('app_brand')}
+      </a>
       <button class="nav-collapse-btn nav-drawer-close" onclick={() => (mobileOpen = false)} aria-label="Close menu">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
@@ -160,6 +166,9 @@
   }
   .nav-brand {
     flex: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
     font-size: 1.25rem;
     font-weight: 700;
     /* Reset Pico's link --pico-color so the brand matches the username text. */
@@ -170,6 +179,11 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .nav-brand-logo {
+    width: 1.5rem;
+    height: 1.5rem;
+    flex-shrink: 0;
   }
   .nav-collapse-btn {
     display: flex;
@@ -261,9 +275,16 @@
     padding-bottom: 0.8rem;
   }
   .nav-mobile-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
     font-size: 1.1rem;
     font-weight: 700;
     opacity: 0.8;
+  }
+  .nav-mobile-logo {
+    width: 1.25rem;
+    height: 1.25rem;
   }
   .nav-hamburger {
     display: flex;
