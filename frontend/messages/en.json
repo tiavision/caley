@@ -244,6 +244,8 @@
   "mail_actions": "Actions",
   "mail_popout": "Open email in new window",
   "mail_messageUnavailable": "This message is no longer available.",
+  "mail_threads": "Threads",
+  "mail_threadsHeading": "Conversation",
   "mail_markUnread": "Mark unread",
   "mail_markRead": "Mark read",
   "mail_imageSourcesEmail": "Image sources for this email",

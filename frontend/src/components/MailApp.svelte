@@ -88,6 +88,23 @@
     attachments: Attachment[];
   }
 
+  interface ThreadNode {
+    uid: number;
+    account_id: string;
+    mailbox: string;
+    message_id: string | null;
+    parent_message_id: string | null;
+    from: string | null;
+    subject: string | null;
+    sent_at: number | null;
+    is_read: boolean;
+  }
+
+  interface ThreadTreeNode {
+    message: ThreadNode;
+    children: ThreadTreeNode[];
+  }
+
   function canPreviewContentType(value: string | null | undefined): boolean {
     const contentType = value?.split(';', 1)[0].trim().toLowerCase() ?? '';
     return [
@@ -182,6 +199,9 @@
 
   let selectedMessage: Message | null = null;
   let listCursor: Message | null = null;
+  let threadMessages: ThreadNode[] = [];
+  let threadTree: ThreadTreeNode[] = [];
+  let threadRequest = 0;
   let queuedReaderNavigation: -1 | 1 | null = null;
   let messageLoading = false;
   let standaloneUnavailable = false;
@@ -652,6 +672,7 @@
   let accountDialog: HTMLDialogElement;
   let composeDialog: HTMLDialogElement;
   let folderDialog: HTMLDialogElement;
+  let threadDialog: HTMLDialogElement;
   let sidebarOpen = false;
 
   let usesDetailOverlay = false;
@@ -1477,6 +1498,8 @@
   }
 
   async function openMessage(msg: Message) {
+    const activeThreadRequest = ++threadRequest;
+    threadMessages = [];
     messageLoading = true;
     standaloneUnavailable = false;
     pgpDecryptGeneration++;
@@ -1505,6 +1528,7 @@
         const full = await r.json() as Message;
         viewMode = htmlAddsValue(full.body_html) ? 'html' : 'text';
         selectedMessage = full;
+        void loadThread(full, activeThreadRequest);
         messageLoading = false;
         if (full.is_encrypted && getKeys().length > 0) {
           void pgpDecrypt(full);
@@ -1539,6 +1563,9 @@
   }
 
   function clearOpenMessage() {
+    threadRequest++;
+    threadMessages = [];
+    threadDialog?.close();
     clearPgpAttachments();
     selectedMessage = null;
     detailOverlayVisible = false;
@@ -1560,6 +1587,76 @@
     void openMessage(msg);
     if (focusReader) void tick().then(() => detailEl?.focus());
   }
+
+  async function loadThread(msg: Message, request: number) {
+    try {
+      const url = `/api/email/thread?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
+      const response = await fetch(url);
+      if (!response.ok || request !== threadRequest) return;
+      const data = await response.json();
+      if (request === threadRequest) threadMessages = data.messages || [];
+    } catch {
+      if (request === threadRequest) threadMessages = [];
+    }
+  }
+
+  function isCurrentThreadMessage(node: ThreadNode): boolean {
+    if (!selectedMessage) return false;
+    if (node.message_id && selectedMessage.message_id) {
+      return node.message_id === selectedMessage.message_id;
+    }
+    return node.account_id === selectedMessage.account_id &&
+      node.mailbox === selectedMessage.mailbox && node.uid === selectedMessage.uid;
+  }
+
+  function buildThreadTree(nodes: ThreadNode[]): ThreadTreeNode[] {
+    const ids = new Set(nodes.map(node => node.message_id).filter((id): id is string => !!id));
+    const childrenByParent = new Map<string, ThreadNode[]>();
+    for (const node of nodes) {
+      if (!node.parent_message_id) continue;
+      const children = childrenByParent.get(node.parent_message_id) ?? [];
+      children.push(node);
+      childrenByParent.set(node.parent_message_id, children);
+    }
+
+    const included = new Set<ThreadNode>();
+    const branch = (node: ThreadNode, ancestry: Set<ThreadNode>): ThreadTreeNode => {
+      included.add(node);
+      const nextAncestry = new Set(ancestry).add(node);
+      const children = node.message_id
+        ? (childrenByParent.get(node.message_id) ?? [])
+            .filter(child => !nextAncestry.has(child))
+            .map(child => branch(child, nextAncestry))
+        : [];
+      return { message: node, children };
+    };
+    const roots = nodes.filter(node => !node.parent_message_id || !ids.has(node.parent_message_id));
+    const tree = roots.map(node => branch(node, new Set()));
+    for (const node of nodes) {
+      if (!included.has(node)) tree.push(branch(node, new Set()));
+    }
+    return tree;
+  }
+
+  function openThreadMessage(node: ThreadNode) {
+    threadDialog?.close();
+    clearMarkedSelection();
+    const exact = messages.find(message =>
+      message.account_id === node.account_id && message.mailbox === node.mailbox && message.uid === node.uid
+    );
+    const visible = exact ?? (node.message_id
+      ? messages.find(message => message.message_id === node.message_id)
+      : undefined);
+    if (!standalone && visible) {
+      openMessageFromList(visible, true);
+      return;
+    }
+    if (!standalone) listCursor = null;
+    detailOverlayVisible = true;
+    void openMessage(locatorMessage({ accountId: node.account_id, mailbox: node.mailbox, uid: node.uid }));
+  }
+
+  $: threadTree = buildThreadTree(threadMessages);
 
   async function setFlag(msg: Message, flag: string, set: boolean): Promise<boolean> {
     try {
@@ -2656,6 +2753,27 @@
   </span>
 {/snippet}
 
+{#snippet threadBranch(nodes: ThreadTreeNode[])}
+  {#each nodes as branch}
+    {@const node = branch.message}
+    <li>
+      <button
+        class="thread-message"
+        class:current={isCurrentThreadMessage(node)}
+        aria-current={isCurrentThreadMessage(node) ? 'true' : undefined}
+        on:click={() => openThreadMessage(node)}
+      >
+        <span class="thread-message-from">{senderName(node.from) || tl('mail_unknownSender')}</span>
+        <span class="thread-message-subject">{node.subject || tl('mail_noSubject')}</span>
+        <span class="thread-message-date">{formatDate(node.sent_at)}</span>
+      </button>
+      {#if branch.children.length > 0}
+        <ul>{@render threadBranch(branch.children)}</ul>
+      {/if}
+    </li>
+  {/each}
+{/snippet}
+
 <div class="mail-page" class:standalone>
   <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
   <div class="mail-layout" class:standalone style="grid-template-columns: {layoutColumns}">
@@ -3165,11 +3283,13 @@
           <div class="loading">{tl('mail_loading')}</div>
         {:else}
           <div class="detail-meta">
-            <button type="button" class="meta-primary" aria-expanded={metaExpanded}
-              on:click={() => metaExpanded = !metaExpanded}>
-              <span class="meta-label">{primaryMetaLabel}:</span>
-              <span class="meta-value">{primaryMetaValue}</span>
-              <span class="meta-toggle" aria-hidden="true">{metaExpanded ? '▲' : '▼'}</span>
+            <div class="meta-primary-row">
+              <button type="button" class="meta-primary" aria-expanded={metaExpanded}
+                on:click={() => metaExpanded = !metaExpanded}>
+                <span class="meta-label">{primaryMetaLabel}:</span>
+                <span class="meta-value">{primaryMetaValue}</span>
+                <span class="meta-toggle" aria-hidden="true">{metaExpanded ? '▲' : '▼'}</span>
+              </button>
               {#if pgpIconBadges.length > 0}
                 <span class="pgp-security-icons">
                   {#each pgpIconBadges as badge}
@@ -3190,7 +3310,17 @@
                   {/each}
                 </span>
               {/if}
-            </button>
+              {#if threadMessages.length > 1}
+                <button
+                  class="inline-action-btn thread-trigger"
+                  on:click={() => threadDialog?.showModal()}
+                  title={tl('mail_threads')}
+                  aria-label={tl('mail_threads')}
+                >
+                  <UiIcon name="tree" size={16} strokeWidth={2.2} />
+                </button>
+              {/if}
+            </div>
             {#if metaExpanded}
               {#if isSentFolder}<div><strong>{tl('mail_metaFrom')}:</strong> {selectedMessage.from || ''}</div>{/if}
               {#if !isSentFolder}<div><strong>{tl('mail_metaTo')}:</strong> {selectedMessage.to.join(', ')}</div>{/if}
@@ -3361,6 +3491,24 @@
     </section>
   </div>
 </div>
+
+<!-- ── Conversation threads dialog ───────────────────────────────────────── -->
+<dialog
+  bind:this={threadDialog}
+  class="thread-dialog"
+  on:click={(e) => { if (e.target === e.currentTarget) threadDialog?.close(); }}
+  on:cancel={(e) => { e.preventDefault(); threadDialog?.close(); }}
+>
+  <article>
+    <header>
+      <h3>{tl('mail_threadsHeading')}</h3>
+      <button class="close-btn" aria-label={tl('mail_close')} on:click={() => threadDialog?.close()}></button>
+    </header>
+    <ul class="thread-tree" aria-label={tl('mail_threadsHeading')}>
+      {@render threadBranch(threadTree)}
+    </ul>
+  </article>
+</dialog>
 
 {#if !standalone}
 <!-- ── Identity management dialog ────────────────────────────────────────── -->
@@ -4791,12 +4939,19 @@
     margin-bottom: 0.1rem;
   }
 
+  .meta-primary-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
   .meta-primary {
     display: flex;
     align-items: center;
     gap: 0.4rem;
     cursor: pointer;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     margin: 0;
     padding: 0;
     border: none;
@@ -4851,6 +5006,16 @@
   .pgp-security-icon-verified {
     color: var(--pico-ins-color);
     background: color-mix(in srgb, var(--pico-ins-color) 20%, transparent);
+  }
+
+  .thread-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .thread-trigger:hover {
+    color: var(--pico-color, #333);
   }
 
   .meta-toggle:hover {
@@ -5581,6 +5746,98 @@
       bottom: 2.25rem;
       right: 5.5rem;
     }
+  }
+
+  .thread-dialog {
+    width: min(640px, calc(100vw - 2rem));
+  }
+
+  .thread-dialog article {
+    margin: 0;
+    padding: 0;
+  }
+
+  .thread-dialog header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
+  }
+
+  .thread-dialog header h3 {
+    margin: 0;
+  }
+
+  .thread-tree,
+  .thread-tree ul {
+    list-style: none;
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .thread-tree li::marker {
+    content: '';
+  }
+
+  .thread-tree {
+    padding: 0.65rem;
+    max-height: min(65vh, 34rem);
+    overflow-y: auto;
+  }
+
+  .thread-tree ul {
+    padding-left: 1.15rem;
+    border-left: 1px solid var(--pico-muted-border-color, #ddd);
+  }
+
+  .thread-tree li {
+    margin: 0.2rem 0;
+  }
+
+  .thread-message {
+    display: grid;
+    grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 0.7rem;
+    width: 100%;
+    margin: 0;
+    padding: 0.55rem 0.65rem;
+    border: none;
+    border-radius: 0.35rem;
+    background: none;
+    color: inherit;
+    font-size: 0.84rem;
+    text-align: left;
+  }
+
+  .thread-message:hover,
+  .thread-message:focus-visible {
+    background: var(--pico-muted-border-color, #f5f5f5);
+  }
+
+  .thread-message.current {
+    background: var(--pico-primary-background, #e6f2fb);
+    box-shadow: inset 3px 0 0 var(--pico-primary, #0172ad);
+  }
+
+  .thread-message-from,
+  .thread-message-subject {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .thread-message-subject {
+    color: var(--pico-secondary, #444);
+  }
+
+  .thread-message-date {
+    color: var(--pico-muted-color, #888);
+    font-size: 0.75rem;
+    white-space: nowrap;
   }
 
   @media (max-width: 639px) {

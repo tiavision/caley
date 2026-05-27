@@ -390,9 +390,10 @@ fn parse_header_bytes(
 
     let message_id = msg.message_id().map(str::to_owned);
 
-    // Build thread_id from In-Reply-To (TextList or Text header value)
+    // Store the direct reply parent when available, otherwise the nearest
+    // referenced ancestor for messages without In-Reply-To.
     let thread_id = hv_first_text(msg.in_reply_to())
-        .or_else(|| hv_first_text(msg.references()));
+        .or_else(|| hv_last_text(msg.references()));
 
     let from_addr = msg.from().map(|a| {
         let addrs = address_to_strings(a);
@@ -419,6 +420,18 @@ fn hv_first_text(hv: &mail_parser::HeaderValue<'_>) -> Option<String> {
         }
         mail_parser::HeaderValue::TextList(list) => {
             list.first().and_then(|t| t.split_whitespace().next().map(str::to_owned))
+        }
+        _ => None,
+    }
+}
+
+fn hv_last_text(hv: &mail_parser::HeaderValue<'_>) -> Option<String> {
+    match hv {
+        mail_parser::HeaderValue::Text(t) => {
+            t.split_whitespace().last().map(str::to_owned)
+        }
+        mail_parser::HeaderValue::TextList(list) => {
+            list.last().and_then(|t| t.split_whitespace().last().map(str::to_owned))
         }
         _ => None,
     }
@@ -1272,6 +1285,20 @@ pub async fn send_raw_email(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_reply_parent_prefers_in_reply_to() {
+        let raw = b"Message-ID: <child@example.test>\r\nIn-Reply-To: <parent@example.test>\r\nReferences: <root@example.test> <other@example.test>\r\n\r\nbody";
+        let (_, parent, ..) = parse_header_bytes(raw);
+        assert_eq!(parent.as_deref(), Some("parent@example.test"));
+    }
+
+    #[test]
+    fn test_reply_parent_uses_nearest_reference() {
+        let raw = b"Message-ID: <child@example.test>\r\nReferences: <root@example.test> <parent@example.test>\r\n\r\nbody";
+        let (_, parent, ..) = parse_header_bytes(raw);
+        assert_eq!(parent.as_deref(), Some("parent@example.test"));
+    }
 
     #[test]
     fn test_title_tag_stripped_with_content() {

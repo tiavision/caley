@@ -1,5 +1,5 @@
 use std::time::Duration;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use axum::{
     body::Body,
@@ -547,6 +547,61 @@ pub async fn get_message(
             (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
         }
     }
+}
+
+pub async fn get_thread(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<GetMessageQuery>,
+) -> impl IntoResponse {
+    match email_db::get_account(&state.db, &q.account_id, &user.user_id, &state.encryption_key).await {
+        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
+        Err(e) => {
+            eprintln!("[email] get_thread account lookup error: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+        Ok(Some(_)) => {}
+    }
+
+    match email_db::list_thread_messages(&state.db, &q.account_id, &q.mailbox, q.uid).await {
+        Ok(messages) => {
+            let messages = dedupe_thread_messages(messages, &q.account_id, &q.mailbox, q.uid);
+            let list: Vec<_> = messages.iter().map(thread_message_to_json).collect();
+            Json(json!({ "messages": list })).into_response()
+        }
+        Err(e) => {
+            eprintln!("[email] get_thread error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
+fn dedupe_thread_messages(
+    mut messages: Vec<email_db::MessageRow>,
+    account_id: &str,
+    mailbox: &str,
+    uid: u32,
+) -> Vec<email_db::MessageRow> {
+    messages.sort_by_key(|m| (m.sent_at.is_none(), m.sent_at.unwrap_or_default(), m.rowid));
+    let mut result = Vec::new();
+    let mut logical_indices: HashMap<String, usize> = HashMap::new();
+    for message in messages {
+        let is_open_message = message.account_id == account_id
+            && message.mailbox == mailbox
+            && message.uid == uid as i64;
+        if let Some(message_id) = message.message_id.clone() {
+            if let Some(&index) = logical_indices.get(&message_id) {
+                if is_open_message {
+                    result[index] = message;
+                }
+                continue;
+            }
+            logical_indices.insert(message_id, result.len());
+        }
+        result.push(message);
+    }
+    result.sort_by_key(|m| (m.sent_at.is_none(), m.sent_at.unwrap_or_default(), m.rowid));
+    result
 }
 
 #[derive(Deserialize)]
@@ -1231,6 +1286,24 @@ fn message_to_json_with_attachments(
     })
 }
 
+fn thread_message_to_json(m: &email_db::MessageRow) -> serde_json::Value {
+    let flags: Vec<String> = m.flags.as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+
+    json!({
+        "uid": m.uid,
+        "account_id": m.account_id,
+        "mailbox": m.mailbox,
+        "message_id": m.message_id,
+        "parent_message_id": m.thread_id,
+        "from": m.from_addr,
+        "subject": m.subject,
+        "sent_at": m.sent_at,
+        "is_read": flags.iter().any(|f| f == "\\Seen"),
+    })
+}
+
 // ── Image proxy ───────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -1841,7 +1914,44 @@ pub async fn autodiscover_handler(
 
 #[cfg(test)]
 mod tests {
-    use super::{attachment_disposition, can_preview_attachment};
+    use super::{attachment_disposition, can_preview_attachment, dedupe_thread_messages};
+    use crate::email_db::MessageRow;
+
+    fn thread_row(mailbox: &str, uid: i64, message_id: &str, sent_at: i64) -> MessageRow {
+        MessageRow {
+            uid,
+            account_id: "account".to_owned(),
+            mailbox: mailbox.to_owned(),
+            message_id: Some(message_id.to_owned()),
+            thread_id: None,
+            from_addr: None,
+            to_addrs: None,
+            cc_addrs: None,
+            subject: None,
+            sent_at: Some(sent_at),
+            flags: None,
+            has_attachments: false,
+            body_text: None,
+            rowid: uid,
+            body_html: None,
+            size: None,
+            is_encrypted: false,
+            is_signed: false,
+        }
+    }
+
+    #[test]
+    fn thread_messages_deduplicate_mailbox_copies_and_keep_open_locator() {
+        let messages = vec![
+            thread_row("Archive", 1, "same", 1),
+            thread_row("INBOX", 2, "same", 1),
+            thread_row("INBOX", 3, "reply", 2),
+        ];
+        let result = dedupe_thread_messages(messages, "account", "INBOX", 2);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].mailbox, "INBOX");
+        assert_eq!(result[0].uid, 2);
+    }
 
     #[test]
     fn previewable_attachment_types_are_allowlisted_case_insensitively() {

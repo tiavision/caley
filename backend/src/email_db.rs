@@ -1054,6 +1054,56 @@ pub async fn get_message(
     Ok(row.as_ref().map(row_to_message_full))
 }
 
+pub async fn list_thread_messages(
+    pool: &SqlitePool,
+    account_id: &str,
+    mailbox: &str,
+    uid: u32,
+) -> Result<Vec<MessageRow>> {
+    let rows = sqlx::query(
+        "WITH RECURSIVE connected(id) AS (
+             SELECT message_id FROM cached_messages
+              WHERE account_id = ? AND mailbox = ? AND uid = ? AND message_id IS NOT NULL
+             UNION
+             SELECT thread_id FROM cached_messages
+              WHERE account_id = ? AND mailbox = ? AND uid = ? AND thread_id IS NOT NULL
+             UNION
+             SELECT m.message_id
+               FROM cached_messages m JOIN connected c
+                 ON m.message_id = c.id OR m.thread_id = c.id
+              WHERE m.account_id = ? AND m.message_id IS NOT NULL
+             UNION
+             SELECT m.thread_id
+               FROM cached_messages m JOIN connected c
+                 ON m.message_id = c.id OR m.thread_id = c.id
+              WHERE m.account_id = ? AND m.thread_id IS NOT NULL
+         )
+         SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
+                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
+                m.body_text, m.rowid, m.is_encrypted, m.is_signed
+           FROM cached_messages m
+          WHERE m.account_id = ?
+            AND ((m.mailbox = ? AND m.uid = ?)
+              OR m.message_id IN (SELECT id FROM connected)
+              OR m.thread_id IN (SELECT id FROM connected))
+          ORDER BY COALESCE(m.sent_at, 9223372036854775807), m.rowid",
+    )
+    .bind(account_id)
+    .bind(mailbox)
+    .bind(uid as i64)
+    .bind(account_id)
+    .bind(mailbox)
+    .bind(uid as i64)
+    .bind(account_id)
+    .bind(account_id)
+    .bind(account_id)
+    .bind(mailbox)
+    .bind(uid as i64)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(row_to_message).collect())
+}
+
 fn row_to_message(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
     MessageRow {
         uid: r.get(0),
@@ -1586,4 +1636,65 @@ pub async fn get_unread_counts_virtual(pool: &SqlitePool, user_id: &str) -> Resu
     .fetch_all(pool)
     .await?;
     Ok(rows.iter().map(|r| (r.get(0), r.get(1))).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn thread_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE cached_messages (
+                account_id TEXT NOT NULL, mailbox TEXT NOT NULL, uid INTEGER NOT NULL,
+                message_id TEXT, thread_id TEXT, from_addr TEXT, to_addrs TEXT, cc_addrs TEXT,
+                subject TEXT, sent_at INTEGER, flags TEXT, has_attachments INTEGER NOT NULL DEFAULT 0,
+                body_text TEXT, rowid_override INTEGER, is_encrypted INTEGER NOT NULL DEFAULT 0,
+                is_signed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (account_id, mailbox, uid)
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    async fn insert_thread_message(
+        pool: &SqlitePool,
+        account_id: &str,
+        mailbox: &str,
+        uid: i64,
+        message_id: &str,
+        parent: Option<&str>,
+        sent_at: i64,
+    ) {
+        sqlx::query(
+            "INSERT INTO cached_messages
+             (account_id, mailbox, uid, message_id, thread_id, subject, sent_at, flags)
+             VALUES (?, ?, ?, ?, ?, ?, ?, '[]')",
+        )
+        .bind(account_id)
+        .bind(mailbox)
+        .bind(uid)
+        .bind(message_id)
+        .bind(parent)
+        .bind(message_id)
+        .bind(sent_at)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn thread_lookup_finds_connected_messages_across_mailboxes_in_one_account() {
+        let pool = thread_pool().await;
+        insert_thread_message(&pool, "account", "INBOX", 1, "root", None, 1).await;
+        insert_thread_message(&pool, "account", "Sent", 2, "reply", Some("root"), 2).await;
+        insert_thread_message(&pool, "account", "Archive", 3, "leaf", Some("reply"), 3).await;
+        insert_thread_message(&pool, "other", "INBOX", 4, "foreign", Some("reply"), 4).await;
+
+        let messages = list_thread_messages(&pool, "account", "Archive", 3).await.unwrap();
+        let ids: Vec<_> = messages.iter().filter_map(|m| m.message_id.as_deref()).collect();
+        assert_eq!(ids, vec!["root", "reply", "leaf"]);
+    }
 }
