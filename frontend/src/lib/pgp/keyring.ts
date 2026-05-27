@@ -178,6 +178,11 @@ export async function verifySignedMessage(
         message: await openpgp.createCleartextMessage({ text: signedBlock!.text }),
         verificationKeys: publicKeys,
       });
+    const hasMatchingKey = result.signatures.some(sig =>
+      publicKeys.some(key => key.getKeyIDs().some(keyId => keyId.equals(sig.keyID)))
+    );
+    if (!hasMatchingKey) return [...badges, 'unverified'];
+
     let anyVerified = false;
     let anyFailed = false;
     for (const sig of result.signatures) {

@@ -410,7 +410,6 @@
   "pgp_confirmRemovePublicKey": "Diesen vertrauenswürdigen öffentlichen Schlüssel entfernen?",
   "pgp_composeEncrypt": "Verschlüsseln",
   "pgp_composeSign": "Signieren",
-  "pgp_composeProtectedHint": "Geschützte E-Mail wird auf diesem Gerät erstellt.",
   "pgp_composeIdentityMissing": "Wähle eine Absenderidentität aus.",
   "pgp_composeNoRecipients": "Füge mindestens einen Empfänger hinzu.",
   "pgp_composeUnlockSigningKey": "Entsperre den Tresor mit dem Signaturschlüssel für diese Identität.",

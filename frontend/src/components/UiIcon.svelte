@@ -1,5 +1,5 @@
 <script lang="ts">
-  export let name: 'import' | 'trash' | 'key-plus';
+  export let name: 'import' | 'trash' | 'key-plus' | 'lock' | 'signature';
   export let size = 16;
   export let strokeWidth = 2;
 </script>
@@ -31,5 +31,12 @@
     <path d="M15 4h4v4" />
     <path d="M18 15v6" />
     <path d="M15 18h6" />
+  {:else if name === 'lock'}
+    <rect x="5" y="10" width="14" height="10" rx="2" />
+    <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+    <path d="M12 14v2" />
+  {:else if name === 'signature'}
+    <path d="M3 18c3.4-5.3 5.2-11.8 7.3-11.8 3.4 0-1.6 10.3-1.1 11.3.7 1.5 3.4-4.1 4.5-4.1 1.1 0 .3 3.7 1.5 3.7 1 0 2-2 3.2-2 1.1 0 1.6.6 2.6 1.2" />
+    <path d="M3 21h18" />
   {/if}
 </svg>

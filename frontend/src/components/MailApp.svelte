@@ -6,11 +6,12 @@
   import UiIcon from './UiIcon.svelte';
   import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey, validateVault, eraseBytes } from '../lib/pgp/vault.ts';
   import { unlock } from '../lib/pgp/webauthn.ts';
-  import { decryptMessage, verifySignedMessage, verifiesWithKey, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
-  import { parsePublicKey, listPublicKeys, readVerificationKeys, savePublicKey } from '../lib/pgp/public-keys.ts';
+  import { decryptMessage, verifySignedMessage, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
+  import { parsePublicKey, listPublicKeys, readVerificationKeys, savePublicKey, type StoredPublicKey } from '../lib/pgp/public-keys.ts';
   import { openVault, getKeys, isUnlocked } from '../lib/pgp/session.ts';
   import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
   import { buildProtectedMime, parseEnvelopeAddresses } from '../lib/pgp/compose.ts';
+  import type * as openpgp from 'openpgp';
   import DOMPurify from 'dompurify';
 
   let locale = 'en';
@@ -91,11 +92,19 @@
         (contentType === 'application/octet-stream' || contentType === 'application/pgp-encrypted'));
   }
 
+  function isPgpSignatureAttachment(attachment: Attachment): boolean {
+    const filename = attachment.filename.toLowerCase();
+    const contentType = attachment.content_type?.split(';', 1)[0].trim().toLowerCase() ?? '';
+    return contentType === 'application/pgp-signature' ||
+      /^signature\.(asc|sig|pgp|gpg)$/.test(filename);
+  }
+
   function isPgpPublicKeyAttachment(attachment: Attachment): boolean {
     const filename = attachment.filename.toLowerCase();
     const contentType = attachment.content_type?.split(';', 1)[0].trim().toLowerCase() ?? '';
     return contentType === 'application/pgp-keys' ||
-      (!isPgpTransportAttachment(attachment) && /\.(asc|pgp|gpg|pub)$/.test(filename));
+      (!isPgpTransportAttachment(attachment) && !isPgpSignatureAttachment(attachment) &&
+        /\.(asc|pgp|gpg|pub)$/.test(filename));
   }
 
   // ── State ────────────────────────────────────────────────────────────────
@@ -194,6 +203,13 @@
   let composeReplyAll = false;
   let composeEncrypt = false;
   let composeSign = false;
+  let composeCanEncrypt = false;
+  let composeCanSign = false;
+  let composeSignOptedOut = false;
+  let composeTrustedKeys: { record: StoredPublicKey; key: openpgp.PublicKey }[] = [];
+  let composeStoredSigningFingerprints = new Set<string>();
+  let composeKeysLoading = false;
+  let composeKeysRequest = 0;
   let composeFileInput: HTMLInputElement;
   let filePickerOpen = false;
 
@@ -219,6 +235,7 @@
   let pgpPublicKeyImporting = '';
   let pgpPublicKeyImportError = '';
   let pgpPublicKeyImportSuccess = '';
+  let pgpImportablePublicKeyAttachments = new Set<string>();
   let pgpKeyUnlocked = isUnlocked();
   let pgpDecryptGeneration = 0;
 
@@ -237,6 +254,7 @@
     pgpDecryptError = '';
     pgpPublicKeyImportError = '';
     pgpPublicKeyImportSuccess = '';
+    pgpImportablePublicKeyAttachments = new Set();
     pgpKeyUnlocked = isUnlocked();
     iframeKey++;
   }
@@ -273,6 +291,142 @@
     return key.users.some(user => user.userID?.email?.trim().toLowerCase() === email.toLowerCase());
   }
 
+  async function trustedPublicKeys(): Promise<{ record: StoredPublicKey; key: openpgp.PublicKey }[]> {
+    const records = (await listPublicKeys()).filter(record => record.trust === 'trusted');
+    const parsed: { record: StoredPublicKey; key: openpgp.PublicKey }[] = [];
+    for (const record of records) {
+      try {
+        parsed.push({ record, key: await parsePublicKey(record.armored) });
+      } catch {
+        // Corrupt stored keys are unavailable for compose encryption.
+      }
+    }
+    return parsed;
+  }
+
+  function signingKeyForIdentity(identityId: string): openpgp.PrivateKey | null {
+    const identity = identities.find(item => item.identity_id === identityId);
+    if (!identity) return null;
+    return getKeys().find(key => keyHasEmail(key, identity.email)) ?? null;
+  }
+
+  function storedSigningKeyExists(
+    identityId: string,
+    keys: { record: StoredPublicKey; key: openpgp.PublicKey }[],
+    fingerprints: Set<string>,
+  ): boolean {
+    const identity = identities.find(item => item.identity_id === identityId);
+    if (!identity) return false;
+    return keys.some(({ record, key }) =>
+      record.is_own
+      && fingerprints.has(record.fingerprint.toUpperCase())
+      && keyHasEmail(key, identity.email)
+    );
+  }
+
+  function reconcileComposeSigning(
+    identityId: string,
+    optedOut: boolean,
+    keys: { record: StoredPublicKey; key: openpgp.PublicKey }[],
+    fingerprints: Set<string>,
+  ) {
+    composeCanSign = signingKeyForIdentity(identityId) !== null
+      || storedSigningKeyExists(identityId, keys, fingerprints);
+    if (!composeCanSign) {
+      composeSign = false;
+    } else if (!optedOut) {
+      composeSign = true;
+    }
+  }
+
+  function composeEncryptionSelection(
+    identityId: string,
+    toValue: string,
+    ccValue: string,
+    bccValue: string,
+    keys: { record: StoredPublicKey; key: openpgp.PublicKey }[],
+  ): { keys: openpgp.PublicKey[]; missing: string[] } {
+    const identity = identities.find(item => item.identity_id === identityId);
+    const recipients = [
+      ...parseEnvelopeAddresses(toValue),
+      ...parseEnvelopeAddresses(ccValue),
+      ...parseEnvelopeAddresses(bccValue),
+    ];
+    if (!identity || recipients.length === 0) {
+      return { keys: [], missing: identity ? recipients : [''] };
+    }
+
+    const encryptionKeys: openpgp.PublicKey[] = [];
+    const missing: string[] = [];
+    for (const recipient of recipients) {
+      const matching = keys.filter(({ key }) => keyHasEmail(key, recipient));
+      if (matching.length === 0) {
+        missing.push(recipient);
+      } else {
+        for (const { key } of matching) encryptionKeys.push(key);
+      }
+    }
+    const ownKeys = keys.filter(({ record, key }) => record.is_own && keyHasEmail(key, identity.email));
+    if (ownKeys.length === 0) {
+      missing.push(identity.email);
+    } else {
+      for (const { key } of ownKeys) encryptionKeys.push(key);
+    }
+    return { keys: encryptionKeys, missing: [...new Set(missing)] };
+  }
+
+  function reconcileComposeEncryption(
+    identityId: string,
+    toValue: string,
+    ccValue: string,
+    bccValue: string,
+    keys: { record: StoredPublicKey; key: openpgp.PublicKey }[],
+    loading: boolean,
+  ) {
+    const selection = composeEncryptionSelection(identityId, toValue, ccValue, bccValue, keys);
+    composeCanEncrypt = !loading && selection.keys.length > 0 && selection.missing.length === 0;
+    if (!composeCanEncrypt) composeEncrypt = false;
+  }
+
+  async function loadComposeTrustedKeys() {
+    const request = ++composeKeysRequest;
+    composeKeysLoading = true;
+    composeTrustedKeys = [];
+    composeStoredSigningFingerprints = new Set();
+    try {
+      const [keys, vault] = await Promise.all([
+        trustedPublicKeys(),
+        readVault().catch(() => null),
+      ]);
+      if (request === composeKeysRequest) {
+        composeTrustedKeys = keys;
+        composeStoredSigningFingerprints = vault && localActiveDevice(vault)
+          ? new Set(vault.keys.map(record => record.fingerprint.toUpperCase()))
+          : new Set();
+      }
+    } catch {
+      if (request === composeKeysRequest) {
+        composeTrustedKeys = [];
+        composeStoredSigningFingerprints = new Set();
+      }
+    } finally {
+      if (request === composeKeysRequest) composeKeysLoading = false;
+    }
+  }
+
+  function toggleComposeSign() {
+    if (!composeCanSign) return;
+    composeSign = !composeSign;
+    composeSignOptedOut = !composeSign;
+  }
+
+  function toggleComposeEncrypt() {
+    if (composeCanEncrypt) composeEncrypt = !composeEncrypt;
+  }
+
+  $: reconcileComposeSigning(composeIdentityId, composeSignOptedOut, composeTrustedKeys, composeStoredSigningFingerprints);
+  $: reconcileComposeEncryption(composeIdentityId, composeTo, composeCc, composeBcc, composeTrustedKeys, composeKeysLoading);
+
   async function fetchRawMessage(msg: Message): Promise<Uint8Array> {
     const url = `/api/email/raw?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
     const res = await fetch(url);
@@ -287,26 +441,30 @@
     }
   }
 
-  async function harvestSignedAttachments(
-    rawBytes: Uint8Array,
+  function isSelectedMessage(msg: Message): boolean {
+    return selectedMessage?.uid === msg.uid &&
+      selectedMessage?.account_id === msg.account_id &&
+      selectedMessage?.mailbox === msg.mailbox;
+  }
+
+  async function loadMessagePublicKeyCandidates(
     msg: Message,
-    decryptedAttachments: DecryptedAttachment[] | null = null,
-  ): Promise<boolean> {
-    if (!msg.is_signed && !decryptedAttachments) return false;
-    const sender = bareMailbox(msg.from);
-    const candidates = decryptedAttachments
-      ? decryptedAttachments.filter(attachment => isPgpPublicKeyAttachment({
-        filename: attachment.filename,
-        content_type: attachment.contentType,
-        size: attachment.data.byteLength,
-      }))
-      : (msg.attachments ?? []).filter(isPgpPublicKeyAttachment);
-    let harvested = false;
+    attachments: (Attachment & { data?: Uint8Array })[],
+  ) {
+    const candidates = attachments.filter(isPgpPublicKeyAttachment);
+    if (candidates.length === 0) {
+      if (isSelectedMessage(msg)) pgpImportablePublicKeyAttachments = new Set();
+      return;
+    }
+    const storedFingerprints = new Set(
+      (await listPublicKeys()).map(record => record.fingerprint.toUpperCase()),
+    );
+    const importable = new Set<string>();
     for (const candidate of candidates) {
       try {
-        let bytes: Uint8Array;
-        if ('data' in candidate) {
-          bytes = candidate.data;
+        let bytes = candidate.data;
+        if (bytes) {
+          // Decrypted attachment data is already available in memory.
         } else {
           const url = `/api/email/attachment?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}&filename=${encodeURIComponent(candidate.filename)}`;
           const response = await fetch(url);
@@ -314,24 +472,18 @@
           bytes = new Uint8Array(await response.arrayBuffer());
         }
         const key = await parsePublicKey(new TextDecoder().decode(bytes));
-        if (!sender || !keyHasEmail(key, sender)) continue;
-        const valid = msg.is_encrypted
-          ? (await decryptMessage(getKeys(), rawBytes, [key])).badges.includes('verified')
-          : await verifiesWithKey(rawBytes, key);
-        if (valid) {
-          await savePublicKey(key, 'harvested_attachment', sender);
-          harvested = true;
-        }
+        if (!storedFingerprints.has(key.getFingerprint().toUpperCase())) importable.add(candidate.filename);
       } catch {
-        // A malformed or unverifiable attached key is not harvested.
+        // Only parsed OpenPGP public-key attachments receive an import action.
       }
     }
-    return harvested;
+    if (isSelectedMessage(msg)) pgpImportablePublicKeyAttachments = importable;
   }
 
-  async function pgpUnlock() {
+  async function pgpUnlock(decryptSelected = true): Promise<boolean> {
     pgpUnlocking = true;
     pgpUnlockError = '';
+    let unlocked = false;
     try {
       const vault = await readVault();
       if (!vault) throw new Error('no vault');
@@ -345,9 +497,11 @@
         openVault(vaultKey, keys);
         rememberLocalDevice(device.cred_id);
         pgpKeyUnlocked = true;
-        if (selectedMessage?.is_encrypted) {
+        reconcileComposeSigning(composeIdentityId, composeSignOptedOut, composeTrustedKeys, composeStoredSigningFingerprints);
+        if (decryptSelected && selectedMessage?.is_encrypted) {
           await pgpDecrypt(selectedMessage);
         }
+        unlocked = true;
       } finally {
         eraseBytes(raw);
       }
@@ -357,6 +511,7 @@
       pgpUnlockError = `${tl('pgp_unlockError')} ${msg}`;
     }
     pgpUnlocking = false;
+    return unlocked;
   }
 
   async function pgpDecrypt(msg: Message) {
@@ -388,10 +543,7 @@
           url: URL.createObjectURL(new Blob([attachment.data], { type: 'application/octet-stream' })),
           data: attachment.data,
         }));
-        if (await harvestSignedAttachments(rawBytes, msg, result.attachments)) {
-          const refreshedKeys = await listPublicKeys().then(readVerificationKeys).catch(() => []);
-          pgpBadges = (await decryptMessage(keys, rawBytes, refreshedKeys)).badges;
-        }
+        await loadMessagePublicKeyCandidates(msg, pgpAttachments);
         if (result.isHtml) {
           const withInlineImages = insertDecryptedInlineImages(result.plaintext, result.attachments);
           pgpDecryptedHtml = DOMPurify.sanitize(withInlineImages, { FORCE_BODY: true, FORBID_TAGS: ['script', 'style'] });
@@ -410,10 +562,11 @@
     pgpPublicKeyImportError = '';
     pgpPublicKeyImportSuccess = '';
     try {
+      const msg = selectedMessage;
+      if (!msg) throw new Error('no message');
       let bytes = decryptedData;
       if (!bytes) {
-        if (!selectedMessage) throw new Error('no message');
-        const url = `/api/email/attachment?account_id=${encodeURIComponent(selectedMessage.account_id)}&mailbox=${encodeURIComponent(selectedMessage.mailbox)}&uid=${selectedMessage.uid}&filename=${encodeURIComponent(attachment.filename)}`;
+        const url = `/api/email/attachment?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}&filename=${encodeURIComponent(attachment.filename)}`;
         const res = await fetch(url);
         if (!res.ok) throw new Error('attachment fetch failed');
         bytes = new Uint8Array(await res.arrayBuffer());
@@ -422,8 +575,14 @@
       const key = await parsePublicKey(armored);
       await savePublicKey(key, 'message_attachment');
       pgpPublicKeyImportSuccess = tl('pgp_publicKeyImported');
-      if (selectedMessage?.is_encrypted && getKeys().length > 0) {
-        await pgpDecrypt(selectedMessage);
+      const attachments = msg.is_encrypted ? pgpAttachments : msg.attachments;
+      await loadMessagePublicKeyCandidates(msg, attachments);
+      if (msg.is_encrypted && getKeys().length > 0) {
+        await pgpDecrypt(msg);
+      } else if (msg.is_signed) {
+        const rawBytes = await fetchRawMessage(msg);
+        const verificationKeys = await listPublicKeys().then(readVerificationKeys).catch(() => []);
+        pgpBadges = await verifySignedMessage(rawBytes, verificationKeys);
       }
     } catch {
       pgpPublicKeyImportError = tl('pgp_publicKeyImportError');
@@ -1056,6 +1215,7 @@
     pgpBadges = [];
     pgpPublicKeyImportError = '';
     pgpPublicKeyImportSuccess = '';
+    pgpImportablePublicKeyAttachments = new Set();
     pgpKeyUnlocked = isUnlocked();
     try {
       const url = `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
@@ -1076,8 +1236,8 @@
         try {
           const rawBytes = await fetchRawMessage(full);
           await harvestAutocrypt(rawBytes, full);
+          await loadMessagePublicKeyCandidates(full, full.attachments);
           if (full.is_signed && !full.is_encrypted) {
-            await harvestSignedAttachments(rawBytes, full);
             const verificationKeys = await listPublicKeys().then(readVerificationKeys).catch(() => []);
             pgpBadges = await verifySignedMessage(rawBytes, verificationKeys);
           }
@@ -1378,6 +1538,7 @@
     composeReplyAll = false;
     composeEncrypt = false;
     composeSign = false;
+    composeSignOptedOut = false;
     if (replyTo) {
       composeTo = replyTo.from || '';
       composeSubject = replyTo.subject?.startsWith('Re:') ? replyTo.subject : `Re: ${replyTo.subject || ''}`;
@@ -1396,6 +1557,8 @@
       composeInReplyTo = null;
       composeIdentityId = (identities.find(i => i.is_default) ?? identities[0])?.identity_id ?? '';
     }
+    reconcileComposeSigning(composeIdentityId, composeSignOptedOut, composeTrustedKeys, composeStoredSigningFingerprints);
+    void loadComposeTrustedKeys();
     composeDialog?.showModal();
   }
 
@@ -1429,37 +1592,24 @@
         const allRecipients = [...to, ...cc, ...bcc];
         if (allRecipients.length === 0) throw new Error(tl('pgp_composeNoRecipients'));
 
-        const signingKey = composeSign
-          ? getKeys().find(key => keyHasEmail(key, identity.email)) ?? null
-          : null;
+        let signingKey = composeSign ? signingKeyForIdentity(composeIdentityId) : null;
+        if (composeSign && !signingKey && composeCanSign) {
+          await pgpUnlock(false);
+          signingKey = signingKeyForIdentity(composeIdentityId);
+        }
         if (composeSign && !signingKey) throw new Error(tl('pgp_composeUnlockSigningKey'));
 
-        const encryptionKeys = [];
+        let encryptionKeys: openpgp.PublicKey[] = [];
         if (composeEncrypt) {
-          const missing: string[] = [];
-          const usableRecords = (await listPublicKeys()).filter(record => record.trust === 'trusted');
-          const usableKeys = await Promise.all(usableRecords.map(async record => ({
-            record,
-            key: await parsePublicKey(record.armored),
-          })));
-          for (const recipient of allRecipients) {
-            const matching = usableKeys.filter(({ key }) => keyHasEmail(key, recipient));
-            if (matching.length === 0) {
-              missing.push(recipient);
-            } else {
-              for (const { key } of matching) encryptionKeys.push(key);
-            }
-          }
-          let hasOwnKey = false;
-          for (const { record, key } of usableKeys) {
-            if (!record.is_own) continue;
-            if (keyHasEmail(key, identity.email)) {
-              encryptionKeys.push(key);
-              hasOwnKey = true;
-            }
-          }
-          if (!hasOwnKey) missing.push(identity.email);
-          if (missing.length > 0) throw new Error(tl('pgp_composeMissingKeys', { emails: [...new Set(missing)].join(', ') }));
+          const selection = composeEncryptionSelection(
+            composeIdentityId,
+            composeTo,
+            composeCc,
+            composeBcc,
+            await trustedPublicKeys(),
+          );
+          if (selection.missing.length > 0) throw new Error(tl('pgp_composeMissingKeys', { emails: selection.missing.join(', ') }));
+          encryptionKeys = selection.keys;
         }
         const rawMime = await buildProtectedMime({
           identity,
@@ -1804,7 +1954,8 @@
   $: htmlHasValue = htmlAddsValue(selectedMessage?.body_html ?? null);
   $: bodyTextSegments = linkifySegments(selectedMessage?.body_text ?? '');
   $: visibleServerAttachments = selectedMessage?.attachments.filter(att =>
-    !selectedMessage?.is_encrypted || !isPgpTransportAttachment(att)
+    !isPgpSignatureAttachment(att) &&
+    (!selectedMessage?.is_encrypted || !isPgpTransportAttachment(att))
   ) ?? [];
 
   $: emailOrigins = (() => {
@@ -2279,9 +2430,16 @@
                         <span class="attachment-name" title={att.filename}>{att.filename}</span>
                         <span class="attachment-size">{humanSize(att.size)}</span>
                       </a>
-                      {#if isPgpPublicKeyAttachment(att)}
-                        <button class="secondary small pgp-import-public-btn" on:click={() => importMessagePublicKey(att)} disabled={pgpPublicKeyImporting === att.filename}>
-                          {pgpPublicKeyImporting === att.filename ? tl('pgp_importing') : tl('pgp_importPublicKeyButton')}
+                      {#if pgpImportablePublicKeyAttachments.has(att.filename)}
+                        <button
+                          class="pgp-import-public-btn"
+                          on:click={() => importMessagePublicKey(att)}
+                          disabled={pgpPublicKeyImporting === att.filename}
+                          aria-busy={pgpPublicKeyImporting === att.filename}
+                          title={tl('pgp_importPublicKeyButton')}
+                          aria-label={tl('pgp_importPublicKeyButton')}
+                        >
+                          <UiIcon name="import" />
                         </button>
                       {/if}
                     </div>
@@ -2306,9 +2464,16 @@
                         <span class="attachment-name" title={att.filename}>{att.filename}</span>
                         <span class="attachment-size">{humanSize(att.size)}</span>
                       </a>
-                      {#if isPgpPublicKeyAttachment(att)}
-                        <button class="secondary small pgp-import-public-btn" on:click={() => importMessagePublicKey(att, att.data)} disabled={pgpPublicKeyImporting === att.filename}>
-                          {pgpPublicKeyImporting === att.filename ? tl('pgp_importing') : tl('pgp_importPublicKeyButton')}
+                      {#if pgpImportablePublicKeyAttachments.has(att.filename)}
+                        <button
+                          class="pgp-import-public-btn"
+                          on:click={() => importMessagePublicKey(att, att.data)}
+                          disabled={pgpPublicKeyImporting === att.filename}
+                          aria-busy={pgpPublicKeyImporting === att.filename}
+                          title={tl('pgp_importPublicKeyButton')}
+                          aria-label={tl('pgp_importPublicKeyButton')}
+                        >
+                          <UiIcon name="import" />
                         </button>
                       {/if}
                     </div>
@@ -2318,17 +2483,17 @@
             </div>
           {/if}
           <div class="detail-body">
+            {#if pgpBadges.length > 0}
+              <div class="pgp-badges">
+                {#each pgpBadges as badge}
+                  <span class="pgp-badge pgp-badge-{badge}">{pgpBadgeLabel(badge)}</span>
+                {/each}
+              </div>
+            {/if}
+            {#if pgpPublicKeyImportError}<p class="pgp-error">{pgpPublicKeyImportError}</p>{/if}
+            {#if pgpPublicKeyImportSuccess}<p class="pgp-success">{pgpPublicKeyImportSuccess}</p>{/if}
             {#if selectedMessage.is_encrypted}
               <!-- PGP encrypted message -->
-              {#if pgpBadges.length > 0}
-                <div class="pgp-badges">
-                  {#each pgpBadges as badge}
-                    <span class="pgp-badge pgp-badge-{badge}">{pgpBadgeLabel(badge)}</span>
-                  {/each}
-                </div>
-              {/if}
-              {#if pgpPublicKeyImportError}<p class="pgp-error">{pgpPublicKeyImportError}</p>{/if}
-              {#if pgpPublicKeyImportSuccess}<p class="pgp-success">{pgpPublicKeyImportSuccess}</p>{/if}
               {#if pgpDecryptedHtml}
                 <!-- Decrypted HTML: sandboxed iframe WITHOUT allow-same-origin -->
                 {#key iframeKey}
@@ -2356,7 +2521,7 @@
                       {pgpDecrypting ? tl('pgp_decrypting') : tl('pgp_badgeEncrypted')}
                     </button>
                   {:else}
-                    <button class="pgp-decrypt-btn" on:click={pgpUnlock} disabled={pgpUnlocking} aria-busy={pgpUnlocking}>
+                    <button class="pgp-decrypt-btn" on:click={() => pgpUnlock()} disabled={pgpUnlocking} aria-busy={pgpUnlocking}>
                       {pgpUnlocking ? tl('pgp_unlocking') : tl('pgp_unlockVaultButton')}
                     </button>
                   {/if}
@@ -2667,6 +2832,32 @@
       <div class="compose-row">
         <span class="compose-label">{tl('mail_composeTo')}</span>
         <input class="compose-input" bind:value={composeTo} placeholder={tl('mail_composeToPlaceholder')} />
+        <div class="compose-security-controls">
+          <button
+            type="button"
+            class="compose-security-toggle"
+            class:active={composeEncrypt}
+            disabled={!composeCanEncrypt}
+            title={tl('pgp_composeEncrypt')}
+            aria-label={tl('pgp_composeEncrypt')}
+            aria-pressed={composeEncrypt}
+            on:click={toggleComposeEncrypt}
+          >
+            <UiIcon name="lock" size={16} />
+          </button>
+          <button
+            type="button"
+            class="compose-security-toggle"
+            class:active={composeSign}
+            disabled={!composeCanSign || pgpUnlocking}
+            title={tl('pgp_composeSign')}
+            aria-label={tl('pgp_composeSign')}
+            aria-pressed={composeSign}
+            on:click={toggleComposeSign}
+          >
+            <UiIcon name="signature" size={17} />
+          </button>
+        </div>
         {#if !showComposeCcBcc}
           <button type="button" class="ccbcc-toggle" on:click={() => { showComposeCcBcc = true; }}>{tl('mail_composeCcBcc')}</button>
         {/if}
@@ -2684,13 +2875,6 @@
       <div class="compose-row">
         <span class="compose-label">{tl('mail_composeSubject')}</span>
         <input class="compose-input" bind:value={composeSubject} />
-      </div>
-      <div class="compose-security">
-        <label><input type="checkbox" bind:checked={composeEncrypt} /> {tl('pgp_composeEncrypt')}</label>
-        <label><input type="checkbox" bind:checked={composeSign} /> {tl('pgp_composeSign')}</label>
-        {#if composeEncrypt || composeSign}
-          <span class="compose-security-note">{tl('pgp_composeProtectedHint')}</span>
-        {/if}
       </div>
       <div class="compose-body-row">
         <textarea bind:value={composeBody} rows={10}></textarea>
@@ -3726,10 +3910,26 @@
   }
 
   .pgp-import-public-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
     margin: 0;
-    padding: 0.2rem 0.45rem;
-    font-size: 0.78rem;
+    padding: 0.25rem;
+    width: 1.7rem;
+    height: 1.7rem;
+    background: none;
+    border: none;
+    color: var(--pico-muted-color);
+  }
+
+  .pgp-import-public-btn:hover:not(:disabled) {
+    background: none;
+    color: var(--pico-color);
+  }
+
+  .pgp-import-public-btn:disabled {
+    opacity: 0.45;
   }
 
   .detail-body {
@@ -4067,6 +4267,42 @@
     color: var(--pico-color);
     background: var(--pico-secondary-background);
     border-radius: 0.25rem;
+  }
+
+  .compose-security-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    flex-shrink: 0;
+  }
+
+  .compose-security-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.7rem;
+    height: 1.7rem;
+    padding: 0;
+    margin: 0;
+    border: none;
+    border-radius: 0.3rem;
+    background: transparent;
+    color: var(--pico-muted-color);
+  }
+
+  .compose-security-toggle:hover:not(:disabled) {
+    color: var(--pico-color);
+    background: var(--pico-secondary-background);
+  }
+
+  .compose-security-toggle.active {
+    color: var(--pico-primary);
+    background: color-mix(in srgb, var(--pico-primary) 15%, transparent);
+  }
+
+  .compose-security-toggle:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 
   .compose-body-row {
@@ -4433,25 +4669,6 @@
     color: var(--pico-del-color);
     font-size: 0.875rem;
     margin: 0.25rem 0;
-  }
-
-  .compose-security {
-    display: flex;
-    align-items: center;
-    gap: 1.25rem;
-    padding: 0.25rem 0;
-    font-size: 0.9rem;
-  }
-
-  .compose-security label {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    margin: 0;
-  }
-
-  .compose-security-note {
-    color: var(--pico-muted-color);
   }
 
   .pgp-success {
