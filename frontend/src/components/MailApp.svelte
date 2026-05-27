@@ -14,6 +14,9 @@
   import type * as openpgp from 'openpgp';
   import DOMPurify from 'dompurify';
 
+  export let standalone = false;
+  export let initialMessage: { accountId: string; mailbox: string; uid: number } | null = null;
+
   let locale = 'en';
   $: tl = makeTl(locale);
 
@@ -159,6 +162,7 @@
 
   let selectedMessage: Message | null = null;
   let messageLoading = false;
+  let standaloneUnavailable = false;
 
   let sseSource: EventSource | null = null;
 
@@ -678,7 +682,11 @@
     displayName = user.display_name || '';
     locale = getLocale();
 
-    await loadAll();
+    if (standalone) {
+      await loadStandalone();
+    } else {
+      await loadAll();
+    }
     connectSSE();
 
     const mql = window.matchMedia('(max-width: 767px)');
@@ -741,6 +749,49 @@
         await selectMailbox(firstAcc.account_id, inbox.name);
       }
     }
+  }
+
+  function locatorMessage(locator: { accountId: string; mailbox: string; uid: number }): Message {
+    return {
+      uid: locator.uid,
+      account_id: locator.accountId,
+      mailbox: locator.mailbox,
+      rowid: 0,
+      message_id: null,
+      thread_id: null,
+      from: null,
+      to: [],
+      cc: [],
+      subject: null,
+      sent_at: null,
+      flags: [],
+      has_attachments: false,
+      body_text: null,
+      body_html: null,
+      is_read: true,
+      is_flagged: false,
+      is_encrypted: false,
+      is_signed: false,
+      attachments: [],
+    };
+  }
+
+  async function loadStandalone() {
+    if (!initialMessage || !Number.isInteger(initialMessage.uid) || initialMessage.uid <= 0) {
+      standaloneUnavailable = true;
+      return;
+    }
+    selectedAccountId = initialMessage.accountId;
+    selectedMailbox = initialMessage.mailbox;
+    selectedMessage = locatorMessage(initialMessage);
+    messageLoading = true;
+    await Promise.all([
+      loadIdentities(),
+      loadMailboxes(initialMessage.accountId),
+      loadImageOrigins(),
+      loadBlacklistOrigins(),
+    ]);
+    await openMessage(locatorMessage(initialMessage));
   }
 
   async function loadAccounts() {
@@ -1202,6 +1253,7 @@
 
   async function openMessage(msg: Message) {
     messageLoading = true;
+    standaloneUnavailable = false;
     pgpDecryptGeneration++;
     pgpDecrypting = false;
     selectedMessage = msg;
@@ -1219,10 +1271,12 @@
     pgpPublicKeyImportSuccess = '';
     pgpImportablePublicKeyAttachments = new Set();
     pgpKeyUnlocked = isUnlocked();
+    let loaded = false;
     try {
       const url = `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
       const r = await fetch(url);
       if (r.ok) {
+        loaded = true;
         const full = await r.json() as Message;
         viewMode = htmlAddsValue(full.body_html) ? 'html' : 'text';
         selectedMessage = full;
@@ -1252,6 +1306,11 @@
       }
     } catch {}
     messageLoading = false;
+    if (standalone && !loaded) {
+      clearPgpAttachments();
+      selectedMessage = null;
+      standaloneUnavailable = true;
+    }
   }
 
   function closeDetail() {
@@ -1278,9 +1337,10 @@
         : msg.flags.filter(f => f !== flag);
       const updated = { ...msg, flags: newFlags, is_read: newFlags.includes('\\Seen'), is_flagged: newFlags.includes('\\Flagged') };
       messages = messages.map(m =>
-        m.uid === msg.uid && m.account_id === msg.account_id ? updated : m
+        m.uid === msg.uid && m.account_id === msg.account_id && m.mailbox === msg.mailbox ? updated : m
       );
-      if (selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id) {
+      if (selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id &&
+          selectedMessage?.mailbox === msg.mailbox) {
         selectedMessage = updated;
       }
     } catch {}
@@ -1293,9 +1353,11 @@
       `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`,
       { method: 'DELETE' }
     );
-    messages = messages.filter(m => !(m.uid === msg.uid && m.account_id === msg.account_id));
-    if (selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id) {
+    messages = messages.filter(m => !(m.uid === msg.uid && m.account_id === msg.account_id && m.mailbox === msg.mailbox));
+    if (selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id &&
+        selectedMessage?.mailbox === msg.mailbox) {
       closeDetail();
+      if (standalone) standaloneUnavailable = true;
     }
   }
 
@@ -1305,10 +1367,21 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ account_id: msg.account_id, mailbox: msg.mailbox, uid: msg.uid, dest_mailbox: destMailbox }),
     });
-    messages = messages.filter(m => !(m.uid === msg.uid && m.account_id === msg.account_id));
-    if (selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id) {
+    messages = messages.filter(m => !(m.uid === msg.uid && m.account_id === msg.account_id && m.mailbox === msg.mailbox));
+    if (selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id &&
+        selectedMessage?.mailbox === msg.mailbox) {
       closeDetail();
+      if (standalone) standaloneUnavailable = true;
     }
+  }
+
+  function openPopout(msg: Message) {
+    const params = new URLSearchParams({
+      account_id: msg.account_id,
+      mailbox: msg.mailbox,
+      uid: String(msg.uid),
+    });
+    window.open(`/mail/view/?${params}`, '_blank', 'popup=yes,width=980,height=760,noopener,noreferrer');
   }
 
   // ── Account management ───────────────────────────────────────────────────
@@ -1765,34 +1838,48 @@
     sseSource = new EventSource('/api/events/stream');
     sseSource.addEventListener('emails_refetch', async (e) => {
       const data = JSON.parse(e.data);
-      if (!searching && data.account_id === selectedAccountId && data.mailbox === selectedMailbox) {
+      if (standalone && selectedMessage && data.account_id === selectedMessage.account_id &&
+          data.mailbox === selectedMessage.mailbox) {
+        await openMessage(selectedMessage);
+      } else if (!searching && data.account_id === selectedAccountId && data.mailbox === selectedMailbox) {
         await loadMessages();
       }
-      loadUnreadCounts();
+      if (!standalone) loadUnreadCounts();
     });
     sseSource.addEventListener('email_updated', (e) => {
       const data = JSON.parse(e.data);
+      const updateFlags = (m: Message) => m.uid === data.uid && m.account_id === data.account_id && m.mailbox === data.mailbox
+        ? { ...m, flags: data.flags, is_read: data.flags.includes('\\Seen'), is_flagged: data.flags.includes('\\Flagged') }
+        : m;
       messages = messages.map(m =>
-        m.uid === data.uid && m.account_id === data.account_id
-          ? { ...m, flags: data.flags, is_read: data.flags.includes('\\Seen'), is_flagged: data.flags.includes('\\Flagged') }
-          : m
+        updateFlags(m)
       );
-      loadUnreadCounts();
+      if (selectedMessage) selectedMessage = updateFlags(selectedMessage);
+      if (!standalone) loadUnreadCounts();
     });
     sseSource.addEventListener('email_removed', (e) => {
       const data = JSON.parse(e.data);
       const before = messages.length;
-      messages = messages.filter(m => !(m.uid === data.uid && m.account_id === data.account_id));
+      messages = messages.filter(m => !(m.uid === data.uid && m.account_id === data.account_id && m.mailbox === data.mailbox));
       if (messages.length < before) totalMessages = Math.max(0, totalMessages - 1);
-      loadUnreadCounts();
+      if (selectedMessage?.uid === data.uid && selectedMessage?.account_id === data.account_id &&
+          selectedMessage?.mailbox === data.mailbox) {
+        closeDetail();
+        if (standalone) standaloneUnavailable = true;
+      }
+      if (!standalone) loadUnreadCounts();
     });
     sseSource.addEventListener('accounts_changed', async () => {
-      await loadAccounts();
-      for (const acc of accounts) await loadMailboxes(acc.account_id);
+      if (standalone && selectedAccountId) {
+        await loadMailboxes(selectedAccountId);
+      } else {
+        await loadAccounts();
+        for (const acc of accounts) await loadMailboxes(acc.account_id);
+      }
     });
     sseSource.addEventListener('mailboxes_changed', async (e) => {
       const data = JSON.parse(e.data);
-      await loadMailboxes(data.account_id);
+      if (!standalone || data.account_id === selectedAccountId) await loadMailboxes(data.account_id);
     });
     sseSource.addEventListener('sync_started', (e) => {
       const { account_id, mailbox } = JSON.parse(e.data);
@@ -1803,7 +1890,7 @@
       const next = new Set(syncingMailboxes);
       next.delete(`${account_id}|${mailbox}`);
       syncingMailboxes = next;
-      loadUnreadCounts();
+      if (!standalone) loadUnreadCounts();
     });
     sseSource.onerror = () => {
       sseSource?.close();
@@ -1948,7 +2035,7 @@
   $: primaryMetaValue = selectedMessage
     ? (isSentFolder ? selectedMessage.to.join(', ') : (selectedMessage.from || ''))
     : '';
-  $: layoutColumns = isMobile ? '1fr' : `${sidebarWidth}px 5px ${listWidth}px 5px 1fr`;
+  $: layoutColumns = standalone || isMobile ? '1fr' : `${sidebarWidth}px 5px ${listWidth}px 5px 1fr`;
 
   $: totalPages = totalMessages === 0 ? 0 : Math.ceil(totalMessages / pageSize);
   $: hasPrev = currentPage > 1;
@@ -2005,9 +2092,10 @@
   </span>
 {/snippet}
 
-<div class="mail-page">
+<div class="mail-page" class:standalone>
   <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
-  <div class="mail-layout" style="grid-template-columns: {layoutColumns}">
+  <div class="mail-layout" class:standalone style="grid-template-columns: {layoutColumns}">
+    {#if !standalone}
     <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
     {#if sidebarOpen}
       <button type="button" class="sidebar-backdrop" aria-label={tl('mail_aria_folders')} on:click={() => (sidebarOpen = false)}></button>
@@ -2329,13 +2417,14 @@
     </section>
 
     <div class="resize-handle" role="separator" aria-orientation="vertical" on:mousedown={(e) => startResize('list', e)}></div>
+    {/if}
 
     <!-- ── Message detail ────────────────────────────────────────────────────── -->
-    <section class="message-detail" class:is-open={isMobile && !!selectedMessage}>
+    <section class="message-detail" class:standalone class:is-open={!standalone && isMobile && !!selectedMessage}>
       {#if selectedMessage}
         <div class="detail-header">
           <div class="detail-subject-row">
-            {#if isMobile}<button class="detail-close-btn" aria-label={tl('mail_back')} on:click={closeDetail}>←</button>{/if}
+            {#if !standalone && isMobile}<button class="detail-close-btn" aria-label={tl('mail_back')} on:click={closeDetail}>←</button>{/if}
             <span class="detail-subject">{selectedMessage.subject || tl('mail_noSubject')}</span>
             <button
               class="star-btn"
@@ -2393,6 +2482,11 @@
                 </div>
               {/if}
             </div>
+            {#if !standalone}
+              <button class="inline-action-btn" on:click={() => openPopout(selectedMessage!)} aria-label={tl('mail_popout')} title={tl('mail_popout')}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h7"/></svg>
+              </button>
+            {/if}
           </div>
         </div>
         {#if messageLoading}
@@ -2583,12 +2677,13 @@
           </div>
         {/if}
       {:else}
-        <div class="empty">{tl('mail_selectMessage')}</div>
+        <div class="empty">{standalone && standaloneUnavailable ? tl('mail_messageUnavailable') : tl('mail_selectMessage')}</div>
       {/if}
     </section>
   </div>
 </div>
 
+{#if !standalone}
 <!-- ── Identity management dialog ────────────────────────────────────────── -->
 <dialog
   bind:this={identityDialog}
@@ -2750,8 +2845,10 @@
     {/if}
   </article>
 </dialog>
+{/if}
 
 <!-- ── Image origins trigger button ───────────────────────────────────────── -->
+{#if !standalone}
 <button
   class="origins-trigger"
   on:click={openOriginsGlobal}
@@ -2763,6 +2860,7 @@
     <span class="origins-badge">{imageOrigins.length + blacklistOrigins.length}</span>
   {/if}
 </button>
+{/if}
 
 <!-- ── Image origins dialog ────────────────────────────────────────────────── -->
 <dialog
@@ -2942,6 +3040,7 @@
   </article>
 </dialog>
 
+{#if !standalone}
 <!-- ── Virtual folder form ─────────────────────────────────────────────────── -->
 <dialog
   bind:this={folderDialog}
@@ -3013,6 +3112,7 @@
     <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
   </svg>
 </button>
+{/if}
 
 <style>
   .folder-mailbox-label {
@@ -3112,6 +3212,12 @@
   .mail-layout {
     display: grid;
     overflow: hidden;
+  }
+
+  .mail-layout.standalone {
+    display: flex;
+    flex: 1;
+    min-height: 0;
   }
 
   .resize-handle {
@@ -3650,6 +3756,13 @@
     flex-direction: column;
     overflow: hidden;
     margin-bottom: 0;
+  }
+
+  .message-detail.standalone {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    background: var(--pico-card-background-color, white);
   }
 
   .detail-header {
@@ -4599,6 +4712,13 @@
       background: var(--pico-card-background-color, white);
       overflow-y: auto;
       box-shadow: inset 0 3px 12px rgba(0,0,0,0.08);
+    }
+
+    .message-detail.standalone {
+      display: flex;
+      position: static;
+      overflow-y: auto;
+      box-shadow: none;
     }
 
     .message-detail.is-open .detail-header {
