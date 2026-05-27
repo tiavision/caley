@@ -3,9 +3,8 @@
   import { getUser } from '../lib/user.ts';
   import { getLocale, makeTl } from '../lib/i18n.ts';
   import SelectDropdown from './SelectDropdown.svelte';
-  import { readVault, decryptPrivateKeys } from '../lib/pgp/vault.ts';
+  import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey } from '../lib/pgp/vault.ts';
   import { unlock } from '../lib/pgp/webauthn.ts';
-  import { deriveKek, b64uDecode } from '../lib/pgp/kek.ts';
   import { decryptMessage, verifySignedMessage, verifiesWithKey, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
   import { parsePublicKey, listPublicKeys, readVerificationKeys, savePublicKey } from '../lib/pgp/public-keys.ts';
   import { openVault, getKeys, isUnlocked } from '../lib/pgp/session.ts';
@@ -335,10 +334,13 @@
     try {
       const vault = await readVault();
       if (!vault) throw new Error('no vault');
-      const { prfOutput } = await unlock(vault.metadata.prfSalt);
-      const wrappingKey = await deriveKek(prfOutput, b64uDecode(vault.metadata.hkdfSalt));
-      const keys = await decryptPrivateKeys(wrappingKey, vault.keys);
-      openVault(wrappingKey, keys);
+      const device = localActiveDevice(vault);
+      if (!device) throw new Error('no local approved device');
+      const { prfOutput } = await unlock(device.prf_salt, device.cred_id);
+      const { raw, key: vaultKey } = await unwrapVaultKey(device, prfOutput);
+      const keys = await decryptPrivateKeys(vaultKey, vault.keys);
+      openVault(vaultKey, keys, raw);
+      rememberLocalDevice(device.cred_id);
       pgpKeyUnlocked = true;
       if (selectedMessage?.is_encrypted) {
         await pgpDecrypt(selectedMessage);

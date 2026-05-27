@@ -5,8 +5,9 @@ use axum::{
     response::{IntoResponse, Json, Response},
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::Row;
 use tower_sessions::Session;
 use uuid::Uuid;
 use webauthn_rs::prelude::*;
@@ -25,10 +26,28 @@ fn user_id_to_uuid(user_id: &str) -> Uuid {
     Uuid::from_bytes(bytes)
 }
 
-fn inject_prf_registration(challenge: &mut serde_json::Value) {
+fn configure_prf_registration(challenge: &mut serde_json::Value) {
     if let Some(pk) = challenge.get_mut("publicKey") {
         if let Some(obj) = pk.as_object_mut() {
-            obj.insert("extensions".to_owned(), json!({ "prf": {} }));
+            // Android credential providers are only offered for discoverable
+            // passkey registration. Do not constrain authenticator attachment:
+            // that would exclude third-party passkey managers.
+            if let Some(selection) = obj
+                .entry("authenticatorSelection".to_owned())
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+            {
+                selection.insert("residentKey".to_owned(), json!("required"));
+                selection.insert("requireResidentKey".to_owned(), json!(true));
+            }
+
+            if let Some(extensions) = obj
+                .entry("extensions".to_owned())
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+            {
+                extensions.insert("prf".to_owned(), json!({}));
+            }
         }
     }
 }
@@ -92,7 +111,7 @@ pub async fn register_start(
                     return (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response();
                 }
             };
-            inject_prf_registration(&mut challenge);
+            configure_prf_registration(&mut challenge);
             Json(challenge).into_response()
         }
         Err(e) => {
@@ -177,6 +196,7 @@ pub async fn register_finish(
 #[derive(Deserialize)]
 pub struct AuthStartBody {
     pub prf_salt: String,
+    pub credential_id: Option<String>,
 }
 
 pub async fn authenticate_start(
@@ -195,6 +215,7 @@ pub async fn authenticate_start(
 
     let passkeys: Vec<Passkey> = rows
         .iter()
+        .filter(|r| body.credential_id.as_ref().map_or(true, |id| id == &r.cred_id))
         .filter_map(|r| serde_json::from_str::<Passkey>(&r.passkey).ok())
         .collect();
 
@@ -293,7 +314,7 @@ pub async fn authenticate_finish(
                 }
                 break;
             }
-            StatusCode::OK.into_response()
+            Json(json!({ "cred_id": matched_id })).into_response()
         }
         Err(e) => {
             eprintln!("[pgp] finish_passkey_authentication: {e:?}");
@@ -346,6 +367,343 @@ pub async fn delete_credential(
         Err(e) => {
             eprintln!("[pgp] delete_credential: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
+// ── Synced encrypted private-key vault ───────────────────────────────────────
+
+#[derive(Deserialize, Serialize)]
+pub struct EncryptedBlob {
+    pub iv: String,
+    pub ciphertext: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct PrivateKeyBlob {
+    pub fingerprint: String,
+    pub iv: String,
+    pub ciphertext: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct DeviceBundle {
+    pub cred_id: String,
+    pub public_jwk: serde_json::Value,
+    pub encrypted_private_jwk: String,
+    pub private_iv: String,
+    pub prf_salt: String,
+    pub hkdf_salt: String,
+    pub pairing_nonce: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct VaultWrap {
+    pub cred_id: String,
+    pub ephemeral_public_jwk: serde_json::Value,
+    pub hkdf_salt: String,
+    pub iv: String,
+    pub ciphertext: String,
+}
+
+#[derive(Deserialize)]
+pub struct InitializeVaultBody {
+    pub manifest: EncryptedBlob,
+    pub key: PrivateKeyBlob,
+    pub device: DeviceBundle,
+    pub wrap: VaultWrap,
+}
+
+#[derive(Deserialize)]
+pub struct PendingDeviceBody {
+    pub device: DeviceBundle,
+}
+
+#[derive(Deserialize)]
+pub struct ApproveDeviceBody {
+    pub cred_id: String,
+    pub wrap: VaultWrap,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateVaultBody {
+    pub expected_revision: i64,
+    pub manifest: EncryptedBlob,
+    #[serde(default)]
+    pub upsert_keys: Vec<PrivateKeyBlob>,
+    #[serde(default)]
+    pub delete_keys: Vec<String>,
+    pub approve_device: Option<ApproveDeviceBody>,
+    pub remove_device: Option<String>,
+    pub replace_wraps: Option<Vec<VaultWrap>>,
+}
+
+async fn owns_credential(state: &AppState, user_id: &str, cred_id: &str) -> bool {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM webauthn_credentials WHERE user_id = ? AND cred_id = ?",
+    )
+    .bind(user_id)
+    .bind(cred_id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0)
+        > 0
+}
+
+pub async fn get_vault(State(state): State<AppState>, user: CurrentUser) -> impl IntoResponse {
+    let vault = match sqlx::query(
+        "SELECT revision, manifest_iv, encrypted_manifest FROM pgp_vaults WHERE user_id = ?",
+    )
+    .bind(&user.user_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            eprintln!("[pgp] get vault: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+    };
+
+    let keys = match sqlx::query(
+        "SELECT fingerprint, iv, ciphertext FROM pgp_private_keys WHERE user_id = ? ORDER BY fingerprint",
+    )
+    .bind(&user.user_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|r| json!({ "fingerprint": r.get::<String, _>(0), "iv": r.get::<String, _>(1), "ciphertext": r.get::<String, _>(2) }))
+            .collect::<Vec<_>>(),
+        Err(e) => {
+            eprintln!("[pgp] get vault keys: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+    };
+    let devices = match sqlx::query(
+        "SELECT d.cred_id, w.device_label, d.status, d.public_jwk, d.encrypted_private_jwk,
+                d.private_iv, d.prf_salt, d.hkdf_salt, d.pairing_nonce,
+                v.ephemeral_public_jwk, v.hkdf_salt, v.iv, v.ciphertext
+         FROM pgp_devices d
+         JOIN webauthn_credentials w ON w.cred_id = d.cred_id
+         LEFT JOIN pgp_vault_wraps v ON v.user_id = d.user_id AND v.cred_id = d.cred_id
+         WHERE d.user_id = ? ORDER BY d.created_at",
+    )
+    .bind(&user.user_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|r| {
+                let envelope = r.get::<Option<String>, _>(9).map(|jwk| json!({
+                    "cred_id": r.get::<String, _>(0),
+                    "ephemeral_public_jwk": serde_json::from_str::<serde_json::Value>(&jwk).unwrap_or(json!(null)),
+                    "hkdf_salt": r.get::<Option<String>, _>(10).unwrap_or_default(),
+                    "iv": r.get::<Option<String>, _>(11).unwrap_or_default(),
+                    "ciphertext": r.get::<Option<String>, _>(12).unwrap_or_default(),
+                }));
+                json!({
+                    "cred_id": r.get::<String, _>(0),
+                    "device_label": r.get::<Option<String>, _>(1),
+                    "status": r.get::<String, _>(2),
+                    "public_jwk": serde_json::from_str::<serde_json::Value>(&r.get::<String, _>(3)).unwrap_or(json!(null)),
+                    "encrypted_private_jwk": r.get::<String, _>(4),
+                    "private_iv": r.get::<String, _>(5),
+                    "prf_salt": r.get::<String, _>(6),
+                    "hkdf_salt": r.get::<String, _>(7),
+                    "pairing_nonce": r.get::<String, _>(8),
+                    "wrap": envelope,
+                })
+            })
+            .collect::<Vec<_>>(),
+        Err(e) => {
+            eprintln!("[pgp] get vault devices: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+    };
+
+    Json(json!({
+        "revision": vault.get::<i64, _>(0),
+        "manifest": { "iv": vault.get::<String, _>(1), "ciphertext": vault.get::<String, _>(2) },
+        "keys": keys,
+        "devices": devices,
+    }))
+    .into_response()
+}
+
+pub async fn initialize_vault(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<InitializeVaultBody>,
+) -> impl IntoResponse {
+    if body.wrap.cred_id != body.device.cred_id
+        || !owns_credential(&state, &user.user_id, &body.device.cred_id).await
+    {
+        return (StatusCode::BAD_REQUEST, "invalid device credential").into_response();
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response(),
+    };
+    let now = chrono::Utc::now().timestamp();
+    let result = async {
+        sqlx::query(
+            "INSERT INTO pgp_vaults(user_id, revision, manifest_iv, encrypted_manifest, created_at, updated_at)
+             VALUES(?, 1, ?, ?, ?, ?)",
+        )
+        .bind(&user.user_id).bind(&body.manifest.iv).bind(&body.manifest.ciphertext).bind(now).bind(now)
+        .execute(&mut *tx).await?;
+        sqlx::query(
+            "INSERT INTO pgp_private_keys(user_id, fingerprint, iv, ciphertext) VALUES(?, ?, ?, ?)",
+        )
+        .bind(&user.user_id).bind(&body.key.fingerprint).bind(&body.key.iv).bind(&body.key.ciphertext)
+        .execute(&mut *tx).await?;
+        sqlx::query(
+            "INSERT INTO pgp_devices(cred_id, user_id, status, public_jwk, encrypted_private_jwk, private_iv, prf_salt, hkdf_salt, pairing_nonce, created_at)
+             VALUES(?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&body.device.cred_id).bind(&user.user_id).bind(body.device.public_jwk.to_string())
+        .bind(&body.device.encrypted_private_jwk).bind(&body.device.private_iv).bind(&body.device.prf_salt)
+        .bind(&body.device.hkdf_salt).bind(&body.device.pairing_nonce).bind(now)
+        .execute(&mut *tx).await?;
+        insert_wrap(&mut tx, &user.user_id, &body.wrap).await?;
+        sqlx::query("UPDATE webauthn_credentials SET has_prf = 1 WHERE cred_id = ? AND user_id = ?")
+            .bind(&body.device.cred_id).bind(&user.user_id).execute(&mut *tx).await?;
+        tx.commit().await
+    }
+    .await;
+    match result {
+        Ok(_) => StatusCode::CREATED.into_response(),
+        Err(e) => {
+            eprintln!("[pgp] initialize vault: {e}");
+            (StatusCode::CONFLICT, "vault already exists").into_response()
+        }
+    }
+}
+
+async fn insert_wrap(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: &str,
+    wrap: &VaultWrap,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO pgp_vault_wraps(user_id, cred_id, ephemeral_public_jwk, hkdf_salt, iv, ciphertext)
+         VALUES(?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, cred_id) DO UPDATE SET ephemeral_public_jwk = excluded.ephemeral_public_jwk,
+           hkdf_salt = excluded.hkdf_salt, iv = excluded.iv, ciphertext = excluded.ciphertext",
+    )
+    .bind(user_id).bind(&wrap.cred_id).bind(wrap.ephemeral_public_jwk.to_string())
+    .bind(&wrap.hkdf_salt).bind(&wrap.iv).bind(&wrap.ciphertext)
+    .execute(&mut **tx).await?;
+    Ok(())
+}
+
+pub async fn create_pending_device(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<PendingDeviceBody>,
+) -> impl IntoResponse {
+    if !owns_credential(&state, &user.user_id, &body.device.cred_id).await {
+        return (StatusCode::BAD_REQUEST, "invalid device credential").into_response();
+    }
+    let has_vault = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM pgp_vaults WHERE user_id = ?")
+        .bind(&user.user_id).fetch_one(&state.db).await.unwrap_or(0) > 0;
+    if !has_vault {
+        return (StatusCode::CONFLICT, "vault not initialized").into_response();
+    }
+    let now = chrono::Utc::now().timestamp();
+    let result = sqlx::query(
+        "INSERT INTO pgp_devices(cred_id, user_id, status, public_jwk, encrypted_private_jwk, private_iv, prf_salt, hkdf_salt, pairing_nonce, created_at)
+         VALUES(?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&body.device.cred_id).bind(&user.user_id).bind(body.device.public_jwk.to_string())
+    .bind(&body.device.encrypted_private_jwk).bind(&body.device.private_iv).bind(&body.device.prf_salt)
+    .bind(&body.device.hkdf_salt).bind(&body.device.pairing_nonce).bind(now)
+    .execute(&state.db).await;
+    match result {
+        Ok(_) => {
+            let _ = sqlx::query("UPDATE webauthn_credentials SET has_prf = 1 WHERE cred_id = ? AND user_id = ?")
+                .bind(&body.device.cred_id).bind(&user.user_id).execute(&state.db).await;
+            StatusCode::CREATED.into_response()
+        }
+        Err(e) => {
+            eprintln!("[pgp] pending device: {e}");
+            (StatusCode::CONFLICT, "device already registered").into_response()
+        }
+    }
+}
+
+pub async fn update_vault(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<UpdateVaultBody>,
+) -> impl IntoResponse {
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response(),
+    };
+    let now = chrono::Utc::now().timestamp();
+    let updated = match sqlx::query(
+        "UPDATE pgp_vaults SET revision = revision + 1, manifest_iv = ?, encrypted_manifest = ?, updated_at = ?
+         WHERE user_id = ? AND revision = ?",
+    )
+    .bind(&body.manifest.iv).bind(&body.manifest.ciphertext).bind(now).bind(&user.user_id).bind(body.expected_revision)
+    .execute(&mut *tx).await
+    {
+        Ok(r) if r.rows_affected() == 1 => true,
+        Ok(_) => false,
+        Err(e) => {
+            eprintln!("[pgp] update vault: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+    };
+    if !updated {
+        return (StatusCode::CONFLICT, "vault revision conflict").into_response();
+    }
+
+    let result = async {
+        for key in &body.upsert_keys {
+            sqlx::query(
+                "INSERT INTO pgp_private_keys(user_id, fingerprint, iv, ciphertext) VALUES(?, ?, ?, ?)
+                 ON CONFLICT(user_id, fingerprint) DO UPDATE SET iv = excluded.iv, ciphertext = excluded.ciphertext",
+            )
+            .bind(&user.user_id).bind(&key.fingerprint).bind(&key.iv).bind(&key.ciphertext)
+            .execute(&mut *tx).await?;
+        }
+        for fingerprint in &body.delete_keys {
+            sqlx::query("DELETE FROM pgp_private_keys WHERE user_id = ? AND fingerprint = ?")
+                .bind(&user.user_id).bind(fingerprint).execute(&mut *tx).await?;
+        }
+        if let Some(approval) = &body.approve_device {
+            if approval.cred_id != approval.wrap.cred_id {
+                return Err(sqlx::Error::Protocol("wrap credential mismatch".into()));
+            }
+            sqlx::query("UPDATE pgp_devices SET status = 'active' WHERE user_id = ? AND cred_id = ? AND status = 'pending'")
+                .bind(&user.user_id).bind(&approval.cred_id).execute(&mut *tx).await?;
+            insert_wrap(&mut tx, &user.user_id, &approval.wrap).await?;
+        }
+        if let Some(cred_id) = &body.remove_device {
+            sqlx::query("DELETE FROM webauthn_credentials WHERE user_id = ? AND cred_id = ?")
+                .bind(&user.user_id).bind(cred_id).execute(&mut *tx).await?;
+        }
+        if let Some(wraps) = &body.replace_wraps {
+            sqlx::query("DELETE FROM pgp_vault_wraps WHERE user_id = ?")
+                .bind(&user.user_id).execute(&mut *tx).await?;
+            for wrap in wraps {
+                insert_wrap(&mut tx, &user.user_id, wrap).await?;
+            }
+        }
+        tx.commit().await
+    }
+    .await;
+    match result {
+        Ok(_) => Json(json!({ "revision": body.expected_revision + 1 })).into_response(),
+        Err(e) => {
+            eprintln!("[pgp] apply vault update: {e}");
+            (StatusCode::BAD_REQUEST, "invalid vault update").into_response()
         }
     }
 }

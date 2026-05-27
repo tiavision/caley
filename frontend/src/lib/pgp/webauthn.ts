@@ -38,8 +38,12 @@ function credentialToJson(cred: PublicKeyCredential): unknown {
 }
 
 // Decode a server challenge JSON into the form expected by navigator.credentials.
-function decodeCreationOptions(json: Record<string, unknown>): PublicKeyCredentialCreationOptions {
+function decodeCreationOptions(
+  json: Record<string, unknown>,
+  prfSalt?: Uint8Array,
+): PublicKeyCredentialCreationOptions {
   const pk = json.publicKey as Record<string, unknown>;
+  const extensions = pk.extensions as Record<string, unknown> | undefined;
   return {
     ...pk,
     challenge: b64uDecode(pk.challenge as string),
@@ -51,6 +55,10 @@ function decodeCreationOptions(json: Record<string, unknown>): PublicKeyCredenti
       const cr = c as Record<string, unknown>;
       return { ...cr, id: b64uDecode(cr.id as string) };
     }),
+    extensions: prfSalt ? {
+      ...extensions,
+      prf: { eval: { first: prfSalt } },
+    } : extensions,
   } as PublicKeyCredentialCreationOptions;
 }
 
@@ -82,37 +90,52 @@ export interface EnrollResult {
   hasPrf: boolean;
 }
 
+function getPrfOutput(credential: PublicKeyCredential): ArrayBuffer | undefined {
+  const extResults = credential.getClientExtensionResults() as Record<string, unknown>;
+  const prf = extResults?.prf as Record<string, unknown> | undefined;
+  const first = (prf?.results as Record<string, unknown> | undefined)?.first;
+  return first instanceof ArrayBuffer ? first : undefined;
+}
+
 /**
- * Enrollment = register + immediate authenticate (to capture first PRF output).
+ * Enrollment requests a PRF output during registration, then authenticates only
+ * when registration does not return a value (including Samsung Pass-style flows).
  * deviceLabel is stored in the server's credential registry.
  */
 export async function enroll(deviceLabel: string): Promise<EnrollResult> {
+  const prfSalt = new Uint8Array(32);
+  crypto.getRandomValues(prfSalt);
+  const prfSaltB64 = b64uEncode(prfSalt);
+
   // --- Register ---
   const startRes = await fetch('/api/webauthn/register/start', { method: 'POST' });
   if (!startRes.ok) throw new Error('register/start failed: ' + await startRes.text());
   const startJson = await startRes.json() as Record<string, unknown>;
 
-  const creationOptions = decodeCreationOptions(startJson);
+  const creationOptions = decodeCreationOptions(startJson, prfSalt);
   const credential = await navigator.credentials.create({ publicKey: creationOptions });
   if (!credential) throw new Error('WebAuthn create() returned null');
+  const registrationCredential = credential as PublicKeyCredential;
+  const creationPrfOutput = getPrfOutput(registrationCredential);
 
   const finishRes = await fetch('/api/webauthn/register/finish', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ credential: credentialToJson(credential as PublicKeyCredential), device_label: deviceLabel, has_prf: false }),
+    body: JSON.stringify({ credential: credentialToJson(registrationCredential), device_label: deviceLabel, has_prf: false }),
   });
   if (!finishRes.ok) throw new Error('register/finish failed: ' + await finishRes.text());
   const { cred_id } = await finishRes.json() as { cred_id: string };
 
-  // --- Authenticate immediately to capture PRF output ---
-  const prfSalt = new Uint8Array(32);
-  crypto.getRandomValues(prfSalt);
-  const prfSaltB64 = b64uEncode(prfSalt);
+  if (creationPrfOutput) {
+    return { credentialId: cred_id, prfSalt: prfSaltB64, prfOutput: creationPrfOutput, hasPrf: true };
+  }
 
+  // Samsung Pass and other authenticators may enable PRF at creation but only
+  // evaluate it during authentication.
   const authStartRes = await fetch('/api/webauthn/authenticate/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prf_salt: prfSaltB64 }),
+    body: JSON.stringify({ prf_salt: prfSaltB64, credential_id: cred_id }),
   });
   if (!authStartRes.ok) throw new Error('authenticate/start failed: ' + await authStartRes.text());
   const authJson = await authStartRes.json() as Record<string, unknown>;
@@ -121,12 +144,8 @@ export async function enroll(deviceLabel: string): Promise<EnrollResult> {
   const authCred = await navigator.credentials.get({ publicKey: requestOptions });
   if (!authCred) throw new Error('WebAuthn get() returned null');
 
-  const extResults = (authCred as PublicKeyCredential).getClientExtensionResults() as Record<string, unknown>;
-  const prf = extResults?.prf as Record<string, unknown> | undefined;
-  const prfOutput = (prf?.results as Record<string, unknown>)?.first as ArrayBuffer | undefined;
-
-  const hasPrf = !!prfOutput;
-  if (!hasPrf) throw new Error('prf_not_supported');
+  const prfOutput = getPrfOutput(authCred as PublicKeyCredential);
+  if (!prfOutput) throw new Error('prf_not_supported');
 
   const authFinishRes = await fetch('/api/webauthn/authenticate/finish', {
     method: 'POST',
@@ -134,13 +153,8 @@ export async function enroll(deviceLabel: string): Promise<EnrollResult> {
     body: JSON.stringify(credentialToJson(authCred as PublicKeyCredential)),
   });
   if (!authFinishRes.ok) throw new Error('authenticate/finish failed: ' + await authFinishRes.text());
-
-  // Update has_prf on the server (fire-and-forget)
-  fetch('/api/webauthn/register/finish', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ credential: credentialToJson(credential as PublicKeyCredential), device_label: deviceLabel, has_prf: true }),
-  }).catch(() => {});
+  const authenticated = await authFinishRes.json() as { cred_id: string };
+  if (authenticated.cred_id !== cred_id) throw new Error('wrong credential selected');
 
   return { credentialId: cred_id, prfSalt: prfSaltB64, prfOutput, hasPrf: true };
 }
@@ -209,11 +223,11 @@ export interface UnlockResult {
  * Unlock = authenticate with the stored PRF salt.
  * Returns the raw PRF bytes; the caller derives the KEK and decrypts the vault.
  */
-export async function unlock(prfSaltB64: string): Promise<UnlockResult> {
+export async function unlock(prfSaltB64: string, credentialId?: string): Promise<UnlockResult> {
   const authStartRes = await fetch('/api/webauthn/authenticate/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prf_salt: prfSaltB64 }),
+    body: JSON.stringify({ prf_salt: prfSaltB64, credential_id: credentialId }),
   });
   if (!authStartRes.ok) throw new Error('authenticate/start failed: ' + await authStartRes.text());
   const authJson = await authStartRes.json() as Record<string, unknown>;
@@ -233,6 +247,8 @@ export async function unlock(prfSaltB64: string): Promise<UnlockResult> {
     body: JSON.stringify(credentialToJson(authCred as PublicKeyCredential)),
   });
   if (!finishRes.ok) throw new Error('authenticate/finish failed: ' + await finishRes.text());
+  const authenticated = await finishRes.json() as { cred_id: string };
+  if (credentialId && authenticated.cred_id !== credentialId) throw new Error('wrong credential selected');
 
   return { prfOutput, prfSaltUsed: prfSaltB64 };
 }

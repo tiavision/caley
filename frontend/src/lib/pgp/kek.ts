@@ -26,13 +26,37 @@ export function b64uDecode(s: string): Uint8Array {
  * prfBytes   - raw PRF output (32 bytes from WebAuthn PRF extension)
  * hkdfSalt   - 32-byte random HKDF salt (stored in vault, not secret)
  */
-export async function deriveKek(prfBytes: ArrayBuffer, hkdfSalt: Uint8Array): Promise<CryptoKey> {
+export async function deriveKek(
+  prfBytes: ArrayBuffer,
+  hkdfSalt: Uint8Array,
+  info = 'caley-device-kek-v1',
+): Promise<CryptoKey> {
   const rawKey = await crypto.subtle.importKey('raw', prfBytes, 'HKDF', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
     {
       name: 'HKDF',
       salt: hkdfSalt,
-      info: new TextEncoder().encode('caley-pgp-kek-v1'),
+      info: new TextEncoder().encode(info),
+      hash: 'SHA-256',
+    },
+    rawKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+export async function importAesKey(raw: Uint8Array): Promise<CryptoKey> {
+  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+export async function deriveSharedKek(shared: ArrayBuffer, salt: Uint8Array): Promise<CryptoKey> {
+  const rawKey = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      salt,
+      info: new TextEncoder().encode('caley-vault-wrap-v1'),
       hash: 'SHA-256',
     },
     rawKey,
