@@ -1,5 +1,5 @@
 <script lang="ts">
-  export let name: 'import' | 'trash' | 'key-plus' | 'lock' | 'signature';
+  export let name: 'import' | 'trash' | 'key-plus' | 'lock' | 'signature' | 'verified';
   export let size = 16;
   export let strokeWidth = 2;
 </script>
@@ -38,5 +38,8 @@
   {:else if name === 'signature'}
     <path d="M3 18c3.4-5.3 5.2-11.8 7.3-11.8 3.4 0-1.6 10.3-1.1 11.3.7 1.5 3.4-4.1 4.5-4.1 1.1 0 .3 3.7 1.5 3.7 1 0 2-2 3.2-2 1.1 0 1.6.6 2.6 1.2" />
     <path d="M3 21h18" />
+  {:else if name === 'verified'}
+    <circle cx="12" cy="12" r="9" />
+    <polyline points="8 12 11 15 16 9" />
   {/if}
 </svg>

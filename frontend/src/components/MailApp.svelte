@@ -238,6 +238,8 @@
   let pgpImportablePublicKeyAttachments = new Set<string>();
   let pgpKeyUnlocked = isUnlocked();
   let pgpDecryptGeneration = 0;
+  $: pgpIconBadges = pgpBadges.filter(badge => badge === 'encrypted' || badge === 'signed' || badge === 'verified');
+  $: pgpTextBadges = pgpBadges.filter(badge => badge !== 'encrypted' && badge !== 'signed' && badge !== 'verified');
 
   function clearPgpAttachments() {
     for (const attachment of pgpAttachments) URL.revokeObjectURL(attachment.url);
@@ -2403,6 +2405,26 @@
               <span class="meta-label">{primaryMetaLabel}:</span>
               <span class="meta-value">{primaryMetaValue}</span>
               <span class="meta-toggle" aria-hidden="true">{metaExpanded ? '▲' : '▼'}</span>
+              {#if pgpIconBadges.length > 0}
+                <span class="pgp-security-icons">
+                  {#each pgpIconBadges as badge}
+                    <span
+                      class="pgp-security-icon pgp-security-icon-{badge}"
+                      title={pgpBadgeLabel(badge)}
+                      aria-label={pgpBadgeLabel(badge)}
+                      role="img"
+                    >
+                      {#if badge === 'encrypted'}
+                        <UiIcon name="lock" size={16} />
+                      {:else if badge === 'signed'}
+                        <UiIcon name="signature" size={17} />
+                      {:else}
+                        <UiIcon name="verified" size={16} />
+                      {/if}
+                    </span>
+                  {/each}
+                </span>
+              {/if}
             </div>
             {#if metaExpanded}
               {#if isSentFolder}<div><strong>{tl('mail_metaFrom')}:</strong> {selectedMessage.from || ''}</div>{/if}
@@ -2486,9 +2508,9 @@
             </div>
           {/if}
           <div class="detail-body">
-            {#if pgpBadges.length > 0}
+            {#if pgpTextBadges.length > 0}
               <div class="pgp-badges">
-                {#each pgpBadges as badge}
+                {#each pgpTextBadges as badge}
                   <span class="pgp-badge pgp-badge-{badge}">{pgpBadgeLabel(badge)}</span>
                 {/each}
               </div>
@@ -3854,6 +3876,29 @@
     line-height: 1;
   }
 
+  .pgp-security-icons {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    flex-shrink: 0;
+  }
+
+  .pgp-security-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.7rem;
+    height: 1.7rem;
+    border-radius: 0.3rem;
+    color: var(--pico-primary);
+    background: color-mix(in srgb, var(--pico-primary) 15%, transparent);
+  }
+
+  .pgp-security-icon-verified {
+    color: var(--pico-ins-color);
+    background: color-mix(in srgb, var(--pico-ins-color) 20%, transparent);
+  }
+
   .meta-toggle:hover {
     color: var(--pico-color, inherit);
   }
@@ -4653,9 +4698,6 @@
     color: var(--pico-color);
   }
 
-  .pgp-badge-verified { background: color-mix(in srgb, var(--pico-ins-color) 20%, transparent); color: var(--pico-ins-color); }
-  .pgp-badge-encrypted { background: color-mix(in srgb, var(--pico-primary) 15%, transparent); color: var(--pico-primary); }
-  .pgp-badge-signed { background: color-mix(in srgb, var(--pico-primary) 10%, transparent); color: var(--pico-primary); }
   .pgp-badge-verification_failed,
   .pgp-badge-decrypt_failed { background: color-mix(in srgb, var(--pico-del-color) 15%, transparent); color: var(--pico-del-color); }
 
