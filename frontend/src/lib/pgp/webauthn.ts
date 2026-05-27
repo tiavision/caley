@@ -98,9 +98,9 @@ function getPrfOutput(credential: PublicKeyCredential): ArrayBuffer | undefined 
 }
 
 /**
- * Enrollment requests a PRF output during registration, then authenticates only
- * when registration does not return a value (including Samsung Pass-style flows).
- * deviceLabel is stored in the server's credential registry.
+ * Enrollment requests a PRF output during registration. Authenticators that
+ * support PRF but do not return its value at creation (such as Samsung Pass)
+ * are authenticated once afterward to obtain it.
  */
 export async function enroll(deviceLabel: string): Promise<EnrollResult> {
   const prfSalt = new Uint8Array(32);
@@ -130,8 +130,8 @@ export async function enroll(deviceLabel: string): Promise<EnrollResult> {
     return { credentialId: cred_id, prfSalt: prfSaltB64, prfOutput: creationPrfOutput, hasPrf: true };
   }
 
-  // Samsung Pass and other authenticators may enable PRF at creation but only
-  // evaluate it during authentication.
+  // Some authenticators expose PRF support at creation but evaluate it only
+  // during authentication.
   const authStartRes = await fetch('/api/webauthn/authenticate/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

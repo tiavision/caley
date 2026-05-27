@@ -373,6 +373,37 @@ pub async fn delete_credential(
 
 // ── Synced encrypted private-key vault ───────────────────────────────────────
 
+pub async fn reset_vault(State(state): State<AppState>, user: CurrentUser) -> impl IntoResponse {
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response(),
+    };
+    let result = async {
+        // Deleting WebAuthn credentials cascades through device bundles and wraps.
+        sqlx::query("DELETE FROM webauthn_credentials WHERE user_id = ?")
+            .bind(&user.user_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM pgp_private_keys WHERE user_id = ?")
+            .bind(&user.user_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM pgp_vaults WHERE user_id = ?")
+            .bind(&user.user_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await
+    }
+    .await;
+    match result {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            eprintln!("[pgp] reset vault: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 pub struct EncryptedBlob {
     pub iv: String,
@@ -681,8 +712,11 @@ pub async fn update_vault(
             if approval.cred_id != approval.wrap.cred_id {
                 return Err(sqlx::Error::Protocol("wrap credential mismatch".into()));
             }
-            sqlx::query("UPDATE pgp_devices SET status = 'active' WHERE user_id = ? AND cred_id = ? AND status = 'pending'")
+            let approved = sqlx::query("UPDATE pgp_devices SET status = 'active' WHERE user_id = ? AND cred_id = ? AND status = 'pending'")
                 .bind(&user.user_id).bind(&approval.cred_id).execute(&mut *tx).await?;
+            if approved.rows_affected() != 1 {
+                return Err(sqlx::Error::Protocol("pending device not found".into()));
+            }
             insert_wrap(&mut tx, &user.user_id, &approval.wrap).await?;
         }
         if let Some(cred_id) = &body.remove_device {

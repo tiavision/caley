@@ -238,6 +238,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/webauthn/credentials", get(pgp::list_credentials))
         .route("/api/webauthn/credential", delete(pgp::delete_credential))
         .route("/api/pgp/vault", get(pgp::get_vault))
+        .route("/api/pgp/vault", delete(pgp::reset_vault))
         .route("/api/pgp/vault/initialize", post(pgp::initialize_vault))
         .route("/api/pgp/vault", put(pgp::update_vault))
         .route("/api/pgp/devices/pending", post(pgp::create_pending_device))

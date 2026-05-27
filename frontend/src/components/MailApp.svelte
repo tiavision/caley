@@ -3,7 +3,7 @@
   import { getUser } from '../lib/user.ts';
   import { getLocale, makeTl } from '../lib/i18n.ts';
   import SelectDropdown from './SelectDropdown.svelte';
-  import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey } from '../lib/pgp/vault.ts';
+  import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey, validateVault, eraseBytes } from '../lib/pgp/vault.ts';
   import { unlock } from '../lib/pgp/webauthn.ts';
   import { decryptMessage, verifySignedMessage, verifiesWithKey, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
   import { parsePublicKey, listPublicKeys, readVerificationKeys, savePublicKey } from '../lib/pgp/public-keys.ts';
@@ -338,15 +338,22 @@
       if (!device) throw new Error('no local approved device');
       const { prfOutput } = await unlock(device.prf_salt, device.cred_id);
       const { raw, key: vaultKey } = await unwrapVaultKey(device, prfOutput);
-      const keys = await decryptPrivateKeys(vaultKey, vault.keys);
-      openVault(vaultKey, keys, raw);
-      rememberLocalDevice(device.cred_id);
-      pgpKeyUnlocked = true;
-      if (selectedMessage?.is_encrypted) {
-        await pgpDecrypt(selectedMessage);
+      try {
+        await validateVault(vault, vaultKey, device.cred_id);
+        const keys = await decryptPrivateKeys(vaultKey, vault.keys);
+        openVault(vaultKey, keys);
+        rememberLocalDevice(device.cred_id);
+        pgpKeyUnlocked = true;
+        if (selectedMessage?.is_encrypted) {
+          await pgpDecrypt(selectedMessage);
+        }
+      } finally {
+        eraseBytes(raw);
       }
-    } catch {
-      pgpUnlockError = tl('pgp_unlockError');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[pgp] unlock vault failed', e);
+      pgpUnlockError = `${tl('pgp_unlockError')} ${msg}`;
     }
     pgpUnlocking = false;
   }
