@@ -1,5 +1,5 @@
 <script lang="ts">
-  export let name: 'import' | 'trash' | 'key-plus' | 'lock' | 'signature' | 'verified';
+  export let name: 'import' | 'export' | 'trash' | 'key-plus' | 'identity-plus' | 'lock' | 'signature' | 'verified';
   export let size = 16;
   export let strokeWidth = 2;
 </script>
@@ -19,6 +19,10 @@
     <path d="M12 16V4" />
     <polyline points="7 9 12 4 17 9" />
     <path d="M4 17v3h16v-3" />
+  {:else if name === 'export'}
+    <path d="M12 4v12" />
+    <polyline points="7 11 12 16 17 11" />
+    <path d="M4 17v3h16v-3" />
   {:else if name === 'trash'}
     <polyline points="3 6 5 6 21 6" />
     <path d="M19 6l-1 14H6L5 6" />
@@ -31,6 +35,11 @@
     <path d="M15 4h4v4" />
     <path d="M18 15v6" />
     <path d="M15 18h6" />
+  {:else if name === 'identity-plus'}
+    <circle cx="9" cy="7" r="4" />
+    <path d="M2 19c0-4 3.1-7 7-7 2.1 0 4 0.9 5.3 2.3" />
+    <path d="M19 15v6" />
+    <path d="M16 18h6" />
   {:else if name === 'lock'}
     <rect x="5" y="10" width="14" height="10" rx="2" />
     <path d="M8 10V7a4 4 0 0 1 8 0v3" />

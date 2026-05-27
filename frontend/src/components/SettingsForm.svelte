@@ -53,7 +53,14 @@
     type VaultManifest,
   } from '../lib/pgp/vault.ts';
   import { enroll, unlock, listCredentials } from '../lib/pgp/webauthn.ts';
-  import { importPrivateKey, getFingerprint, getPrimaryEmail, extractPublicKey } from '../lib/pgp/keyring.ts';
+  import {
+    importPrivateKey,
+    getFingerprint,
+    getPrimaryEmail,
+    getKeyIdentities,
+    addKeyIdentity,
+    extractPublicKey,
+  } from '../lib/pgp/keyring.ts';
   import {
     parsePublicKey,
     listPublicKeys,
@@ -101,6 +108,8 @@
   let pgpResetting = false;
   let pgpPrivateKeyDialog: HTMLDialogElement;
   let pgpPublicKeyDialog: HTMLDialogElement;
+  let pgpIdentityDialog: HTMLDialogElement;
+  let pgpOwnPublicKeyDialog: HTMLDialogElement;
   let pgpAccessDialog: HTMLDialogElement;
   let pgpUnlockDialog: HTMLDialogElement;
   let pgpUnlockDialogRecovery = false;
@@ -127,12 +136,36 @@
   let pgpPublicImporting = false;
   let pgpPublicImportError = '';
   let pgpPublicImportSuccess = '';
+  let pgpOwnPublicKeys = new Map<string, StoredPublicKey>();
+  let pgpStoredKeyIdentities = new Map<string, ReturnType<typeof getKeyIdentities>>();
+  let pgpManagedFingerprint = '';
+  let pgpIdentityName = '';
+  let pgpIdentityEmail = '';
+  let pgpIdentityComment = '';
+  let pgpManagedPublicArmored = '';
+  let pgpKeyActionSaving = false;
+  let pgpKeyActionError = '';
   $: pgpTrustedSenderKeys = pgpPublicKeys.filter(key => !key.is_own);
   $: pgpLocalActiveMethods = pgpVault ? localActiveDevices(pgpVault) : [];
   $: pgpLocalPendingMethods = pgpVault ? localPendingDevices(pgpVault) : [];
   $: pgpUnlockCandidates = pgpUnlockDialogRecovery
     ? (pgpVault?.devices.filter(device => device.status === 'active') ?? [])
     : pgpLocalActiveMethods;
+
+  async function cacheOwnPublicKeys() {
+    const keys = new Map<string, StoredPublicKey>();
+    const identities = new Map<string, ReturnType<typeof getKeyIdentities>>();
+    for (const record of pgpPublicKeys.filter(key => key.is_own)) {
+      keys.set(record.fingerprint, record);
+      try {
+        identities.set(record.fingerprint, getKeyIdentities(await parsePublicKey(record.armored)));
+      } catch {
+        // A malformed public copy must not prevent the private vault from loading.
+      }
+    }
+    pgpOwnPublicKeys = keys;
+    pgpStoredKeyIdentities = identities;
+  }
 
   async function loadVaultStatus() {
     const vault = await readVault().catch(() => null);
@@ -142,6 +175,7 @@
     pgpPairingSas = localPending ? await pairingSas(localPending) : '';
     pgpHasCredentials = (await listCredentials().catch(() => [])).length > 0;
     pgpPublicKeys = await listPublicKeys().catch(() => []);
+    await cacheOwnPublicKeys();
   }
 
   function refreshUnlockState() {
@@ -242,6 +276,7 @@
         };
         pgpVaultRecords = [record];
         pgpPublicKeys = await listPublicKeys().catch(() => []);
+        await cacheOwnPublicKeys();
         refreshUnlockState();
         pgpJustEnrolled = pgpImportedFingerprint;
         clearImportForm();
@@ -278,6 +313,8 @@
 
       await uploadPublicKey(pgpImportedKey, pgpImportedFingerprint);
       addKey(pgpImportedFingerprint, pgpImportedKey);
+      pgpPublicKeys = await listPublicKeys().catch(() => pgpPublicKeys);
+      await cacheOwnPublicKeys();
 
       pgpVaultRecords = [
         ...pgpVaultRecords.filter(existing => existing.fingerprint !== record.fingerprint),
@@ -453,6 +490,50 @@
     }
   }
 
+  function unlockedPrivateKey(fingerprint: string): openpgp.PrivateKey | undefined {
+    return getKeys().find(key => getFingerprint(key) === fingerprint);
+  }
+
+  function displayedKeyIdentities(
+    fingerprint: string,
+    _unlockRevision: number,
+    storedIdentities: Map<string, ReturnType<typeof getKeyIdentities>>,
+  ): ReturnType<typeof getKeyIdentities> {
+    const key = unlockedPrivateKey(fingerprint);
+    return key ? getKeyIdentities(key) : (storedIdentities.get(fingerprint) ?? []);
+  }
+
+  async function updatePrivateKey(key: openpgp.PrivateKey) {
+    if (!pgpVault || !pgpManifest) throw new Error('unlock the vault first');
+    const vaultKey = getWrappingKey();
+    if (!vaultKey) throw new Error('unlock the vault first');
+    const fingerprint = getFingerprint(key);
+    const record = await encryptPrivateKey(vaultKey, fingerprint, key);
+    const keys = [
+      ...pgpManifest.keys.filter(existing => existing.fingerprint !== fingerprint),
+      { fingerprint, commitment: await keyCommitment(record) },
+    ];
+    const next = await nextManifest({ keys });
+    const encryptedManifest = await encryptManifest(vaultKey, next);
+    const revision = await updateVault({
+      expected_revision: pgpVault.revision,
+      manifest: encryptedManifest,
+      upsert_keys: [record],
+    });
+    await checkpointUpdate(next, encryptedManifest);
+    pgpManifest = next;
+    pgpVaultRecords = [
+      ...pgpVaultRecords.filter(existing => existing.fingerprint !== fingerprint),
+      record,
+    ];
+    pgpVault = { ...pgpVault, revision, manifest: encryptedManifest, keys: pgpVaultRecords };
+    addKey(fingerprint, key);
+    await uploadPublicKey(key, fingerprint);
+    pgpPublicKeys = await listPublicKeys().catch(() => pgpPublicKeys);
+    await cacheOwnPublicKeys();
+    refreshUnlockState();
+  }
+
   async function onPgpRemoveDevice(device: DeviceRecord) {
     if (!pgpVault || !getWrappingKey() || !pgpManifest) {
       pgpDeviceActionError = tl('pgp_unlockRemoveFirst');
@@ -581,6 +662,73 @@
     pgpPublicArmoredKey = '';
     pgpPublicImportError = '';
     pgpPublicKeyDialog?.showModal();
+  }
+
+  function openIdentityDialog(fingerprint: string) {
+    pgpManagedFingerprint = fingerprint;
+    pgpIdentityName = '';
+    pgpIdentityEmail = '';
+    pgpIdentityComment = '';
+    pgpKeyActionError = '';
+    pgpIdentityDialog?.showModal();
+  }
+
+  function openOwnPublicKeyDialog(fingerprint: string) {
+    pgpManagedFingerprint = fingerprint;
+    pgpManagedPublicArmored = '';
+    pgpKeyActionError = '';
+    pgpOwnPublicKeyDialog?.showModal();
+  }
+
+  async function onPgpAddIdentity() {
+    const key = unlockedPrivateKey(pgpManagedFingerprint);
+    if (!key) return;
+    pgpKeyActionSaving = true;
+    pgpKeyActionError = '';
+    try {
+      const updated = await addKeyIdentity(key, {
+        name: pgpIdentityName.trim(),
+        email: pgpIdentityEmail.trim(),
+        ...(pgpIdentityComment.trim() ? { comment: pgpIdentityComment.trim() } : {}),
+      });
+      await updatePrivateKey(updated);
+      pgpIdentityDialog?.close();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      pgpKeyActionError = `${tl('pgp_identityAddError')}: ${msg}`;
+    }
+    pgpKeyActionSaving = false;
+  }
+
+  async function onPgpOwnPublicImport() {
+    const privateKey = unlockedPrivateKey(pgpManagedFingerprint);
+    if (!privateKey) return;
+    pgpKeyActionSaving = true;
+    pgpKeyActionError = '';
+    try {
+      const publicKey = await parsePublicKey(pgpManagedPublicArmored);
+      if (getFingerprint(publicKey) !== pgpManagedFingerprint) {
+        throw new Error(tl('pgp_publicKeyMismatch'));
+      }
+      await updatePrivateKey(await privateKey.update(publicKey));
+      pgpOwnPublicKeyDialog?.close();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      pgpKeyActionError = `${tl('pgp_ownPublicKeyImportError')}: ${msg}`;
+    }
+    pgpKeyActionSaving = false;
+  }
+
+  function onPgpExportPublicKey(fingerprint: string) {
+    const key = unlockedPrivateKey(fingerprint);
+    const armored = key ? extractPublicKey(key) : pgpOwnPublicKeys.get(fingerprint)?.armored;
+    if (!armored) return;
+    const url = URL.createObjectURL(new Blob([armored], { type: 'application/pgp-keys' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${fingerprint}.asc`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   async function selectUnlockMethod(device: DeviceRecord) {
@@ -850,6 +998,9 @@
         <button class="secondary danger" onclick={onPgpResetVault} disabled={pgpResetting} aria-busy={pgpResetting}>
           {tl('pgp_startOverButton')}
         </button>
+        {#if pgpVaultUnlocked}
+          <button class="secondary" onclick={onPgpRotateVaultKey}>{tl('pgp_rotateVaultKey')}</button>
+        {/if}
       </div>
 
       <div class="pgp-section-heading">
@@ -872,33 +1023,64 @@
       <p class="pgp-section-hint">{tl('pgp_privateKeysHint')}</p>
       <ul class="pgp-key-list">
         {#each pgpVaultRecords as record (record.fingerprint)}
-          <li class="pgp-key-item">
-            <div class="pgp-key-info">
-              <span class="pgp-fingerprint">{record.fingerprint.slice(0, 16)}…</span>
+          <li class="pgp-key-item pgp-private-key-item">
+            <div class="pgp-key-info pgp-private-key-info">
+              <div class="pgp-private-key-header">
+                <span class="pgp-fingerprint" title={record.fingerprint}>{record.fingerprint}</span>
+                <div class="pgp-key-actions">
+                  {#if pgpVaultUnlocked}
+                    <button
+                      class="pgp-icon-btn"
+                      onclick={() => openIdentityDialog(record.fingerprint)}
+                      title={tl('pgp_addIdentity')}
+                      aria-label={tl('pgp_addIdentity')}
+                    >
+                      <UiIcon name="identity-plus" />
+                    </button>
+                    <button
+                      class="pgp-icon-btn"
+                      onclick={() => openOwnPublicKeyDialog(record.fingerprint)}
+                      title={tl('pgp_importOwnPublicKey')}
+                      aria-label={tl('pgp_importOwnPublicKey')}
+                    >
+                      <UiIcon name="import" />
+                    </button>
+                  {/if}
+                  {#if pgpVaultUnlocked || pgpOwnPublicKeys.has(record.fingerprint)}
+                    <button
+                      class="pgp-icon-btn"
+                      onclick={() => onPgpExportPublicKey(record.fingerprint)}
+                      title={tl('pgp_exportPublicKey')}
+                      aria-label={tl('pgp_exportPublicKey')}
+                    >
+                      <UiIcon name="export" />
+                    </button>
+                  {/if}
+                  {#if pgpVaultUnlocked}
+                    <button
+                      class="pgp-icon-btn danger"
+                      onclick={() => onPgpRemoveKey(record.fingerprint)}
+                      title={tl('pgp_removeKey')}
+                      aria-label={tl('pgp_removeKey')}
+                    >
+                      <UiIcon name="trash" />
+                    </button>
+                  {/if}
+                </div>
+              </div>
               {#if record.fingerprint === pgpJustEnrolled}
                 <span class="pgp-success">{tl('pgp_enrolled')}</span>
               {/if}
-            </div>
-            <div class="pgp-key-actions">
-              {#if pgpVaultUnlocked}
-                <button
-                  class="pgp-icon-btn danger"
-                  onclick={() => onPgpRemoveKey(record.fingerprint)}
-                  title={tl('pgp_removeKey')}
-                  aria-label={tl('pgp_removeKey')}
-                >
-                  <UiIcon name="trash" />
-                </button>
+              {#if displayedKeyIdentities(record.fingerprint, pgpUnlockRevision, pgpStoredKeyIdentities).length > 0}
+                <span class="pgp-identity-heading">{tl('pgp_keyIdentities')}</span>
+                {#each displayedKeyIdentities(record.fingerprint, pgpUnlockRevision, pgpStoredKeyIdentities) as identity (identity.userID)}
+                  <span class="pgp-key-identity">{identity.userID}</span>
+                {/each}
               {/if}
             </div>
           </li>
         {/each}
       </ul>
-      {#if pgpVaultUnlocked}
-        <div class="pgp-global-actions">
-          <button class="secondary" onclick={onPgpRotateVaultKey}>{tl('pgp_rotateVaultKey')}</button>
-        </div>
-      {/if}
 
       <div class="pgp-section-heading">
         <h4>{tl('pgp_devicesHeading')}</h4>
@@ -1107,6 +1289,67 @@
           </button>
         {/if}
         <button type="button" class="secondary" onclick={closePrivateKeyDialog}>{tl('event_cancel')}</button>
+      </footer>
+    </form>
+  </article>
+</dialog>
+
+<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
+<dialog
+  bind:this={pgpIdentityDialog}
+  onclick={(e) => { if (e.target === e.currentTarget) pgpIdentityDialog?.close(); }}
+>
+  <article>
+    <header>
+      <h3>{tl('pgp_addIdentity')}</h3>
+      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={() => pgpIdentityDialog?.close()}></button>
+    </header>
+    {#if pgpKeyActionError}<p class="pgp-error">{pgpKeyActionError}</p>{/if}
+    <form onsubmit={(e) => { e.preventDefault(); onPgpAddIdentity(); }}>
+      <label>
+        <span>{tl('pgp_identityName')}</span>
+        <input type="text" bind:value={pgpIdentityName} />
+      </label>
+      <label>
+        <span>{tl('pgp_identityEmail')}</span>
+        <input type="email" bind:value={pgpIdentityEmail} required />
+      </label>
+      <label>
+        <span>{tl('pgp_identityComment')}</span>
+        <input type="text" bind:value={pgpIdentityComment} />
+      </label>
+      <footer>
+        <button type="submit" disabled={pgpKeyActionSaving} aria-busy={pgpKeyActionSaving}>
+          {pgpKeyActionSaving ? tl('mail_saving') : tl('mail_add')}
+        </button>
+        <button type="button" class="secondary" onclick={() => pgpIdentityDialog?.close()}>{tl('event_cancel')}</button>
+      </footer>
+    </form>
+  </article>
+</dialog>
+
+<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
+<dialog
+  bind:this={pgpOwnPublicKeyDialog}
+  onclick={(e) => { if (e.target === e.currentTarget) pgpOwnPublicKeyDialog?.close(); }}
+>
+  <article>
+    <header>
+      <h3>{tl('pgp_importOwnPublicKey')}</h3>
+      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={() => pgpOwnPublicKeyDialog?.close()}></button>
+    </header>
+    <p class="pgp-section-hint">{tl('pgp_importOwnPublicKeyHint')}</p>
+    {#if pgpKeyActionError}<p class="pgp-error">{pgpKeyActionError}</p>{/if}
+    <form onsubmit={(e) => { e.preventDefault(); onPgpOwnPublicImport(); }}>
+      <label>
+        <span>{tl('pgp_importArmoredPublicKey')}</span>
+        <textarea rows="6" bind:value={pgpManagedPublicArmored} placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----"></textarea>
+      </label>
+      <footer>
+        <button type="submit" disabled={pgpKeyActionSaving || !pgpManagedPublicArmored} aria-busy={pgpKeyActionSaving}>
+          {pgpKeyActionSaving ? tl('pgp_importing') : tl('pgp_importPublicKeyButton')}
+        </button>
+        <button type="button" class="secondary" onclick={() => pgpOwnPublicKeyDialog?.close()}>{tl('event_cancel')}</button>
       </footer>
     </form>
   </article>
@@ -1404,6 +1647,47 @@
     gap: 0.15rem;
   }
 
+  .pgp-private-key-info {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.2rem;
+    text-align: left;
+  }
+
+  .pgp-private-key-item {
+    align-items: stretch;
+  }
+
+  .pgp-private-key-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .pgp-private-key-header .pgp-fingerprint {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    word-break: normal;
+  }
+
+  .pgp-private-key-header .pgp-key-actions {
+    flex-wrap: nowrap;
+  }
+
+  .pgp-identity-heading {
+    color: var(--pico-muted-color);
+    font-size: 0.8rem;
+  }
+
+  .pgp-key-identity {
+    font-size: 0.9rem;
+  }
+
   .pgp-key-source {
     color: var(--pico-muted-color);
     font-size: 0.85rem;
@@ -1417,12 +1701,11 @@
     padding: 0.5rem 0.75rem;
     border: 1px solid var(--pico-muted-border-color);
     border-radius: var(--pico-border-radius);
+    text-align: left;
   }
 
   .pgp-key-info {
     display: flex;
-    align-items: center;
-    gap: 0.5rem;
     min-width: 0;
     flex: 1;
   }
@@ -1451,6 +1734,8 @@
 
   .pgp-key-actions {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 0.4rem;
     flex-shrink: 0;
   }

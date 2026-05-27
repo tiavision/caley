@@ -50,6 +50,32 @@ export function getPrimaryEmail(key: openpgp.Key): string {
   return uid;
 }
 
+export interface KeyIdentity {
+  name: string;
+  email: string;
+  comment: string;
+  userID: string;
+}
+
+/** Return all textual User IDs certified on a key. */
+export function getKeyIdentities(key: openpgp.Key): KeyIdentity[] {
+  return key.users.flatMap(user => user.userID ? [{
+    name: user.userID.name,
+    email: user.userID.email,
+    comment: user.userID.comment,
+    userID: user.userID.userID,
+  }] : []);
+}
+
+/** Self-certify another User ID while retaining existing key certifications. */
+export async function addKeyIdentity(
+  privateKey: openpgp.PrivateKey,
+  identity: openpgp.UserID,
+): Promise<openpgp.PrivateKey> {
+  const reformatted = await openpgp.reformatKey({ privateKey, userIDs: [identity], format: 'object' });
+  return privateKey.update(reformatted.publicKey);
+}
+
 /** Return armored public key from a private key. */
 export function extractPublicKey(privateKey: openpgp.PrivateKey): string {
   return privateKey.toPublic().armor();
