@@ -1225,6 +1225,9 @@
         viewMode = htmlAddsValue(full.body_html) ? 'html' : 'text';
         selectedMessage = full;
         messageLoading = false;
+        if (full.is_encrypted && getKeys().length > 0) {
+          void pgpDecrypt(full);
+        }
         // Update in list
         messages = messages.map(m =>
           m.uid === msg.uid && m.account_id === msg.account_id && m.mailbox === msg.mailbox ? full : m
@@ -2518,7 +2521,7 @@
                   {#if pgpUnlockError}<p class="pgp-error">{pgpUnlockError}</p>{/if}
                   {#if pgpKeyUnlocked}
                     <button class="pgp-decrypt-btn" on:click={() => pgpDecrypt(selectedMessage!)} disabled={pgpDecrypting}>
-                      {pgpDecrypting ? tl('pgp_decrypting') : tl('pgp_badgeEncrypted')}
+                      {pgpDecrypting ? tl('pgp_decrypting') : tl('pgp_decryptButton')}
                     </button>
                   {:else}
                     <button class="pgp-decrypt-btn" on:click={() => pgpUnlock()} disabled={pgpUnlocking} aria-busy={pgpUnlocking}>

@@ -360,6 +360,7 @@
   "pgp_badgeVerificationFailed": "Signature invalid",
   "pgp_decryptFailed": "Decryption failed.",
   "pgp_unlockToRead": "This message is encrypted. Unlock your private key vault to read it.",
+  "pgp_decryptButton": "Decrypt",
   "pgp_decrypting": "Decrypting…",
   "pgp_vaultHeading": "Private key vault",
   "pgp_vaultUnlocked": "Vault unlocked",

@@ -360,6 +360,7 @@
   "pgp_badgeVerificationFailed": "Signatur ungültig",
   "pgp_decryptFailed": "Entschlüsselung fehlgeschlagen.",
   "pgp_unlockToRead": "Diese Nachricht ist verschlüsselt. Entsperre deinen privaten Schlüsseltresor, um sie zu lesen.",
+  "pgp_decryptButton": "Entschlüsseln",
   "pgp_decrypting": "Wird entschlüsselt…",
   "pgp_vaultHeading": "Privater Schlüsseltresor",
   "pgp_vaultUnlocked": "Tresor entsperrt",
