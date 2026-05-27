@@ -251,6 +251,120 @@ pub async fn set_flags(session: &mut ImapSession, uid: u32, flags: &[&str], set:
     Ok(())
 }
 
+/// Appends a transmitted RFC 5322 message to the account's existing sent mailbox.
+/// Returns the mailbox name when a suitable destination was found.
+pub async fn append_to_sent(
+    host: &str,
+    port: u16,
+    username: &str,
+    password: &str,
+    raw_message: &[u8],
+) -> Result<Option<String>> {
+    let mut session = connect(host, port, username, password).await?;
+    let sent_mailbox = find_sent_mailbox(&mut session).await?;
+    if let Some(mailbox) = &sent_mailbox {
+        append_message(&mut session, mailbox, raw_message).await?;
+    }
+    let _ = session.logout().await;
+    Ok(sent_mailbox)
+}
+
+async fn append_message(session: &mut ImapSession, mailbox: &str, raw_message: &[u8]) -> Result<()> {
+    use async_imap::imap_proto::{Response, Status};
+    use tokio::io::AsyncWriteExt;
+
+    let mailbox_arg = quote_imap_string(mailbox)?;
+    let request_id = session
+        .run_command(format!("APPEND {mailbox_arg} (\\Seen) {{{}}}", raw_message.len()))
+        .await?;
+
+    loop {
+        let response = session
+            .read_response()
+            .await
+            .ok_or_else(|| anyhow!("IMAP connection closed while appending to mailbox {mailbox:?}"))??;
+        match response.parsed() {
+            Response::Continue { .. } => break,
+            Response::Done {
+                tag,
+                status,
+                code,
+                information,
+            } if tag == &request_id => {
+                return Err(anyhow!(
+                    "IMAP APPEND to mailbox {mailbox:?} rejected before upload: {status:?} {code:?} {}",
+                    information.as_deref().unwrap_or("")
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    session.as_mut().write_all(raw_message).await?;
+    session.as_mut().write_all(b"\r\n").await?;
+    session.as_mut().flush().await?;
+
+    loop {
+        let response = session
+            .read_response()
+            .await
+            .ok_or_else(|| anyhow!("IMAP connection closed while completing APPEND to mailbox {mailbox:?}"))??;
+        if let Response::Done {
+            tag,
+            status,
+            code,
+            information,
+        } = response.parsed()
+        {
+            if tag != &request_id {
+                continue;
+            }
+            return match status {
+                Status::Ok => Ok(()),
+                _ => Err(anyhow!(
+                    "IMAP APPEND to mailbox {mailbox:?} rejected after upload: {status:?} {code:?} {}",
+                    information.as_deref().unwrap_or("")
+                )),
+            };
+        }
+    }
+}
+
+fn quote_imap_string(value: &str) -> Result<String> {
+    if value.chars().any(|c| c == '\r' || c == '\n' || c == '\0') {
+        return Err(anyhow!("invalid IMAP mailbox name"));
+    }
+    Ok(format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")))
+}
+
+async fn find_sent_mailbox(session: &mut ImapSession) -> Result<Option<String>> {
+    let mut stream = session.list(None, Some("*")).await?;
+    let mut fallback = None;
+    while let Some(item) = stream.next().await {
+        let info = item?;
+        let name = info.name().to_owned();
+        if info
+            .attributes()
+            .iter()
+            .any(|attribute| matches!(attribute, async_imap::types::NameAttribute::Sent))
+        {
+            return Ok(Some(name));
+        }
+
+        let leaf = name
+            .rsplit(|c| c == '/' || c == '.')
+            .next()
+            .unwrap_or(&name)
+            .to_ascii_lowercase();
+        if fallback.is_none()
+            && matches!(leaf.as_str(), "sent" | "sent mail" | "sent messages" | "gesendet")
+        {
+            fallback = Some(name);
+        }
+    }
+    Ok(fallback)
+}
+
 // ── Header parsing ────────────────────────────────────────────────────────────
 
 fn parse_header_bytes(
@@ -1055,7 +1169,7 @@ pub async fn send_email(
     body: &str,
     in_reply_to: Option<&str>,
     attachments: Vec<(String, String, Vec<u8>)>,
-) -> Result<()> {
+) -> Result<Vec<u8>> {
     use lettre::{
         message::{header::ContentType, Attachment, MultiPart, SinglePart},
         AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
@@ -1096,6 +1210,7 @@ pub async fn send_email(
         builder.multipart(mp)
     }
     .map_err(|e| anyhow!("failed to build email: {e}"))?;
+    let raw_message = email.formatted();
 
     let creds = Credentials::new(username.to_owned(), password.to_owned());
     // Port 465 uses implicit TLS (SMTPS); 587/25 use STARTTLS.
@@ -1111,7 +1226,7 @@ pub async fn send_email(
         .build();
 
     mailer.send(email).await.map_err(|e| anyhow!("SMTP send failed: {e}"))?;
-    Ok(())
+    Ok(raw_message)
 }
 
 /// Relay an already-built RFC 5322 message without reconstructing its MIME headers.

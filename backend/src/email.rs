@@ -840,15 +840,36 @@ pub async fn send_email(
     let smtp_host = account.smtp_host.as_deref().unwrap_or(&account.host);
     let smtp_port = account.smtp_port.unwrap_or(587) as u16;
 
-    if let Err(e) = imap_client::send_email(
+    let raw_message = match imap_client::send_email(
         smtp_host, smtp_port,
         &account.username, &account.password,
         &from, &to, &cc, &bcc, &subject, &body,
         in_reply_to.as_deref(),
         attachments,
     ).await {
-        eprintln!("[email] send_email error: {e}");
-        return (StatusCode::BAD_GATEWAY, format!("Failed to send: {e}")).into_response();
+        Ok(raw_message) => raw_message,
+        Err(e) => {
+            eprintln!("[email] send_email error: {e}");
+            return (StatusCode::BAD_GATEWAY, format!("Failed to send: {e}")).into_response();
+        }
+    };
+
+    match imap_client::append_to_sent(
+        &account.host,
+        account.port as u16,
+        &account.username,
+        &account.password,
+        &raw_message,
+    )
+    .await
+    {
+        Ok(Some(mailbox)) => {
+            state
+                .email_sync_manager
+                .trigger(&account.account_id, EmailSyncTrigger::Mailbox(mailbox));
+        }
+        Ok(None) => eprintln!("[email] sent mailbox not found for account {}", account.account_id),
+        Err(e) => eprintln!("[email] failed to append sent message: {e}"),
     }
 
     StatusCode::OK.into_response()
@@ -984,6 +1005,25 @@ pub async fn send_raw_email(
         eprintln!("[email] send_raw error: {e}");
         return (StatusCode::BAD_GATEWAY, format!("Failed to send: {e}")).into_response();
     }
+
+    match imap_client::append_to_sent(
+        &account.host,
+        account.port as u16,
+        &account.username,
+        &account.password,
+        &raw_mime,
+    )
+    .await
+    {
+        Ok(Some(mailbox)) => {
+            state
+                .email_sync_manager
+                .trigger(&account.account_id, EmailSyncTrigger::Mailbox(mailbox));
+        }
+        Ok(None) => eprintln!("[email] sent mailbox not found for account {}", account.account_id),
+        Err(e) => eprintln!("[email] failed to append sent message: {e}"),
+    }
+
     StatusCode::OK.into_response()
 }
 
