@@ -34,6 +34,14 @@ pub enum SseMessage {
     EmailRemoved { account_id: String, uid: u32, mailbox: String },
     /// A single email was created or its flags changed
     EmailUpdated { account_id: String, uid: u32, mailbox: String, flags: Vec<String> },
+    /// A newly delivered unread inbox email suitable for a client notification
+    NewEmail {
+        account_id: String,
+        uid: u32,
+        mailbox: String,
+        from_addr: Option<String>,
+        subject: Option<String>,
+    },
     /// The account list changed (account added or removed)
     AccountsChanged,
     /// The mailbox list for an account changed
@@ -134,6 +142,17 @@ pub async fn events_stream(
             Ok(SseMessage::EmailUpdated { account_id, uid, mailbox, flags }) => {
                 Some(Event::default().event("email_updated").data(
                     serde_json::json!({ "account_id": account_id, "uid": uid, "mailbox": mailbox, "flags": flags }).to_string(),
+                ))
+            }
+            Ok(SseMessage::NewEmail { account_id, uid, mailbox, from_addr, subject }) => {
+                Some(Event::default().event("new_email").data(
+                    serde_json::json!({
+                        "account_id": account_id,
+                        "uid": uid,
+                        "mailbox": mailbox,
+                        "from": from_addr,
+                        "subject": subject,
+                    }).to_string(),
                 ))
             }
             Ok(SseMessage::AccountsChanged) => {

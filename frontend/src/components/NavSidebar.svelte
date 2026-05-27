@@ -1,7 +1,14 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { initI18n, getLocale, makeTl } from '../lib/i18n.ts';
   import { getUser, type UserInfo } from '../lib/user.ts';
+  import {
+    type NewMailNotification,
+    mailNotificationsEnabled,
+    mailNotificationsStorageKey,
+    mailNotificationsSupported,
+    showNewMailNotification,
+  } from '../lib/mail-notifications.ts';
 
   let locale = 'en';
   $: tl = makeTl(locale);
@@ -11,7 +18,11 @@
   let collapsed = false;
   let mobileOpen = false;
   let mobileHeaderEl: HTMLElement;
-
+  let notificationSupported = false;
+  let notificationPermission: NotificationPermission = 'default';
+  let notificationEnabled = false;
+  let notificationSource: EventSource | null = null;
+  let notificationReconnect: ReturnType<typeof setTimeout> | null = null;
   const path = window.location.pathname;
 
   function isActive(prefix: string): boolean {
@@ -31,7 +42,13 @@
       if (window.innerWidth < 768) {
         document.querySelector('main > #app')?.prepend(mobileHeaderEl);
       }
+      initializeNotifications();
     }
+  });
+
+  onDestroy(() => {
+    notificationSource?.close();
+    if (notificationReconnect) clearTimeout(notificationReconnect);
   });
 
   function toggleCollapse() {
@@ -40,6 +57,48 @@
     try {
       localStorage.setItem('nav-collapsed', collapsed ? '1' : '0');
     } catch {}
+  }
+
+  function initializeNotifications() {
+    notificationSupported = mailNotificationsSupported();
+    if (!notificationSupported) return;
+    notificationPermission = Notification.permission;
+    notificationEnabled = mailNotificationsEnabled();
+    if (notificationEnabled && !path.startsWith('/mail/')) connectNotificationEvents();
+  }
+
+  async function toggleNotifications() {
+    if (!notificationSupported || notificationPermission === 'denied') return;
+    if (notificationEnabled) {
+      notificationEnabled = false;
+      localStorage.removeItem(mailNotificationsStorageKey);
+      notificationSource?.close();
+      notificationSource = null;
+      return;
+    }
+
+    notificationPermission = Notification.permission === 'granted'
+      ? 'granted'
+      : await Notification.requestPermission();
+    if (notificationPermission !== 'granted') return;
+    notificationEnabled = true;
+    localStorage.setItem(mailNotificationsStorageKey, '1');
+    if (!path.startsWith('/mail/')) connectNotificationEvents();
+  }
+
+  function connectNotificationEvents() {
+    if (!notificationEnabled || notificationSource) return;
+    notificationSource = new EventSource('/api/events/stream');
+    notificationSource.addEventListener('new_email', (event) => {
+      showNewMailNotification(JSON.parse(event.data) as NewMailNotification, tl);
+    });
+    notificationSource.onerror = () => {
+      notificationSource?.close();
+      notificationSource = null;
+      if (notificationEnabled) {
+        notificationReconnect = setTimeout(connectNotificationEvents, 5000);
+      }
+    };
   }
 </script>
 
@@ -116,6 +175,24 @@
     <div class="nav-bottom">
       {#if user?.display_name}
         <div class="nav-user" title={user.display_name}>{user.display_name}</div>
+      {/if}
+      {#if notificationSupported}
+        <button
+          type="button"
+          class="nav-item nav-action"
+          class:enabled={notificationEnabled}
+          onclick={toggleNotifications}
+          disabled={notificationPermission === 'denied'}
+          aria-pressed={notificationEnabled}
+          title={notificationPermission === 'denied' ? tl('mail_notificationsBlocked') : tl('mail_notifications')}
+        >
+          <span class="nav-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+          </span>
+          <span class="label">{tl('mail_notifications')}</span>
+        </button>
       {/if}
       <a href="/settings/" class="nav-item" class:active={isActive('/settings/')} title={user?.has_settings ? tl('nav_settings') : tl('nav_setup')}>
         <span class="nav-icon">
@@ -221,6 +298,21 @@
     white-space: nowrap;
   }
   .nav-item:hover { background: var(--pico-muted-border-color, #e0e0e0); }
+  .nav-action {
+    width: 100%;
+    margin: 0;
+    border: 0;
+    background: transparent !important;
+    color: var(--pico-muted-color, #666) !important;
+    text-align: left;
+  }
+  .nav-action.enabled {
+    color: var(--pico-primary, #0172ad) !important;
+  }
+  .nav-action:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
   .nav-item.active {
     background: var(--pico-primary-background, #e6f2fb);
     color: var(--pico-h3-color);

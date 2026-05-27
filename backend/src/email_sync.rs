@@ -341,6 +341,8 @@ impl EmailSyncManager {
     ) -> anyhow::Result<()> {
         let (uidvalidity, _exists) = imap_client::select_mailbox(session, mailbox).await?;
         let cached_uidvalidity = email_db::get_mailbox_uidvalidity(&self.db, account_id, mailbox).await?;
+        let notify_new_inbox_mail = mailbox.eq_ignore_ascii_case("INBOX")
+            && cached_uidvalidity == Some(uidvalidity);
 
         // UIDVALIDITY changed → full re-fetch
         if cached_uidvalidity.map_or(false, |v| v != uidvalidity) {
@@ -403,6 +405,17 @@ impl EmailSyncManager {
                     &self.db, account_id, mailbox, h.uid,
                     &h.from_emails, &h.to_emails, &h.cc_emails,
                 ).await?;
+                if notify_new_inbox_mail
+                    && !h.flags.as_deref().unwrap_or_default().contains("\\Seen")
+                {
+                    self.broadcaster.send(user_id, SseMessage::NewEmail {
+                        account_id: account_id.to_owned(),
+                        uid: h.uid as u32,
+                        mailbox: mailbox.to_owned(),
+                        from_addr: h.from_addr.clone(),
+                        subject: h.subject.clone(),
+                    });
+                }
             }
             if !headers.is_empty() {
                 self.broadcaster.send(user_id, SseMessage::EmailsRefetch {

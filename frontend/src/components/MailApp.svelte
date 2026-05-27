@@ -2,6 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { getUser } from '../lib/user.ts';
   import { getLocale, makeTl } from '../lib/i18n.ts';
+  import { type NewMailNotification, showNewMailNotification } from '../lib/mail-notifications.ts';
   import SelectDropdown from './SelectDropdown.svelte';
   import UiIcon from './UiIcon.svelte';
   import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey, validateVault, eraseBytes } from '../lib/pgp/vault.ts';
@@ -2358,6 +2359,9 @@
 
   function connectSSE() {
     sseSource = new EventSource('/api/events/stream');
+    sseSource.addEventListener('new_email', (e) => {
+      showNewMailNotification(JSON.parse(e.data) as NewMailNotification, tl);
+    });
     sseSource.addEventListener('emails_refetch', async (e) => {
       const data = JSON.parse(e.data);
       if (standalone && selectedMessage && data.account_id === selectedMessage.account_id &&
