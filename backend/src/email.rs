@@ -1390,6 +1390,32 @@ pub async fn proxy_image(
 
 // ── Attachment download ───────────────────────────────────────────────────────
 
+fn can_preview_attachment(content_type: &str) -> bool {
+    let content_type = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+
+    matches!(
+        content_type.as_str(),
+        "application/pdf"
+            | "text/plain"
+            | "image/png"
+            | "image/jpeg"
+            | "image/gif"
+            | "image/webp"
+            | "image/avif"
+    ) || (content_type.starts_with("audio/") && content_type.len() > "audio/".len())
+        || (content_type.starts_with("video/") && content_type.len() > "video/".len())
+}
+
+fn attachment_disposition(content_type: &str, filename: &str) -> String {
+    let kind = if can_preview_attachment(content_type) { "inline" } else { "attachment" };
+    format!("{kind}; filename=\"{filename}\"")
+}
+
 #[derive(Deserialize)]
 pub struct DownloadAttachmentQuery {
     pub account_id: String,
@@ -1449,7 +1475,7 @@ pub async fn download_attachment(
         .chars()
         .map(|c| if c.is_control() || c == '"' || c == '\\' { '_' } else { c })
         .collect();
-    let disposition = format!("attachment; filename=\"{safe_name}\"");
+    let disposition = attachment_disposition(&ct, &safe_name);
 
     (
         StatusCode::OK,
@@ -1810,5 +1836,56 @@ pub async fn autodiscover_handler(
         }))
         .into_response(),
         None => Json(json!({ "found": false })).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{attachment_disposition, can_preview_attachment};
+
+    #[test]
+    fn previewable_attachment_types_are_allowlisted_case_insensitively() {
+        for content_type in [
+            "application/pdf",
+            "APPLICATION/PDF; version=1.7",
+            " text/plain; charset=utf-8",
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/webp",
+            "image/avif",
+            "audio/mpeg",
+            "video/mp4",
+        ] {
+            assert!(can_preview_attachment(content_type), "{content_type}");
+        }
+    }
+
+    #[test]
+    fn active_and_unknown_attachment_types_are_not_previewable() {
+        for content_type in [
+            "text/html",
+            "image/svg+xml",
+            "application/xml",
+            "application/javascript",
+            "application/octet-stream",
+            "audio/",
+            "video/",
+            "",
+        ] {
+            assert!(!can_preview_attachment(content_type), "{content_type}");
+        }
+    }
+
+    #[test]
+    fn disposition_uses_preview_policy() {
+        assert_eq!(
+            attachment_disposition("application/pdf", "file.pdf"),
+            "inline; filename=\"file.pdf\""
+        );
+        assert_eq!(
+            attachment_disposition("text/html", "file.html"),
+            "attachment; filename=\"file.html\""
+        );
     }
 }

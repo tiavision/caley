@@ -87,6 +87,25 @@
     attachments: Attachment[];
   }
 
+  function canPreviewContentType(value: string | null | undefined): boolean {
+    const contentType = value?.split(';', 1)[0].trim().toLowerCase() ?? '';
+    return [
+      'application/pdf',
+      'text/plain',
+      'image/png',
+      'image/jpeg',
+      'image/gif',
+      'image/webp',
+      'image/avif',
+    ].includes(contentType) ||
+      (contentType.startsWith('audio/') && contentType.length > 'audio/'.length) ||
+      (contentType.startsWith('video/') && contentType.length > 'video/'.length);
+  }
+
+  function canPreviewAttachment(attachment: Attachment): boolean {
+    return canPreviewContentType(attachment.content_type);
+  }
+
   function isPgpTransportAttachment(attachment: Attachment): boolean {
     const filename = attachment.filename.toLowerCase();
     const contentType = attachment.content_type?.split(';', 1)[0].trim().toLowerCase() ?? '';
@@ -548,7 +567,10 @@
           filename: attachment.filename,
           content_type: attachment.contentType,
           size: attachment.data.byteLength,
-          url: URL.createObjectURL(new Blob([attachment.data], { type: 'application/octet-stream' })),
+          url: URL.createObjectURL(new Blob(
+            [attachment.data],
+            { type: canPreviewContentType(attachment.contentType) ? attachment.contentType : 'application/octet-stream' },
+          )),
           data: attachment.data,
         }));
         await loadMessagePublicKeyCandidates(msg, pgpAttachments);
@@ -2938,7 +2960,9 @@
                       <a
                         class="compose-attachment-chip attachment-chip-dl"
                         href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
-                        download={att.filename}
+                        download={canPreviewAttachment(att) ? undefined : att.filename}
+                        target={canPreviewAttachment(att) ? '_blank' : undefined}
+                        rel={canPreviewAttachment(att) ? 'noopener' : undefined}
                       >
                         <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
                         <span class="attachment-name" title={att.filename}>{att.filename}</span>
@@ -2973,7 +2997,13 @@
                 <div class="attachments-list">
                   {#each pgpAttachments as att}
                     <div class="pgp-attachment-row">
-                      <a class="compose-attachment-chip attachment-chip-dl" href={att.url} download={att.filename}>
+                      <a
+                        class="compose-attachment-chip attachment-chip-dl"
+                        href={att.url}
+                        download={canPreviewAttachment(att) ? undefined : att.filename}
+                        target={canPreviewAttachment(att) ? '_blank' : undefined}
+                        rel={canPreviewAttachment(att) ? 'noopener' : undefined}
+                      >
                         <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
                         <span class="attachment-name" title={att.filename}>{att.filename}</span>
                         <span class="attachment-size">{humanSize(att.size)}</span>
