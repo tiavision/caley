@@ -184,6 +184,11 @@
   let queuedReaderNavigation: -1 | 1 | null = null;
   let messageLoading = false;
   let standaloneUnavailable = false;
+  let markedMessageKeys = new Set<string>();
+  let selectionAnchorKey: string | null = null;
+  let bulkActionBusy = false;
+  let bulkActionError = '';
+  let bulkMoveOpen = false;
 
   let sseSource: EventSource | null = null;
 
@@ -755,8 +760,70 @@
     return `${msg.account_id}\u0000${msg.mailbox}\u0000${msg.uid}`;
   }
 
+  function identityKey(accountId: string, mailbox: string, uid: number): string {
+    return `${accountId}\u0000${mailbox}\u0000${uid}`;
+  }
+
   function sameMessage(a: Message | null, b: Message | null): boolean {
     return !!a && !!b && messageKey(a) === messageKey(b);
+  }
+
+  function clearMarkedSelection() {
+    markedMessageKeys = new Set();
+    selectionAnchorKey = null;
+    bulkActionError = '';
+    bulkMoveOpen = false;
+  }
+
+  function showSelection() {
+    detailOverlayVisible = true;
+    actionsOpen = false;
+    moveSubmenuOpen = false;
+  }
+
+  function toggleMarkedMessage(msg: Message) {
+    const key = messageKey(msg);
+    const next = new Set(markedMessageKeys);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    markedMessageKeys = next;
+    selectionAnchorKey = key;
+    bulkActionError = '';
+    bulkMoveOpen = false;
+    if (next.size > 0) showSelection();
+  }
+
+  function markMessageRange(msg: Message) {
+    const targetIndex = messages.findIndex(candidate => sameMessage(candidate, msg));
+    const anchorIndex = selectionAnchorKey
+      ? messages.findIndex(candidate => messageKey(candidate) === selectionAnchorKey)
+      : -1;
+    if (targetIndex < 0 || anchorIndex < 0) {
+      const next = new Set(markedMessageKeys);
+      next.add(messageKey(msg));
+      markedMessageKeys = next;
+      selectionAnchorKey = messageKey(msg);
+    } else {
+      const from = Math.min(anchorIndex, targetIndex);
+      const to = Math.max(anchorIndex, targetIndex);
+      const next = new Set(markedMessageKeys);
+      for (const candidate of messages.slice(from, to + 1)) next.add(messageKey(candidate));
+      markedMessageKeys = next;
+    }
+    bulkActionError = '';
+    bulkMoveOpen = false;
+    showSelection();
+  }
+
+  function handleMessageRowClick(e: MouseEvent, msg: Message) {
+    if (e.ctrlKey || e.metaKey) {
+      toggleMarkedMessage(msg);
+    } else if (e.shiftKey) {
+      markMessageRange(msg);
+    } else {
+      clearMarkedSelection();
+      openMessageFromList(msg);
+    }
   }
 
   function registerMessageRow(node: HTMLButtonElement, msg: Message) {
@@ -1045,6 +1112,7 @@
   }
 
   async function selectMailbox(accountId: string, mailbox: string) {
+    clearMarkedSelection();
     selectedAccountId = accountId;
     selectedMailbox = mailbox;
     selectedFolderId = null;
@@ -1075,6 +1143,7 @@
   }
 
   async function selectVirtualFolder(folderId: string) {
+    clearMarkedSelection();
     selectedFolderId = folderId;
     selectedAccountId = null;
     selectedMailbox = null;
@@ -1121,6 +1190,7 @@
   }
 
   async function runSearch() {
+    clearMarkedSelection();
     const q = searchQuery.trim();
     if (q === '' && !anyFilterActive()) {
       await loadMessages();
@@ -1136,6 +1206,7 @@
   }
 
   async function clearAllFilters() {
+    clearMarkedSelection();
     if (searchDebounce) { clearTimeout(searchDebounce); searchDebounce = null; }
     searchQuery = '';
     searching = false;
@@ -1315,6 +1386,7 @@
 
   async function nextPage() {
     if (!hasNext) return;
+    clearMarkedSelection();
     const params = cursorParams('forward', messages.at(-1));
     currentPage++;
     if (searching) {
@@ -1329,6 +1401,7 @@
 
   async function prevPage() {
     if (!hasPrev) return;
+    clearMarkedSelection();
     const params = cursorParams('backward', messages[0]);
     currentPage--;
     if (searching) {
@@ -1343,6 +1416,7 @@
 
   async function firstPage() {
     if (!hasPrev) return;
+    clearMarkedSelection();
     currentPage = 1;
     if (searching) {
       await execSearch('&direction=forward');
@@ -1356,6 +1430,7 @@
 
   async function lastPage() {
     if (!hasNext || searching) return;
+    clearMarkedSelection();
     currentPage = totalPages;
     saveNavState();
     await loadMessages('&direction=last');
@@ -1364,6 +1439,7 @@
   }
 
   async function goToPage(page: number) {
+    clearMarkedSelection();
     const p = Math.max(1, Math.min(page, totalPages));
     const off = (p - 1) * pageSize;
     currentPage = p;
@@ -1477,15 +1553,16 @@
   }
 
   function openMessageFromList(msg: Message, focusReader = false) {
+    clearMarkedSelection();
     listCursor = msg;
     detailOverlayVisible = true;
     void openMessage(msg);
     if (focusReader) void tick().then(() => detailEl?.focus());
   }
 
-  async function setFlag(msg: Message, flag: string, set: boolean) {
+  async function setFlag(msg: Message, flag: string, set: boolean): Promise<boolean> {
     try {
-      await fetch('/api/email/message/flags', {
+      const response = await fetch('/api/email/message/flags', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1496,6 +1573,7 @@
           set,
         }),
       });
+      if (!response.ok) return false;
       // Optimistic update
       const newFlags = set
         ? [...msg.flags, flag].filter((f, i, a) => a.indexOf(f) === i)
@@ -1508,7 +1586,10 @@
           selectedMessage?.mailbox === msg.mailbox) {
         selectedMessage = updated;
       }
-    } catch {}
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async function selectAfterRemoval(msg: Message, originalIndex: number, hadNext: boolean, hadPrev: boolean) {
@@ -1589,6 +1670,75 @@
     if (archiveMailbox) void moveMessage(msg, archiveMailbox);
   }
 
+  function keepFailedSelection(failed: Set<string>) {
+    markedMessageKeys = failed;
+    selectionAnchorKey = failed.size > 0 ? [...failed][0] : null;
+    bulkActionError = failed.size > 0 ? tl('mail_bulkActionError') : '';
+    bulkMoveOpen = false;
+  }
+
+  async function applyBulkFlags(flag: string, set: boolean) {
+    bulkActionBusy = true;
+    bulkActionError = '';
+    const failed = new Set<string>();
+    for (const msg of selectedMessages) {
+      if (!(await setFlag(msg, flag, set))) failed.add(messageKey(msg));
+    }
+    keepFailedSelection(failed);
+    await loadUnreadCounts();
+    bulkActionBusy = false;
+  }
+
+  async function requestMoveMessage(msg: Message, destMailbox: string): Promise<boolean> {
+    try {
+      const response = await fetch('/api/email/message/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: msg.account_id, mailbox: msg.mailbox, uid: msg.uid, dest_mailbox: destMailbox }),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function applyBulkMove(destinationFor: (msg: Message) => string | null) {
+    bulkActionBusy = true;
+    bulkActionError = '';
+    const failed = new Set<string>();
+    for (const msg of selectedMessages) {
+      const destination = destinationFor(msg);
+      if (!destination || !(await requestMoveMessage(msg, destination))) failed.add(messageKey(msg));
+    }
+    await loadMessages();
+    keepFailedSelection(new Set([...failed].filter(key => messages.some(msg => messageKey(msg) === key))));
+    await loadUnreadCounts();
+    bulkActionBusy = false;
+  }
+
+  async function applyBulkDelete() {
+    if (selectedMessages.some(msg => folderKind(msg.mailbox) === 'trash') &&
+        !confirm(tl('mail_bulkDeleteConfirm', { n: selectedMessages.length }))) return;
+    bulkActionBusy = true;
+    bulkActionError = '';
+    const failed = new Set<string>();
+    for (const msg of selectedMessages) {
+      try {
+        const response = await fetch(
+          `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`,
+          { method: 'DELETE' },
+        );
+        if (!response.ok) failed.add(messageKey(msg));
+      } catch {
+        failed.add(messageKey(msg));
+      }
+    }
+    await loadMessages();
+    keepFailedSelection(new Set([...failed].filter(key => messages.some(msg => messageKey(msg) === key))));
+    await loadUnreadCounts();
+    bulkActionBusy = false;
+  }
+
   function isTypingTarget(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false;
     return target.isContentEditable ||
@@ -1645,6 +1795,27 @@
     const inReader = !!(detailEl && target && detailEl.contains(target) && selectedMessage);
     const inList = !standalone && !!target?.closest('.message-list');
     const inListRow = inList && !!target?.closest('.message-row');
+    const isSpace = e.code === 'Space' || e.key === ' ';
+
+    if (!standalone && selectedMessages.length > 0 && !e.altKey && !e.ctrlKey && !e.metaKey &&
+        !e.shiftKey && e.key === 'Escape') {
+      e.preventDefault();
+      clearMarkedSelection();
+      return;
+    }
+
+    if (inListRow && listCursor && !e.altKey && isSpace &&
+        ((e.ctrlKey || e.metaKey) && !e.shiftKey)) {
+      e.preventDefault();
+      toggleMarkedMessage(listCursor);
+      return;
+    }
+
+    if (inListRow && listCursor && !e.altKey && !e.ctrlKey && !e.metaKey && e.shiftKey && isSpace) {
+      e.preventDefault();
+      markMessageRange(listCursor);
+      return;
+    }
 
     if (inList && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -1658,6 +1829,8 @@
         return;
       }
     }
+
+    if (selectedMessages.length > 0) return;
 
     if (!standalone && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey &&
         (e.key === 'j' || e.key === 'k')) {
@@ -2174,6 +2347,7 @@
   async function deleteFolder(folder: VirtualFolder) {
     await fetch(`/api/email/folder?folder_id=${encodeURIComponent(folder.folder_id)}`, { method: 'DELETE' });
     if (selectedFolderId === folder.folder_id) {
+      clearMarkedSelection();
       selectedFolderId = null;
       messages = [];
     }
@@ -2207,6 +2381,12 @@
     });
     sseSource.addEventListener('email_removed', (e) => {
       const data = JSON.parse(e.data);
+      const nextMarked = new Set(markedMessageKeys);
+      nextMarked.delete(identityKey(data.account_id, data.mailbox, data.uid));
+      if (nextMarked.size !== markedMessageKeys.size) {
+        markedMessageKeys = nextMarked;
+        if (nextMarked.size === 0) selectionAnchorKey = null;
+      }
       const before = messages.length;
       messages = messages.filter(m => !(m.uid === data.uid && m.account_id === data.account_id && m.mailbox === data.mailbox));
       if (messages.length < before) totalMessages = Math.max(0, totalMessages - 1);
@@ -2381,6 +2561,16 @@
   }
 
   $: isSentFolder = !!(selectedMailbox && /sent/i.test(selectedMailbox));
+  $: selectedMessages = messages.filter(msg => markedMessageKeys.has(messageKey(msg)));
+  $: bulkAccountId = selectedMessages.length > 0 &&
+      selectedMessages.every(msg => msg.account_id === selectedMessages[0].account_id)
+    ? selectedMessages[0].account_id
+    : null;
+  $: bulkSourceMailboxes = new Set(selectedMessages.map(msg => msg.mailbox));
+  $: bulkMoveDestinations = bulkAccountId
+    ? (mailboxesByAccount[bulkAccountId] || []).filter(mb => mb.subscribed && !bulkSourceMailboxes.has(mb.name))
+    : [];
+  $: canBulkArchive = selectedMessages.length > 0 && selectedMessages.every(msg => archiveMailboxFor(msg) !== null);
   $: primaryMetaLabel = isSentFolder ? tl('mail_metaTo') : tl('mail_metaFrom');
   $: FOLDER_NAMES = {
     inbox: tl('mail_folder_inbox'),
@@ -2731,11 +2921,13 @@
               class="message-row"
               class:unread={!msg.is_read}
               class:selected={sameMessage(listCursor, msg)}
-              class:opened={sameMessage(selectedMessage, msg)}
+              class:marked={markedMessageKeys.has(messageKey(msg))}
+              class:opened={selectedMessages.length === 0 && sameMessage(selectedMessage, msg)}
+              aria-pressed={markedMessageKeys.has(messageKey(msg))}
               use:registerMessageRow={msg}
               tabindex={sameMessage(listCursor, msg) || (!listCursor && messages[0] === msg) ? 0 : -1}
               on:focus={() => (listCursor = msg)}
-              on:click={() => openMessageFromList(msg)}
+              on:click={(e) => handleMessageRowClick(e, msg)}
               draggable="true"
               on:dragstart={(e) => { draggedMessage = msg; if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'; }}
               on:dragend={() => { draggedMessage = null; dragOverMailbox = null; }}
@@ -2821,12 +3013,70 @@
     <section
       class="message-detail"
       class:standalone
-      class:is-open={!standalone && usesDetailOverlay && !!selectedMessage && detailOverlayVisible}
+      class:is-open={!standalone && usesDetailOverlay && (selectedMessages.length > 0 || !!selectedMessage) && detailOverlayVisible}
       bind:this={detailEl}
       tabindex="-1"
       aria-label={tl('nav_mail')}
     >
-      {#if selectedMessage}
+      {#if !standalone && selectedMessages.length > 0}
+        <div class="bulk-selection-header">
+          {#if usesDetailOverlay}
+            <button class="detail-close-btn" aria-label={tl('mail_back')} on:click={clearMarkedSelection}>←</button>
+          {/if}
+          <h2>{tl('mail_selectedCount', { n: selectedMessages.length })}</h2>
+          <button class="bulk-clear-btn" on:click={clearMarkedSelection} disabled={bulkActionBusy}>
+            {tl('mail_clearSelection')}
+          </button>
+        </div>
+        <div class="bulk-selection-body" aria-busy={bulkActionBusy}>
+          {#if bulkActionError}<p class="bulk-action-error">{bulkActionError}</p>{/if}
+          <div class="bulk-actions">
+            <button on:click={() => applyBulkFlags('\\Seen', true)} disabled={bulkActionBusy}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2 4 12 13 22 4"/></svg>
+              {tl('mail_markRead')}
+            </button>
+            <button on:click={() => applyBulkFlags('\\Seen', false)} disabled={bulkActionBusy}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12c-2.5 4-5.8 6-10 6s-7.5-2-10-6c2.5-4 5.8-6 10-6s7.5 2 10 6Z"/><circle cx="12" cy="12" r="3"/></svg>
+              {tl('mail_markUnread')}
+            </button>
+            <button on:click={() => applyBulkFlags('\\Flagged', true)} disabled={bulkActionBusy}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.1 8.5 22 9.3 17 14.1 18.3 21 12 17.6 5.7 21 7 14.1 2 9.3 8.9 8.5 12 2"/></svg>
+              {tl('mail_flag')}
+            </button>
+            <button on:click={() => applyBulkFlags('\\Flagged', false)} disabled={bulkActionBusy}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.1 8.5 22 9.3 17 14.1 18.3 21 12 17.6 5.7 21 7 14.1 2 9.3 8.9 8.5 12 2"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
+              {tl('mail_unflag')}
+            </button>
+            {#if canBulkArchive}
+              <button class="bulk-section-start" on:click={() => applyBulkMove(msg => archiveMailboxFor(msg))} disabled={bulkActionBusy}>
+                {@render folderIcon('archive')}
+                {tl('mail_archive')}
+              </button>
+            {/if}
+            {#if bulkMoveDestinations.length > 0}
+              <button class="bulk-move-toggle" class:bulk-section-start={!canBulkArchive} on:click={() => bulkMoveOpen = !bulkMoveOpen} disabled={bulkActionBusy}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                {tl('mail_moveToFolder')}
+                <span class="move-caret">{bulkMoveOpen ? '▴' : '▾'}</span>
+              </button>
+            {/if}
+            <button class="bulk-delete-btn bulk-section-start" on:click={applyBulkDelete} disabled={bulkActionBusy}>
+              <UiIcon name="trash" size={14} strokeWidth={2.2} />
+              {tl('mail_delete')}
+            </button>
+          </div>
+          {#if bulkMoveOpen && bulkMoveDestinations.length > 0}
+            <div class="bulk-destinations" aria-label={tl('mail_moveToFolder')}>
+              {#each bulkMoveDestinations as mailbox}
+                <button on:click={() => applyBulkMove(() => mailbox.name)} disabled={bulkActionBusy}>
+                  {@render folderIcon(folderKind(mailbox.name))}
+                  <span>{FOLDER_NAMES[folderKind(mailbox.name)] || mailbox.name}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {:else if selectedMessage}
         <div class="detail-header">
           <div class="detail-subject-row" class:stacked={detailHeaderStacked} use:observeDetailHeader>
             <div class="detail-subject-line" bind:this={detailSubjectLineEl}>
@@ -4030,6 +4280,15 @@
     background: var(--pico-primary-background, #e6f2fb);
   }
 
+  .message-row.marked {
+    background: color-mix(in srgb, var(--pico-primary, #0172ad) 18%, transparent);
+    box-shadow: inset 3px 0 0 var(--pico-primary, #0172ad);
+  }
+
+  .message-row.marked.selected {
+    background: color-mix(in srgb, var(--pico-primary, #0172ad) 24%, transparent);
+  }
+
   .message-row.opened:not(.selected) {
     box-shadow: inset 3px 0 0 var(--pico-primary, #0172ad);
   }
@@ -4202,6 +4461,97 @@
     flex: 1;
     min-height: 0;
     background: var(--pico-card-background-color, white);
+  }
+
+  .bulk-selection-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
+  }
+
+  .bulk-selection-header h2 {
+    flex: 1;
+    margin: 0;
+    font-size: 1.05rem;
+  }
+
+  .bulk-clear-btn {
+    padding: 0.3rem 0.65rem;
+    margin: 0;
+    width: auto;
+    font-size: 0.82rem;
+    background: none;
+    border: 1px solid var(--pico-muted-border-color, #ddd);
+    color: inherit;
+  }
+
+  .bulk-selection-body {
+    padding: 1rem;
+    overflow-y: auto;
+  }
+
+  .bulk-actions {
+    width: min(250px, 100%);
+    overflow: hidden;
+    border: 1px solid var(--pico-muted-border-color, #ddd);
+    border-radius: 6px;
+    background: var(--pico-background-color, white);
+  }
+
+  .bulk-actions button,
+  .bulk-destinations button {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    margin: 0;
+    padding: 0.45rem 0.9rem;
+    border: none;
+    border-radius: 0;
+    background: none;
+    color: inherit;
+    text-align: left;
+    font-size: 0.85rem;
+    font-weight: normal;
+    white-space: nowrap;
+  }
+
+  .bulk-actions button:hover:not(:disabled),
+  .bulk-destinations button:hover:not(:disabled) {
+    background: var(--pico-muted-border-color, #f5f5f5);
+  }
+
+  .bulk-actions button:disabled,
+  .bulk-destinations button:disabled {
+    opacity: 0.55;
+  }
+
+  .bulk-actions .bulk-section-start {
+    border-top: 1px solid var(--pico-muted-border-color, #eee);
+  }
+
+  .bulk-move-toggle .move-caret {
+    margin-left: auto;
+  }
+
+  .bulk-delete-btn {
+    color: var(--pico-del-color, #c0392b) !important;
+  }
+
+  .bulk-destinations {
+    width: min(250px, 100%);
+    margin-top: 0.65rem;
+    overflow: hidden;
+    border: 1px solid var(--pico-muted-border-color, #ddd);
+    border-radius: 6px;
+    background: var(--pico-card-background-color, #fafafa);
+  }
+
+  .bulk-action-error {
+    color: var(--pico-del-color, #c0392b);
+    margin: 0 0 0.75rem;
   }
 
   .detail-header {
