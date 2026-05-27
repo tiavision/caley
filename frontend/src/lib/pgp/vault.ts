@@ -119,14 +119,22 @@ export function clearLocalVaultState(): void {
 }
 
 export function localActiveDevice(vault: VaultData): DeviceRecord | undefined {
-  const activeById = new Map(
-    vault.devices
-      .filter(device => device.status === 'active' && device.wrap)
-      .map(device => [device.cred_id, device]),
-  );
+  return localActiveDevices(vault)[0];
+}
+
+export function localActiveDevices(vault: VaultData): DeviceRecord[] {
+  return localDevices(vault).filter(device => device.status === 'active' && device.wrap);
+}
+
+export function localPendingDevices(vault: VaultData): DeviceRecord[] {
+  return localDevices(vault).filter(device => device.status === 'pending');
+}
+
+function localDevices(vault: VaultData): DeviceRecord[] {
+  const byId = new Map(vault.devices.map(device => [device.cred_id, device]));
   return readLocalDeviceIds()
-    .map(credentialId => activeById.get(credentialId))
-    .find((device): device is DeviceRecord => device !== undefined);
+    .map(credentialId => byId.get(credentialId))
+    .filter((device): device is DeviceRecord => device !== undefined);
 }
 
 async function jsonRequest(path: string, init?: RequestInit): Promise<Response> {

@@ -3,6 +3,7 @@
   import { getUser } from '../lib/user.ts';
   import { getLocale, makeTl } from '../lib/i18n.ts';
   import SelectDropdown from './SelectDropdown.svelte';
+  import UiIcon from './UiIcon.svelte';
   import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey, validateVault, eraseBytes } from '../lib/pgp/vault.ts';
   import { unlock } from '../lib/pgp/webauthn.ts';
   import { decryptMessage, verifySignedMessage, verifiesWithKey, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
@@ -1835,7 +1836,7 @@
     {:else if kind === 'drafts'}
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
     {:else if kind === 'trash'}
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+      <UiIcon name="trash" size={15} />
     {:else if kind === 'junk'}
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
     {:else if kind === 'archive'}
@@ -2230,7 +2231,7 @@
                   {/if}
                   <div class="menu-separator"></div>
                   <button role="menuitem" class="menu-item-danger" on:click={() => { actionsOpen = false; deleteMessage(selectedMessage!); }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                    <UiIcon name="trash" size={14} strokeWidth={2.2} />
                     {tl('mail_delete')}
                   </button>
                 </div>
