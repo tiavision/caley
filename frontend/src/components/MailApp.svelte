@@ -161,6 +161,8 @@
   $: filterActive = filterAddrActive || filterDateActive;
 
   let selectedMessage: Message | null = null;
+  let listCursor: Message | null = null;
+  let queuedReaderNavigation: -1 | 1 | null = null;
   let messageLoading = false;
   let standaloneUnavailable = false;
 
@@ -633,6 +635,8 @@
 
   let iframeEl: HTMLIFrameElement | null = null;
   let iframeResizeObserver: ResizeObserver | null = null;
+  let detailEl: HTMLElement | null = null;
+  let detailBodyEl: HTMLElement | null = null;
   let detailHeaderEl: HTMLDivElement | null = null;
   let detailSubjectLineEl: HTMLDivElement | null = null;
   let detailControlsEl: HTMLDivElement | null = null;
@@ -722,6 +726,39 @@
   let actionsMenuPos = { top: 0, right: 0 };
   let attachmentsExpanded = false;
   let imagesNoticeDismissed = false;
+  let detailOverlayVisible = false;
+  const messageRowEls = new Map<string, HTMLButtonElement>();
+
+  function messageKey(msg: Message): string {
+    return `${msg.account_id}\u0000${msg.mailbox}\u0000${msg.uid}`;
+  }
+
+  function sameMessage(a: Message | null, b: Message | null): boolean {
+    return !!a && !!b && messageKey(a) === messageKey(b);
+  }
+
+  function registerMessageRow(node: HTMLButtonElement, msg: Message) {
+    let key = messageKey(msg);
+    messageRowEls.set(key, node);
+    return {
+      update(next: Message) {
+        messageRowEls.delete(key);
+        key = messageKey(next);
+        messageRowEls.set(key, node);
+      },
+      destroy() {
+        messageRowEls.delete(key);
+      },
+    };
+  }
+
+  async function focusListMessage(msg: Message | null) {
+    if (!msg || standalone) return;
+    await tick();
+    const row = messageRowEls.get(messageKey(msg));
+    row?.scrollIntoView({ block: 'nearest' });
+    row?.focus();
+  }
 
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -755,6 +792,7 @@
 
     window.addEventListener('mousemove', handleResizeMove);
     window.addEventListener('mouseup', stopResize);
+    window.addEventListener('keydown', handleMailKeydown);
     document.addEventListener('visibilitychange', clearPgpContentWhenHidden);
     window.addEventListener('pagehide', clearPgpContent);
   });
@@ -770,6 +808,7 @@
     }
     window.removeEventListener('mousemove', handleResizeMove);
     window.removeEventListener('mouseup', stopResize);
+    window.removeEventListener('keydown', handleMailKeydown);
     window.removeEventListener('click', handleWindowClick);
     document.removeEventListener('visibilitychange', clearPgpContentWhenHidden);
     window.removeEventListener('pagehide', clearPgpContent);
@@ -854,6 +893,8 @@
       loadBlacklistOrigins(),
     ]);
     await openMessage(locatorMessage(initialMessage));
+    await tick();
+    detailEl?.focus();
   }
 
   async function loadAccounts() {
@@ -986,6 +1027,9 @@
     selectedMailbox = mailbox;
     selectedFolderId = null;
     selectedMessage = null;
+    listCursor = null;
+    queuedReaderNavigation = null;
+    detailOverlayVisible = false;
     currentPage = 1;
     saveNavState();
     resetSearch();
@@ -997,6 +1041,11 @@
     removeFilterListeners();
     sidebarOpen = false;
     await loadMessages();
+    if (queuedReaderNavigation) {
+      const step = queuedReaderNavigation;
+      queuedReaderNavigation = null;
+      await moveCursor(step, true);
+    }
     fetch(
       `/api/email/sync?account_id=${encodeURIComponent(accountId)}&mailbox=${encodeURIComponent(mailbox)}`,
       { method: 'POST' },
@@ -1008,6 +1057,9 @@
     selectedAccountId = null;
     selectedMailbox = null;
     selectedMessage = null;
+    listCursor = null;
+    queuedReaderNavigation = null;
+    detailOverlayVisible = false;
     currentPage = 1;
     saveNavState();
     resetSearch();
@@ -1019,6 +1071,11 @@
     removeFilterListeners();
     sidebarOpen = false;
     await loadMessages();
+    if (queuedReaderNavigation) {
+      const step = queuedReaderNavigation;
+      queuedReaderNavigation = null;
+      await moveCursor(step, true);
+    }
   }
 
   function resetSearch() {
@@ -1049,6 +1106,8 @@
     }
     searching = true;
     selectedMessage = null;
+    listCursor = null;
+    detailOverlayVisible = false;
     currentPage = 1;
     searchHasNext = false;
     await execSearch('&direction=forward');
@@ -1242,6 +1301,7 @@
       saveNavState();
       await loadMessages(params);
     }
+    listCursor = null;
     listScrollEl?.scrollTo({ top: 0 });
   }
 
@@ -1255,6 +1315,7 @@
       saveNavState();
       await loadMessages(params);
     }
+    listCursor = null;
     listScrollEl?.scrollTo({ top: 0 });
   }
 
@@ -1267,6 +1328,7 @@
       saveNavState();
       await loadMessages('&direction=forward');
     }
+    listCursor = null;
     listScrollEl?.scrollTo({ top: 0 });
   }
 
@@ -1275,6 +1337,7 @@
     currentPage = totalPages;
     saveNavState();
     await loadMessages('&direction=last');
+    listCursor = null;
     listScrollEl?.scrollTo({ top: 0 });
   }
 
@@ -1284,6 +1347,7 @@
     currentPage = p;
     saveNavState();
     await loadMessages(`&offset=${off}`);
+    listCursor = null;
     listScrollEl?.scrollTo({ top: 0 });
   }
 
@@ -1375,9 +1439,26 @@
     }
   }
 
-  function closeDetail() {
+  function clearOpenMessage() {
     clearPgpAttachments();
     selectedMessage = null;
+    detailOverlayVisible = false;
+  }
+
+  function returnToListFromReader() {
+    if (!selectedMessage || standalone) return;
+    listCursor = messages.find(m => sameMessage(m, selectedMessage)) ?? listCursor;
+    actionsOpen = false;
+    moveSubmenuOpen = false;
+    if (usesDetailOverlay) detailOverlayVisible = false;
+    void focusListMessage(listCursor);
+  }
+
+  function openMessageFromList(msg: Message, focusReader = false) {
+    listCursor = msg;
+    detailOverlayVisible = true;
+    void openMessage(msg);
+    if (focusReader) void tick().then(() => detailEl?.focus());
   }
 
   async function setFlag(msg: Message, flag: string, set: boolean) {
@@ -1408,6 +1489,54 @@
     } catch {}
   }
 
+  async function selectAfterRemoval(msg: Message, originalIndex: number, hadNext: boolean, hadPrev: boolean) {
+    if (standalone) return;
+    let next: Message | undefined = messages[originalIndex];
+    if (!next && hadNext) {
+      currentPage++;
+      const params = cursorParams('forward', msg);
+      if (searching) {
+        await execSearch(params);
+      } else {
+        saveNavState();
+        await loadMessages(params);
+      }
+      next = messages[0];
+    }
+    next ??= messages[originalIndex - 1];
+    if (!next && hadPrev) {
+      currentPage--;
+      const params = cursorParams('backward', msg);
+      if (searching) {
+        await execSearch(params, true);
+      } else {
+        saveNavState();
+        await loadMessages(params);
+      }
+      next = messages.at(-1);
+    }
+    listCursor = next ?? null;
+    await focusListMessage(listCursor);
+  }
+
+  async function removeVisibleMessage(msg: Message) {
+    const originalIndex = messages.findIndex(m => sameMessage(m, msg));
+    const hadNext = hasNext;
+    const hadPrev = hasPrev;
+    messages = messages.filter(m => !sameMessage(m, msg));
+    if (!searching) totalMessages = Math.max(0, totalMessages - 1);
+    const affectedCursor = sameMessage(listCursor, msg);
+    const affectedReader = sameMessage(selectedMessage, msg);
+    if (affectedReader) clearOpenMessage();
+    if (standalone) {
+      if (affectedReader) standaloneUnavailable = true;
+      return;
+    }
+    if (affectedCursor || affectedReader) {
+      await selectAfterRemoval(msg, Math.max(originalIndex, 0), hadNext, hadPrev);
+    }
+  }
+
   async function deleteMessage(msg: Message) {
     const inTrash = folderKind(msg.mailbox) === 'trash';
     if (inTrash && !confirm(tl('mail_deleteMessageConfirm'))) return;
@@ -1415,12 +1544,7 @@
       `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`,
       { method: 'DELETE' }
     );
-    messages = messages.filter(m => !(m.uid === msg.uid && m.account_id === msg.account_id && m.mailbox === msg.mailbox));
-    if (selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id &&
-        selectedMessage?.mailbox === msg.mailbox) {
-      closeDetail();
-      if (standalone) standaloneUnavailable = true;
-    }
+    await removeVisibleMessage(msg);
   }
 
   async function moveMessage(msg: Message, destMailbox: string) {
@@ -1429,11 +1553,139 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ account_id: msg.account_id, mailbox: msg.mailbox, uid: msg.uid, dest_mailbox: destMailbox }),
     });
-    messages = messages.filter(m => !(m.uid === msg.uid && m.account_id === msg.account_id && m.mailbox === msg.mailbox));
-    if (selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id &&
-        selectedMessage?.mailbox === msg.mailbox) {
-      closeDetail();
-      if (standalone) standaloneUnavailable = true;
+    await removeVisibleMessage(msg);
+  }
+
+  function archiveMailboxFor(msg: Message): string | null {
+    const candidates = (mailboxesByAccount[msg.account_id] || [])
+      .filter(mb => mb.subscribed && mb.name !== msg.mailbox && folderKind(mb.name) === 'archive');
+    return candidates.length === 1 ? candidates[0].name : null;
+  }
+
+  function archiveMessage(msg: Message) {
+    const archiveMailbox = archiveMailboxFor(msg);
+    if (archiveMailbox) void moveMessage(msg, archiveMailbox);
+  }
+
+  function isTypingTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    return target.isContentEditable ||
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement;
+  }
+
+  async function moveCursor(step: -1 | 1, openInReader: boolean) {
+    const current = openInReader ? selectedMessage : listCursor;
+    let index = current ? messages.findIndex(msg => sameMessage(msg, current)) : -1;
+    let target: Message | undefined;
+    if (index < 0) {
+      target = step === 1 ? messages[0] : messages.at(-1);
+    } else {
+      target = messages[index + step];
+    }
+    if (!target && step === 1 && hasNext) {
+      await nextPage();
+      target = messages[0];
+    } else if (!target && step === -1 && hasPrev) {
+      await prevPage();
+      target = messages.at(-1);
+    }
+    if (!target) return;
+    listCursor = target;
+    if (openInReader) {
+      openMessageFromList(target, true);
+    } else {
+      await focusListMessage(target);
+    }
+  }
+
+  function scrollReader(key: string) {
+    const scroller = (standalone || usesDetailOverlay ? detailEl : detailBodyEl);
+    if (!scroller) return;
+    if (key === 'Home') {
+      scroller.scrollTo({ top: 0 });
+    } else if (key === 'End') {
+      scroller.scrollTo({ top: scroller.scrollHeight });
+    } else {
+      const delta = scroller.clientHeight * 0.9 * (key === 'PageDown' ? 1 : -1);
+      scroller.scrollBy({ top: delta });
+    }
+  }
+
+  function shortcutMessage(inReader: boolean): Message | null {
+    return inReader ? selectedMessage : (listCursor ?? selectedMessage);
+  }
+
+  function handleMailKeydown(e: KeyboardEvent) {
+    if (e.defaultPrevented || isTypingTarget(e.target) || document.querySelector('dialog[open]')) return;
+    const target = e.target instanceof HTMLElement ? e.target : null;
+    const inReader = !!(detailEl && target && detailEl.contains(target) && selectedMessage);
+    const inList = !standalone && !!target?.closest('.message-list');
+    const inListRow = inList && !!target?.closest('.message-row');
+
+    if (inList && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        void moveCursor(e.key === 'ArrowDown' ? 1 : -1, false);
+        return;
+      }
+      if (inListRow && e.key === 'Enter' && listCursor) {
+        e.preventDefault();
+        openMessageFromList(listCursor, true);
+        return;
+      }
+    }
+
+    if (!standalone && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey &&
+        (e.key === 'j' || e.key === 'k')) {
+      e.preventDefault();
+      const step = e.key === 'j' ? 1 : -1;
+      if (messagesLoading && !listCursor && !selectedMessage) {
+        queuedReaderNavigation = step;
+      } else {
+        void moveCursor(step, true);
+      }
+      return;
+    }
+
+    if (inReader && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      if (!standalone && !e.shiftKey && e.key === 'Escape') {
+        e.preventDefault();
+        returnToListFromReader();
+        return;
+      }
+      if (!e.shiftKey && ['PageUp', 'PageDown', 'Home', 'End'].includes(e.key)) {
+        e.preventDefault();
+        scrollReader(e.key);
+        return;
+      }
+    }
+
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const msg = shortcutMessage(inReader);
+    if (!msg) return;
+    if (!e.shiftKey && e.key === 'r') {
+      e.preventDefault();
+      openCompose(msg);
+    } else if (!e.shiftKey && e.key === 'a') {
+      e.preventDefault();
+      openComposeReplyAll(msg);
+    } else if (!e.shiftKey && e.key === 'f') {
+      e.preventDefault();
+      openComposeForward(msg);
+    } else if (!e.shiftKey && e.key === 'e' && archiveMailboxFor(msg)) {
+      e.preventDefault();
+      archiveMessage(msg);
+    } else if (e.key === '#') {
+      e.preventDefault();
+      void deleteMessage(msg);
+    } else if (e.shiftKey && e.key.toLowerCase() === 'i') {
+      e.preventDefault();
+      void setFlag(msg, '\\Seen', true);
+    } else if (e.shiftKey && e.key.toLowerCase() === 'u') {
+      e.preventDefault();
+      void setFlag(msg, '\\Seen', false);
     }
   }
 
@@ -1718,6 +1970,18 @@
     composeReplyAll = true;
   }
 
+  function openComposeForward(forwardFrom: Message) {
+    openCompose();
+    const accountIdentities = identities.filter(i => i.account_id === forwardFrom.account_id);
+    composeIdentityId = (accountIdentities.find(i => i.is_default) ?? accountIdentities[0] ?? identities[0])?.identity_id ?? '';
+    composeSubject = /^fwd:/i.test(forwardFrom.subject ?? '')
+      ? (forwardFrom.subject ?? '')
+      : `Fwd: ${forwardFrom.subject || ''}`;
+    composeBody = `\n\n--- Forwarded message ---\nFrom: ${forwardFrom.from || ''}\nTo: ${(forwardFrom.to ?? []).join(', ')}\nSubject: ${forwardFrom.subject || ''}\n\n${forwardFrom.body_text || ''}`;
+    composeInReplyTo = null;
+    reconcileComposeSigning(composeIdentityId, composeSignOptedOut, composeTrustedKeys, composeStoredSigningFingerprints);
+  }
+
   async function sendEmail() {
     composeSending = true;
     composeError = '';
@@ -1926,7 +2190,7 @@
       if (messages.length < before) totalMessages = Math.max(0, totalMessages - 1);
       if (selectedMessage?.uid === data.uid && selectedMessage?.account_id === data.account_id &&
           selectedMessage?.mailbox === data.mailbox) {
-        closeDetail();
+        clearOpenMessage();
         if (standalone) standaloneUnavailable = true;
       }
       if (!standalone) loadUnreadCounts();
@@ -2018,6 +2282,17 @@
       sidebarWidth = Math.max(140, Math.min(400, resizeStartWidth + delta));
     } else {
       listWidth = Math.max(180, Math.min(600, resizeStartWidth + delta));
+    }
+  }
+
+  function resizeWithKeyboard(which: 'sidebar' | 'list', e: KeyboardEvent) {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const delta = (e.shiftKey ? 25 : 10) * (e.key === 'ArrowRight' ? 1 : -1);
+    if (which === 'sidebar') {
+      sidebarWidth = Math.max(140, Math.min(400, sidebarWidth + delta));
+    } else {
+      listWidth = Math.max(180, Math.min(600, listWidth + delta));
     }
   }
 
@@ -2250,7 +2525,19 @@
       </div>
     </aside>
 
-    <div class="resize-handle" role="separator" aria-orientation="vertical" on:mousedown={(e) => startResize('sidebar', e)}></div>
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_no_noninteractive_tabindex -->
+    <div
+      class="resize-handle"
+      role="separator"
+      tabindex="0"
+      aria-orientation="vertical"
+      aria-label={tl('mail_resizeFolders')}
+      aria-valuemin="140"
+      aria-valuemax="400"
+      aria-valuenow={sidebarWidth}
+      on:mousedown={(e) => startResize('sidebar', e)}
+      on:keydown={(e) => resizeWithKeyboard('sidebar', e)}
+    ></div>
 
     <!-- ── Message list ────────────────────────────────────────────────────── -->
     <section class="message-list">
@@ -2421,8 +2708,12 @@
             <button
               class="message-row"
               class:unread={!msg.is_read}
-              class:selected={selectedMessage?.uid === msg.uid && selectedMessage?.account_id === msg.account_id}
-              on:click={() => openMessage(msg)}
+              class:selected={sameMessage(listCursor, msg)}
+              class:opened={sameMessage(selectedMessage, msg)}
+              use:registerMessageRow={msg}
+              tabindex={sameMessage(listCursor, msg) || (!listCursor && messages[0] === msg) ? 0 : -1}
+              on:focus={() => (listCursor = msg)}
+              on:click={() => openMessageFromList(msg)}
               draggable="true"
               on:dragstart={(e) => { draggedMessage = msg; if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'; }}
               on:dragend={() => { draggedMessage = null; dragOverMailbox = null; }}
@@ -2489,16 +2780,35 @@
       {/if}
     </section>
 
-    <div class="resize-handle detail-resize-handle" role="separator" aria-orientation="vertical" on:mousedown={(e) => startResize('list', e)}></div>
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_no_noninteractive_tabindex -->
+    <div
+      class="resize-handle detail-resize-handle"
+      role="separator"
+      tabindex="0"
+      aria-orientation="vertical"
+      aria-label={tl('mail_resizeMessages')}
+      aria-valuemin="180"
+      aria-valuemax="600"
+      aria-valuenow={listWidth}
+      on:mousedown={(e) => startResize('list', e)}
+      on:keydown={(e) => resizeWithKeyboard('list', e)}
+    ></div>
     {/if}
 
     <!-- ── Message detail ────────────────────────────────────────────────────── -->
-    <section class="message-detail" class:standalone class:is-open={!standalone && usesDetailOverlay && !!selectedMessage}>
+    <section
+      class="message-detail"
+      class:standalone
+      class:is-open={!standalone && usesDetailOverlay && !!selectedMessage && detailOverlayVisible}
+      bind:this={detailEl}
+      tabindex="-1"
+      aria-label={tl('nav_mail')}
+    >
       {#if selectedMessage}
         <div class="detail-header">
           <div class="detail-subject-row" class:stacked={detailHeaderStacked} use:observeDetailHeader>
             <div class="detail-subject-line" bind:this={detailSubjectLineEl}>
-              {#if !standalone && usesDetailOverlay}<button class="detail-close-btn" aria-label={tl('mail_back')} on:click={closeDetail}>←</button>{/if}
+              {#if !standalone && usesDetailOverlay}<button class="detail-close-btn" aria-label={tl('mail_back')} on:click={returnToListFromReader}>←</button>{/if}
               <span class="detail-subject">{selectedMessage.subject || tl('mail_noSubject')}</span>
             </div>
             <div class="detail-controls" bind:this={detailControlsEl}>
@@ -2520,6 +2830,9 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="8 14 3 9 8 4"/><polyline points="14 14 9 9 14 4"/><path d="M21 20v-7a4 4 0 0 0-4-4H3"/></svg>
                     {tl('mail_replyAll')}
                   </button>
+                  <button role="menuitem" on:click={() => { actionsOpen = false; openComposeForward(selectedMessage!); }}>
+                    {tl('mail_forward')}
+                  </button>
                   <div class="menu-separator"></div>
                   <button role="menuitem" on:click={() => { actionsOpen = false; setFlag(selectedMessage!, '\\Seen', !selectedMessage!.is_read); }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2 4 12 13 22 4"/></svg>
@@ -2535,6 +2848,12 @@
                     <button role="menuitem" class:menu-item-active={viewMode === 'text'} on:click={() => { viewMode = 'text'; actionsOpen = false; }}>{tl('mail_viewAsText')}</button>
                   {/if}
                   <div class="menu-separator"></div>
+                  {#if archiveMailboxFor(selectedMessage)}
+                    <button role="menuitem" on:click={() => { actionsOpen = false; archiveMessage(selectedMessage!); }}>
+                      {@render folderIcon('archive')}
+                      {tl('mail_archive')}
+                    </button>
+                  {/if}
                   <button role="menuitem" class="move-to-folder-btn" on:click|stopPropagation={() => moveSubmenuOpen = !moveSubmenuOpen}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                     {tl('mail_moveToFolder')}
@@ -2570,9 +2889,8 @@
           <div class="loading">{tl('mail_loading')}</div>
         {:else}
           <div class="detail-meta">
-            <div class="meta-primary" tabindex="0" aria-expanded={metaExpanded}
-              on:click={() => metaExpanded = !metaExpanded}
-              on:keydown={e => (e.key === 'Enter' || e.key === ' ') && (metaExpanded = !metaExpanded)}>
+            <button type="button" class="meta-primary" aria-expanded={metaExpanded}
+              on:click={() => metaExpanded = !metaExpanded}>
               <span class="meta-label">{primaryMetaLabel}:</span>
               <span class="meta-value">{primaryMetaValue}</span>
               <span class="meta-toggle" aria-hidden="true">{metaExpanded ? '▲' : '▼'}</span>
@@ -2596,7 +2914,7 @@
                   {/each}
                 </span>
               {/if}
-            </div>
+            </button>
             {#if metaExpanded}
               {#if isSentFolder}<div><strong>{tl('mail_metaFrom')}:</strong> {selectedMessage.from || ''}</div>{/if}
               {#if !isSentFolder}<div><strong>{tl('mail_metaTo')}:</strong> {selectedMessage.to.join(', ')}</div>{/if}
@@ -2678,7 +2996,7 @@
               {/if}
             </div>
           {/if}
-          <div class="detail-body">
+          <div class="detail-body" bind:this={detailBodyEl}>
             {#if pgpTextBadges.length > 0}
               <div class="pgp-badges">
                 {#each pgpTextBadges as badge}
@@ -3300,13 +3618,19 @@
   .resize-handle {
     cursor: col-resize;
     background: var(--pico-muted-border-color, #ddd);
+    border: none;
+    border-radius: 0;
+    margin: 0;
+    padding: 0;
+    min-width: 3px;
     transition: background 0.12s;
     position: relative;
     z-index: 1;
     width: 3px;
   }
 
-  .resize-handle:hover {
+  .resize-handle:hover,
+  .resize-handle:focus-visible {
     background: var(--pico-primary, #0172ad);
   }
 
@@ -3676,6 +4000,10 @@
     background: var(--pico-primary-background, #e6f2fb);
   }
 
+  .message-row.opened:not(.selected) {
+    box-shadow: inset 3px 0 0 var(--pico-primary, #0172ad);
+  }
+
   .message-row.unread {
     border-left-color: var(--pico-primary, #0172ad);
   }
@@ -3833,6 +4161,10 @@
     flex-direction: column;
     overflow: hidden;
     margin-bottom: 0;
+  }
+
+  .message-detail:focus {
+    outline: none;
   }
 
   .message-detail.standalone {
@@ -4080,6 +4412,14 @@
     align-items: center;
     gap: 0.4rem;
     cursor: pointer;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
   }
 
   .meta-label {
