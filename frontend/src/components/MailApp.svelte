@@ -624,14 +624,23 @@
   let folderDialog: HTMLDialogElement;
   let sidebarOpen = false;
 
-  let isMobile = false;
-  let mediaQueryListener: ((e: MediaQueryListEvent) => void) | null = null;
+  let usesDetailOverlay = false;
+  let isPhone = false;
+  let compactMediaQuery: MediaQueryList | null = null;
+  let phoneMediaQuery: MediaQueryList | null = null;
+  let compactMediaQueryListener: ((e: MediaQueryListEvent) => void) | null = null;
+  let phoneMediaQueryListener: ((e: MediaQueryListEvent) => void) | null = null;
 
   let iframeEl: HTMLIFrameElement | null = null;
   let iframeResizeObserver: ResizeObserver | null = null;
+  let detailHeaderEl: HTMLDivElement | null = null;
+  let detailSubjectLineEl: HTMLDivElement | null = null;
+  let detailControlsEl: HTMLDivElement | null = null;
+  let detailHeaderResizeObserver: ResizeObserver | null = null;
+  let detailHeaderStacked = false;
 
   function fitIframeToContent() {
-    if (!iframeEl || !isMobile) return;
+    if (!iframeEl || !usesDetailOverlay) return;
     iframeResizeObserver?.disconnect();
     try {
       const doc = iframeEl.contentDocument;
@@ -646,9 +655,52 @@
     } catch {}
   }
 
-  $: if (!isMobile && iframeEl) {
+  $: if (!usesDetailOverlay && iframeEl) {
     iframeEl.style.height = '';
     iframeResizeObserver?.disconnect();
+  }
+
+  function intrinsicWidth(element: HTMLElement): number {
+    const clone = element.cloneNode(true) as HTMLElement;
+    clone.style.position = 'fixed';
+    clone.style.left = '-10000px';
+    clone.style.top = '0';
+    clone.style.width = 'max-content';
+    clone.style.maxWidth = 'none';
+    clone.style.flex = 'none';
+    clone.style.whiteSpace = 'nowrap';
+    clone.style.visibility = 'hidden';
+    clone.style.pointerEvents = 'none';
+    document.body.appendChild(clone);
+    const width = clone.getBoundingClientRect().width;
+    clone.remove();
+    return width;
+  }
+
+  function updateDetailHeaderLayout() {
+    if (!detailHeaderEl || !detailSubjectLineEl || !detailControlsEl || !selectedMessage) {
+      detailHeaderStacked = false;
+      return;
+    }
+    const style = getComputedStyle(detailHeaderEl);
+    const gap = parseFloat(style.columnGap || style.gap) || 0;
+    const requiredWidth = intrinsicWidth(detailSubjectLineEl) + intrinsicWidth(detailControlsEl) + gap;
+    detailHeaderStacked = requiredWidth > detailHeaderEl.clientWidth;
+  }
+
+  function observeDetailHeader(node: HTMLDivElement) {
+    detailHeaderEl = node;
+    detailHeaderResizeObserver?.disconnect();
+    detailHeaderResizeObserver = new ResizeObserver(updateDetailHeaderLayout);
+    detailHeaderResizeObserver.observe(node);
+    void tick().then(updateDetailHeaderLayout);
+    return {
+      destroy() {
+        if (detailHeaderEl === node) detailHeaderEl = null;
+        detailHeaderResizeObserver?.disconnect();
+        detailHeaderResizeObserver = null;
+      },
+    };
   }
 
   // Resize state
@@ -689,10 +741,17 @@
     }
     connectSSE();
 
-    const mql = window.matchMedia('(max-width: 767px)');
-    isMobile = mql.matches;
-    mediaQueryListener = (e: MediaQueryListEvent) => { isMobile = e.matches; };
-    mql.addEventListener('change', mediaQueryListener);
+    compactMediaQuery = window.matchMedia('(max-width: 1023px)');
+    phoneMediaQuery = window.matchMedia('(max-width: 639px)');
+    usesDetailOverlay = compactMediaQuery.matches;
+    isPhone = phoneMediaQuery.matches;
+    compactMediaQueryListener = (e: MediaQueryListEvent) => { usesDetailOverlay = e.matches; };
+    phoneMediaQueryListener = (e: MediaQueryListEvent) => {
+      isPhone = e.matches;
+      if (!e.matches) sidebarOpen = false;
+    };
+    compactMediaQuery.addEventListener('change', compactMediaQueryListener);
+    phoneMediaQuery.addEventListener('change', phoneMediaQueryListener);
 
     window.addEventListener('mousemove', handleResizeMove);
     window.addEventListener('mouseup', stopResize);
@@ -702,9 +761,12 @@
 
   onDestroy(() => {
     sseSource?.close();
-    if (mediaQueryListener) {
-      const mql = window.matchMedia('(max-width: 767px)');
-      mql.removeEventListener('change', mediaQueryListener);
+    detailHeaderResizeObserver?.disconnect();
+    if (compactMediaQuery && compactMediaQueryListener) {
+      compactMediaQuery.removeEventListener('change', compactMediaQueryListener);
+    }
+    if (phoneMediaQuery && phoneMediaQueryListener) {
+      phoneMediaQuery.removeEventListener('change', phoneMediaQueryListener);
     }
     window.removeEventListener('mousemove', handleResizeMove);
     window.removeEventListener('mouseup', stopResize);
@@ -2035,7 +2097,18 @@
   $: primaryMetaValue = selectedMessage
     ? (isSentFolder ? selectedMessage.to.join(', ') : (selectedMessage.from || ''))
     : '';
-  $: layoutColumns = standalone || isMobile ? '1fr' : `${sidebarWidth}px 5px ${listWidth}px 5px 1fr`;
+  $: layoutColumns = standalone || isPhone
+    ? '1fr'
+    : usesDetailOverlay
+      ? `${sidebarWidth}px 5px 1fr`
+      : `${sidebarWidth}px 5px ${listWidth}px 5px 1fr`;
+  $: {
+    selectedMessage;
+    usesDetailOverlay;
+    locale;
+    standalone;
+    void tick().then(updateDetailHeaderLayout);
+  }
 
   $: totalPages = totalMessages === 0 ? 0 : Math.ceil(totalMessages / pageSize);
   $: hasPrev = currentPage > 1;
@@ -2097,10 +2170,10 @@
   <div class="mail-layout" class:standalone style="grid-template-columns: {layoutColumns}">
     {#if !standalone}
     <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
-    {#if sidebarOpen}
+    {#if isPhone && sidebarOpen}
       <button type="button" class="sidebar-backdrop" aria-label={tl('mail_aria_folders')} on:click={() => (sidebarOpen = false)}></button>
     {/if}
-    <aside class="mail-sidebar" class:open={sidebarOpen}>
+    <aside class="mail-sidebar" class:open={isPhone && sidebarOpen}>
       <!-- Virtual folders -->
       {#if virtualFolders.length > 0}
         <div class="sidebar-section">
@@ -2416,30 +2489,33 @@
       {/if}
     </section>
 
-    <div class="resize-handle" role="separator" aria-orientation="vertical" on:mousedown={(e) => startResize('list', e)}></div>
+    <div class="resize-handle detail-resize-handle" role="separator" aria-orientation="vertical" on:mousedown={(e) => startResize('list', e)}></div>
     {/if}
 
     <!-- ── Message detail ────────────────────────────────────────────────────── -->
-    <section class="message-detail" class:standalone class:is-open={!standalone && isMobile && !!selectedMessage}>
+    <section class="message-detail" class:standalone class:is-open={!standalone && usesDetailOverlay && !!selectedMessage}>
       {#if selectedMessage}
         <div class="detail-header">
-          <div class="detail-subject-row">
-            {#if !standalone && isMobile}<button class="detail-close-btn" aria-label={tl('mail_back')} on:click={closeDetail}>←</button>{/if}
-            <span class="detail-subject">{selectedMessage.subject || tl('mail_noSubject')}</span>
-            <button
-              class="star-btn"
-              class:flagged={selectedMessage.is_flagged}
-              on:click={() => setFlag(selectedMessage!, '\\Flagged', !selectedMessage!.is_flagged)}
-              aria-label={selectedMessage.is_flagged ? tl('mail_unflag') : tl('mail_flag')}
-              title={selectedMessage.is_flagged ? tl('mail_unflag') : tl('mail_flag')}
-            >★</button>
-            <button class="inline-action-btn" on:click={() => openCompose(selectedMessage!)} aria-label={tl('mail_reply')} title={tl('mail_reply')}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
-            </button>
-            <div class="actions-wrapper" bind:this={actionsEl}>
-              <button class="actions-toggle" on:click={toggleActions} aria-label={tl('mail_messageActions')}>{#if isMobile}⋮{:else}{tl('mail_actions')} <span class="actions-caret">▾</span>{/if}</button>
-              {#if actionsOpen}
-                <div class="actions-menu" role="menu">
+          <div class="detail-subject-row" class:stacked={detailHeaderStacked} use:observeDetailHeader>
+            <div class="detail-subject-line" bind:this={detailSubjectLineEl}>
+              {#if !standalone && usesDetailOverlay}<button class="detail-close-btn" aria-label={tl('mail_back')} on:click={closeDetail}>←</button>{/if}
+              <span class="detail-subject">{selectedMessage.subject || tl('mail_noSubject')}</span>
+            </div>
+            <div class="detail-controls" bind:this={detailControlsEl}>
+              <button
+                class="star-btn"
+                class:flagged={selectedMessage.is_flagged}
+                on:click={() => setFlag(selectedMessage!, '\\Flagged', !selectedMessage!.is_flagged)}
+                aria-label={selectedMessage.is_flagged ? tl('mail_unflag') : tl('mail_flag')}
+                title={selectedMessage.is_flagged ? tl('mail_unflag') : tl('mail_flag')}
+              >★</button>
+              <button class="inline-action-btn" on:click={() => openCompose(selectedMessage!)} aria-label={tl('mail_reply')} title={tl('mail_reply')}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+              </button>
+              <div class="actions-wrapper" bind:this={actionsEl}>
+                <button class="actions-toggle" on:click={toggleActions} aria-label={tl('mail_messageActions')}>{#if usesDetailOverlay}⋮{:else}{tl('mail_actions')} <span class="actions-caret">▾</span>{/if}</button>
+                {#if actionsOpen}
+                  <div class="actions-menu" role="menu">
                   <button role="menuitem" on:click={() => { actionsOpen = false; openComposeReplyAll(selectedMessage!); }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="8 14 3 9 8 4"/><polyline points="14 14 9 9 14 4"/><path d="M21 20v-7a4 4 0 0 0-4-4H3"/></svg>
                     {tl('mail_replyAll')}
@@ -2479,14 +2555,15 @@
                     <UiIcon name="trash" size={14} strokeWidth={2.2} />
                     {tl('mail_delete')}
                   </button>
-                </div>
+                  </div>
+                {/if}
+              </div>
+              {#if !standalone}
+                <button class="inline-action-btn" on:click={() => openPopout(selectedMessage!)} aria-label={tl('mail_popout')} title={tl('mail_popout')}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h7"/></svg>
+                </button>
               {/if}
             </div>
-            {#if !standalone}
-              <button class="inline-action-btn" on:click={() => openPopout(selectedMessage!)} aria-label={tl('mail_popout')} title={tl('mail_popout')}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h7"/></svg>
-              </button>
-            {/if}
           </div>
         </div>
         {#if messageLoading}
@@ -3777,6 +3854,44 @@
     gap: 0.5rem;
   }
 
+  .detail-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  .detail-subject-line {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .detail-subject-row.stacked {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.35rem;
+  }
+
+  .detail-subject-row.stacked .detail-controls {
+    order: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .detail-subject-row.stacked .detail-subject-line {
+    order: 1;
+    width: 100%;
+  }
+
+  .detail-subject-row.stacked .detail-subject {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
   .detail-close-btn {
     background: none;
     border: none;
@@ -3797,6 +3912,8 @@
     min-width: 0;
     font-size: 1.05rem;
     font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
   }
 
   .actions-wrapper {
@@ -4681,25 +4798,7 @@
   }
 
   /* Responsive */
-  @media (max-width: 767px) {
-    .mail-sidebar {
-      position: fixed;
-      top: 0;
-      left: 0;
-      bottom: 0;
-      width: 280px;
-      max-width: 80vw;
-      z-index: 61;
-      transform: translateX(-100%);
-      transition: transform 0.25s ease;
-      box-shadow: 0 0 1.5rem rgba(0, 0, 0, 0.25);
-      border-right: 1px solid var(--pico-muted-border-color, #ddd);
-    }
-
-    .mail-sidebar.open {
-      transform: translateX(0);
-    }
-
+  @media (max-width: 1023px) {
     .message-detail {
       display: none;
     }
@@ -4708,7 +4807,7 @@
       display: flex;
       position: fixed;
       inset: 0;
-      z-index: 100;
+      z-index: 101;
       background: var(--pico-card-background-color, white);
       overflow-y: auto;
       box-shadow: inset 0 3px 12px rgba(0,0,0,0.08);
@@ -4735,24 +4834,18 @@
       flex: none;
     }
 
-    .resize-handle {
+    .detail-resize-handle {
       display: none;
     }
 
     .mail-layout {
-      display: flex;
+      display: grid;
       flex: 1;
       min-height: 0;
     }
 
     .message-list {
-      flex: 1;
       min-height: 0;
-    }
-
-    .folder-toggle {
-      display: flex;
-      align-items: center;
     }
 
     .fab {
@@ -4766,7 +4859,49 @@
     }
   }
 
-  @media (min-width: 768px) {
+  @media (max-width: 639px) {
+    .mail-layout {
+      position: relative;
+      display: flex;
+    }
+
+    .sidebar-backdrop {
+      position: absolute;
+    }
+
+    .mail-sidebar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 280px;
+      max-width: 80vw;
+      z-index: 61;
+      transform: translateX(-100%);
+      transition: transform 0.25s ease;
+      box-shadow: 0 0 1.5rem rgba(0, 0, 0, 0.25);
+      border-right: 1px solid var(--pico-muted-border-color, #ddd);
+    }
+
+    .mail-sidebar.open {
+      transform: translateX(0);
+    }
+
+    .resize-handle {
+      display: none;
+    }
+
+    .message-list {
+      flex: 1;
+    }
+
+    .folder-toggle {
+      display: flex;
+      align-items: center;
+    }
+  }
+
+  @media (min-width: 1024px) {
     .mail-layout {
       flex: 1;
       min-height: 0;
