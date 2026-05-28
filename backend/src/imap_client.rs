@@ -1181,6 +1181,7 @@ pub async fn send_email(
     subject: &str,
     body: &str,
     in_reply_to: Option<&str>,
+    references: Option<&str>,
     attachments: Vec<(String, String, Vec<u8>)>,
 ) -> Result<Vec<u8>> {
     use lettre::{
@@ -1204,6 +1205,9 @@ pub async fn send_email(
     }
     if let Some(reply_to) = in_reply_to {
         builder = builder.in_reply_to(reply_to.to_owned());
+    }
+    if let Some(references) = references {
+        builder = builder.references(references.to_owned());
     }
 
     let text_part = SinglePart::builder()

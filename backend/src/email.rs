@@ -807,6 +807,7 @@ pub async fn send_email(
     let mut subject = String::new();
     let mut body = String::new();
     let mut in_reply_to: Option<String> = None;
+    let mut references: Option<String> = None;
     let mut attachments: Vec<(String, String, Vec<u8>)> = vec![];
 
     loop {
@@ -836,6 +837,7 @@ pub async fn send_email(
                         "subject" => subject = text,
                         "body" => body = text,
                         "in_reply_to" if !text.is_empty() => in_reply_to = Some(text),
+                        "references" if !text.is_empty() => references = Some(text),
                         _ => {}
                     }
                 }
@@ -899,7 +901,7 @@ pub async fn send_email(
         smtp_host, smtp_port,
         &account.username, &account.password,
         &from, &to, &cc, &bcc, &subject, &body,
-        in_reply_to.as_deref(),
+        in_reply_to.as_deref(), references.as_deref(),
         attachments,
     ).await {
         Ok(raw_message) => raw_message,

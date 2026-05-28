@@ -12,6 +12,7 @@ export interface ProtectedComposeMessage {
   subject: string;
   body: string;
   inReplyTo: string | null;
+  references: string | null;
   attachments: File[];
   encrypt: boolean;
   sign: boolean;
@@ -64,6 +65,7 @@ function messageHeaders(message: ProtectedComposeMessage): string {
     'MIME-Version: 1.0',
   ];
   if (message.inReplyTo) headers.push(`In-Reply-To: ${safeHeader(message.inReplyTo)}`);
+  if (message.references) headers.push(`References: ${safeHeader(message.references)}`);
   return `${headers.join('\r\n')}\r\n`;
 }
 

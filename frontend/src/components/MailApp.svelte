@@ -262,6 +262,8 @@
   let composeBody = '';
   let composeIdentityId = '';
   let composeInReplyTo: string | null = null;
+  let composeReferences: string | null = null;
+  let composeMode: 'new' | 'reply' | 'replyAll' | 'forward' = 'new';
   let composeSending = false;
   let composeError = '';
   let showComposeCcBcc = false;
@@ -2287,10 +2289,12 @@
     composeSign = false;
     composeSignOptedOut = false;
     if (replyTo) {
+      composeMode = 'reply';
       composeTo = replyTo.from || '';
       composeSubject = replyTo.subject?.startsWith('Re:') ? replyTo.subject : `Re: ${replyTo.subject || ''}`;
-      composeBody = `\n\n--- Original message ---\nFrom: ${replyTo.from || ''}\n${replyTo.body_text || ''}`;
+      composeBody = replyQuote(replyTo);
       composeInReplyTo = replyTo.message_id;
+      composeReferences = replyTo.message_id;
       // Try to match the identity that was the recipient of the original message
       const accountIdentities = identities.filter(i => i.account_id === replyTo.account_id);
       const toAddresses = (replyTo.to ?? []).map(a => a.toLowerCase());
@@ -2302,6 +2306,8 @@
       composeSubject = '';
       composeBody = '';
       composeInReplyTo = null;
+      composeReferences = null;
+      composeMode = 'new';
       composeIdentityId = (identities.find(i => i.is_default) ?? identities[0])?.identity_id ?? '';
     }
     reconcileComposeSigning(composeIdentityId, composeSignOptedOut, composeTrustedKeys, composeStoredSigningFingerprints);
@@ -2323,17 +2329,20 @@
     composeCc = ccAddresses;
     showComposeCcBcc = ccAddresses.length > 0;
     composeReplyAll = true;
+    composeMode = 'replyAll';
   }
 
   function openComposeForward(forwardFrom: Message) {
     openCompose();
+    composeMode = 'forward';
     const accountIdentities = identities.filter(i => i.account_id === forwardFrom.account_id);
     composeIdentityId = (accountIdentities.find(i => i.is_default) ?? accountIdentities[0] ?? identities[0])?.identity_id ?? '';
     composeSubject = /^fwd:/i.test(forwardFrom.subject ?? '')
       ? (forwardFrom.subject ?? '')
       : `Fwd: ${forwardFrom.subject || ''}`;
-    composeBody = `\n\n--- Forwarded message ---\nFrom: ${forwardFrom.from || ''}\nTo: ${(forwardFrom.to ?? []).join(', ')}\nSubject: ${forwardFrom.subject || ''}\n\n${forwardFrom.body_text || ''}`;
+    composeBody = forwardQuote(forwardFrom);
     composeInReplyTo = null;
+    composeReferences = null;
     reconcileComposeSigning(composeIdentityId, composeSignOptedOut, composeTrustedKeys, composeStoredSigningFingerprints);
   }
 
@@ -2377,6 +2386,7 @@
           subject: composeSubject,
           body: composeBody,
           inReplyTo: composeInReplyTo,
+          references: composeReferences,
           attachments: composeAttachments,
           encrypt: composeEncrypt,
           sign: composeSign,
@@ -2399,6 +2409,7 @@
         fd.append('subject', composeSubject);
         fd.append('body', composeBody);
         if (composeInReplyTo) fd.append('in_reply_to', composeInReplyTo);
+        if (composeReferences) fd.append('references', composeReferences);
         for (const file of composeAttachments) {
           fd.append('attachment', file, file.name);
         }
@@ -2601,6 +2612,47 @@
     const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
     if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
     return d.toLocaleDateString([], opts);
+  }
+
+  function formatMessageDateTime(ts: number | null): string {
+    return ts ? new Date(ts * 1000).toLocaleString() : '';
+  }
+
+  function cleanQuotedBody(message: Message): string {
+    return (message.body_text ?? '').replace(/\r\n?/g, '\n').trim();
+  }
+
+  function quoteHeaderLines(message: Message, includeSubject = false): string[] {
+    const lines: string[] = [];
+    const date = formatMessageDateTime(message.sent_at);
+    if (date) lines.push(`Date: ${date}`);
+    if (message.from) lines.push(`From: ${message.from}`);
+    if (message.to.length > 0) lines.push(`To: ${message.to.join(', ')}`);
+    if (message.cc.length > 0) lines.push(`Cc: ${message.cc.join(', ')}`);
+    if (includeSubject) lines.push(`Subject: ${message.subject || tl('mail_noSubject')}`);
+    return lines;
+  }
+
+  function replyQuote(message: Message): string {
+    const header = quoteHeaderLines(message, false);
+    const quotedLines = [...header, '', cleanQuotedBody(message)]
+      .join('\n')
+      .split('\n')
+      .map(line => line ? `> ${line}` : '>')
+      .join('\n');
+    return `\n\n${quotedLines}`;
+  }
+
+  function forwardQuote(message: Message): string {
+    const lines = [
+      '',
+      '',
+      '--- Forwarded message ---',
+      ...quoteHeaderLines(message, true),
+      '',
+      cleanQuotedBody(message),
+    ];
+    return lines.join('\n').replace(/\n+$/, '');
   }
 
   // Tags that convey something plain text cannot (links, images, tables, lists,
@@ -3317,6 +3369,7 @@
                     {tl('mail_replyAll')}
                   </button>
                   <button role="menuitem" on:click={() => { actionsOpen = false; openComposeForward(selectedMessage!); }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg>
                     {tl('mail_forward')}
                   </button>
                   <div class="menu-separator"></div>
@@ -3860,7 +3913,7 @@
 >
   <article>
     <header class="compose-header">
-      <span class="compose-title">{composeInReplyTo ? (composeReplyAll ? tl('mail_replyAll') : tl('mail_reply')) : tl('mail_newMessage')}</span>
+      <span class="compose-title">{composeMode === 'forward' ? tl('mail_forward') : composeMode === 'replyAll' ? tl('mail_replyAll') : composeMode === 'reply' ? tl('mail_reply') : tl('mail_newMessage')}</span>
       <button class="close-btn" aria-label={tl('mail_close')} on:click={() => composeDialog?.close()}></button>
     </header>
     <form on:submit|preventDefault={sendEmail} class="compose-form">
