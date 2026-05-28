@@ -902,7 +902,26 @@
 
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
+  function setupResponsiveState() {
+    compactMediaQuery = window.matchMedia('(max-width: 1023px)');
+    phoneMediaQuery = window.matchMedia('(max-width: 639px)');
+    usesDetailOverlay = compactMediaQuery.matches;
+    isPhone = phoneMediaQuery.matches;
+    compactMediaQueryListener = (e: MediaQueryListEvent) => {
+      usesDetailOverlay = e.matches;
+      if (e.matches) void tick().then(fitIframeToContent);
+    };
+    phoneMediaQueryListener = (e: MediaQueryListEvent) => {
+      isPhone = e.matches;
+      if (!e.matches) sidebarOpen = false;
+    };
+    compactMediaQuery.addEventListener('change', compactMediaQueryListener);
+    phoneMediaQuery.addEventListener('change', phoneMediaQueryListener);
+  }
+
   onMount(async () => {
+    setupResponsiveState();
+
     const user = await getUser();
     if (!user.ok) {
       window.location.href = '/';
@@ -919,17 +938,7 @@
     }
     connectSSE();
 
-    compactMediaQuery = window.matchMedia('(max-width: 1023px)');
-    phoneMediaQuery = window.matchMedia('(max-width: 639px)');
-    usesDetailOverlay = compactMediaQuery.matches;
-    isPhone = phoneMediaQuery.matches;
-    compactMediaQueryListener = (e: MediaQueryListEvent) => { usesDetailOverlay = e.matches; };
-    phoneMediaQueryListener = (e: MediaQueryListEvent) => {
-      isPhone = e.matches;
-      if (!e.matches) sidebarOpen = false;
-    };
-    compactMediaQuery.addEventListener('change', compactMediaQueryListener);
-    phoneMediaQuery.addEventListener('change', phoneMediaQueryListener);
+    if (usesDetailOverlay) void tick().then(fitIframeToContent);
 
     window.addEventListener('mousemove', handleResizeMove);
     window.addEventListener('mouseup', stopResize);
@@ -3618,6 +3627,7 @@
                 <iframe
                   bind:this={iframeEl}
                   on:load={fitIframeToContent}
+                  scrolling={usesDetailOverlay ? 'no' : undefined}
                   sandbox="allow-popups allow-same-origin"
                   srcdoc={renderedHtml}
                   title={tl('nav_mail')}
