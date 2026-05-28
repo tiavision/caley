@@ -902,50 +902,52 @@
   {#if loading}
     <p aria-busy="true">{tl('nav_loading')}</p>
   {:else if tab === 'settings'}
-    <p>{tl('settings_subtitle')}</p>
-    <form onsubmit={(e) => { e.preventDefault(); onSubmit(); }}>
-      <label>
-        <span>{tl('settings_baseUrl')}</span>
-        <input
-          type="url"
-          placeholder={tl('settings_baseUrlPlaceholder')}
-          bind:value={caldavBaseUrl}
-          required
-        />
-      </label>
+    <div class="settings-panel">
+      <p class="settings-subtitle">{tl('settings_subtitle')}</p>
+      <form class="settings-connection-form" onsubmit={(e) => { e.preventDefault(); onSubmit(); }}>
+        <label>
+          <span>{tl('settings_baseUrl')}</span>
+          <input
+            type="url"
+            placeholder={tl('settings_baseUrlPlaceholder')}
+            bind:value={caldavBaseUrl}
+            required
+          />
+        </label>
 
-      <label>
-        <span>{tl('settings_username')}</span>
-        <input
-          type="text"
-          placeholder={tl('settings_usernamePlaceholder')}
-          bind:value={caldavUsername}
-          required
-        />
-      </label>
+        <label>
+          <span>{tl('settings_username')}</span>
+          <input
+            type="text"
+            placeholder={tl('settings_usernamePlaceholder')}
+            bind:value={caldavUsername}
+            required
+          />
+        </label>
 
-      <label>
-        <span>{tl('settings_password')}</span>
-        <input
-          type="password"
-          placeholder={!hasPassword ? tl('settings_passwordPlaceholder') : tl('settings_passwordHint')}
-          bind:value={caldavPassword}
-        />
-      </label>
+        <label>
+          <span>{tl('settings_password')}</span>
+          <input
+            type="password"
+            placeholder={!hasPassword ? tl('settings_passwordPlaceholder') : tl('settings_passwordHint')}
+            bind:value={caldavPassword}
+          />
+        </label>
 
-      {#if errorMsg}
-        <p class="error-msg">{errorMsg}</p>
-      {/if}
+        {#if errorMsg}
+          <p class="error-msg">{errorMsg}</p>
+        {/if}
 
-      <button type="submit" disabled={saving} aria-busy={saving}>
-        {tl('settings_submit')}
+        <button type="submit" disabled={saving} aria-busy={saving}>
+          {tl('settings_submit')}
+        </button>
+      </form>
+
+      <hr />
+      <button class="delete-account-btn" onclick={onDeleteAccount} disabled={deleting} aria-busy={deleting}>
+        {tl('settings_deleteAccount')}
       </button>
-    </form>
-
-    <hr />
-    <button class="delete-account-btn" onclick={onDeleteAccount} disabled={deleting} aria-busy={deleting}>
-      {tl('settings_deleteAccount')}
-    </button>
+    </div>
   {:else if tab === 'calendars'}
     <!-- Calendars tab -->
     {#if calendarsLoading}
@@ -1439,8 +1441,9 @@
 
 <style>
   .settings-form {
-    max-width: 32rem;
-    margin: 2rem auto;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 1rem;
   }
 
   .settings-header {
@@ -1466,6 +1469,7 @@
     border: 1px solid var(--pico-del-color);
     color: var(--pico-del-color);
     margin-top: 0.5rem;
+    width: auto;
   }
 
   .delete-account-btn:hover {
@@ -1474,30 +1478,93 @@
   }
 
   .tabs {
+    align-items: center;
+    align-self: flex-start;
+    background: var(--pico-muted-border-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 0.5rem;
     display: flex;
-    border-bottom: 2px solid var(--pico-muted-border-color);
+    flex-wrap: wrap;
+    gap: 0.15rem;
     margin-bottom: 1.5rem;
+    margin-top: 1rem;
+    max-width: 100%;
+    padding: 0.15rem;
   }
+
   .tabs button {
     background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px;
-    padding: 0.4rem 1rem;
-    font-size: 0.9rem;
-    font-weight: 500;
+    border: 1px solid transparent;
+    border-radius: 0.35rem;
+    box-shadow: none;
     color: var(--pico-muted-color);
     cursor: pointer;
-    border-radius: 0;
-    transition: color 0.15s, border-color 0.15s;
+    font-size: 0.9rem;
+    font-weight: 500;
+    line-height: 1.2;
+    margin: 0;
+    min-height: 2rem;
+    padding: 0.4rem 0.75rem;
+    transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+    width: auto;
   }
+
   .tabs button:hover {
+    background: var(--pico-card-background-color);
     color: var(--pico-primary);
   }
+
   .tabs button.active {
+    background: var(--pico-card-background-color);
+    border-color: var(--pico-card-border-color);
     color: var(--pico-primary);
-    border-bottom-color: var(--pico-primary);
     font-weight: 600;
+  }
+
+  .settings-panel {
+    max-width: 32rem;
+  }
+
+  .settings-subtitle {
+    color: var(--pico-muted-color);
+    margin-bottom: 1rem;
+  }
+
+  .settings-connection-form {
+    max-width: 30rem;
+  }
+
+  .settings-connection-form input {
+    max-width: 30rem;
+  }
+
+  .settings-connection-form button[type="submit"] {
+    width: auto;
+  }
+
+  .settings-panel hr {
+    max-width: 30rem;
+    margin: 1.25rem 0 0.75rem;
+  }
+
+  @media (max-width: 640px) {
+    .settings-form {
+      padding: 0.75rem;
+    }
+
+    .settings-header {
+      align-items: flex-start;
+    }
+
+    .tabs {
+      width: 100%;
+    }
+
+    .tabs button {
+      flex: 1 1 auto;
+      min-width: 8rem;
+    }
   }
 
   .calendar-list {
