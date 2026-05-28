@@ -3578,7 +3578,6 @@
                     srcdoc={pgpDecryptedHtml}
                     title={tl('nav_mail')}
                     class="html-body"
-                    scrolling="no"
                   ></iframe>
                 {/key}
               {:else if pgpDecryptedText}
@@ -3623,7 +3622,6 @@
                   srcdoc={renderedHtml}
                   title={tl('nav_mail')}
                   class="html-body"
-                  scrolling="no"
                 ></iframe>
               {/key}
             {:else if selectedMessage.body_text !== null}
@@ -5871,7 +5869,7 @@
     .message-detail.standalone {
       display: flex;
       position: static;
-      overflow: hidden;
+      overflow-y: auto;
       box-shadow: none;
     }
 
@@ -5887,17 +5885,6 @@
 
     .html-body {
       flex: none;
-    }
-
-    .message-detail.standalone .detail-body {
-      flex: 1;
-      min-height: 0;
-      overflow-y: auto;
-    }
-
-    .message-detail.standalone .html-body {
-      flex: 1;
-      min-height: 0;
     }
 
     .detail-resize-handle {
