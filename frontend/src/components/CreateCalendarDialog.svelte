@@ -1,14 +1,16 @@
 <script lang="ts">
   import { makeTl } from '../lib/i18n.ts';
-  import type { CalendarJson } from '../types/calendar.ts';
+  import type { CalendarJson, CalDavAccountJson } from '../types/calendar.ts';
 
   export let locale: string = 'en';
+  export let accounts: CalDavAccountJson[] = [];
   export let oncreated: ((cal: CalendarJson) => void) | undefined = undefined;
 
   $: tl = makeTl(locale);
 
   let dialogEl: HTMLDialogElement;
   let name = '';
+  let accountId = '';
   let color = '';
   let useColor = false;
   let error = '';
@@ -16,6 +18,7 @@
 
   export function open() {
     name = '';
+    accountId = accounts[0]?.account_id || '';
     color = '#4a90d9';
     useColor = false;
     error = '';
@@ -30,6 +33,7 @@
     saving = true;
     try {
       const params = new URLSearchParams({ name: trimmed });
+      params.set('account_id', accountId);
       if (useColor && color) params.set('color', color);
       const resp = await fetch('/api/calendar', {
         method: 'POST',
@@ -71,6 +75,17 @@
         <span>{tl('cal_createCalendarName')}</span>
         <input type="text" bind:value={name} required />
       </label>
+
+      {#if accounts.length > 1}
+        <label>
+          <span>{tl('cal_createAccount')}</span>
+          <select bind:value={accountId} required>
+            {#each accounts as account (account.account_id)}
+              <option value={account.account_id}>{account.display_name}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
 
       <label class="color-toggle">
         <input type="checkbox" bind:checked={useColor} />

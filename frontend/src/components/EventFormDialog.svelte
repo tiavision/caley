@@ -21,7 +21,7 @@
 
   let fUid = '', fSummary = '', fDate = '', fStartTime = '', fEndTime = '';
   let fIsAllDay = false, fLocation = '', fDescription = '', fTz = '';
-  let fOriginalDtstart = '', fOriginalCalendarHref = '', fCalendarHref = '';
+  let fOriginalDtstart = '', fOriginalCalendarHref = '', fOriginalAccountId = '', fCalendarHref = '', fAccountId = '';
   let formAlarms: AlarmFields[] = [];
   let formAttendees: AttendeeFields[] = [];
 
@@ -111,11 +111,14 @@
     fUid = ''; fSummary = ''; fDate = focusedEventDate || fmtDate(new Date());
     fIsAllDay = true; fStartTime = ''; fEndTime = '';
     fLocation = ''; fDescription = ''; fTz = getUserTz();
-    fOriginalDtstart = ''; fOriginalCalendarHref = '';
+    fOriginalDtstart = ''; fOriginalCalendarHref = ''; fOriginalAccountId = '';
     const stored = localStorage.getItem('defaultCalendar');
     const active = calendars.find(c => c.is_active);
-    const fallback = active?.href || calendars[0]?.href || '';
-    fCalendarHref = (stored && calendars.find(c => c.href === stored && c.is_active)) ? stored : fallback;
+    const fallback = active || calendars[0];
+    const storedCal = stored ? calendars.find(c => `${c.account_id}\0${c.href}` === stored && c.is_active) : null;
+    const selected = storedCal || fallback;
+    fAccountId = selected?.account_id || '';
+    fCalendarHref = selected?.href || '';
     resetRecurrence(); formAlarms = []; formAttendees = []; formError = '';
     timeSuggestions = []; timeSuggestionIdx = -1;
     setTimeout(() => {
@@ -131,8 +134,8 @@
     formMode = 'edit'; formScope = scope;
     fUid = ev.uid; fSummary = ev.summary; fLocation = ev.location;
     fDescription = ev.description; fTz = ev.tz || getUserTz();
-    fOriginalDtstart = ev.dtstart; fOriginalCalendarHref = ev.calendar_href;
-    fCalendarHref = ev.calendar_href; fIsAllDay = ev.is_all_day;
+    fOriginalDtstart = ev.dtstart; fOriginalCalendarHref = ev.calendar_href; fOriginalAccountId = ev.account_id;
+    fAccountId = ev.account_id; fCalendarHref = ev.calendar_href; fIsAllDay = ev.is_all_day;
     let dtstart = ev.dtstart;
     if (scope === 'series' && ev.is_recurring && ev.master_dtstart) dtstart = ev.master_dtstart;
     fDate = dtstart.split('T')[0] || '';
@@ -164,6 +167,8 @@
     p.append('tz', fTz); p.append('scope', formScope);
     p.append('original_dtstart', fOriginalDtstart);
     p.append('original_calendar_href', fOriginalCalendarHref);
+    p.append('original_account_id', fOriginalAccountId);
+    p.append('account_id', fAccountId);
     p.append('calendar_href', fCalendarHref); p.append('recurrence', rruleJson);
     for (const a of formAlarms) {
       p.append('alarm_direction', a.direction); p.append('alarm_value', a.value);
@@ -181,7 +186,7 @@
         body: p.toString(),
       });
       if (res.ok) {
-        if (formMode === 'create') localStorage.setItem('defaultCalendar', fCalendarHref);
+        if (formMode === 'create') localStorage.setItem('defaultCalendar', `${fAccountId}\0${fCalendarHref}`);
         formDialogEl?.close();
         onsaved?.();
       } else {
@@ -195,7 +200,7 @@
     if (!fUid || !fCalendarHref) return;
     if (!confirm(tl('event_deleteConfirm'))) return;
     formSaving = true;
-    let url = `/api/event?uid=${encodeURIComponent(fUid)}&calendar_href=${encodeURIComponent(fCalendarHref)}`;
+    let url = `/api/event?account_id=${encodeURIComponent(fAccountId)}&uid=${encodeURIComponent(fUid)}&calendar_href=${encodeURIComponent(fCalendarHref)}`;
     if (formScope === 'this_instance' && fOriginalDtstart)
       url += `&scope=this_instance&original_dtstart=${encodeURIComponent(fOriginalDtstart)}&tz=${encodeURIComponent(fTz)}`;
     try {
@@ -744,9 +749,22 @@
 
       <label>
         <span>{tl('event_calendar')}</span>
-        <select bind:value={fCalendarHref} disabled={formScope === 'this_instance'} onchange={() => localStorage.setItem('defaultCalendar', fCalendarHref)}>
-          {#each calendars as cal}
-            <option value={cal.href}>{cal.name}</option>
+        <select
+          value={`${fAccountId}\0${fCalendarHref}`}
+          disabled={formScope === 'this_instance'}
+          onchange={(e) => {
+            const [accountId, href] = (e.target as HTMLSelectElement).value.split('\0');
+            fAccountId = accountId;
+            fCalendarHref = href;
+            localStorage.setItem('defaultCalendar', `${fAccountId}\0${fCalendarHref}`);
+          }}
+        >
+          {#each Array.from(new Map(calendars.map(c => [c.account_id, c])).values()) as accountCal (accountCal.account_id)}
+            <optgroup label={accountCal.account_id}>
+              {#each calendars.filter(c => c.account_id === accountCal.account_id) as cal (cal.account_id + cal.href)}
+                <option value={`${cal.account_id}\0${cal.href}`}>{cal.name}</option>
+              {/each}
+            </optgroup>
           {/each}
         </select>
       </label>

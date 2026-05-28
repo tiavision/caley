@@ -88,12 +88,12 @@
     sseSource.addEventListener('events_refetch', () => { fetchEvents(); fetchMonthGrid(); });
     sseSource.addEventListener('calendars_changed', () => { fetchCalendars(); fetchMonthGrid(); });
     sseSource.addEventListener('event_updated', async (e: MessageEvent) => {
-      const payload: { uid: string; calendar_href: string; event?: EventJson } = JSON.parse(e.data);
+      const payload: { account_id: string; uid: string; calendar_href: string; event?: EventJson } = JSON.parse(e.data);
       const { uid } = payload;
       if (payload.event) {
         days = days.map(day => ({
           ...day,
-          events: day.events.filter(ev => ev.uid !== uid),
+          events: day.events.filter(ev => !(ev.account_id === payload.account_id && ev.uid === uid)),
         }));
         const dateIso = payload.event.dtstart.substring(0, 10);
         days = days.map(day => {
@@ -113,10 +113,10 @@
       }
     });
     sseSource.addEventListener('event_removed', (e: MessageEvent) => {
-      const [uid, calendar_href] = (e.data as string).split('|');
+        const payload: { account_id: string; uid: string; calendar_href: string } = JSON.parse(e.data);
       days = days.map(day => ({
         ...day,
-        events: day.events.filter(ev => !(ev.uid === uid && ev.calendar_href === calendar_href))
+        events: day.events.filter(ev => !(ev.account_id === payload.account_id && ev.uid === payload.uid && ev.calendar_href === payload.calendar_href))
       }));
     });
     sseSource.onerror = () => {
@@ -420,7 +420,7 @@
             </button>
           </div>
           <div class="appointments">
-            {#each day.events as event (event.uid + event.dtstart)}
+            {#each day.events as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
               <article
                 class="appointment event-trigger"

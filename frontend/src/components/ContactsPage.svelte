@@ -57,6 +57,7 @@
   let formPhones: TypedEntry[] = [emptyPhone()];
   let formAddresses: AddressEntry[] = [];
   let formOrg = '';
+  let formAccountId = '';
   let formAddressbookHref = '';
   let formSaving = false;
   let formError = '';
@@ -85,10 +86,11 @@
       addressbooks = data.addressbooks;
       contacts = data.contacts;
       if (!formAddressbookHref && addressbooks.length > 0) {
+        formAccountId = addressbooks[0].account_id;
         formAddressbookHref = addressbooks[0].href;
       }
       if (selectedAddressbookHrefs.size === 0 && addressbooks.length > 0) {
-        selectedAddressbookHrefs = new Set(addressbooks.map(ab => ab.href));
+        selectedAddressbookHrefs = new Set(addressbooks.map(ab => abKey(ab)));
       }
     } catch {
       errorMsg = 'Failed to load contacts.';
@@ -102,13 +104,13 @@
     sseSource.addEventListener('contacts_refetch', () => loadContacts());
     sseSource.addEventListener('contact_updated', (e: MessageEvent) => {
       try {
-        const payload: { uid: string; addressbook_href: string; contact?: ContactJson } = JSON.parse(e.data);
+        const payload: { account_id: string; uid: string; addressbook_href: string; contact?: ContactJson } = JSON.parse(e.data);
         if (payload.contact) {
-          const idx = contacts.findIndex(c => c.uid === payload.uid && c.addressbook_href === payload.addressbook_href);
+          const idx = contacts.findIndex(c => c.account_id === payload.account_id && c.uid === payload.uid && c.addressbook_href === payload.addressbook_href);
           if (idx >= 0) {
             contacts[idx] = payload.contact;
             contacts = [...contacts];
-            if (selectedContact?.uid === payload.uid) selectedContact = payload.contact;
+            if (selectedContact?.account_id === payload.account_id && selectedContact?.uid === payload.uid) selectedContact = payload.contact;
           } else {
             contacts = sortedInsert(contacts, payload.contact);
           }
@@ -119,9 +121,9 @@
     });
     sseSource.addEventListener('contact_removed', (e: MessageEvent) => {
       try {
-        const payload: { uid: string; addressbook_href: string } = JSON.parse(e.data);
-        contacts = contacts.filter(c => !(c.uid === payload.uid && c.addressbook_href === payload.addressbook_href));
-        if (selectedContact?.uid === payload.uid && selectedContact?.addressbook_href === payload.addressbook_href) {
+        const payload: { account_id: string; uid: string; addressbook_href: string } = JSON.parse(e.data);
+        contacts = contacts.filter(c => !(c.account_id === payload.account_id && c.uid === payload.uid && c.addressbook_href === payload.addressbook_href));
+        if (selectedContact?.account_id === payload.account_id && selectedContact?.uid === payload.uid && selectedContact?.addressbook_href === payload.addressbook_href) {
           closeDetail();
         }
       } catch {}
@@ -141,7 +143,7 @@
   $: filteredContacts = (() => {
     let list = contacts;
     if (addressbooks.length > 1 && selectedAddressbookHrefs.size < addressbooks.length) {
-      list = list.filter(c => selectedAddressbookHrefs.has(c.addressbook_href));
+      list = list.filter(c => selectedAddressbookHrefs.has(contactAbKey(c)));
     }
     const q = filterText.trim().toLowerCase();
     if (q) {
@@ -169,8 +171,16 @@
       .map(([letter, items]) => ({ letter, items }));
   }
 
-  function getAddressbookName(href: string): string {
-    return addressbooks.find(ab => ab.href === href)?.name ?? '';
+  function getAddressbookName(accountId: string, href: string): string {
+    return addressbooks.find(ab => ab.account_id === accountId && ab.href === href)?.name ?? '';
+  }
+
+  function abKey(ab: AddressbookJson): string {
+    return `${ab.account_id}\0${ab.href}`;
+  }
+
+  function contactAbKey(c: ContactJson): string {
+    return `${c.account_id}\0${c.addressbook_href}`;
   }
 
   $: abBtnLabel = (() => {
@@ -179,9 +189,9 @@
     return n === total ? tl('contacts_addressbooks') : `${tl('contacts_addressbooks')} (${n}/${total})`;
   })();
 
-  function toggleAddressbook(href: string) {
-    if (selectedAddressbookHrefs.has(href)) selectedAddressbookHrefs.delete(href);
-    else selectedAddressbookHrefs.add(href);
+  function toggleAddressbook(key: string) {
+    if (selectedAddressbookHrefs.has(key)) selectedAddressbookHrefs.delete(key);
+    else selectedAddressbookHrefs.add(key);
     selectedAddressbookHrefs = selectedAddressbookHrefs;
   }
 
@@ -222,6 +232,7 @@
     formPhones = [emptyPhone()];
     formAddresses = [];
     formOrg = '';
+    formAccountId = addressbooks[0]?.account_id ?? '';
     formAddressbookHref = addressbooks[0]?.href ?? '';
     formError = '';
     await tick();
@@ -241,6 +252,7 @@
     formPhones = c.phones.length > 0 ? c.phones.map(p => ({ ...p })) : [emptyPhone()];
     formAddresses = c.addresses.map(a => ({ ...a }));
     formOrg = c.org;
+    formAccountId = c.account_id;
     formAddressbookHref = c.addressbook_href;
     formError = '';
     await tick();
@@ -266,6 +278,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           uid: formUid ?? undefined,
+          account_id: formAccountId,
           addressbook_href: formAddressbookHref,
           fn_name: formName.trim(),
           emails,
@@ -296,7 +309,7 @@
       await fetch('/api/contact', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uid: c.uid, addressbook_href: c.addressbook_href }),
+        body: JSON.stringify({ account_id: c.account_id, uid: c.uid, addressbook_href: c.addressbook_href }),
       });
     } catch {}
   }
@@ -319,13 +332,13 @@
           </button>
           {#if abDropdownOpen}
             <ul class="ab-dropdown-list">
-              {#each addressbooks as ab (ab.href)}
+              {#each addressbooks as ab (ab.account_id + ab.href)}
                 <li>
                   <label>
                     <input
                       type="checkbox"
-                      checked={selectedAddressbookHrefs.has(ab.href)}
-                      onchange={() => toggleAddressbook(ab.href)}
+                      checked={selectedAddressbookHrefs.has(abKey(ab))}
+                      onchange={() => toggleAddressbook(abKey(ab))}
                     />
                     {ab.name}
                   </label>
@@ -356,7 +369,7 @@
         <div class="contact-group">
           <div class="contact-group-letter">{group.letter}</div>
           <div class="contact-cards">
-            {#each group.items as contact (contact.uid + contact.addressbook_href)}
+              {#each group.items as contact (contact.account_id + contact.uid + contact.addressbook_href)}
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <div
                 class="contact-card"
@@ -367,7 +380,7 @@
               >
                 <div class="card-avatar">
                   {#if contact.has_photo}
-                    <img class="avatar-photo" src="/api/contact/photo?uid={encodeURIComponent(contact.uid)}&addressbook_href={encodeURIComponent(contact.addressbook_href)}" alt="" />
+                    <img class="avatar-photo" src="/api/contact/photo?account_id={encodeURIComponent(contact.account_id)}&uid={encodeURIComponent(contact.uid)}&addressbook_href={encodeURIComponent(contact.addressbook_href)}" alt="" />
                   {:else}
                     {(contact.fn_name[0] ?? '?').toUpperCase()}
                   {/if}
@@ -384,7 +397,7 @@
                     <span class="card-org">{contact.org}</span>
                   {/if}
                   {#if addressbooks.length > 1}
-                    <span class="card-ab">{getAddressbookName(contact.addressbook_href)}</span>
+                    <span class="card-ab">{getAddressbookName(contact.account_id, contact.addressbook_href)}</span>
                   {/if}
                 </div>
               </div>
@@ -432,7 +445,7 @@
         <div class="detail-avatar-wrap">
           <div class="detail-avatar">
             {#if selectedContact.has_photo}
-              <img class="avatar-photo" src="/api/contact/photo?uid={encodeURIComponent(selectedContact.uid)}&addressbook_href={encodeURIComponent(selectedContact.addressbook_href)}" alt="" />
+              <img class="avatar-photo" src="/api/contact/photo?account_id={encodeURIComponent(selectedContact.account_id)}&uid={encodeURIComponent(selectedContact.uid)}&addressbook_href={encodeURIComponent(selectedContact.addressbook_href)}" alt="" />
             {:else}
               {(selectedContact.fn_name[0] ?? '?').toUpperCase()}
             {/if}
@@ -495,7 +508,7 @@
         {#if addressbooks.length > 1}
           <div class="detail-row">
             <span class="detail-label">{tl('contacts_addressbook')}</span>
-            <span>{getAddressbookName(selectedContact.addressbook_href)}</span>
+            <span>{getAddressbookName(selectedContact.account_id, selectedContact.addressbook_href)}</span>
           </div>
         {/if}
 
@@ -633,9 +646,16 @@
       {#if addressbooks.length > 1}
         <label>
           {tl('contacts_addressbook')}
-          <select bind:value={formAddressbookHref}>
-            {#each addressbooks as ab}
-              <option value={ab.href}>{ab.name}</option>
+          <select
+            value={`${formAccountId}\0${formAddressbookHref}`}
+            onchange={(e) => {
+              const [accountId, href] = (e.target as HTMLSelectElement).value.split('\0');
+              formAccountId = accountId;
+              formAddressbookHref = href;
+            }}
+          >
+            {#each addressbooks as ab (ab.account_id + ab.href)}
+              <option value={`${ab.account_id}\0${ab.href}`}>{ab.name}</option>
             {/each}
           </select>
         </label>

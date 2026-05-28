@@ -19,9 +19,10 @@ pub enum SseMessage {
     /// Calendar list changed — client should re-fetch /api/calendars
     CalendarsChanged,
     /// A single event was deleted
-    EventRemoved { uid: String, calendar_href: String },
+    EventRemoved { account_id: String, uid: String, calendar_href: String },
     /// A single event was created or updated
     EventUpdated {
+        account_id: String,
         uid: String,
         calendar_href: String,
         event_json: Option<String>,
@@ -30,11 +31,13 @@ pub enum SseMessage {
     ContactsRefetch,
     /// A single contact was deleted
     ContactRemoved {
+        account_id: String,
         uid: String,
         addressbook_href: String,
     },
     /// A single contact was created or updated (contact_json is inline to avoid a roundtrip)
     ContactUpdated {
+        account_id: String,
         uid: String,
         addressbook_href: String,
         contact_json: Option<String>,
@@ -120,35 +123,37 @@ pub async fn events_stream(
             Ok(SseMessage::CalendarsChanged) => {
                 Some(Event::default().event("calendars_changed").data("1"))
             }
-            Ok(SseMessage::EventRemoved { uid, calendar_href }) => {
-                Some(Event::default().event("event_removed").data(format!("{uid}|{calendar_href}")))
+            Ok(SseMessage::EventRemoved { account_id, uid, calendar_href }) => {
+                Some(Event::default().event("event_removed").data(
+                    serde_json::json!({ "account_id": account_id, "uid": uid, "calendar_href": calendar_href }).to_string(),
+                ))
             }
-            Ok(SseMessage::EventUpdated { uid, calendar_href, event_json }) => {
+            Ok(SseMessage::EventUpdated { account_id, uid, calendar_href, event_json }) => {
                 let data = if let Some(event) = event_json {
                     let parsed: serde_json::Value =
                         serde_json::from_str(&event).unwrap_or_default();
-                    serde_json::json!({ "uid": uid, "calendar_href": calendar_href, "event": parsed })
+                    serde_json::json!({ "account_id": account_id, "uid": uid, "calendar_href": calendar_href, "event": parsed })
                         .to_string()
                 } else {
-                    serde_json::json!({ "uid": uid, "calendar_href": calendar_href }).to_string()
+                    serde_json::json!({ "account_id": account_id, "uid": uid, "calendar_href": calendar_href }).to_string()
                 };
                 Some(Event::default().event("event_updated").data(data))
             }
             Ok(SseMessage::ContactsRefetch) => {
                 Some(Event::default().event("contacts_refetch").data("1"))
             }
-            Ok(SseMessage::ContactRemoved { uid, addressbook_href }) => {
+            Ok(SseMessage::ContactRemoved { account_id, uid, addressbook_href }) => {
                 Some(Event::default().event("contact_removed").data(
-                    serde_json::json!({ "uid": uid, "addressbook_href": addressbook_href }).to_string()
+                    serde_json::json!({ "account_id": account_id, "uid": uid, "addressbook_href": addressbook_href }).to_string()
                 ))
             }
-            Ok(SseMessage::ContactUpdated { uid, addressbook_href, contact_json }) => {
+            Ok(SseMessage::ContactUpdated { account_id, uid, addressbook_href, contact_json }) => {
                 let data = if let Some(contact) = contact_json {
                     let parsed: serde_json::Value = serde_json::from_str(&contact).unwrap_or_default();
-                    serde_json::json!({ "uid": uid, "addressbook_href": addressbook_href, "contact": parsed })
+                    serde_json::json!({ "account_id": account_id, "uid": uid, "addressbook_href": addressbook_href, "contact": parsed })
                         .to_string()
                 } else {
-                    serde_json::json!({ "uid": uid, "addressbook_href": addressbook_href }).to_string()
+                    serde_json::json!({ "account_id": account_id, "uid": uid, "addressbook_href": addressbook_href }).to_string()
                 };
                 Some(Event::default().event("contact_updated").data(data))
             }
@@ -228,13 +233,13 @@ pub async fn push_webhook(
 
     // Check calendar push subscriptions first
     match db::get_user_and_calendar_from_push_token(&state.db, &token).await {
-        Ok(Some((user_id, calendar_href))) => {
+        Ok(Some((user_id, account_id, calendar_href))) => {
             eprintln!(
                 "[push] webhook matched user {user_id} calendar {calendar_href}, triggering targeted sync"
             );
             state
                 .sync_manager
-                .trigger(&user_id, SyncTrigger::Calendar(calendar_href));
+                .trigger(&user_id, SyncTrigger::Calendar { account_id, href: calendar_href });
             return axum::http::StatusCode::CREATED.into_response();
         }
         Ok(None) => {}
@@ -243,13 +248,13 @@ pub async fn push_webhook(
 
     // Check contact push subscriptions
     match db::get_user_and_addressbook_from_push_token(&state.db, &token).await {
-        Ok(Some((user_id, addressbook_href))) => {
+        Ok(Some((user_id, account_id, addressbook_href))) => {
             eprintln!(
                 "[push] webhook matched user {user_id} addressbook {addressbook_href}, triggering contact sync"
             );
             state
                 .sync_manager
-                .trigger(&user_id, SyncTrigger::Addressbook(addressbook_href));
+                .trigger(&user_id, SyncTrigger::Addressbook { account_id, href: addressbook_href });
             axum::http::StatusCode::CREATED.into_response()
         }
         _ => {

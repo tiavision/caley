@@ -33,7 +33,7 @@
       const res = await fetch('/api/calendars');
       if (res.ok) {
         calendars = await res.json();
-        selectedHrefs = new Set(calendars.filter(c => c.is_active).map(c => c.href));
+        selectedHrefs = new Set(calendars.filter(c => c.is_active).map(calendarKey));
       }
     } catch {}
     calendarsLoaded = true;
@@ -46,9 +46,13 @@
     return n === total ? tl('search_calendars') : `${tl('search_calendars')} (${n}/${total})`;
   })();
 
-  function toggleCalendar(href: string) {
-    if (selectedHrefs.has(href)) selectedHrefs.delete(href);
-    else selectedHrefs.add(href);
+  function calendarKey(cal: CalendarJson): string {
+    return `${cal.account_id}\0${cal.href}`;
+  }
+
+  function toggleCalendar(key: string) {
+    if (selectedHrefs.has(key)) selectedHrefs.delete(key);
+    else selectedHrefs.add(key);
     selectedHrefs = selectedHrefs;
   }
 
@@ -103,8 +107,8 @@
     return new Date(y, mo - 1, d).toLocaleDateString(locale, { dateStyle: 'long' });
   }
 
-  function calendarName(href: string): string {
-    return calendars.find(c => c.href === href)?.name ?? '';
+  function calendarName(accountId: string, href: string): string {
+    return calendars.find(c => c.account_id === accountId && c.href === href)?.name ?? '';
   }
 </script>
 
@@ -126,13 +130,13 @@
     </button>
     {#if calDropdownOpen}
       <ul class="cal-dropdown-list">
-        {#each calendars as cal (cal.href)}
+        {#each calendars as cal (cal.account_id + cal.href)}
           <li>
             <label>
               <input
                 type="checkbox"
-                checked={selectedHrefs.has(cal.href)}
-                onchange={() => toggleCalendar(cal.href)}
+                checked={selectedHrefs.has(calendarKey(cal))}
+                onchange={() => toggleCalendar(calendarKey(cal))}
               />
               <EventColorDot color={cal.color} />
               {cal.name}
@@ -190,8 +194,8 @@
             {#if item.description}
               <span class="result-desc">{item.description}</span>
             {/if}
-            {#if calendarName(item.calendar_href)}
-              <span class="result-calendar">{calendarName(item.calendar_href)}</span>
+            {#if calendarName(item.account_id, item.calendar_href)}
+              <span class="result-calendar">{calendarName(item.account_id, item.calendar_href)}</span>
             {/if}
           </div>
         </button>

@@ -7,7 +7,7 @@
   import CreateCalendarDialog from './CreateCalendarDialog.svelte';
   import ImportDialog from './ImportDialog.svelte';
   import UiIcon from './UiIcon.svelte';
-  import type { CalendarJson } from '../types/calendar.ts';
+  import type { CalendarJson, CalDavAccountJson } from '../types/calendar.ts';
 
   let locale = 'en';
   $: tl = makeTl(locale);
@@ -15,6 +15,8 @@
   let caldavBaseUrl = '';
   let caldavUsername = '';
   let caldavPassword = '';
+  let caldavDisplayName = '';
+  let editingAccountId = '';
   let hasPassword = false;
   let loading = true;
   let saving = false;
@@ -73,29 +75,37 @@
   import * as openpgp from 'openpgp';
 
   // ── Tabs ───────────────────────────────────────────────────────────────────
-  let tab: 'settings' | 'calendars' | 'encryption' = 'settings';
+  let tab: 'settings' | 'encryption' = 'settings';
 
   // ── Calendars tab ─────────────────────────────────────────────────────────
   let calendars: CalendarJson[] = [];
+  let caldavAccounts: CalDavAccountJson[] = [];
   let calendarsLoading = false;
   let createCalDialog: CreateCalendarDialog;
   let importDialog: ImportDialog;
+  let accountDialog: HTMLDialogElement;
 
   async function fetchCalendars() {
     calendarsLoading = true;
     try {
       const res = await fetch('/api/calendars');
       if (res.ok) calendars = await res.json();
+      const accountRes = await fetch('/api/caldav/accounts');
+      if (accountRes.ok) caldavAccounts = (await accountRes.json()).accounts || [];
     } catch {}
     calendarsLoading = false;
   }
 
-  async function toggleCalendar(href: string, active: boolean) {
-    calendars = calendars.map(c => c.href === href ? { ...c, is_active: active } : c);
+  async function toggleCalendar(accountId: string, href: string, active: boolean) {
+    calendars = calendars.map(c => c.account_id === accountId && c.href === href ? { ...c, is_active: active } : c);
+    caldavAccounts = caldavAccounts.map(acc => acc.account_id === accountId ? {
+      ...acc,
+      calendars: acc.calendars.map(c => c.href === href ? { ...c, is_active: active } : c),
+    } : acc);
     await fetch('/api/calendar/toggle', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `href=${encodeURIComponent(href)}&active=${active}`,
+      body: `account_id=${encodeURIComponent(accountId)}&href=${encodeURIComponent(href)}&active=${active}`,
     });
   }
 
@@ -774,9 +784,8 @@
     }
   }
 
-  function switchTab(t: 'settings' | 'calendars' | 'encryption') {
+  function switchTab(t: 'settings' | 'encryption') {
     tab = t;
-    if (t === 'calendars' && calendars.length === 0) fetchCalendars();
     if (t === 'encryption') loadVaultStatus();
   }
 
@@ -799,16 +808,7 @@
       return;
     }
 
-    // Load existing settings to prefill the form.
-    try {
-      const res = await fetch('/api/settings/form');
-      if (res.ok) {
-        const data = await res.json();
-        caldavBaseUrl = data.caldav_base_url || '';
-        caldavUsername = data.caldav_username || '';
-        hasPassword = !!data.has_password;
-      }
-    } catch {}
+    await fetchCalendars();
     loading = false;
   });
 
@@ -817,23 +817,48 @@
     locale = selectedLocale;
   }
 
+  function openAddAccountDialog() {
+    editingAccountId = '';
+    caldavDisplayName = '';
+    caldavBaseUrl = '';
+    caldavUsername = '';
+    caldavPassword = '';
+    hasPassword = false;
+    errorMsg = '';
+    accountDialog?.showModal();
+  }
+
+  function openEditAccountDialog(account: CalDavAccountJson) {
+    editingAccountId = account.account_id;
+    caldavDisplayName = account.display_name || '';
+    caldavBaseUrl = account.caldav_base_url || '';
+    caldavUsername = account.caldav_username || '';
+    caldavPassword = '';
+    hasPassword = !!account.has_password;
+    errorMsg = '';
+    accountDialog?.showModal();
+  }
+
   async function onSubmit() {
     saving = true;
     errorMsg = '';
     const params = new URLSearchParams();
+    if (editingAccountId) params.append('account_id', editingAccountId);
+    params.append('display_name', caldavDisplayName);
     params.append('caldav_base_url', caldavBaseUrl);
     params.append('caldav_username', caldavUsername);
     params.append('caldav_password', caldavPassword);
 
     try {
-      const res = await fetch('/api/settings', {
+      const res = await fetch('/api/caldav/account', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: params.toString(),
       });
       const data = await res.json();
       if (res.ok && data.status === 'ok') {
-        window.location.href = '/calendar/';
+        accountDialog?.close();
+        await fetchCalendars();
       } else {
         errorMsg = data.error || tl('event_error');
       }
@@ -841,6 +866,14 @@
       errorMsg = tl('event_error');
     }
     saving = false;
+  }
+
+  async function onDeleteCalDavAccount(account: CalDavAccountJson) {
+    if (!confirm(`Remove account "${account.display_name}"?`)) return;
+    try {
+      const res = await fetch(`/api/caldav/account?account_id=${encodeURIComponent(account.account_id)}`, { method: 'DELETE' });
+      if (res.ok) await fetchCalendars();
+    } catch {}
   }
 
   async function onDeleteAccount() {
@@ -886,12 +919,6 @@
       >{tl('nav_settings')}</button>
       <button
         role="tab"
-        class:active={tab === 'calendars'}
-        aria-selected={tab === 'calendars'}
-        onclick={() => switchTab('calendars')}
-      >{tl('cal_calendars')}</button>
-      <button
-        role="tab"
         class:active={tab === 'encryption'}
         aria-selected={tab === 'encryption'}
         onclick={() => switchTab('encryption')}
@@ -904,71 +931,10 @@
   {:else if tab === 'settings'}
     <div class="settings-panel">
       <p class="settings-subtitle">{tl('settings_subtitle')}</p>
-      <form class="settings-connection-form" onsubmit={(e) => { e.preventDefault(); onSubmit(); }}>
-        <label>
-          <span>{tl('settings_baseUrl')}</span>
-          <input
-            type="url"
-            placeholder={tl('settings_baseUrlPlaceholder')}
-            bind:value={caldavBaseUrl}
-            required
-          />
-        </label>
-
-        <label>
-          <span>{tl('settings_username')}</span>
-          <input
-            type="text"
-            placeholder={tl('settings_usernamePlaceholder')}
-            bind:value={caldavUsername}
-            required
-          />
-        </label>
-
-        <label>
-          <span>{tl('settings_password')}</span>
-          <input
-            type="password"
-            placeholder={!hasPassword ? tl('settings_passwordPlaceholder') : tl('settings_passwordHint')}
-            bind:value={caldavPassword}
-          />
-        </label>
-
-        {#if errorMsg}
-          <p class="error-msg">{errorMsg}</p>
-        {/if}
-
-        <button type="submit" disabled={saving} aria-busy={saving}>
-          {tl('settings_submit')}
-        </button>
-      </form>
-
-      <hr />
-      <button class="delete-account-btn" onclick={onDeleteAccount} disabled={deleting} aria-busy={deleting}>
-        {tl('settings_deleteAccount')}
-      </button>
-    </div>
-  {:else if tab === 'calendars'}
-    <!-- Calendars tab -->
-    {#if calendarsLoading}
-      <p aria-busy="true">{tl('nav_loading')}</p>
-    {:else}
-      <ul class="calendar-list">
-        {#each calendars as cal}
-          <li>
-            <label>
-              <input
-                type="checkbox"
-                checked={cal.is_active}
-                onchange={(e) => toggleCalendar(cal.href, (e.target as HTMLInputElement).checked)}
-              />
-              <EventColorDot color={cal.color} />
-              {cal.name}
-            </label>
-          </li>
-        {/each}
-      </ul>
       <div class="cal-actions">
+        <button class="cal-action-btn" onclick={openAddAccountDialog}>
+          {tl('mail_addAccount')}
+        </button>
         <button class="cal-action-btn" onclick={() => createCalDialog.open()}>
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           {tl('cal_createCalendar')}
@@ -977,7 +943,58 @@
           {tl('cal_import')}
         </button>
       </div>
-    {/if}
+      {#if calendarsLoading}
+        <p aria-busy="true">{tl('nav_loading')}</p>
+      {:else if caldavAccounts.length === 0}
+        <p>{tl('settings_subtitle')}</p>
+      {:else}
+        <div class="caldav-account-list">
+          {#each caldavAccounts as account (account.account_id)}
+            <section class="caldav-account">
+              <header class="caldav-account-header">
+                <div>
+                  <h3>{account.display_name}</h3>
+                  <p>{account.caldav_username}</p>
+                </div>
+                <div class="caldav-account-actions">
+                  <button class="secondary small" onclick={() => openEditAccountDialog(account)}>{tl('contacts_edit')}</button>
+                  <button class="contrast outline small" onclick={() => onDeleteCalDavAccount(account)}>{tl('contacts_delete')}</button>
+                </div>
+              </header>
+              <h4>{tl('cal_calendars')}</h4>
+              <ul class="calendar-list">
+                {#each account.calendars as cal (cal.account_id + cal.href)}
+                  <li>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={cal.is_active}
+                        onchange={(e) => toggleCalendar(cal.account_id, cal.href, (e.target as HTMLInputElement).checked)}
+                      />
+                      <EventColorDot color={cal.color} />
+                      {cal.name}
+                    </label>
+                  </li>
+                {/each}
+              </ul>
+              {#if account.addressbooks.length > 0}
+                <h4>{tl('contacts_addressbooks')}</h4>
+                <ul class="calendar-list">
+                  {#each account.addressbooks as ab (ab.account_id + ab.href)}
+                    <li>{ab.name}</li>
+                  {/each}
+                </ul>
+              {/if}
+            </section>
+          {/each}
+        </div>
+      {/if}
+
+      <hr />
+      <button class="delete-account-btn" onclick={onDeleteAccount} disabled={deleting} aria-busy={deleting}>
+        {tl('settings_deleteAccount')}
+      </button>
+    </div>
   {:else if tab === 'encryption'}
     {#if pgpVault}
       <div class="pgp-heading">
@@ -1233,14 +1250,50 @@
   {/if}
 </div>
 
+<dialog bind:this={accountDialog} onclick={(e) => { if (e.target === e.currentTarget) accountDialog?.close(); }}>
+  <article>
+    <header>
+      <h3>{editingAccountId ? tl('mail_editAccountHeading') : tl('mail_addAccountHeading')}</h3>
+      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={() => accountDialog?.close()}></button>
+    </header>
+    <form class="settings-connection-form" onsubmit={(e) => { e.preventDefault(); onSubmit(); }}>
+      <label>
+        <span>{tl('settings_accountName')}</span>
+        <input type="text" bind:value={caldavDisplayName} />
+      </label>
+      <label>
+        <span>{tl('settings_baseUrl')}</span>
+        <input type="url" placeholder={tl('settings_baseUrlPlaceholder')} bind:value={caldavBaseUrl} required />
+      </label>
+      <label>
+        <span>{tl('settings_username')}</span>
+        <input type="text" placeholder={tl('settings_usernamePlaceholder')} bind:value={caldavUsername} required />
+      </label>
+      <label>
+        <span>{tl('settings_password')}</span>
+        <input type="password" placeholder={!hasPassword ? tl('settings_passwordPlaceholder') : tl('settings_passwordHint')} bind:value={caldavPassword} />
+      </label>
+      {#if errorMsg}
+        <p class="error-msg">{errorMsg}</p>
+      {/if}
+      <footer>
+        <button type="submit" disabled={saving} aria-busy={saving}>{tl('settings_submit')}</button>
+        <button type="button" class="secondary" onclick={() => accountDialog?.close()}>{tl('event_cancel')}</button>
+      </footer>
+    </form>
+  </article>
+</dialog>
+
 <CreateCalendarDialog
   bind:this={createCalDialog}
   {locale}
+  accounts={caldavAccounts}
   oncreated={(cal) => { calendars = [...calendars, cal]; }}
 />
 <ImportDialog
   bind:this={importDialog}
   {calendars}
+  accounts={caldavAccounts}
   {locale}
   onimported={fetchCalendars}
 />

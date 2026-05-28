@@ -1,8 +1,9 @@
 <script lang="ts">
   import { makeTl } from '../lib/i18n.ts';
-  import type { CalendarJson } from '../types/calendar.ts';
+  import type { CalendarJson, CalDavAccountJson } from '../types/calendar.ts';
 
   export let calendars: CalendarJson[] = [];
+  export let accounts: CalDavAccountJson[] = [];
   export let locale: string = 'en';
   export let onimported: ((data: { imported: number; errors: number }) => void) | undefined = undefined;
 
@@ -12,6 +13,7 @@
 
   let dialogEl: HTMLDialogElement;
   let selectedHref = '';
+  let selectedAccountId = '';
   let newCalName = '';
   let fileInput: HTMLInputElement;
   let error = '';
@@ -24,7 +26,10 @@
     const stored = localStorage.getItem('defaultCalendar');
     const active = calendars.find(c => c.is_active);
     const fallback = active?.href || calendars[0]?.href || NEW_CAL_SENTINEL;
-    selectedHref = (stored && calendars.find(c => c.href === stored && c.is_active)) ? stored : fallback;
+    const storedCal = stored ? calendars.find(c => `${c.account_id}\0${c.href}` === stored && c.is_active) : null;
+    const fallbackCal = active || calendars[0];
+    selectedAccountId = storedCal?.account_id || fallbackCal?.account_id || accounts[0]?.account_id || '';
+    selectedHref = storedCal?.href || fallback;
     newCalName = '';
     error = '';
     successMsg = '';
@@ -42,6 +47,7 @@
     importing = true;
     try {
       let targetHref = selectedHref;
+      let targetAccountId = selectedAccountId;
 
       if (isNewCal) {
         const calName = newCalName.trim();
@@ -49,16 +55,18 @@
         const resp = await fetch('/api/calendar', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({ name: calName }).toString(),
+          body: new URLSearchParams({ account_id: targetAccountId, name: calName }).toString(),
         });
         if (!resp.ok) { error = await resp.text(); importing = false; return; }
         const cal: CalendarJson = await resp.json();
         targetHref = cal.href;
+        targetAccountId = cal.account_id;
         onimported?.({ imported: 0, errors: 0 }); // signal calendars changed
       }
 
       const fd = new FormData();
       fd.append('file', file);
+      fd.append('account_id', targetAccountId);
       fd.append('calendar_href', targetHref);
       const resp = await fetch('/api/import', { method: 'POST', body: fd });
       if (!resp.ok) { error = await resp.text(); return; }
@@ -69,6 +77,7 @@
       }
       onimported?.(result);
       if (result.errors === 0) {
+        localStorage.setItem('defaultCalendar', `${targetAccountId}\0${targetHref}`);
         setTimeout(() => dialogEl?.close(), 1500);
       }
     } catch (e) {
@@ -105,14 +114,42 @@
 
       <label>
         <span>{tl('cal_importCalendar')}</span>
-        <select bind:value={selectedHref}>
-          {#each calendars as cal}
-            <option value={cal.href}>{cal.name}</option>
+        <select
+          value={`${selectedAccountId}\0${selectedHref}`}
+          onchange={(e) => {
+            const value = (e.target as HTMLSelectElement).value;
+            if (value === NEW_CAL_SENTINEL) {
+              selectedHref = NEW_CAL_SENTINEL;
+              selectedAccountId = accounts[0]?.account_id || '';
+            } else {
+              const [accountId, href] = value.split('\0');
+              selectedAccountId = accountId;
+              selectedHref = href;
+            }
+          }}
+        >
+          {#each accounts as account (account.account_id)}
+            <optgroup label={account.display_name}>
+              {#each account.calendars as cal (cal.account_id + cal.href)}
+                <option value={`${cal.account_id}\0${cal.href}`}>{cal.name}</option>
+              {/each}
+            </optgroup>
           {/each}
           <option disabled>─────</option>
           <option value={NEW_CAL_SENTINEL}>{tl('cal_importNewCalendar')}</option>
         </select>
       </label>
+
+      {#if isNewCal && accounts.length > 1}
+        <label>
+          <span>{tl('mail_account')}</span>
+          <select bind:value={selectedAccountId}>
+            {#each accounts as account (account.account_id)}
+              <option value={account.account_id}>{account.display_name}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
 
       {#if isNewCal}
         <label>

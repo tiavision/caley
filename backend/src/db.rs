@@ -2,6 +2,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, S
 use sqlx::{Row, SqlitePool};
 use std::collections::HashSet;
 use std::path::Path;
+use uuid::Uuid;
 
 use crate::caldav::unescape_ical_text;
 use crate::search::SearchMode;
@@ -19,9 +20,19 @@ pub struct UserSettings {
 
 #[derive(sqlx::FromRow)]
 pub struct CachedCalendar {
+    pub account_id: String,
     pub href: String,
     pub name: String,
     pub color: Option<String>,
+}
+
+pub struct CalDavAccount {
+    pub account_id: String,
+    pub display_name: Option<String>,
+    pub caldav_base_url: String,
+    pub caldav_username: String,
+    pub caldav_password: String,
+    pub sort_order: i64,
 }
 
 fn encrypt_field(value: &str, key: &[u8; 32]) -> anyhow::Result<String> {
@@ -61,11 +72,11 @@ pub async fn init_db(path: &str) -> anyhow::Result<SqlitePool> {
 
 pub async fn get_deactivated_calendars(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     key: &[u8; 32],
 ) -> anyhow::Result<HashSet<String>> {
-    let rows = sqlx::query("SELECT calendar_href FROM deactivated_calendars WHERE user_id = ?")
-        .bind(user_id)
+    let rows = sqlx::query("SELECT calendar_href FROM deactivated_calendars WHERE account_id = ?")
+        .bind(account_id)
         .fetch_all(pool)
         .await?;
     let mut set = HashSet::new();
@@ -78,16 +89,16 @@ pub async fn get_deactivated_calendars(
 
 pub async fn deactivate_calendar(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     calendar_href: &str,
     key: &[u8; 32],
 ) -> anyhow::Result<()> {
     let enc_href = encrypt_field(calendar_href, key)?;
     sqlx::query(
-        "INSERT INTO deactivated_calendars (user_id, calendar_href) VALUES (?, ?)
-         ON CONFLICT(user_id, calendar_href) DO NOTHING",
+        "INSERT INTO deactivated_calendars (account_id, calendar_href) VALUES (?, ?)
+         ON CONFLICT(account_id, calendar_href) DO NOTHING",
     )
-    .bind(user_id)
+    .bind(account_id)
     .bind(enc_href)
     .execute(pool)
     .await?;
@@ -96,13 +107,13 @@ pub async fn deactivate_calendar(
 
 pub async fn activate_calendar(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     calendar_href: &str,
     key: &[u8; 32],
 ) -> anyhow::Result<()> {
     let rows =
-        sqlx::query("SELECT rowid, calendar_href FROM deactivated_calendars WHERE user_id = ?")
-            .bind(user_id)
+        sqlx::query("SELECT rowid, calendar_href FROM deactivated_calendars WHERE account_id = ?")
+            .bind(account_id)
             .fetch_all(pool)
             .await?;
     for row in rows {
@@ -138,31 +149,166 @@ pub async fn ensure_user(
     Ok(())
 }
 
-/// Return the user's active CalDAV account. The schema supports multiple
-/// accounts per user; downstream code currently operates on a single one.
+pub async fn list_caldav_accounts(
+    pool: &SqlitePool,
+    user_id: &str,
+    key: &[u8; 32],
+) -> anyhow::Result<Vec<CalDavAccount>> {
+    let rows = sqlx::query(
+        "SELECT account_id, display_name, caldav_base_url, caldav_username, caldav_password, sort_order
+         FROM caldav_accounts
+         WHERE user_id = ?
+         ORDER BY sort_order, account_id",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|r| {
+            Ok(CalDavAccount {
+                account_id: r.get(0),
+                display_name: r.get(1),
+                caldav_base_url: decrypt_field(&r.get::<String, _>(2), key)?,
+                caldav_username: decrypt_field(&r.get::<String, _>(3), key)?,
+                caldav_password: decrypt_field(&r.get::<String, _>(4), key)?,
+                sort_order: r.get(5),
+            })
+        })
+        .collect()
+}
+
+pub async fn get_caldav_account(
+    pool: &SqlitePool,
+    user_id: &str,
+    account_id: &str,
+    key: &[u8; 32],
+) -> anyhow::Result<Option<CalDavAccount>> {
+    let row = sqlx::query(
+        "SELECT account_id, display_name, caldav_base_url, caldav_username, caldav_password, sort_order
+         FROM caldav_accounts
+         WHERE user_id = ? AND account_id = ?",
+    )
+    .bind(user_id)
+    .bind(account_id)
+    .fetch_optional(pool)
+    .await?;
+
+    row.map(|r| {
+        Ok(CalDavAccount {
+            account_id: r.get(0),
+            display_name: r.get(1),
+            caldav_base_url: decrypt_field(&r.get::<String, _>(2), key)?,
+            caldav_username: decrypt_field(&r.get::<String, _>(3), key)?,
+            caldav_password: decrypt_field(&r.get::<String, _>(4), key)?,
+            sort_order: r.get(5),
+        })
+    })
+    .transpose()
+}
+
+/// Return the user's first CalDAV account for compatibility with local login and
+/// legacy code paths. New calendar/contact code should use account-specific APIs.
 pub async fn get_settings(
     pool: &SqlitePool,
     user_id: &str,
     key: &[u8; 32],
 ) -> anyhow::Result<Option<UserSettings>> {
-    let row = sqlx::query(
-        "SELECT caldav_base_url, caldav_username, caldav_password FROM caldav_accounts
-         WHERE user_id = ? ORDER BY sort_order, account_id LIMIT 1",
+    Ok(list_caldav_accounts(pool, user_id, key)
+        .await?
+        .into_iter()
+        .next()
+        .map(|a| UserSettings {
+            caldav_base_url: a.caldav_base_url,
+            caldav_username: a.caldav_username,
+            caldav_password: a.caldav_password,
+        }))
+}
+
+pub async fn upsert_caldav_account(
+    pool: &SqlitePool,
+    user_id: &str,
+    account_id: Option<&str>,
+    display_name: Option<&str>,
+    settings: &UserSettings,
+    key: &[u8; 32],
+) -> anyhow::Result<String> {
+    let account_id = account_id
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("{user_id}:{}", Uuid::new_v4()));
+    let sort_order: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(sort_order) + 1, 0) FROM caldav_accounts WHERE user_id = ?",
     )
     .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    let enc_url = encrypt_field(&settings.caldav_base_url, key)?;
+    let enc_user = encrypt_field(&settings.caldav_username, key)?;
+    let enc_pass = encrypt_field(&settings.caldav_password, key)?;
+    sqlx::query(
+        "INSERT INTO caldav_accounts
+            (account_id, user_id, display_name, caldav_base_url, caldav_username, caldav_password, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(account_id) DO UPDATE SET
+            display_name = excluded.display_name,
+            caldav_base_url = excluded.caldav_base_url,
+            caldav_username = excluded.caldav_username,
+            caldav_password = excluded.caldav_password",
+    )
+    .bind(&account_id)
+    .bind(user_id)
+    .bind(display_name)
+    .bind(enc_url)
+    .bind(enc_user)
+    .bind(enc_pass)
+    .bind(sort_order)
+    .execute(pool)
+    .await?;
+    Ok(account_id)
+}
+
+pub async fn delete_caldav_account(
+    pool: &SqlitePool,
+    user_id: &str,
+    account_id: &str,
+) -> anyhow::Result<bool> {
+    let result = sqlx::query("DELETE FROM caldav_accounts WHERE user_id = ? AND account_id = ?")
+        .bind(user_id)
+        .bind(account_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn get_user_id_for_caldav_account(
+    pool: &SqlitePool,
+    account_id: &str,
+) -> anyhow::Result<Option<String>> {
+    sqlx::query_scalar("SELECT user_id FROM caldav_accounts WHERE account_id = ?")
+        .bind(account_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(Into::into)
+}
+
+pub async fn get_caldav_account_password(
+    pool: &SqlitePool,
+    user_id: &str,
+    account_id: &str,
+    key: &[u8; 32],
+) -> anyhow::Result<Option<String>> {
+    let row = sqlx::query(
+        "SELECT caldav_password FROM caldav_accounts WHERE user_id = ? AND account_id = ?",
+    )
+    .bind(user_id)
+    .bind(account_id)
     .fetch_optional(pool)
     .await?;
-
     match row {
         Some(r) => {
-            let enc_url: String = r.get(0);
-            let enc_user: String = r.get(1);
-            let enc_pass: String = r.get(2);
-            Ok(Some(UserSettings {
-                caldav_base_url: decrypt_field(&enc_url, key)?,
-                caldav_username: decrypt_field(&enc_user, key)?,
-                caldav_password: decrypt_field(&enc_pass, key)?,
-            }))
+            let enc: String = r.get(0);
+            Ok(Some(decrypt_field(&enc, key)?))
         }
         None => Ok(None),
     }
@@ -175,40 +321,31 @@ pub async fn upsert_settings(
     key: &[u8; 32],
 ) -> anyhow::Result<()> {
     let account_id = format!("{user_id}:default");
-    let enc_url = encrypt_field(&settings.caldav_base_url, key)?;
-    let enc_user = encrypt_field(&settings.caldav_username, key)?;
-    let enc_pass = encrypt_field(&settings.caldav_password, key)?;
-    sqlx::query(
-        "INSERT INTO caldav_accounts
-            (account_id, user_id, caldav_base_url, caldav_username, caldav_password)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(account_id) DO UPDATE SET
-            caldav_base_url = excluded.caldav_base_url,
-            caldav_username = excluded.caldav_username,
-            caldav_password = excluded.caldav_password",
-    )
-    .bind(account_id)
-    .bind(user_id)
-    .bind(enc_url)
-    .bind(enc_user)
-    .bind(enc_pass)
-    .execute(pool)
-    .await?;
+    upsert_caldav_account(pool, user_id, Some(&account_id), None, settings, key).await?;
     Ok(())
 }
 
 pub async fn clear_user_cache(pool: &SqlitePool, user_id: &str) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
-    sqlx::query("DELETE FROM cached_calendars WHERE user_id = ?")
-        .bind(user_id)
+    sqlx::query(
+        "DELETE FROM cached_calendars
+         WHERE account_id IN (SELECT account_id FROM caldav_accounts WHERE user_id = ?)",
+    )
+    .bind(user_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM cached_events WHERE user_id = ?")
-        .bind(user_id)
+    sqlx::query(
+        "DELETE FROM cached_events
+         WHERE account_id IN (SELECT account_id FROM caldav_accounts WHERE user_id = ?)",
+    )
+    .bind(user_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM push_subscriptions WHERE user_id = ?")
-        .bind(user_id)
+    sqlx::query(
+        "DELETE FROM push_subscriptions
+         WHERE account_id IN (SELECT account_id FROM caldav_accounts WHERE user_id = ?)",
+    )
+    .bind(user_id)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
@@ -217,21 +354,21 @@ pub async fn clear_user_cache(pool: &SqlitePool, user_id: &str) -> anyhow::Resul
 
 pub async fn upsert_push_subscription(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     calendar_href: &str,
     webhook_token: &str,
     transport: &str,
     expires_at: i64,
 ) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO push_subscriptions (user_id, calendar_href, webhook_token, transport, expires_at)
+        "INSERT INTO push_subscriptions (account_id, calendar_href, webhook_token, transport, expires_at)
          VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(user_id, calendar_href) DO UPDATE SET
+         ON CONFLICT(account_id, calendar_href) DO UPDATE SET
              webhook_token = excluded.webhook_token,
              transport = excluded.transport,
              expires_at = excluded.expires_at",
     )
-    .bind(user_id)
+    .bind(account_id)
     .bind(calendar_href)
     .bind(webhook_token)
     .bind(transport)
@@ -243,13 +380,13 @@ pub async fn upsert_push_subscription(
 
 pub async fn get_push_subscription(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     calendar_href: &str,
 ) -> anyhow::Result<Option<(String, i64)>> {
     let row = sqlx::query(
-        "SELECT webhook_token, expires_at FROM push_subscriptions WHERE user_id = ? AND calendar_href = ?",
+        "SELECT webhook_token, expires_at FROM push_subscriptions WHERE account_id = ? AND calendar_href = ?",
     )
-    .bind(user_id)
+    .bind(account_id)
     .bind(calendar_href)
     .fetch_optional(pool)
     .await?;
@@ -259,35 +396,38 @@ pub async fn get_push_subscription(
 pub async fn get_user_and_calendar_from_push_token(
     pool: &SqlitePool,
     token: &str,
-) -> anyhow::Result<Option<(String, String)>> {
+) -> anyhow::Result<Option<(String, String, String)>> {
     let row = sqlx::query(
-        "SELECT user_id, calendar_href FROM push_subscriptions WHERE webhook_token = ?",
+        "SELECT ca.user_id, p.account_id, p.calendar_href
+         FROM push_subscriptions p
+         JOIN caldav_accounts ca ON ca.account_id = p.account_id
+         WHERE p.webhook_token = ?",
     )
     .bind(token)
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|r| (r.get(0), r.get(1))))
+    Ok(row.map(|r| (r.get(0), r.get(1), r.get(2))))
 }
 
 // ── Calendar cache ────────────────────────────────────────────────────────────
 
 pub async fn upsert_cached_calendar(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     href: &str,
     name: &str,
     color: Option<&str>,
 ) -> anyhow::Result<()> {
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
-        "INSERT INTO cached_calendars (user_id, href, name, color, last_synced)
+        "INSERT INTO cached_calendars (account_id, href, name, color, last_synced)
          VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(user_id, href) DO UPDATE SET
+         ON CONFLICT(account_id, href) DO UPDATE SET
             name = excluded.name,
             color = excluded.color,
             last_synced = excluded.last_synced",
     )
-    .bind(user_id)
+    .bind(account_id)
     .bind(href)
     .bind(name)
     .bind(color)
@@ -302,7 +442,11 @@ pub async fn get_cached_calendars(
     user_id: &str,
 ) -> anyhow::Result<Vec<CachedCalendar>> {
     let cals = sqlx::query_as::<_, CachedCalendar>(
-        "SELECT href, name, color FROM cached_calendars WHERE user_id = ? ORDER BY name",
+        "SELECT c.account_id, c.href, c.name, c.color
+         FROM cached_calendars c
+         JOIN caldav_accounts ca ON ca.account_id = c.account_id
+         WHERE ca.user_id = ?
+         ORDER BY ca.sort_order, c.name",
     )
     .bind(user_id)
     .fetch_all(pool)
@@ -312,12 +456,12 @@ pub async fn get_cached_calendars(
 
 pub async fn get_calendar_sync_state(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     href: &str,
 ) -> anyhow::Result<(Option<String>, Option<String>)> {
     let row =
-        sqlx::query("SELECT ctag, sync_token FROM cached_calendars WHERE user_id = ? AND href = ?")
-            .bind(user_id)
+        sqlx::query("SELECT ctag, sync_token FROM cached_calendars WHERE account_id = ? AND href = ?")
+            .bind(account_id)
             .bind(href)
             .fetch_optional(pool)
             .await?;
@@ -330,7 +474,7 @@ pub async fn get_calendar_sync_state(
 /// Remove cached data for calendars that no longer exist on the CalDAV server.
 pub async fn remove_stale_calendars(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     fresh_hrefs: &HashSet<String>,
     key: &[u8; 32],
 ) -> anyhow::Result<()> {
@@ -344,50 +488,50 @@ pub async fn remove_stale_calendars(
 
     if !fresh_hrefs.is_empty() {
         let sql = format!(
-            "DELETE FROM push_subscriptions WHERE user_id = ? AND calendar_href NOT IN ({placeholders})"
+            "DELETE FROM push_subscriptions WHERE account_id = ? AND calendar_href NOT IN ({placeholders})"
         );
-        let mut q = sqlx::query(&sql).bind(user_id);
+        let mut q = sqlx::query(&sql).bind(account_id);
         for h in fresh_hrefs {
             q = q.bind(h.as_str());
         }
         q.execute(&mut *tx).await?;
 
         let sql = format!(
-            "DELETE FROM cached_events WHERE user_id = ? AND calendar_href NOT IN ({placeholders})"
+            "DELETE FROM cached_events WHERE account_id = ? AND calendar_href NOT IN ({placeholders})"
         );
-        let mut q = sqlx::query(&sql).bind(user_id);
+        let mut q = sqlx::query(&sql).bind(account_id);
         for h in fresh_hrefs {
             q = q.bind(h.as_str());
         }
         q.execute(&mut *tx).await?;
 
         let sql = format!(
-            "DELETE FROM cached_calendars WHERE user_id = ? AND href NOT IN ({placeholders})"
+            "DELETE FROM cached_calendars WHERE account_id = ? AND href NOT IN ({placeholders})"
         );
-        let mut q = sqlx::query(&sql).bind(user_id);
+        let mut q = sqlx::query(&sql).bind(account_id);
         for h in fresh_hrefs {
             q = q.bind(h.as_str());
         }
         q.execute(&mut *tx).await?;
     } else {
-        sqlx::query("DELETE FROM push_subscriptions WHERE user_id = ?")
-            .bind(user_id)
+        sqlx::query("DELETE FROM push_subscriptions WHERE account_id = ?")
+            .bind(account_id)
             .execute(&mut *tx)
             .await?;
-        sqlx::query("DELETE FROM cached_events WHERE user_id = ?")
-            .bind(user_id)
+        sqlx::query("DELETE FROM cached_events WHERE account_id = ?")
+            .bind(account_id)
             .execute(&mut *tx)
             .await?;
-        sqlx::query("DELETE FROM cached_calendars WHERE user_id = ?")
-            .bind(user_id)
+        sqlx::query("DELETE FROM cached_calendars WHERE account_id = ?")
+            .bind(account_id)
             .execute(&mut *tx)
             .await?;
     }
 
     // deactivated_calendars hrefs are encrypted with random nonces, so decrypt each to compare
     let rows =
-        sqlx::query("SELECT rowid, calendar_href FROM deactivated_calendars WHERE user_id = ?")
-            .bind(user_id)
+        sqlx::query("SELECT rowid, calendar_href FROM deactivated_calendars WHERE account_id = ?")
+            .bind(account_id)
             .fetch_all(&mut *tx)
             .await?;
     for row in rows {
@@ -410,28 +554,28 @@ pub async fn remove_stale_calendars(
 /// Delete all cached data for a single calendar. Used when a calendar returns 404.
 pub async fn delete_calendar_cache(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     calendar_href: &str,
     key: &[u8; 32],
 ) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
 
-    sqlx::query("DELETE FROM push_subscriptions WHERE user_id = ? AND calendar_href = ?")
-        .bind(user_id)
+    sqlx::query("DELETE FROM push_subscriptions WHERE account_id = ? AND calendar_href = ?")
+        .bind(account_id)
         .bind(calendar_href)
         .execute(&mut *tx)
         .await?;
 
-    sqlx::query("DELETE FROM cached_events WHERE user_id = ? AND calendar_href = ?")
-        .bind(user_id)
+    sqlx::query("DELETE FROM cached_events WHERE account_id = ? AND calendar_href = ?")
+        .bind(account_id)
         .bind(calendar_href)
         .execute(&mut *tx)
         .await?;
 
     // deactivated_calendars hrefs are encrypted, so decrypt each to compare
     let rows =
-        sqlx::query("SELECT rowid, calendar_href FROM deactivated_calendars WHERE user_id = ?")
-            .bind(user_id)
+        sqlx::query("SELECT rowid, calendar_href FROM deactivated_calendars WHERE account_id = ?")
+            .bind(account_id)
             .fetch_all(&mut *tx)
             .await?;
     for row in rows {
@@ -448,8 +592,8 @@ pub async fn delete_calendar_cache(
         }
     }
 
-    sqlx::query("DELETE FROM cached_calendars WHERE user_id = ? AND href = ?")
-        .bind(user_id)
+    sqlx::query("DELETE FROM cached_calendars WHERE account_id = ? AND href = ?")
+        .bind(account_id)
         .bind(calendar_href)
         .execute(&mut *tx)
         .await?;
@@ -570,7 +714,7 @@ fn extract_ical_metadata(
 
 pub async fn upsert_cached_event_raw(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     calendar_href: &str,
     event_href: &str,
     etag: &str,
@@ -588,9 +732,9 @@ pub async fn upsert_cached_event_raw(
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
         "INSERT INTO cached_events
-             (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified, summary_idx, description_idx, location_idx)
+             (account_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified, summary_idx, description_idx, location_idx)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(user_id, calendar_href, uid) DO UPDATE SET
+         ON CONFLICT(account_id, calendar_href, uid) DO UPDATE SET
              etag = excluded.etag,
              href = excluded.href,
              raw_ical = excluded.raw_ical,
@@ -606,7 +750,7 @@ pub async fn upsert_cached_event_raw(
              description_idx = excluded.description_idx,
              location_idx = excluded.location_idx",
     )
-    .bind(user_id)
+    .bind(account_id)
     .bind(calendar_href)
     .bind(&uid)
     .bind(etag)
@@ -630,12 +774,12 @@ pub async fn upsert_cached_event_raw(
 
 pub async fn delete_event_by_href(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     calendar_href: &str,
     event_href: &str,
 ) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM cached_events WHERE user_id = ? AND calendar_href = ? AND href = ?")
-        .bind(user_id)
+    sqlx::query("DELETE FROM cached_events WHERE account_id = ? AND calendar_href = ? AND href = ?")
+        .bind(account_id)
         .bind(calendar_href)
         .bind(event_href)
         .execute(pool)
@@ -645,12 +789,12 @@ pub async fn delete_event_by_href(
 
 pub async fn delete_cached_event(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     calendar_href: &str,
     uid: &str,
 ) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM cached_events WHERE user_id = ? AND calendar_href = ? AND uid = ?")
-        .bind(user_id)
+    sqlx::query("DELETE FROM cached_events WHERE account_id = ? AND calendar_href = ? AND uid = ?")
+        .bind(account_id)
         .bind(calendar_href)
         .bind(uid)
         .execute(pool)
@@ -659,6 +803,7 @@ pub async fn delete_cached_event(
 }
 
 pub struct EventRef {
+    pub account_id: String,
     pub uid: String,
     pub calendar_href: String,
 }
@@ -672,7 +817,7 @@ pub struct SyncApplyResult {
 /// events, and update the sync token — all in a single transaction.
 pub async fn apply_incremental_sync(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     calendar_href: &str,
     changed: Vec<(String, String, String)>,
     deleted: Vec<String>,
@@ -695,9 +840,9 @@ pub async fn apply_incremental_sync(
         let location_idx = mode.normalize_text(&location);
         sqlx::query(
             "INSERT INTO cached_events
-                 (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified, summary_idx, description_idx, location_idx)
+                 (account_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified, summary_idx, description_idx, location_idx)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(user_id, calendar_href, uid) DO UPDATE SET
+             ON CONFLICT(account_id, calendar_href, uid) DO UPDATE SET
                  etag = excluded.etag,
                  href = excluded.href,
                  raw_ical = excluded.raw_ical,
@@ -713,7 +858,7 @@ pub async fn apply_incremental_sync(
                  description_idx = excluded.description_idx,
                  location_idx = excluded.location_idx",
         )
-        .bind(user_id)
+        .bind(account_id)
         .bind(calendar_href)
         .bind(&uid)
         .bind(&etag)
@@ -733,6 +878,7 @@ pub async fn apply_incremental_sync(
         .execute(&mut *tx)
         .await?;
         changed_result.push(EventRef {
+            account_id: account_id.to_string(),
             uid,
             calendar_href: calendar_href.to_string(),
         });
@@ -741,23 +887,24 @@ pub async fn apply_incremental_sync(
     let mut deleted_result: Vec<EventRef> = Vec::new();
     for href in deleted {
         let uid: Option<String> = sqlx::query_scalar(
-            "SELECT uid FROM cached_events WHERE user_id = ? AND calendar_href = ? AND href = ?",
+            "SELECT uid FROM cached_events WHERE account_id = ? AND calendar_href = ? AND href = ?",
         )
-        .bind(user_id)
+        .bind(account_id)
         .bind(calendar_href)
         .bind(&href)
         .fetch_optional(&mut *tx)
         .await?;
         if let Some(uid) = uid {
             deleted_result.push(EventRef {
+                account_id: account_id.to_string(),
                 uid,
                 calendar_href: calendar_href.to_string(),
             });
         }
         sqlx::query(
-            "DELETE FROM cached_events WHERE user_id = ? AND calendar_href = ? AND href = ?",
+            "DELETE FROM cached_events WHERE account_id = ? AND calendar_href = ? AND href = ?",
         )
-        .bind(user_id)
+        .bind(account_id)
         .bind(calendar_href)
         .bind(&href)
         .execute(&mut *tx)
@@ -765,11 +912,11 @@ pub async fn apply_incremental_sync(
     }
 
     sqlx::query(
-        "UPDATE cached_calendars SET ctag = ?, sync_token = ? WHERE user_id = ? AND href = ?",
+        "UPDATE cached_calendars SET ctag = ?, sync_token = ? WHERE account_id = ? AND href = ?",
     )
     .bind(stored_ctag)
     .bind(new_token)
-    .bind(user_id)
+    .bind(account_id)
     .bind(calendar_href)
     .execute(&mut *tx)
     .await?;
@@ -785,7 +932,7 @@ pub async fn apply_incremental_sync(
 /// sync state — all in a single transaction.
 pub async fn replace_calendar_events(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     calendar_href: &str,
     all_raw: Vec<(String, String, String)>,
     new_ctag: Option<&str>,
@@ -795,8 +942,8 @@ pub async fn replace_calendar_events(
     let mut tx = pool.begin().await?;
     let now = chrono::Utc::now().timestamp();
 
-    sqlx::query("DELETE FROM cached_events WHERE user_id = ? AND calendar_href = ?")
-        .bind(user_id)
+    sqlx::query("DELETE FROM cached_events WHERE account_id = ? AND calendar_href = ?")
+        .bind(account_id)
         .bind(calendar_href)
         .execute(&mut *tx)
         .await?;
@@ -812,9 +959,9 @@ pub async fn replace_calendar_events(
         let location_idx = mode.normalize_text(&location);
         sqlx::query(
             "INSERT INTO cached_events
-                 (user_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified, summary_idx, description_idx, location_idx)
+                 (account_id, calendar_href, uid, etag, href, raw_ical, summary, dtstart, dtend, description, location, is_all_day, is_recurring, last_modified, summary_idx, description_idx, location_idx)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(user_id, calendar_href, uid) DO UPDATE SET
+             ON CONFLICT(account_id, calendar_href, uid) DO UPDATE SET
                  etag = excluded.etag,
                  href = excluded.href,
                  raw_ical = excluded.raw_ical,
@@ -830,7 +977,7 @@ pub async fn replace_calendar_events(
                  description_idx = excluded.description_idx,
                  location_idx = excluded.location_idx",
         )
-        .bind(user_id)
+        .bind(account_id)
         .bind(calendar_href)
         .bind(&uid)
         .bind(&etag)
@@ -852,11 +999,11 @@ pub async fn replace_calendar_events(
     }
 
     sqlx::query(
-        "UPDATE cached_calendars SET ctag = ?, sync_token = ? WHERE user_id = ? AND href = ?",
+        "UPDATE cached_calendars SET ctag = ?, sync_token = ? WHERE account_id = ? AND href = ?",
     )
     .bind(new_ctag)
     .bind(new_token)
-    .bind(user_id)
+    .bind(account_id)
     .bind(calendar_href)
     .execute(&mut *tx)
     .await?;
@@ -880,25 +1027,26 @@ pub async fn delete_user(pool: &SqlitePool, user_id: &str) -> anyhow::Result<()>
 
 #[derive(sqlx::FromRow)]
 pub struct CachedAddressbook {
+    pub account_id: String,
     pub href: String,
     pub name: String,
 }
 
 pub async fn upsert_cached_addressbook(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     href: &str,
     name: &str,
 ) -> anyhow::Result<()> {
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
-        "INSERT INTO cached_addressbooks (user_id, href, name, last_synced)
+        "INSERT INTO cached_addressbooks (account_id, href, name, last_synced)
          VALUES (?, ?, ?, ?)
-         ON CONFLICT(user_id, href) DO UPDATE SET
+         ON CONFLICT(account_id, href) DO UPDATE SET
             name = excluded.name,
             last_synced = excluded.last_synced",
     )
-    .bind(user_id)
+    .bind(account_id)
     .bind(href)
     .bind(name)
     .bind(now)
@@ -912,7 +1060,11 @@ pub async fn get_cached_addressbooks(
     user_id: &str,
 ) -> anyhow::Result<Vec<CachedAddressbook>> {
     let books = sqlx::query_as::<_, CachedAddressbook>(
-        "SELECT href, name FROM cached_addressbooks WHERE user_id = ? ORDER BY name",
+        "SELECT a.account_id, a.href, a.name
+         FROM cached_addressbooks a
+         JOIN caldav_accounts ca ON ca.account_id = a.account_id
+         WHERE ca.user_id = ?
+         ORDER BY ca.sort_order, a.name",
     )
     .bind(user_id)
     .fetch_all(pool)
@@ -922,13 +1074,13 @@ pub async fn get_cached_addressbooks(
 
 pub async fn get_addressbook_sync_state(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     href: &str,
 ) -> anyhow::Result<(Option<String>, Option<String>)> {
     let row = sqlx::query(
-        "SELECT ctag, sync_token FROM cached_addressbooks WHERE user_id = ? AND href = ?",
+        "SELECT ctag, sync_token FROM cached_addressbooks WHERE account_id = ? AND href = ?",
     )
-    .bind(user_id)
+    .bind(account_id)
     .bind(href)
     .fetch_optional(pool)
     .await?;
@@ -940,7 +1092,7 @@ pub async fn get_addressbook_sync_state(
 
 pub async fn remove_stale_addressbooks(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     fresh_hrefs: &HashSet<String>,
 ) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
@@ -952,42 +1104,42 @@ pub async fn remove_stale_addressbooks(
             .join(",");
 
         let sql = format!(
-            "DELETE FROM contact_push_subscriptions WHERE user_id = ? AND addressbook_href NOT IN ({placeholders})"
+            "DELETE FROM contact_push_subscriptions WHERE account_id = ? AND addressbook_href NOT IN ({placeholders})"
         );
-        let mut q = sqlx::query(&sql).bind(user_id);
+        let mut q = sqlx::query(&sql).bind(account_id);
         for h in fresh_hrefs {
             q = q.bind(h.as_str());
         }
         q.execute(&mut *tx).await?;
 
         let sql = format!(
-            "DELETE FROM cached_contacts WHERE user_id = ? AND addressbook_href NOT IN ({placeholders})"
+            "DELETE FROM cached_contacts WHERE account_id = ? AND addressbook_href NOT IN ({placeholders})"
         );
-        let mut q = sqlx::query(&sql).bind(user_id);
+        let mut q = sqlx::query(&sql).bind(account_id);
         for h in fresh_hrefs {
             q = q.bind(h.as_str());
         }
         q.execute(&mut *tx).await?;
 
         let sql = format!(
-            "DELETE FROM cached_addressbooks WHERE user_id = ? AND href NOT IN ({placeholders})"
+            "DELETE FROM cached_addressbooks WHERE account_id = ? AND href NOT IN ({placeholders})"
         );
-        let mut q = sqlx::query(&sql).bind(user_id);
+        let mut q = sqlx::query(&sql).bind(account_id);
         for h in fresh_hrefs {
             q = q.bind(h.as_str());
         }
         q.execute(&mut *tx).await?;
     } else {
-        sqlx::query("DELETE FROM contact_push_subscriptions WHERE user_id = ?")
-            .bind(user_id)
+        sqlx::query("DELETE FROM contact_push_subscriptions WHERE account_id = ?")
+            .bind(account_id)
             .execute(&mut *tx)
             .await?;
-        sqlx::query("DELETE FROM cached_contacts WHERE user_id = ?")
-            .bind(user_id)
+        sqlx::query("DELETE FROM cached_contacts WHERE account_id = ?")
+            .bind(account_id)
             .execute(&mut *tx)
             .await?;
-        sqlx::query("DELETE FROM cached_addressbooks WHERE user_id = ?")
-            .bind(user_id)
+        sqlx::query("DELETE FROM cached_addressbooks WHERE account_id = ?")
+            .bind(account_id)
             .execute(&mut *tx)
             .await?;
     }
@@ -999,6 +1151,7 @@ pub async fn remove_stale_addressbooks(
 
 #[derive(sqlx::FromRow)]
 pub struct CachedContact {
+    pub account_id: String,
     pub uid: String,
     pub addressbook_href: String,
     pub href: Option<String>,
@@ -1015,7 +1168,7 @@ pub struct CachedContact {
 
 pub async fn upsert_contact(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     addressbook_href: &str,
     uid: &str,
     etag: &str,
@@ -1030,9 +1183,9 @@ pub async fn upsert_contact(
 ) -> anyhow::Result<()> {
     sqlx::query(
         "INSERT INTO cached_contacts
-             (user_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
+             (account_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(user_id, addressbook_href, uid) DO UPDATE SET
+         ON CONFLICT(account_id, addressbook_href, uid) DO UPDATE SET
              etag = excluded.etag,
              href = excluded.href,
              raw_vcard = excluded.raw_vcard,
@@ -1043,7 +1196,7 @@ pub async fn upsert_contact(
              org = excluded.org,
              photo = excluded.photo",
     )
-    .bind(user_id)
+    .bind(account_id)
     .bind(addressbook_href)
     .bind(uid)
     .bind(etag)
@@ -1062,9 +1215,10 @@ pub async fn upsert_contact(
 
 pub async fn get_contacts(pool: &SqlitePool, user_id: &str) -> anyhow::Result<Vec<CachedContact>> {
     let contacts = sqlx::query_as::<_, CachedContact>(
-        "SELECT uid, addressbook_href, href, etag, raw_vcard, fn_name, emails, phones, addresses, org, photo
-         FROM cached_contacts
-         WHERE user_id = ?
+        "SELECT c.account_id, c.uid, c.addressbook_href, c.href, c.etag, c.raw_vcard, c.fn_name, c.emails, c.phones, c.addresses, c.org, c.photo
+         FROM cached_contacts c
+         JOIN caldav_accounts ca ON ca.account_id = c.account_id
+         WHERE ca.user_id = ?
          ORDER BY fn_name COLLATE NOCASE ASC",
     )
     .bind(user_id)
@@ -1075,16 +1229,16 @@ pub async fn get_contacts(pool: &SqlitePool, user_id: &str) -> anyhow::Result<Ve
 
 pub async fn get_contact(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     addressbook_href: &str,
     uid: &str,
 ) -> anyhow::Result<Option<CachedContact>> {
     let contact = sqlx::query_as::<_, CachedContact>(
-        "SELECT uid, addressbook_href, href, etag, raw_vcard, fn_name, emails, phones, addresses, org, photo
+        "SELECT account_id, uid, addressbook_href, href, etag, raw_vcard, fn_name, emails, phones, addresses, org, photo
          FROM cached_contacts
-         WHERE user_id = ? AND addressbook_href = ? AND uid = ?",
+         WHERE account_id = ? AND addressbook_href = ? AND uid = ?",
     )
-    .bind(user_id)
+    .bind(account_id)
     .bind(addressbook_href)
     .bind(uid)
     .fetch_optional(pool)
@@ -1094,14 +1248,14 @@ pub async fn get_contact(
 
 pub async fn delete_contact_from_cache(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     addressbook_href: &str,
     uid: &str,
 ) -> anyhow::Result<()> {
     sqlx::query(
-        "DELETE FROM cached_contacts WHERE user_id = ? AND addressbook_href = ? AND uid = ?",
+        "DELETE FROM cached_contacts WHERE account_id = ? AND addressbook_href = ? AND uid = ?",
     )
-    .bind(user_id)
+    .bind(account_id)
     .bind(addressbook_href)
     .bind(uid)
     .execute(pool)
@@ -1110,6 +1264,7 @@ pub async fn delete_contact_from_cache(
 }
 
 pub struct ContactRef {
+    pub account_id: String,
     pub uid: String,
     pub addressbook_href: String,
 }
@@ -1121,7 +1276,7 @@ pub struct ContactSyncApplyResult {
 
 pub async fn apply_incremental_contact_sync(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     addressbook_href: &str,
     changed: Vec<(String, String, String)>, // (href, etag, raw_vcard)
     deleted: Vec<String>,
@@ -1145,9 +1300,9 @@ pub async fn apply_incremental_contact_sync(
             serde_json::to_string(&fields.addresses).unwrap_or_else(|_| "[]".to_string());
         sqlx::query(
             "INSERT INTO cached_contacts
-                 (user_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
+                 (account_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(user_id, addressbook_href, uid) DO UPDATE SET
+             ON CONFLICT(account_id, addressbook_href, uid) DO UPDATE SET
                  etag = excluded.etag,
                  href = excluded.href,
                  raw_vcard = excluded.raw_vcard,
@@ -1158,7 +1313,7 @@ pub async fn apply_incremental_contact_sync(
                  org = excluded.org,
                  photo = excluded.photo",
         )
-        .bind(user_id)
+        .bind(account_id)
         .bind(addressbook_href)
         .bind(&fields.uid)
         .bind(&etag)
@@ -1173,6 +1328,7 @@ pub async fn apply_incremental_contact_sync(
         .execute(&mut *tx)
         .await?;
         changed_result.push(ContactRef {
+            account_id: account_id.to_string(),
             uid: fields.uid,
             addressbook_href: addressbook_href.to_string(),
         });
@@ -1181,31 +1337,32 @@ pub async fn apply_incremental_contact_sync(
     let mut deleted_result: Vec<ContactRef> = Vec::new();
     for href in deleted {
         let uid: Option<String> = sqlx::query_scalar(
-            "SELECT uid FROM cached_contacts WHERE user_id = ? AND addressbook_href = ? AND href = ?",
+            "SELECT uid FROM cached_contacts WHERE account_id = ? AND addressbook_href = ? AND href = ?",
         )
-        .bind(user_id)
+        .bind(account_id)
         .bind(addressbook_href)
         .bind(&href)
         .fetch_optional(&mut *tx)
         .await?;
         if let Some(uid) = uid {
             deleted_result.push(ContactRef {
+                account_id: account_id.to_string(),
                 uid: uid.clone(),
                 addressbook_href: addressbook_href.to_string(),
             });
             sqlx::query(
-                "DELETE FROM cached_contacts WHERE user_id = ? AND addressbook_href = ? AND uid = ?",
+                "DELETE FROM cached_contacts WHERE account_id = ? AND addressbook_href = ? AND uid = ?",
             )
-            .bind(user_id)
+            .bind(account_id)
             .bind(addressbook_href)
             .bind(&uid)
             .execute(&mut *tx)
             .await?;
         } else {
             sqlx::query(
-                "DELETE FROM cached_contacts WHERE user_id = ? AND addressbook_href = ? AND href = ?",
+                "DELETE FROM cached_contacts WHERE account_id = ? AND addressbook_href = ? AND href = ?",
             )
-            .bind(user_id)
+            .bind(account_id)
             .bind(addressbook_href)
             .bind(&href)
             .execute(&mut *tx)
@@ -1214,11 +1371,11 @@ pub async fn apply_incremental_contact_sync(
     }
 
     sqlx::query(
-        "UPDATE cached_addressbooks SET ctag = ?, sync_token = ? WHERE user_id = ? AND href = ?",
+        "UPDATE cached_addressbooks SET ctag = ?, sync_token = ? WHERE account_id = ? AND href = ?",
     )
     .bind(stored_ctag)
     .bind(new_token)
-    .bind(user_id)
+    .bind(account_id)
     .bind(addressbook_href)
     .execute(&mut *tx)
     .await?;
@@ -1232,7 +1389,7 @@ pub async fn apply_incremental_contact_sync(
 
 pub async fn replace_addressbook_contacts(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     addressbook_href: &str,
     all_raw: Vec<(String, String, String)>,
     new_ctag: Option<&str>,
@@ -1241,8 +1398,8 @@ pub async fn replace_addressbook_contacts(
     use crate::carddav::parse_vcard;
     let mut tx = pool.begin().await?;
 
-    sqlx::query("DELETE FROM cached_contacts WHERE user_id = ? AND addressbook_href = ?")
-        .bind(user_id)
+    sqlx::query("DELETE FROM cached_contacts WHERE account_id = ? AND addressbook_href = ?")
+        .bind(account_id)
         .bind(addressbook_href)
         .execute(&mut *tx)
         .await?;
@@ -1260,9 +1417,9 @@ pub async fn replace_addressbook_contacts(
             serde_json::to_string(&fields.addresses).unwrap_or_else(|_| "[]".to_string());
         sqlx::query(
             "INSERT INTO cached_contacts
-                 (user_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
+                 (account_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(user_id, addressbook_href, uid) DO UPDATE SET
+             ON CONFLICT(account_id, addressbook_href, uid) DO UPDATE SET
                  etag = excluded.etag,
                  href = excluded.href,
                  raw_vcard = excluded.raw_vcard,
@@ -1273,7 +1430,7 @@ pub async fn replace_addressbook_contacts(
                  org = excluded.org,
                  photo = excluded.photo",
         )
-        .bind(user_id)
+        .bind(account_id)
         .bind(addressbook_href)
         .bind(&fields.uid)
         .bind(&etag)
@@ -1290,11 +1447,11 @@ pub async fn replace_addressbook_contacts(
     }
 
     sqlx::query(
-        "UPDATE cached_addressbooks SET ctag = ?, sync_token = ? WHERE user_id = ? AND href = ?",
+        "UPDATE cached_addressbooks SET ctag = ?, sync_token = ? WHERE account_id = ? AND href = ?",
     )
     .bind(new_ctag)
     .bind(new_token)
-    .bind(user_id)
+    .bind(account_id)
     .bind(addressbook_href)
     .execute(&mut *tx)
     .await?;
@@ -1307,21 +1464,21 @@ pub async fn replace_addressbook_contacts(
 
 pub async fn upsert_contact_push_subscription(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     addressbook_href: &str,
     webhook_token: &str,
     transport: &str,
     expires_at: i64,
 ) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO contact_push_subscriptions (user_id, addressbook_href, webhook_token, transport, expires_at)
+        "INSERT INTO contact_push_subscriptions (account_id, addressbook_href, webhook_token, transport, expires_at)
          VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(user_id, addressbook_href) DO UPDATE SET
+         ON CONFLICT(account_id, addressbook_href) DO UPDATE SET
              webhook_token = excluded.webhook_token,
              transport = excluded.transport,
              expires_at = excluded.expires_at",
     )
-    .bind(user_id)
+    .bind(account_id)
     .bind(addressbook_href)
     .bind(webhook_token)
     .bind(transport)
@@ -1333,13 +1490,13 @@ pub async fn upsert_contact_push_subscription(
 
 pub async fn get_contact_push_subscription(
     pool: &SqlitePool,
-    user_id: &str,
+    account_id: &str,
     addressbook_href: &str,
 ) -> anyhow::Result<Option<(String, i64)>> {
     let row = sqlx::query(
-        "SELECT webhook_token, expires_at FROM contact_push_subscriptions WHERE user_id = ? AND addressbook_href = ?",
+        "SELECT webhook_token, expires_at FROM contact_push_subscriptions WHERE account_id = ? AND addressbook_href = ?",
     )
-    .bind(user_id)
+    .bind(account_id)
     .bind(addressbook_href)
     .fetch_optional(pool)
     .await?;
@@ -1349,116 +1506,113 @@ pub async fn get_contact_push_subscription(
 pub async fn get_user_and_addressbook_from_push_token(
     pool: &SqlitePool,
     token: &str,
-) -> anyhow::Result<Option<(String, String)>> {
+) -> anyhow::Result<Option<(String, String, String)>> {
     let row = sqlx::query(
-        "SELECT user_id, addressbook_href FROM contact_push_subscriptions WHERE webhook_token = ?",
+        "SELECT ca.user_id, p.account_id, p.addressbook_href
+         FROM contact_push_subscriptions p
+         JOIN caldav_accounts ca ON ca.account_id = p.account_id
+         WHERE p.webhook_token = ?",
     )
     .bind(token)
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|r| (r.get(0), r.get(1))))
+    Ok(row.map(|r| (r.get(0), r.get(1), r.get(2))))
 }
 
-/// Returns (calendar_href, raw_ical) pairs for events in the date range or recurring.
+/// Returns (account_id, calendar_href, raw_ical) tuples for events in the date range or recurring.
 pub async fn get_raw_events(
     pool: &SqlitePool,
-    user_id: &str,
-    calendar_hrefs: &[String],
+    calendar_keys: &[(String, String)],
     start: &str,
     end: &str,
-) -> anyhow::Result<Vec<(String, String)>> {
-    if calendar_hrefs.is_empty() {
+) -> anyhow::Result<Vec<(String, String, String)>> {
+    if calendar_keys.is_empty() {
         return Ok(vec![]);
     }
 
-    let placeholders = calendar_hrefs
+    let placeholders = calendar_keys
         .iter()
-        .map(|_| "?")
+        .map(|_| "(?, ?)")
         .collect::<Vec<_>>()
         .join(",");
     let sql = format!(
-        "SELECT calendar_href, raw_ical FROM cached_events
-         WHERE user_id = ?
+        "SELECT account_id, calendar_href, raw_ical FROM cached_events
+         WHERE
          AND (is_recurring = 1 OR (dtstart <= ? AND dtend >= ?))
-         AND calendar_href IN ({})",
+         AND (account_id, calendar_href) IN ({})",
         placeholders
-    );
+    ).replacen("WHERE\n         AND", "WHERE", 1);
 
-    let mut q = sqlx::query(&sql).bind(user_id).bind(end).bind(start);
-    for href in calendar_hrefs {
-        q = q.bind(href.as_str());
+    let mut q = sqlx::query(&sql).bind(end).bind(start);
+    for (account_id, href) in calendar_keys {
+        q = q.bind(account_id.as_str()).bind(href.as_str());
     }
     let rows = q.fetch_all(pool).await?;
-    Ok(rows.iter().map(|r| (r.get(0), r.get(1))).collect())
+    Ok(rows.iter().map(|r| (r.get(0), r.get(1), r.get(2))).collect())
 }
 
-/// Returns (calendar_href, dtstart_date) for non-recurring events in the month range.
+/// Returns (account_id, calendar_href, dtstart_date) for non-recurring events in the month range.
 pub async fn get_event_dates_for_month(
     pool: &SqlitePool,
-    user_id: &str,
-    calendar_hrefs: &[String],
+    calendar_keys: &[(String, String)],
     month_start: &str,
     month_end: &str,
-) -> anyhow::Result<Vec<(String, String)>> {
-    if calendar_hrefs.is_empty() {
+) -> anyhow::Result<Vec<(String, String, String)>> {
+    if calendar_keys.is_empty() {
         return Ok(vec![]);
     }
 
-    let placeholders = calendar_hrefs
+    let placeholders = calendar_keys
         .iter()
-        .map(|_| "?")
+        .map(|_| "(?, ?)")
         .collect::<Vec<_>>()
         .join(",");
     let sql = format!(
-        "SELECT calendar_href, dtstart FROM cached_events
-         WHERE user_id = ?
-         AND is_recurring = 0
+        "SELECT account_id, calendar_href, dtstart FROM cached_events
+         WHERE is_recurring = 0
          AND dtstart >= ?
          AND dtstart <= ?
-         AND calendar_href IN ({})",
+         AND (account_id, calendar_href) IN ({})",
         placeholders
     );
 
     let mut q = sqlx::query(&sql)
-        .bind(user_id)
         .bind(month_start)
         .bind(month_end);
-    for href in calendar_hrefs {
-        q = q.bind(href.as_str());
+    for (account_id, href) in calendar_keys {
+        q = q.bind(account_id.as_str()).bind(href.as_str());
     }
     let rows = q.fetch_all(pool).await?;
-    Ok(rows.iter().map(|r| (r.get(0), r.get(1))).collect())
+    Ok(rows.iter().map(|r| (r.get(0), r.get(1), r.get(2))).collect())
 }
 
-/// Returns (calendar_href, raw_ical) for all recurring events in the given calendars.
+/// Returns (account_id, calendar_href, raw_ical) for all recurring events in the given calendars.
 pub async fn get_recurring_raw_events(
     pool: &SqlitePool,
-    user_id: &str,
-    calendar_hrefs: &[String],
-) -> anyhow::Result<Vec<(String, String)>> {
-    if calendar_hrefs.is_empty() {
+    calendar_keys: &[(String, String)],
+) -> anyhow::Result<Vec<(String, String, String)>> {
+    if calendar_keys.is_empty() {
         return Ok(vec![]);
     }
 
-    let placeholders = calendar_hrefs
+    let placeholders = calendar_keys
         .iter()
-        .map(|_| "?")
+        .map(|_| "(?, ?)")
         .collect::<Vec<_>>()
         .join(",");
     let sql = format!(
-        "SELECT calendar_href, raw_ical FROM cached_events
-         WHERE user_id = ?
-         AND is_recurring = 1
-         AND calendar_href IN ({})",
+        "SELECT account_id, calendar_href, raw_ical FROM cached_events
+         WHERE is_recurring = 1
+         AND (account_id, calendar_href) IN ({})",
         placeholders
     );
 
-    let mut q = sqlx::query(&sql).bind(user_id);
-    for href in calendar_hrefs {
-        q = q.bind(href.as_str());
+    let mut q = sqlx::query(&sql);
+    for (account_id, href) in calendar_keys {
+        q = q.bind(account_id.as_str()).bind(href.as_str());
     }
     let rows = q.fetch_all(pool).await?;
-    Ok(rows.iter().map(|r| (r.get(0), r.get(1))).collect())
+    Ok(rows.iter().map(|r| (r.get(0), r.get(1), r.get(2))).collect())
 }
 
 /// Check whether the active search mode matches the stored one and rebuild the FTS

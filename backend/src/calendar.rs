@@ -13,7 +13,7 @@ use crate::caldav::{
     generate_ical_event, generate_new_uid, split_vcalendar_into_events, update_vcalendar_event,
 };
 use crate::db;
-use crate::oidc::{AppState, CurrentUser, require_client};
+use crate::oidc::{AppState, CurrentUser};
 use crate::sync::SyncTrigger;
 use sqlx::Row;
 
@@ -23,6 +23,7 @@ const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
 
 #[derive(Serialize, Clone)]
 pub struct CalendarJson {
+    pub account_id: String,
     pub href: String,
     pub name: String,
     pub color: Option<String>,
@@ -46,6 +47,7 @@ pub struct AttendeeFields {
 
 #[derive(Serialize, Clone)]
 pub struct EventJson {
+    pub account_id: String,
     pub uid: String,
     pub time_range: String,
     pub summary: String,
@@ -193,7 +195,35 @@ fn extract_vevent(ical: &str) -> String {
 
 // ── Event building helper ─────────────────────────────────────────────────────
 
-fn build_event_json(event: &crate::caldav::Event, color: &str, calendar_href: &str) -> EventJson {
+async fn require_account_client(
+    state: &AppState,
+    user: &CurrentUser,
+    account_id: &str,
+) -> Result<CalDavClient, Response> {
+    match db::get_caldav_account(&state.db, &user.user_id, account_id, &state.encryption_key).await {
+        Ok(Some(account)) => CalDavClient::new(
+            account.caldav_base_url,
+            account.caldav_username,
+            account.caldav_password,
+        )
+        .map_err(|e| {
+            eprintln!("CalDAV client error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "CalDAV configuration error").into_response()
+        }),
+        Ok(None) => Err((StatusCode::NOT_FOUND, "CalDAV account not found").into_response()),
+        Err(e) => {
+            eprintln!("Database error: {e}");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response())
+        }
+    }
+}
+
+fn build_event_json(
+    event: &crate::caldav::Event,
+    account_id: &str,
+    color: &str,
+    calendar_href: &str,
+) -> EventJson {
     let time_range = match (&event.start_time, &event.end_time) {
         (Some(s), Some(e)) => format!("{}-{}", s, e),
         (Some(s), None) => s.clone(),
@@ -215,6 +245,7 @@ fn build_event_json(event: &crate::caldav::Event, color: &str, calendar_href: &s
         })
         .collect();
     EventJson {
+        account_id: account_id.to_string(),
         uid: event.uid.clone(),
         time_range,
         summary: event.summary.clone(),
@@ -244,23 +275,20 @@ pub async fn list_calendars(State(state): State<AppState>, user: CurrentUser) ->
             return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
         }
     };
-    let deactivated =
-        db::get_deactivated_calendars(&state.db, &user.user_id, &state.encryption_key)
-            .await
-            .unwrap_or_default();
-
-    let result: Vec<CalendarJson> = calendars
-        .into_iter()
-        .map(|c| {
-            let is_active = !deactivated.contains(&c.href);
-            CalendarJson {
-                is_active,
-                href: c.href,
-                name: c.name,
-                color: c.color,
-            }
-        })
-        .collect();
+    let mut result: Vec<CalendarJson> = Vec::new();
+    for c in calendars {
+        let deactivated =
+            db::get_deactivated_calendars(&state.db, &c.account_id, &state.encryption_key)
+                .await
+                .unwrap_or_default();
+        result.push(CalendarJson {
+            is_active: !deactivated.contains(&c.href),
+            account_id: c.account_id,
+            href: c.href,
+            name: c.name,
+            color: c.color,
+        });
+    }
 
     Json(result).into_response()
 }
@@ -291,28 +319,27 @@ pub async fn list_events(
     let calendars = db::get_cached_calendars(&state.db, &user.user_id)
         .await
         .unwrap_or_default();
-    let deactivated =
-        db::get_deactivated_calendars(&state.db, &user.user_id, &state.encryption_key)
-            .await
-            .unwrap_or_default();
-
     let color_map: HashMap<String, String> = calendars
         .iter()
-        .map(|c| (c.href.clone(), c.color.clone().unwrap_or_default()))
+        .map(|c| (format!("{}\0{}", c.account_id, c.href), c.color.clone().unwrap_or_default()))
         .collect();
 
-    let active_hrefs: Vec<String> = calendars
-        .iter()
-        .filter(|c| !deactivated.contains(&c.href))
-        .map(|c| c.href.clone())
-        .collect();
+    let mut active_hrefs: Vec<(String, String)> = Vec::new();
+    for c in &calendars {
+        let deactivated =
+            db::get_deactivated_calendars(&state.db, &c.account_id, &state.encryption_key)
+                .await
+                .unwrap_or_default();
+        if !deactivated.contains(&c.href) {
+            active_hrefs.push((c.account_id.clone(), c.href.clone()));
+        }
+    }
 
     let start_str = start.format("%Y-%m-%d").to_string();
     let end_str = end.format("%Y-%m-%d").to_string();
 
     let raw_pairs = db::get_raw_events(
         &state.db,
-        &user.user_id,
         &active_hrefs,
         &start_str,
         &end_str,
@@ -321,13 +348,13 @@ pub async fn list_events(
     .unwrap_or_default();
 
     let mut all_events: Vec<(NaiveDate, EventJson)> = Vec::new();
-    for (calendar_href, raw_ical) in raw_pairs {
+    for (account_id, calendar_href, raw_ical) in raw_pairs {
         let color = color_map
-            .get(&calendar_href)
+            .get(&format!("{}\0{}", account_id, calendar_href))
             .map(|s| s.as_str())
             .unwrap_or("");
         for event in CalDavClient::events_from_raw_ical(&raw_ical, start, end) {
-            let json = build_event_json(&event, color, &calendar_href);
+            let json = build_event_json(&event, &account_id, color, &calendar_href);
             all_events.push((event.date, json));
         }
     }
@@ -399,21 +426,21 @@ pub async fn list_calendar(
     let calendars = db::get_cached_calendars(&state.db, &user.user_id)
         .await
         .unwrap_or_default();
-    let deactivated =
-        db::get_deactivated_calendars(&state.db, &user.user_id, &state.encryption_key)
-            .await
-            .unwrap_or_default();
-
     let color_map: HashMap<String, String> = calendars
         .iter()
-        .map(|c| (c.href.clone(), c.color.clone().unwrap_or_default()))
+        .map(|c| (format!("{}\0{}", c.account_id, c.href), c.color.clone().unwrap_or_default()))
         .collect();
 
-    let active_hrefs: Vec<String> = calendars
-        .iter()
-        .filter(|c| !deactivated.contains(&c.href))
-        .map(|c| c.href.clone())
-        .collect();
+    let mut active_hrefs: Vec<(String, String)> = Vec::new();
+    for c in &calendars {
+        let deactivated =
+            db::get_deactivated_calendars(&state.db, &c.account_id, &state.encryption_key)
+                .await
+                .unwrap_or_default();
+        if !deactivated.contains(&c.href) {
+            active_hrefs.push((c.account_id.clone(), c.href.clone()));
+        }
+    }
 
     let month_start_str = first_day.format("%Y-%m-%d").to_string();
     let month_end_str = last_day.format("%Y-%m-%d").to_string();
@@ -424,17 +451,16 @@ pub async fn list_calendar(
     // Non-recurring events directly in range
     let non_recurring = db::get_event_dates_for_month(
         &state.db,
-        &user.user_id,
         &active_hrefs,
         &month_start_str,
         &month_end_str,
     )
     .await
     .unwrap_or_default();
-    for (calendar_href, dtstart_str) in non_recurring {
+    for (account_id, calendar_href, dtstart_str) in non_recurring {
         if let Ok(date) = NaiveDate::parse_from_str(&dtstart_str, "%Y-%m-%d") {
             let color = color_map
-                .get(&calendar_href)
+                .get(&format!("{}\0{}", account_id, calendar_href))
                 .map(|s| s.as_str())
                 .unwrap_or("");
             let dot_color = if color.is_empty() {
@@ -447,12 +473,12 @@ pub async fn list_calendar(
     }
 
     // Recurring events need expansion
-    let recurring_raw = db::get_recurring_raw_events(&state.db, &user.user_id, &active_hrefs)
+    let recurring_raw = db::get_recurring_raw_events(&state.db, &active_hrefs)
         .await
         .unwrap_or_default();
-    for (calendar_href, raw_ical) in recurring_raw {
+    for (account_id, calendar_href, raw_ical) in recurring_raw {
         let color = color_map
-            .get(&calendar_href)
+            .get(&format!("{}\0{}", account_id, calendar_href))
             .map(|s| s.as_str())
             .unwrap_or("");
         let dot_color = if color.is_empty() {
@@ -514,9 +540,11 @@ pub async fn toggle_calendar(
     body: String,
 ) -> Response {
     let mut href = String::new();
+    let mut account_id = String::new();
     let mut active = true;
     for (key, value) in form_urlencoded::parse(body.as_bytes()) {
         match key.as_ref() {
+            "account_id" => account_id = value.into_owned(),
             "href" => href = value.into_owned(),
             "active" => active = value != "false",
             _ => {}
@@ -525,11 +553,22 @@ pub async fn toggle_calendar(
     if href.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing href parameter").into_response();
     }
+    if account_id.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing account_id parameter").into_response();
+    }
+    match db::get_user_id_for_caldav_account(&state.db, &account_id).await {
+        Ok(Some(owner)) if owner == user.user_id => {}
+        Ok(_) => return (StatusCode::NOT_FOUND, "CalDAV account not found").into_response(),
+        Err(e) => {
+            eprintln!("Database error checking account: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+        }
+    }
 
     let result = if active {
-        db::activate_calendar(&state.db, &user.user_id, &href, &state.encryption_key).await
+        db::activate_calendar(&state.db, &account_id, &href, &state.encryption_key).await
     } else {
-        db::deactivate_calendar(&state.db, &user.user_id, &href, &state.encryption_key).await
+        db::deactivate_calendar(&state.db, &account_id, &href, &state.encryption_key).await
     };
 
     match result {
@@ -551,11 +590,6 @@ pub async fn save_event(
     user: CurrentUser,
     body: String,
 ) -> Response {
-    let client = match require_client(&state, &user).await {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-
     let form = parse_event_form(body);
     let raw_uid = parse_form_field(&form, "uid").unwrap_or("").to_string();
     let is_edit = !raw_uid.is_empty();
@@ -583,12 +617,19 @@ pub async fn save_event(
         Some(h) => h.to_string(),
         None => return (StatusCode::BAD_REQUEST, "Missing calendar_href").into_response(),
     };
+    let account_id = match parse_form_field(&form, "account_id") {
+        Some(id) if !id.is_empty() => id.to_string(),
+        _ => return (StatusCode::BAD_REQUEST, "Missing account_id").into_response(),
+    };
     let scope = parse_form_field(&form, "scope")
         .unwrap_or("series")
         .to_string();
     let original_dtstart = parse_form_field(&form, "original_dtstart");
     let original_calendar_href =
         parse_form_field(&form, "original_calendar_href").map(|s| s.to_string());
+    let original_account_id = parse_form_field(&form, "original_account_id")
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     let recurrence: Option<RecurrenceInfo> = parse_form_field(&form, "recurrence")
         .filter(|r| !r.is_empty() && *r != "{}")
         .and_then(|r| serde_json::from_str(r).ok());
@@ -666,6 +707,10 @@ pub async fn save_event(
     }
 
     let event_href = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
+    let client = match require_account_client(&state, &user, &account_id).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
 
     if scope == "this_instance" {
         let raw_ical = match client.get_event(&calendar_href, &uid).await {
@@ -725,6 +770,7 @@ pub async fn save_event(
                 optimistic_upsert(
                     &state,
                     &user.user_id,
+                    &account_id,
                     &calendar_href,
                     &event_href,
                     &modified,
@@ -750,8 +796,21 @@ pub async fn save_event(
         // unknown properties (ORGANIZER, CLASS, X-*, EXDATE, exception VEVENTs, …).
         // New events skip the fetch and generate from scratch.
         let fetch_href = original_calendar_href.as_deref().unwrap_or(&calendar_href);
+        let original_client = match original_account_id.as_deref() {
+            Some(orig_account_id) if orig_account_id != account_id => {
+                match require_account_client(&state, &user, orig_account_id).await {
+                    Ok(c) => Some(c),
+                    Err(r) => return r,
+                }
+            }
+            _ => None,
+        };
         let ical = if is_edit {
-            let original = client.get_event(fetch_href, &uid).await;
+            let original = original_client
+                .as_ref()
+                .unwrap_or(&client)
+                .get_event(fetch_href, &uid)
+                .await;
             match original {
                 Ok(orig_ical) => {
                     match update_vcalendar_event(
@@ -834,20 +893,27 @@ pub async fn save_event(
         match client.put_event(&calendar_href, &uid, &ical).await {
             Ok(_) => {
                 if let Some(ref orig) = original_calendar_href {
-                    if *orig != calendar_href && !orig.is_empty() {
-                        if let Err(e) = client.delete_event(orig, &uid).await {
+                    let moved_account = original_account_id.as_deref().is_some_and(|id| id != account_id);
+                    if (!orig.is_empty()) && (*orig != calendar_href || moved_account) {
+                        let delete_client = original_client.as_ref().unwrap_or(&client);
+                        if let Err(e) = delete_client.delete_event(orig, &uid).await {
                             eprintln!("Failed to delete event from old calendar: {e}");
                         } else {
                             let old_href = format!("{}/{}.ics", orig.trim_end_matches('/'), uid);
-                            let _ =
-                                db::delete_event_by_href(&state.db, &user.user_id, orig, &old_href)
-                                    .await;
+                            let _ = db::delete_event_by_href(
+                                &state.db,
+                                original_account_id.as_deref().unwrap_or(&account_id),
+                                orig,
+                                &old_href,
+                            )
+                            .await;
                         }
                     }
                 }
                 optimistic_upsert(
                     &state,
                     &user.user_id,
+                    &account_id,
                     &calendar_href,
                     &event_href,
                     &ical,
@@ -876,12 +942,8 @@ pub async fn delete_event(
     user: CurrentUser,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    let client = match require_client(&state, &user).await {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-
     let mut uid = String::new();
+    let mut account_id = String::new();
     let mut calendar_href = String::new();
     let mut scope = String::new();
     let mut original_dtstart = String::new();
@@ -890,6 +952,7 @@ pub async fn delete_event(
         for (key, value) in form_urlencoded::parse(query.as_bytes()) {
             match key.as_ref() {
                 "uid" => uid = value.into_owned(),
+                "account_id" => account_id = value.into_owned(),
                 "calendar_href" => calendar_href = value.into_owned(),
                 "scope" => scope = value.into_owned(),
                 "original_dtstart" => original_dtstart = value.into_owned(),
@@ -904,6 +967,14 @@ pub async fn delete_event(
     if calendar_href.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing calendar_href").into_response();
     }
+    if account_id.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing account_id").into_response();
+    }
+
+    let client = match require_account_client(&state, &user, &account_id).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
 
     if scope == "this_instance" && !original_dtstart.is_empty() {
         let raw_ical = match client.get_event(&calendar_href, &uid).await {
@@ -925,6 +996,7 @@ pub async fn delete_event(
                 optimistic_upsert(
                     &state,
                     &user.user_id,
+                    &account_id,
                     &calendar_href,
                     &event_href,
                     &modified,
@@ -949,10 +1021,11 @@ pub async fn delete_event(
 
     match client.delete_event(&calendar_href, &uid).await {
         Ok(_) => {
-            let _ = db::delete_cached_event(&state.db, &user.user_id, &calendar_href, &uid).await;
+            let _ = db::delete_cached_event(&state.db, &account_id, &calendar_href, &uid).await;
             state.sse_broadcaster.send(
                 &user.user_id,
                 crate::sse::SseMessage::EventRemoved {
+                    account_id: account_id.clone(),
                     uid: uid.clone(),
                     calendar_href: calendar_href.clone(),
                 },
@@ -978,6 +1051,7 @@ pub async fn delete_event(
 async fn optimistic_upsert(
     state: &AppState,
     user_id: &str,
+    account_id: &str,
     calendar_href: &str,
     event_href: &str,
     raw_ical: &str,
@@ -985,7 +1059,7 @@ async fn optimistic_upsert(
 ) {
     if let Err(e) = db::upsert_cached_event_raw(
         &state.db,
-        user_id,
+        account_id,
         calendar_href,
         event_href,
         "",
@@ -1006,19 +1080,20 @@ async fn optimistic_upsert(
             .unwrap_or_default();
         let color = calendars
             .iter()
-            .find(|c| c.href == calendar_href)
+            .find(|c| c.account_id == account_id && c.href == calendar_href)
             .and_then(|c| c.color.as_deref())
             .unwrap_or("");
         CalDavClient::events_from_raw_ical(raw_ical, wide_start, wide_end)
             .into_iter()
             .next()
-            .and_then(|ev| serde_json::to_string(&build_event_json(&ev, color, calendar_href)).ok())
+            .and_then(|ev| serde_json::to_string(&build_event_json(&ev, account_id, color, calendar_href)).ok())
     } else {
         None
     };
     state.sse_broadcaster.send(
         user_id,
         crate::sse::SseMessage::EventUpdated {
+            account_id: account_id.to_string(),
             uid: uid.to_string(),
             calendar_href: calendar_href.to_string(),
             event_json,
@@ -1031,15 +1106,12 @@ pub async fn create_calendar_handler(
     user: CurrentUser,
     body: String,
 ) -> Response {
-    let client = match require_client(&state, &user).await {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-
+    let mut account_id = String::new();
     let mut name = String::new();
     let mut color: Option<String> = None;
     for (key, value) in form_urlencoded::parse(body.as_bytes()) {
         match key.as_ref() {
+            "account_id" => account_id = value.into_owned(),
             "name" => name = value.into_owned(),
             "color" => {
                 let v = value.into_owned();
@@ -1055,11 +1127,18 @@ pub async fn create_calendar_handler(
     if name.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing calendar name").into_response();
     }
+    if account_id.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing account_id").into_response();
+    }
+    let client = match require_account_client(&state, &user, &account_id).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
 
     match client.create_calendar(&name, color.as_deref()).await {
         Ok(href) => {
             if let Err(e) =
-                db::upsert_cached_calendar(&state.db, &user.user_id, &href, &name, color.as_deref())
+                db::upsert_cached_calendar(&state.db, &account_id, &href, &name, color.as_deref())
                     .await
             {
                 eprintln!("Failed to cache new calendar: {e}");
@@ -1069,6 +1148,7 @@ pub async fn create_calendar_handler(
                 .send(&user.user_id, crate::sse::SseMessage::CalendarsChanged);
             state.sync_manager.trigger(&user.user_id, SyncTrigger::Full);
             Json(CalendarJson {
+                account_id,
                 href,
                 name,
                 color,
@@ -1094,16 +1174,15 @@ pub async fn import_ics(
     user: CurrentUser,
     mut multipart: Multipart,
 ) -> Response {
-    let client = match require_client(&state, &user).await {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-
+    let mut account_id = String::new();
     let mut calendar_href = String::new();
     let mut ics_content: Option<String> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         match field.name() {
+            Some("account_id") => {
+                account_id = field.text().await.unwrap_or_default();
+            }
             Some("calendar_href") => {
                 calendar_href = field.text().await.unwrap_or_default();
             }
@@ -1121,9 +1200,16 @@ pub async fn import_ics(
     if calendar_href.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing calendar_href").into_response();
     }
+    if account_id.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing account_id").into_response();
+    }
     let ics = match ics_content {
         Some(c) => c,
         None => return (StatusCode::BAD_REQUEST, "Missing ICS file").into_response(),
+    };
+    let client = match require_account_client(&state, &user, &account_id).await {
+        Ok(c) => c,
+        Err(r) => return r,
     };
 
     let events = split_vcalendar_into_events(&ics);
@@ -1140,7 +1226,7 @@ pub async fn import_ics(
                 let event_href = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
                 if let Err(e) = db::upsert_cached_event_raw(
                     &state.db,
-                    &user.user_id,
+                    &account_id,
                     &calendar_href,
                     &event_href,
                     "",
@@ -1180,7 +1266,7 @@ pub async fn search_events(
     let mut q = String::new();
     let mut start: Option<String> = None;
     let mut end: Option<String> = None;
-    let mut cal_hrefs: Vec<String> = Vec::new();
+    let mut cal_keys: Vec<(String, String)> = Vec::new();
 
     if let Some(query) = raw_query {
         for (key, value) in form_urlencoded::parse(query.as_bytes()) {
@@ -1188,7 +1274,14 @@ pub async fn search_events(
                 "q" => q = value.into_owned(),
                 "start" => start = Some(value.into_owned()),
                 "end" => end = Some(value.into_owned()),
-                "cal" => cal_hrefs.push(value.into_owned()),
+                "cal" => {
+                    let value = value.into_owned();
+                    if let Some((account_id, href)) = value.split_once('\0') {
+                        cal_keys.push((account_id.to_string(), href.to_string()));
+                    } else if let Some((account_id, href)) = value.split_once('|') {
+                        cal_keys.push((account_id.to_string(), href.to_string()));
+                    }
+                }
                 _ => {}
             }
         }
@@ -1207,11 +1300,12 @@ pub async fn search_events(
     let user_id = user.user_id.clone();
 
     let mut sql =
-        r#"SELECT e.uid, e.calendar_href, e.dtstart, e.raw_ical, c.color AS calendar_color
+        r#"SELECT e.account_id, e.uid, e.calendar_href, e.dtstart, e.raw_ical, c.color AS calendar_color
     FROM events_fts
     JOIN cached_events e ON events_fts.rowid = e.rowid
-    JOIN cached_calendars c ON c.user_id = e.user_id AND c.href = e.calendar_href
-    WHERE events_fts MATCH ? AND e.user_id = ?"#
+    JOIN cached_calendars c ON c.account_id = e.account_id AND c.href = e.calendar_href
+    JOIN caldav_accounts ca ON ca.account_id = e.account_id
+    WHERE events_fts MATCH ? AND ca.user_id = ?"#
             .to_string();
     if start.is_some() {
         sql.push_str(" AND e.dtstart >= ?");
@@ -1219,9 +1313,9 @@ pub async fn search_events(
     if end.is_some() {
         sql.push_str(" AND e.dtstart <= ?");
     }
-    if !cal_hrefs.is_empty() {
-        let placeholders = cal_hrefs.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        sql.push_str(&format!(" AND e.calendar_href IN ({})", placeholders));
+    if !cal_keys.is_empty() {
+        let placeholders = cal_keys.iter().map(|_| "(?, ?)").collect::<Vec<_>>().join(", ");
+        sql.push_str(&format!(" AND (e.account_id, e.calendar_href) IN ({})", placeholders));
     }
     sql.push_str(" ORDER BY e.dtstart DESC LIMIT 100");
 
@@ -1232,25 +1326,26 @@ pub async fn search_events(
     if let Some(e) = end {
         query = query.bind(e);
     }
-    for href in &cal_hrefs {
-        query = query.bind(href.clone());
+    for (account_id, href) in &cal_keys {
+        query = query.bind(account_id).bind(href);
     }
 
     match query.fetch_all(&state.db).await {
         Ok(rows) => {
             let mut results: Vec<EventJson> = Vec::new();
             for r in &rows {
-                let calendar_href: String = r.get(1);
-                let dtstart: String = r.get(2);
-                let raw_ical: String = r.get(3);
-                let color: Option<String> = r.get(4);
+                let account_id: String = r.get(0);
+                let calendar_href: String = r.get(2);
+                let dtstart: String = r.get(3);
+                let raw_ical: String = r.get(4);
+                let color: Option<String> = r.get(5);
                 let color_str = color.as_deref().unwrap_or("");
                 if let Ok(date) = NaiveDate::parse_from_str(&dtstart, "%Y-%m-%d") {
                     if let Some(event) = CalDavClient::events_from_raw_ical(&raw_ical, date, date)
                         .into_iter()
                         .next()
                     {
-                        results.push(build_event_json(&event, color_str, &calendar_href));
+                        results.push(build_event_json(&event, &account_id, color_str, &calendar_href));
                     }
                 }
             }

@@ -25,6 +25,7 @@ export interface RecurrenceInfo {
 }
 
 export interface EventJson {
+  account_id: string;
   uid: string;
   time_range: string;
   summary: string;
@@ -51,6 +52,7 @@ export interface DayEventsJson {
 }
 
 export interface CalendarJson {
+  account_id: string;
   href: string;
   name: string;
   color: string | null;
@@ -79,6 +81,7 @@ export interface AddressEntry {
 }
 
 export interface ContactJson {
+  account_id: string;
   uid: string;
   addressbook_href: string;
   fn_name: string;
@@ -89,8 +92,20 @@ export interface ContactJson {
 }
 
 export interface AddressbookJson {
+  account_id: string;
   href: string;
   name: string;
+}
+
+export interface CalDavAccountJson {
+  account_id: string;
+  display_name: string;
+  caldav_base_url: string;
+  caldav_username: string;
+  has_password: boolean;
+  sort_order: number;
+  calendars: CalendarJson[];
+  addressbooks: AddressbookJson[];
 }
 
 export interface ContactsResponse {

@@ -1,4 +1,3 @@
-use crate::caldav::CalDavClient;
 use crate::db;
 use crate::email_sync::EmailSyncManager;
 use crate::search::SearchMode;
@@ -100,43 +99,6 @@ pub fn extract_user_id(
         UserIdClaim::Name => claims
             .name()
             .and_then(|n| n.get(None).map(|s| s.as_str().to_owned())),
-    }
-}
-
-/// Build a CalDAV client for the current user. Returns an error response if
-/// credentials are missing or the client cannot be constructed.
-pub async fn require_client(
-    state: &AppState,
-    user: &CurrentUser,
-) -> Result<CalDavClient, Response> {
-    let _ = state.sync_manager.ensure_task_for(&user.user_id);
-
-    let settings = match db::get_settings(&state.db, &user.user_id, &state.encryption_key).await {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Database error: {e}");
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response());
-        }
-    };
-
-    match settings {
-        Some(s) => {
-            let client = CalDavClient::new(s.caldav_base_url, s.caldav_username, s.caldav_password)
-                .map_err(|e| {
-                    eprintln!("CalDAV client error: {e}");
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "CalDAV configuration error",
-                    )
-                        .into_response()
-                })?;
-            Ok(client)
-        }
-        None => Err((
-            StatusCode::PRECONDITION_FAILED,
-            "CalDAV credentials not configured",
-        )
-            .into_response()),
     }
 }
 

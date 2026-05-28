@@ -9,17 +9,19 @@ use uuid::Uuid;
 
 use crate::carddav::{self, AddressEntry, TypedEntry, build_vcard_preserving, contact_href};
 use crate::db;
-use crate::oidc::{AppState, CurrentUser, require_client};
+use crate::oidc::{AppState, CurrentUser};
 use crate::sse::SseMessage;
 
 #[derive(Serialize, Clone)]
 pub struct AddressbookJson {
+    pub account_id: String,
     pub href: String,
     pub name: String,
 }
 
 #[derive(Serialize, Clone)]
 pub struct ContactJson {
+    pub account_id: String,
     pub uid: String,
     pub addressbook_href: String,
     pub fn_name: String,
@@ -58,6 +60,7 @@ fn cached_to_json(c: &db::CachedContact) -> ContactJson {
     let phones = parse_typed_entries(&c.phones);
     let addresses: Vec<AddressEntry> = serde_json::from_str(&c.addresses).unwrap_or_default();
     ContactJson {
+        account_id: c.account_id.clone(),
         uid: c.uid.clone(),
         addressbook_href: c.addressbook_href.clone(),
         fn_name: c.fn_name.clone(),
@@ -66,6 +69,29 @@ fn cached_to_json(c: &db::CachedContact) -> ContactJson {
         addresses,
         org: c.org.clone(),
         has_photo: c.photo.is_some(),
+    }
+}
+
+async fn require_account_client(
+    state: &AppState,
+    user: &CurrentUser,
+    account_id: &str,
+) -> Result<crate::caldav::CalDavClient, Response> {
+    match db::get_caldav_account(&state.db, &user.user_id, account_id, &state.encryption_key).await {
+        Ok(Some(account)) => crate::caldav::CalDavClient::new(
+            account.caldav_base_url,
+            account.caldav_username,
+            account.caldav_password,
+        )
+        .map_err(|e| {
+            eprintln!("CalDAV client error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "CalDAV configuration error").into_response()
+        }),
+        Ok(None) => Err((StatusCode::NOT_FOUND, "CalDAV account not found").into_response()),
+        Err(e) => {
+            eprintln!("[contacts] account lookup error: {e}");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response())
+        }
     }
 }
 
@@ -90,6 +116,7 @@ pub async fn list_contacts(State(state): State<AppState>, user: CurrentUser) -> 
         addressbooks: addressbooks
             .into_iter()
             .map(|a| AddressbookJson {
+                account_id: a.account_id,
                 href: a.href,
                 name: a.name,
             })
@@ -103,6 +130,7 @@ pub async fn list_contacts(State(state): State<AppState>, user: CurrentUser) -> 
 #[derive(Deserialize)]
 pub struct SaveContactRequest {
     pub uid: Option<String>,
+    pub account_id: String,
     pub addressbook_href: String,
     pub fn_name: String,
     pub emails: Vec<TypedEntry>,
@@ -116,7 +144,7 @@ pub async fn save_contact(
     user: CurrentUser,
     Json(req): Json<SaveContactRequest>,
 ) -> impl IntoResponse {
-    let client = match require_client(&state, &user).await {
+    let client = match require_account_client(&state, &user, &req.account_id).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -126,7 +154,7 @@ pub async fn save_contact(
         // Update: look up stored href and raw vCard for non-destructive rebuild
         let stored = match db::get_contact(
             &state.db,
-            &user.user_id,
+            &req.account_id,
             &req.addressbook_href,
             existing_uid,
         )
@@ -181,7 +209,7 @@ pub async fn save_contact(
     let cache_etag = new_etag.unwrap_or_default();
     if let Err(e) = db::upsert_contact(
         &state.db,
-        &user.user_id,
+        &req.account_id,
         &req.addressbook_href,
         &uid,
         &cache_etag,
@@ -200,6 +228,7 @@ pub async fn save_contact(
     }
 
     let contact_json = ContactJson {
+        account_id: req.account_id.clone(),
         uid: uid.clone(),
         addressbook_href: req.addressbook_href.clone(),
         fn_name: req.fn_name.clone(),
@@ -214,6 +243,7 @@ pub async fn save_contact(
     state.sse_broadcaster.send(
         &user.user_id,
         SseMessage::ContactUpdated {
+            account_id: req.account_id,
             uid,
             addressbook_href: req.addressbook_href,
             contact_json: contact_json_str,
@@ -226,6 +256,7 @@ pub async fn save_contact(
 // DELETE /api/contact
 #[derive(Deserialize)]
 pub struct DeleteContactRequest {
+    pub account_id: String,
     pub uid: String,
     pub addressbook_href: String,
 }
@@ -235,13 +266,13 @@ pub async fn delete_contact(
     user: CurrentUser,
     Json(req): Json<DeleteContactRequest>,
 ) -> impl IntoResponse {
-    let client = match require_client(&state, &user).await {
+    let client = match require_account_client(&state, &user, &req.account_id).await {
         Ok(c) => c,
         Err(r) => return r,
     };
 
     let stored =
-        match db::get_contact(&state.db, &user.user_id, &req.addressbook_href, &req.uid).await {
+        match db::get_contact(&state.db, &req.account_id, &req.addressbook_href, &req.uid).await {
             Ok(Some(c)) => c,
             Ok(None) => return (StatusCode::NOT_FOUND, "Contact not found").into_response(),
             Err(e) => {
@@ -264,7 +295,7 @@ pub async fn delete_contact(
     }
 
     if let Err(e) =
-        db::delete_contact_from_cache(&state.db, &user.user_id, &req.addressbook_href, &req.uid)
+        db::delete_contact_from_cache(&state.db, &req.account_id, &req.addressbook_href, &req.uid)
             .await
     {
         eprintln!("[contacts] delete_contact_from_cache error: {e}");
@@ -273,6 +304,7 @@ pub async fn delete_contact(
     state.sse_broadcaster.send(
         &user.user_id,
         SseMessage::ContactRemoved {
+            account_id: req.account_id,
             uid: req.uid,
             addressbook_href: req.addressbook_href,
         },
@@ -284,6 +316,7 @@ pub async fn delete_contact(
 // GET /api/contact/photo
 #[derive(Deserialize)]
 pub struct PhotoQuery {
+    pub account_id: String,
     pub uid: String,
     pub addressbook_href: String,
 }
@@ -293,7 +326,15 @@ pub async fn get_contact_photo(
     user: CurrentUser,
     Query(q): Query<PhotoQuery>,
 ) -> Response {
-    let contact = match db::get_contact(&state.db, &user.user_id, &q.addressbook_href, &q.uid).await
+    match db::get_user_id_for_caldav_account(&state.db, &q.account_id).await {
+        Ok(Some(owner)) if owner == user.user_id => {}
+        Ok(_) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            eprintln!("[contacts] account lookup error: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    }
+    let contact = match db::get_contact(&state.db, &q.account_id, &q.addressbook_href, &q.uid).await
     {
         Ok(Some(c)) => c,
         _ => return StatusCode::NOT_FOUND.into_response(),
