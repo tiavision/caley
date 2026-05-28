@@ -4,7 +4,7 @@
   import EventColorDot from './EventColorDot.svelte';
   import EventDetail from './EventDetail.svelte';
   import EventFormDialog from './EventFormDialog.svelte';
-  import type { EventJson, CalendarJson } from '../types/calendar.ts';
+  import type { EventJson, CalendarJson, CalDavAccountJson } from '../types/calendar.ts';
 
   let locale = 'en';
   $: tl = makeTl(locale);
@@ -18,6 +18,7 @@
   let errorMsg = '';
 
   let calendars: CalendarJson[] = [];
+  let accounts: CalDavAccountJson[] = [];
   let selectedHrefs = new Set<string>();
   let calendarsLoaded = false;
   let calDropdownOpen = false;
@@ -35,6 +36,8 @@
         calendars = await res.json();
         selectedHrefs = new Set(calendars.filter(c => c.is_active).map(calendarKey));
       }
+      const accountRes = await fetch('/api/caldav/accounts');
+      if (accountRes.ok) accounts = (await accountRes.json()).accounts || [];
     } catch {}
     calendarsLoaded = true;
   });
@@ -180,7 +183,7 @@
   <p aria-live="polite">{tl('search_noResults')}</p>
 {:else if results.length > 0}
   <ul class="search-results" aria-live="polite">
-    {#each results as item (item.uid + item.dtstart)}
+    {#each results as item (`${item.account_id}\0${item.calendar_href}\0${item.uid}\0${item.dtstart}`)}
       <li>
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <button type="button" class="search-result" onclick={() => eventDetail.open(item)}>
@@ -215,6 +218,7 @@
 <EventFormDialog
   bind:this={formDialog}
   {calendars}
+  {accounts}
   {locale}
   focusedEventDate=""
   onsaved={() => doSearch()}

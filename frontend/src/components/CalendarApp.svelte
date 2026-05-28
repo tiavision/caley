@@ -5,7 +5,7 @@
   import EventFormDialog from './EventFormDialog.svelte';
   import MonthPicker from './MonthPicker.svelte';
   import EventDetail from './EventDetail.svelte';
-  import type { EventJson, DayEventsJson, CalendarJson, MonthGridJson } from '../types/calendar.ts';
+  import type { EventJson, DayEventsJson, CalendarJson, MonthGridJson, CalDavAccountJson } from '../types/calendar.ts';
   import { getMonday, fmtDate, fmtYM } from '../lib/date.ts';
 
   // ── i18n ───────────────────────────────────────────────────────────────────
@@ -14,6 +14,7 @@
 
   // ── App state ──────────────────────────────────────────────────────────────
   let calendars: CalendarJson[] = [];
+  let accounts: CalDavAccountJson[] = [];
   let days: DayEventsJson[] = [];
   let monthGrid: MonthGridJson | null = null;
   let eventsLoading = false;
@@ -46,6 +47,8 @@
     try {
       const res = await fetch('/api/calendars');
       if (res.ok) calendars = await res.json();
+      const accountRes = await fetch('/api/caldav/accounts');
+      if (accountRes.ok) accounts = (await accountRes.json()).accounts || [];
     } catch {}
   }
 
@@ -454,6 +457,7 @@
 <EventFormDialog
   bind:this={formDialog}
   {calendars}
+  {accounts}
   {locale}
   {focusedEventDate}
   onsaved={() => { fetchEvents(); fetchMonthGrid(); }}

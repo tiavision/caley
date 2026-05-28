@@ -1,10 +1,11 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { makeTl } from '../lib/i18n.ts';
-  import type { PartStat, AlarmFields, AttendeeFields, RecurrenceInfo, EventJson, CalendarJson, ContactJson } from '../types/calendar.ts';
+  import type { PartStat, AlarmFields, AttendeeFields, RecurrenceInfo, EventJson, CalendarJson, ContactJson, CalDavAccountJson } from '../types/calendar.ts';
   import { fmtDate } from '../lib/date.ts';
 
   export let calendars: CalendarJson[] = [];
+  export let accounts: CalDavAccountJson[] = [];
   export let locale: string = 'en';
   export let focusedEventDate: string = '';
   export let onsaved: (() => void) | undefined = undefined;
@@ -66,6 +67,20 @@
       YEARLY: tl('event_repeatUnitYearly'),
     };
     return unitMap[fFreq] || '';
+  })();
+
+  $: calendarGroups = (() => {
+    const seen = new Set<string>();
+    return calendars
+      .map(cal => {
+        if (seen.has(cal.account_id)) return null;
+        seen.add(cal.account_id);
+        return {
+          account_id: cal.account_id,
+          label: accounts.find(a => a.account_id === cal.account_id)?.display_name || cal.account_id,
+        };
+      })
+      .filter((group): group is { account_id: string; label: string } => group !== null);
   })();
 
   function resetRecurrence() {
@@ -759,9 +774,9 @@
             localStorage.setItem('defaultCalendar', `${fAccountId}\0${fCalendarHref}`);
           }}
         >
-          {#each Array.from(new Map(calendars.map(c => [c.account_id, c])).values()) as accountCal (accountCal.account_id)}
-            <optgroup label={accountCal.account_id}>
-              {#each calendars.filter(c => c.account_id === accountCal.account_id) as cal (cal.account_id + cal.href)}
+          {#each calendarGroups as group (group.account_id)}
+            <optgroup label={group.label}>
+              {#each calendars.filter(c => c.account_id === group.account_id) as cal (cal.account_id + cal.href)}
                 <option value={`${cal.account_id}\0${cal.href}`}>{cal.name}</option>
               {/each}
             </optgroup>
