@@ -3560,7 +3560,7 @@
                   class="html-body"
                 ></iframe>
               {/key}
-            {:else if selectedMessage.body_text}
+            {:else if selectedMessage.body_text !== null}
               <pre class="body-text">{#each bodyTextSegments as seg}{#if 'href' in seg}<a href={seg.href} target="_blank" rel="noopener noreferrer">{seg.text}</a>{:else}{seg.text}{/if}{/each}</pre>
             {:else}
               <div class="loading">{tl('mail_loadingBody')}</div>
