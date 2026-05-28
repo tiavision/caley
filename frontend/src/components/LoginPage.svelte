@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { initI18n, getLocale, setLocale, makeTl } from '../lib/i18n.ts';
+  import { markAuthReturnPending, redirectToReturnUrl } from '../lib/return-url.ts';
   import { getUser } from '../lib/user.ts';
 
   let locale = 'en';
@@ -28,7 +29,7 @@
     // Already signed in → straight to the app.
     const user = await getUser();
     if (user.ok) {
-      window.location.href = '/calendar/';
+      redirectToReturnUrl();
       return;
     }
 
@@ -65,7 +66,7 @@
       const data = await res.json();
       if (res.ok && data.status === 'ok') {
         localStorage.setItem('caldav_base_url', caldavBaseUrl);
-        window.location.href = '/calendar/';
+        redirectToReturnUrl();
       } else {
         errorMsg = data.error || tl('login_error');
       }
@@ -123,7 +124,7 @@
 
     {#if oidcEnabled}
       <div class="oidc-divider"><span>{tl('login_or')}</span></div>
-      <a class="oidc-btn" href="/auth/oidc" role="button">{tl('login_oidc_button')}</a>
+      <a class="oidc-btn" href="/auth/oidc" role="button" onclick={markAuthReturnPending}>{tl('login_oidc_button')}</a>
     {/if}
   {/if}
 </div>

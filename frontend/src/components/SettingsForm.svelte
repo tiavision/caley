@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { initI18n, getLocale, setLocale, makeTl } from '../lib/i18n.ts';
+  import { clearReturnUrl } from '../lib/return-url.ts';
   import { getUser } from '../lib/user.ts';
   import EventColorDot from './EventColorDot.svelte';
   import CreateCalendarDialog from './CreateCalendarDialog.svelte';
@@ -849,6 +850,7 @@
       const res = await fetch('/api/account', { method: 'DELETE' });
       if (res.ok) {
         const data = await res.json();
+        clearReturnUrl();
         window.location.href = data.redirect || '/calendar/';
       }
     } catch {}
