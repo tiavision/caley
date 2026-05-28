@@ -714,12 +714,22 @@
       const doc = iframeEl.contentDocument;
       if (!doc) return;
       const setHeight = () => {
-        const h = doc.documentElement.scrollHeight;
-        if (h > 0 && iframeEl) iframeEl.style.height = h + 'px';
+        const root = doc.documentElement;
+        const body = doc.body;
+        const h = Math.max(
+          root.scrollHeight,
+          root.offsetHeight,
+          root.clientHeight,
+          body?.scrollHeight ?? 0,
+          body?.offsetHeight ?? 0,
+          body?.clientHeight ?? 0,
+        );
+        if (h > 0 && iframeEl) iframeEl.style.height = Math.ceil(h) + 2 + 'px';
       };
       setHeight();
       iframeResizeObserver = new ResizeObserver(setHeight);
       iframeResizeObserver.observe(doc.documentElement);
+      if (doc.body) iframeResizeObserver.observe(doc.body);
     } catch {}
   }
 
@@ -3514,6 +3524,7 @@
                     srcdoc={pgpDecryptedHtml}
                     title={tl('nav_mail')}
                     class="html-body"
+                    scrolling="no"
                   ></iframe>
                 {/key}
               {:else if pgpDecryptedText}
@@ -3558,6 +3569,7 @@
                   srcdoc={selectedMessage.body_html}
                   title={tl('nav_mail')}
                   class="html-body"
+                  scrolling="no"
                 ></iframe>
               {/key}
             {:else if selectedMessage.body_text !== null}
@@ -5805,7 +5817,7 @@
     .message-detail.standalone {
       display: flex;
       position: static;
-      overflow-y: auto;
+      overflow: hidden;
       box-shadow: none;
     }
 
@@ -5821,6 +5833,17 @@
 
     .html-body {
       flex: none;
+    }
+
+    .message-detail.standalone .detail-body {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+    }
+
+    .message-detail.standalone .html-body {
+      flex: 1;
+      min-height: 0;
     }
 
     .detail-resize-handle {
