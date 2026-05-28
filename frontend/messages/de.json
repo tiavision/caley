@@ -188,6 +188,8 @@
   "mail_virtualFolders": "Virtuelle Ordner",
   "mail_addAccount": "Konto hinzufügen",
   "mail_addVirtualFolder": "Virtueller Ordner",
+  "mail_collapseAccount": "Konto einklappen",
+  "mail_expandAccount": "Konto ausklappen",
   "mail_notifications": "Benachrichtigungen",
   "mail_notificationsBlocked": "E-Mail-Benachrichtigungen blockiert",
   "mail_notificationTitle": "Neue E-Mail",

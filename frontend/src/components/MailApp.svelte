@@ -50,6 +50,18 @@
     subscribed: boolean;
   }
 
+  interface SidebarMailbox {
+    mailbox: Mailbox;
+    unread_count: number;
+  }
+
+  interface SidebarAccountSection {
+    account: Account;
+    collapsed: boolean;
+    unread_count: number;
+    mailboxes: SidebarMailbox[];
+  }
+
   interface VirtualFolder {
     folder_id: string;
     display_name: string;
@@ -156,6 +168,9 @@
   let syncingMailboxes: Set<string> = new Set();
   let mailboxUnreadCounts: Record<string, Record<string, number>> = {};
   let folderUnreadCounts: Record<string, number> = {};
+  const COLLAPSED_ACCOUNTS_KEY = 'mail-collapsed-accounts';
+  let collapsedAccountIds: Set<string> = new Set();
+  let sidebarAccountSections: SidebarAccountSection[] = [];
 
   let selectedAccountId: string | null = null;
   let selectedMailbox: string | null = null;
@@ -881,6 +896,7 @@
     }
     displayName = user.display_name || '';
     locale = getLocale();
+    loadCollapsedAccounts();
 
     if (standalone) {
       await loadStandalone();
@@ -1057,6 +1073,36 @@
         folderUnreadCounts = data.folders || {};
       }
     } catch {}
+  }
+
+  function loadCollapsedAccounts() {
+    try {
+      const raw = localStorage.getItem(COLLAPSED_ACCOUNTS_KEY);
+      const ids = raw ? JSON.parse(raw) : [];
+      collapsedAccountIds = Array.isArray(ids)
+        ? new Set(ids.filter((id): id is string => typeof id === 'string'))
+        : new Set();
+    } catch {
+      collapsedAccountIds = new Set();
+    }
+  }
+
+  function saveCollapsedAccounts() {
+    try {
+      localStorage.setItem(COLLAPSED_ACCOUNTS_KEY, JSON.stringify([...collapsedAccountIds]));
+    } catch {}
+  }
+
+  function isAccountCollapsed(accountId: string): boolean {
+    return collapsedAccountIds.has(accountId);
+  }
+
+  function toggleAccountCollapsed(accountId: string) {
+    const next = new Set(collapsedAccountIds);
+    if (next.has(accountId)) next.delete(accountId);
+    else next.add(accountId);
+    collapsedAccountIds = next;
+    saveCollapsedAccounts();
   }
 
   async function loadImageOrigins() {
@@ -2125,6 +2171,12 @@
     mailboxesByAccount = Object.fromEntries(
       Object.entries(mailboxesByAccount).filter(([id]) => id !== acc.account_id)
     );
+    if (collapsedAccountIds.has(acc.account_id)) {
+      const next = new Set(collapsedAccountIds);
+      next.delete(acc.account_id);
+      collapsedAccountIds = next;
+      saveCollapsedAccounts();
+    }
     if (selectedAccountId === acc.account_id) {
       selectedAccountId = null;
       selectedMailbox = null;
@@ -2661,6 +2713,28 @@
     return [FOLDER_PRIORITY[folderKind(name)], name.toLowerCase()];
   }
 
+  $: sidebarAccountSections = accounts.map(account => {
+    const collapsed = collapsedAccountIds.has(account.account_id);
+    const mailboxes = (mailboxesByAccount[account.account_id] || [])
+      .filter(mailbox => mailbox.subscribed)
+      .toSorted((a, b) => {
+        const [ap, an] = folderSortKey(a.name);
+        const [bp, bn] = folderSortKey(b.name);
+        return ap !== bp ? ap - bp : an.localeCompare(bn);
+      })
+      .map(mailbox => ({
+        mailbox,
+        unread_count: mailboxUnreadCounts[account.account_id]?.[mailbox.name] ?? 0,
+      }));
+    const unread_count = mailboxes.reduce((sum, item) => sum + item.unread_count, 0);
+    return {
+      account,
+      collapsed,
+      unread_count,
+      mailboxes: collapsed ? mailboxes.filter(item => item.unread_count > 0) : mailboxes,
+    };
+  });
+
   $: isSentFolder = !!(selectedMailbox && /sent/i.test(selectedMailbox));
   $: selectedMessages = messages.filter(msg => markedMessageKeys.has(messageKey(msg)));
   $: bulkAccountId = selectedMessages.length > 0 &&
@@ -2812,42 +2886,50 @@
       {/if}
 
       <!-- Accounts + mailboxes -->
-      {#each accounts as acc}
+      {#each sidebarAccountSections as section}
+        {@const acc = section.account}
         <div class="sidebar-section">
           <div class="sidebar-section-header">
+            <button
+              class="icon-btn account-collapse-btn"
+              class:collapsed={section.collapsed}
+              on:click={() => toggleAccountCollapsed(acc.account_id)}
+              title={section.collapsed ? tl('mail_expandAccount') : tl('mail_collapseAccount')}
+              aria-label={section.collapsed ? tl('mail_expandAccount') : tl('mail_collapseAccount')}
+              aria-expanded={!section.collapsed}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
             <span class="account-name" title={acc.username}>{acc.display_name}</span>
+            {#if section.unread_count > 0}
+              <span class="unread-badge account-unread-badge">{section.unread_count > 999 ? '999+' : section.unread_count}</span>
+            {/if}
             <button class="icon-btn" on:click={() => { sidebarOpen = false; openManageIdentities(acc.account_id); }} title={tl('mail_identities')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg></button>
             <button class="icon-btn" on:click={() => { sidebarOpen = false; openEditAccount(acc); }} title={tl('mail_editAccountHeading')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
             <button class="icon-btn delete-btn" on:click={() => { sidebarOpen = false; removeAccount(acc); }} title={tl('mail_removeAttachment')}>×</button>
           </div>
-          {#each (mailboxesByAccount[acc.account_id] || []).toSorted((a, b) => {
-            const [ap, an] = folderSortKey(a.name);
-            const [bp, bn] = folderSortKey(b.name);
-            return ap !== bp ? ap - bp : an.localeCompare(bn);
-          }) as mb}
-            {#if mb.subscribed}
-              {@const syncKey = `${acc.account_id}|${mb.name}`}
-              {@const mbUnread = mailboxUnreadCounts[acc.account_id]?.[mb.name] ?? 0}
-              {@const isSyncing = syncingMailboxes.has(syncKey)}
-              <button
-                class="sidebar-item"
-                class:active={selectedAccountId === acc.account_id && selectedMailbox === mb.name}
-                class:drag-target={draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name}
-                class:drag-over={dragOverMailbox === `${acc.account_id}|${mb.name}`}
-                on:click={() => selectMailbox(acc.account_id, mb.name)}
-                on:dragover={(e) => { if (draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name) { e.preventDefault(); dragOverMailbox = `${acc.account_id}|${mb.name}`; } }}
-                on:dragleave={() => { if (dragOverMailbox === `${acc.account_id}|${mb.name}`) dragOverMailbox = null; }}
-                on:drop={() => { if (draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name) { moveMessage(draggedMessage, mb.name); } draggedMessage = null; dragOverMailbox = null; }}
-              >
-                {@render folderIcon(folderKind(mb.name))}
-                <span class="folder-name">{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
-                {#if isSyncing}
-                  <span class="sync-spinner" aria-label="Syncing"></span>
-                {:else if mbUnread > 0}
-                  <span class="unread-badge">{mbUnread > 999 ? '999+' : mbUnread}</span>
-                {/if}
-              </button>
-            {/if}
+          {#each section.mailboxes as item}
+            {@const mb = item.mailbox}
+            {@const syncKey = `${acc.account_id}|${mb.name}`}
+            {@const isSyncing = syncingMailboxes.has(syncKey)}
+            <button
+              class="sidebar-item"
+              class:active={selectedAccountId === acc.account_id && selectedMailbox === mb.name}
+              class:drag-target={draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name}
+              class:drag-over={dragOverMailbox === `${acc.account_id}|${mb.name}`}
+              on:click={() => selectMailbox(acc.account_id, mb.name)}
+              on:dragover={(e) => { if (draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name) { e.preventDefault(); dragOverMailbox = `${acc.account_id}|${mb.name}`; } }}
+              on:dragleave={() => { if (dragOverMailbox === `${acc.account_id}|${mb.name}`) dragOverMailbox = null; }}
+              on:drop={() => { if (draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name) { moveMessage(draggedMessage, mb.name); } draggedMessage = null; dragOverMailbox = null; }}
+            >
+              {@render folderIcon(folderKind(mb.name))}
+              <span class="folder-name">{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
+              {#if isSyncing}
+                <span class="sync-spinner" aria-label="Syncing"></span>
+              {:else if item.unread_count > 0}
+                <span class="unread-badge">{item.unread_count > 999 ? '999+' : item.unread_count}</span>
+              {/if}
+            </button>
           {/each}
         </div>
       {/each}
@@ -4094,6 +4176,24 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .account-collapse-btn {
+    opacity: 0.65;
+    transition: transform 0.12s, opacity 0.12s;
+  }
+
+  .account-collapse-btn.collapsed {
+    transform: rotate(-90deg);
+  }
+
+  .account-collapse-btn:hover,
+  .account-collapse-btn:focus-visible {
+    opacity: 1;
+  }
+
+  .account-unread-badge {
+    margin-right: 0.15rem;
   }
 
   .sidebar-item {
