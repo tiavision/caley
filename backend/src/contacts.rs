@@ -1,15 +1,15 @@
 use axum::{
     extract::{Query, State},
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::{IntoResponse, Json, Response},
 };
 use base64::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::carddav::{self, build_vcard_preserving, contact_href, AddressEntry, TypedEntry};
+use crate::carddav::{self, AddressEntry, TypedEntry, build_vcard_preserving, contact_href};
 use crate::db;
-use crate::oidc::{require_client, AppState, CurrentUser};
+use crate::oidc::{AppState, CurrentUser, require_client};
 use crate::sse::SseMessage;
 
 #[derive(Serialize, Clone)]
@@ -41,7 +41,10 @@ fn parse_typed_entries(json: &str) -> Vec<TypedEntry> {
         serde_json::from_str::<Vec<String>>(json)
             .unwrap_or_default()
             .into_iter()
-            .map(|v| TypedEntry { value: v, type_label: "other".into() })
+            .map(|v| TypedEntry {
+                value: v,
+                type_label: "other".into(),
+            })
             .collect()
     })
 }
@@ -67,10 +70,7 @@ fn cached_to_json(c: &db::CachedContact) -> ContactJson {
 }
 
 // GET /api/contacts
-pub async fn list_contacts(
-    State(state): State<AppState>,
-    user: CurrentUser,
-) -> impl IntoResponse {
+pub async fn list_contacts(State(state): State<AppState>, user: CurrentUser) -> impl IntoResponse {
     let addressbooks = match db::get_cached_addressbooks(&state.db, &user.user_id).await {
         Ok(a) => a,
         Err(e) => {
@@ -89,7 +89,10 @@ pub async fn list_contacts(
     let resp = ContactsResponse {
         addressbooks: addressbooks
             .into_iter()
-            .map(|a| AddressbookJson { href: a.href, name: a.name })
+            .map(|a| AddressbookJson {
+                href: a.href,
+                name: a.name,
+            })
             .collect(),
         contacts: contacts.iter().map(cached_to_json).collect(),
     };
@@ -118,9 +121,17 @@ pub async fn save_contact(
         Err(r) => return r,
     };
 
-    let (uid, href, existing_raw, existing_photo, is_new) = if let Some(ref existing_uid) = req.uid {
+    let (uid, href, existing_raw, existing_photo, is_new) = if let Some(ref existing_uid) = req.uid
+    {
         // Update: look up stored href and raw vCard for non-destructive rebuild
-        let stored = match db::get_contact(&state.db, &user.user_id, &req.addressbook_href, existing_uid).await {
+        let stored = match db::get_contact(
+            &state.db,
+            &user.user_id,
+            &req.addressbook_href,
+            existing_uid,
+        )
+        .await
+        {
             Ok(Some(c)) => c,
             Ok(None) => return (StatusCode::NOT_FOUND, "Contact not found").into_response(),
             Err(e) => {
@@ -128,8 +139,16 @@ pub async fn save_contact(
                 return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
             }
         };
-        let h = stored.href.unwrap_or_else(|| contact_href(&req.addressbook_href, existing_uid));
-        (existing_uid.clone(), h, Some(stored.raw_vcard), stored.photo, false)
+        let h = stored
+            .href
+            .unwrap_or_else(|| contact_href(&req.addressbook_href, existing_uid));
+        (
+            existing_uid.clone(),
+            h,
+            Some(stored.raw_vcard),
+            stored.photo,
+            false,
+        )
     } else {
         // Create: generate new uid and href
         let new_uid = Uuid::new_v4().to_string();
@@ -139,7 +158,12 @@ pub async fn save_contact(
 
     let raw_vcard = build_vcard_preserving(
         existing_raw.as_deref(),
-        &uid, &req.fn_name, &req.emails, &req.phones, &req.addresses, &req.org,
+        &uid,
+        &req.fn_name,
+        &req.emails,
+        &req.phones,
+        &req.addresses,
+        &req.org,
     );
 
     let new_etag = match carddav::put_contact(&client, &href, &raw_vcard, is_new).await {
@@ -169,7 +193,9 @@ pub async fn save_contact(
         &addresses_json,
         &req.org,
         existing_photo.as_deref(),
-    ).await {
+    )
+    .await
+    {
         eprintln!("[contacts] upsert_contact error: {e}");
     }
 
@@ -214,23 +240,33 @@ pub async fn delete_contact(
         Err(r) => return r,
     };
 
-    let stored = match db::get_contact(&state.db, &user.user_id, &req.addressbook_href, &req.uid).await {
-        Ok(Some(c)) => c,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Contact not found").into_response(),
-        Err(e) => {
-            eprintln!("[contacts] get_contact error: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
-        }
-    };
+    let stored =
+        match db::get_contact(&state.db, &user.user_id, &req.addressbook_href, &req.uid).await {
+            Ok(Some(c)) => c,
+            Ok(None) => return (StatusCode::NOT_FOUND, "Contact not found").into_response(),
+            Err(e) => {
+                eprintln!("[contacts] get_contact error: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+            }
+        };
 
-    let href = stored.href.unwrap_or_else(|| contact_href(&req.addressbook_href, &req.uid));
+    let href = stored
+        .href
+        .unwrap_or_else(|| contact_href(&req.addressbook_href, &req.uid));
 
     if let Err(e) = carddav::delete_contact(&client, &href).await {
         eprintln!("[contacts] delete_contact error: {e}");
-        return (StatusCode::BAD_GATEWAY, "Failed to delete contact on server").into_response();
+        return (
+            StatusCode::BAD_GATEWAY,
+            "Failed to delete contact on server",
+        )
+            .into_response();
     }
 
-    if let Err(e) = db::delete_contact_from_cache(&state.db, &user.user_id, &req.addressbook_href, &req.uid).await {
+    if let Err(e) =
+        db::delete_contact_from_cache(&state.db, &user.user_id, &req.addressbook_href, &req.uid)
+            .await
+    {
         eprintln!("[contacts] delete_contact_from_cache error: {e}");
     }
 
@@ -257,7 +293,8 @@ pub async fn get_contact_photo(
     user: CurrentUser,
     Query(q): Query<PhotoQuery>,
 ) -> Response {
-    let contact = match db::get_contact(&state.db, &user.user_id, &q.addressbook_href, &q.uid).await {
+    let contact = match db::get_contact(&state.db, &user.user_id, &q.addressbook_href, &q.uid).await
+    {
         Ok(Some(c)) => c,
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
@@ -295,7 +332,8 @@ pub async fn get_contact_photo(
                         ),
                     ],
                     bytes,
-                ).into_response();
+                )
+                    .into_response();
             }
         }
     }

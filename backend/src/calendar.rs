@@ -9,14 +9,13 @@ use std::collections::HashMap;
 use url::form_urlencoded;
 
 use crate::caldav::{
-    add_exdate, add_recurrence_override, generate_ical_event, generate_new_uid,
-    split_vcalendar_into_events, update_vcalendar_event, Alarm, Attendee, CalDavClient, PartStat,
-    RecurrenceInfo,
+    Alarm, Attendee, CalDavClient, PartStat, RecurrenceInfo, add_exdate, add_recurrence_override,
+    generate_ical_event, generate_new_uid, split_vcalendar_into_events, update_vcalendar_event,
 };
 use crate::db;
-use crate::oidc::{require_client, AppState, CurrentUser};
-use sqlx::Row;
+use crate::oidc::{AppState, CurrentUser, require_client};
 use crate::sync::SyncTrigger;
+use sqlx::Row;
 
 const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
 
@@ -168,7 +167,10 @@ fn parse_alarm_from_fields(
 // ── Form parsing helpers ──────────────────────────────────────────────────────
 
 fn parse_form_field<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
-    pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+    pairs
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.as_str())
 }
 
 fn parse_event_form(body: String) -> Vec<(String, String)> {
@@ -191,11 +193,7 @@ fn extract_vevent(ical: &str) -> String {
 
 // ── Event building helper ─────────────────────────────────────────────────────
 
-fn build_event_json(
-    event: &crate::caldav::Event,
-    color: &str,
-    calendar_href: &str,
-) -> EventJson {
+fn build_event_json(event: &crate::caldav::Event, color: &str, calendar_href: &str) -> EventJson {
     let time_range = match (&event.start_time, &event.end_time) {
         (Some(s), Some(e)) => format!("{}-{}", s, e),
         (Some(s), None) => s.clone(),
@@ -207,11 +205,15 @@ fn build_event_json(
         color.to_string()
     };
     let alarms = event.alarms.iter().map(alarm_to_fields).collect();
-    let attendees = event.attendees.iter().map(|a| AttendeeFields {
-        cn: a.cn.clone(),
-        email: a.email.clone(),
-        partstat: a.partstat.clone(),
-    }).collect();
+    let attendees = event
+        .attendees
+        .iter()
+        .map(|a| AttendeeFields {
+            cn: a.cn.clone(),
+            email: a.email.clone(),
+            partstat: a.partstat.clone(),
+        })
+        .collect();
     EventJson {
         uid: event.uid.clone(),
         time_range,
@@ -234,10 +236,7 @@ fn build_event_json(
 
 // ── Read handlers (serve from cache) ─────────────────────────────────────────
 
-pub async fn list_calendars(
-    State(state): State<AppState>,
-    user: CurrentUser,
-) -> Response {
+pub async fn list_calendars(State(state): State<AppState>, user: CurrentUser) -> Response {
     let calendars = match db::get_cached_calendars(&state.db, &user.user_id).await {
         Ok(c) => c,
         Err(e) => {
@@ -245,9 +244,10 @@ pub async fn list_calendars(
             return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
         }
     };
-    let deactivated = db::get_deactivated_calendars(&state.db, &user.user_id, &state.encryption_key)
-        .await
-        .unwrap_or_default();
+    let deactivated =
+        db::get_deactivated_calendars(&state.db, &user.user_id, &state.encryption_key)
+            .await
+            .unwrap_or_default();
 
     let result: Vec<CalendarJson> = calendars
         .into_iter()
@@ -270,7 +270,6 @@ pub async fn list_events(
     user: CurrentUser,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-
     let today = chrono::Local::now().date_naive();
     let weekday = today.weekday().num_days_from_monday();
     let week_start = today - chrono::TimeDelta::days(weekday as i64);
@@ -289,10 +288,13 @@ pub async fn list_events(
     let start = start.unwrap_or(week_start);
     let end = end.unwrap_or(week_start + chrono::TimeDelta::days(6));
 
-    let calendars = db::get_cached_calendars(&state.db, &user.user_id).await.unwrap_or_default();
-    let deactivated = db::get_deactivated_calendars(&state.db, &user.user_id, &state.encryption_key)
+    let calendars = db::get_cached_calendars(&state.db, &user.user_id)
         .await
         .unwrap_or_default();
+    let deactivated =
+        db::get_deactivated_calendars(&state.db, &user.user_id, &state.encryption_key)
+            .await
+            .unwrap_or_default();
 
     let color_map: HashMap<String, String> = calendars
         .iter()
@@ -308,14 +310,22 @@ pub async fn list_events(
     let start_str = start.format("%Y-%m-%d").to_string();
     let end_str = end.format("%Y-%m-%d").to_string();
 
-    let raw_pairs =
-        db::get_raw_events(&state.db, &user.user_id, &active_hrefs, &start_str, &end_str)
-            .await
-            .unwrap_or_default();
+    let raw_pairs = db::get_raw_events(
+        &state.db,
+        &user.user_id,
+        &active_hrefs,
+        &start_str,
+        &end_str,
+    )
+    .await
+    .unwrap_or_default();
 
     let mut all_events: Vec<(NaiveDate, EventJson)> = Vec::new();
     for (calendar_href, raw_ical) in raw_pairs {
-        let color = color_map.get(&calendar_href).map(|s| s.as_str()).unwrap_or("");
+        let color = color_map
+            .get(&calendar_href)
+            .map(|s| s.as_str())
+            .unwrap_or("");
         for event in CalDavClient::events_from_raw_ical(&raw_ical, start, end) {
             let json = build_event_json(&event, color, &calendar_href);
             all_events.push((event.date, json));
@@ -357,7 +367,6 @@ pub async fn list_calendar(
     user: CurrentUser,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-
     let today = chrono::Local::now().date_naive();
     let mut month_param: Option<String> = None;
     if let Some(query) = raw_query {
@@ -387,10 +396,13 @@ pub async fn list_calendar(
         NaiveDate::from_ymd_opt(first_day.year(), first_day.month() - 1, 1).unwrap()
     };
 
-    let calendars = db::get_cached_calendars(&state.db, &user.user_id).await.unwrap_or_default();
-    let deactivated = db::get_deactivated_calendars(&state.db, &user.user_id, &state.encryption_key)
+    let calendars = db::get_cached_calendars(&state.db, &user.user_id)
         .await
         .unwrap_or_default();
+    let deactivated =
+        db::get_deactivated_calendars(&state.db, &user.user_id, &state.encryption_key)
+            .await
+            .unwrap_or_default();
 
     let color_map: HashMap<String, String> = calendars
         .iter()
@@ -421,7 +433,10 @@ pub async fn list_calendar(
     .unwrap_or_default();
     for (calendar_href, dtstart_str) in non_recurring {
         if let Ok(date) = NaiveDate::parse_from_str(&dtstart_str, "%Y-%m-%d") {
-            let color = color_map.get(&calendar_href).map(|s| s.as_str()).unwrap_or("");
+            let color = color_map
+                .get(&calendar_href)
+                .map(|s| s.as_str())
+                .unwrap_or("");
             let dot_color = if color.is_empty() {
                 NEUTRAL_DOT_COLOR.to_string()
             } else {
@@ -436,7 +451,10 @@ pub async fn list_calendar(
         .await
         .unwrap_or_default();
     for (calendar_href, raw_ical) in recurring_raw {
-        let color = color_map.get(&calendar_href).map(|s| s.as_str()).unwrap_or("");
+        let color = color_map
+            .get(&calendar_href)
+            .map(|s| s.as_str())
+            .unwrap_or("");
         let dot_color = if color.is_empty() {
             NEUTRAL_DOT_COLOR.to_string()
         } else {
@@ -516,10 +534,9 @@ pub async fn toggle_calendar(
 
     match result {
         Ok(_) => {
-            state.sse_broadcaster.send(
-                &user.user_id,
-                crate::sse::SseMessage::CalendarsChanged,
-            );
+            state
+                .sse_broadcaster
+                .send(&user.user_id, crate::sse::SseMessage::CalendarsChanged);
             StatusCode::OK.into_response()
         }
         Err(e) => {
@@ -546,10 +563,18 @@ pub async fn save_event(
     if uid.is_empty() {
         uid = generate_new_uid();
     }
-    let summary = parse_form_field(&form, "summary").unwrap_or_default().to_string();
-    let description = parse_form_field(&form, "description").unwrap_or_default().to_string();
-    let location = parse_form_field(&form, "location").unwrap_or_default().to_string();
-    let date = parse_form_field(&form, "date").unwrap_or_default().to_string();
+    let summary = parse_form_field(&form, "summary")
+        .unwrap_or_default()
+        .to_string();
+    let description = parse_form_field(&form, "description")
+        .unwrap_or_default()
+        .to_string();
+    let location = parse_form_field(&form, "location")
+        .unwrap_or_default()
+        .to_string();
+    let date = parse_form_field(&form, "date")
+        .unwrap_or_default()
+        .to_string();
     let start_time = parse_form_field(&form, "start_time");
     let end_time = parse_form_field(&form, "end_time");
     let tz = parse_form_field(&form, "tz").unwrap_or("UTC").to_string();
@@ -558,17 +583,36 @@ pub async fn save_event(
         Some(h) => h.to_string(),
         None => return (StatusCode::BAD_REQUEST, "Missing calendar_href").into_response(),
     };
-    let scope = parse_form_field(&form, "scope").unwrap_or("series").to_string();
+    let scope = parse_form_field(&form, "scope")
+        .unwrap_or("series")
+        .to_string();
     let original_dtstart = parse_form_field(&form, "original_dtstart");
-    let original_calendar_href = parse_form_field(&form, "original_calendar_href").map(|s| s.to_string());
+    let original_calendar_href =
+        parse_form_field(&form, "original_calendar_href").map(|s| s.to_string());
     let recurrence: Option<RecurrenceInfo> = parse_form_field(&form, "recurrence")
         .filter(|r| !r.is_empty() && *r != "{}")
         .and_then(|r| serde_json::from_str(r).ok());
 
-    let alarm_dirs: Vec<&str> = form.iter().filter(|(k, _)| k == "alarm_direction").map(|(_, v)| v.as_str()).collect();
-    let alarm_vals: Vec<&str> = form.iter().filter(|(k, _)| k == "alarm_value").map(|(_, v)| v.as_str()).collect();
-    let alarm_units: Vec<&str> = form.iter().filter(|(k, _)| k == "alarm_unit").map(|(_, v)| v.as_str()).collect();
-    let alarm_dts: Vec<&str> = form.iter().filter(|(k, _)| k == "alarm_datetime").map(|(_, v)| v.as_str()).collect();
+    let alarm_dirs: Vec<&str> = form
+        .iter()
+        .filter(|(k, _)| k == "alarm_direction")
+        .map(|(_, v)| v.as_str())
+        .collect();
+    let alarm_vals: Vec<&str> = form
+        .iter()
+        .filter(|(k, _)| k == "alarm_value")
+        .map(|(_, v)| v.as_str())
+        .collect();
+    let alarm_units: Vec<&str> = form
+        .iter()
+        .filter(|(k, _)| k == "alarm_unit")
+        .map(|(_, v)| v.as_str())
+        .collect();
+    let alarm_dts: Vec<&str> = form
+        .iter()
+        .filter(|(k, _)| k == "alarm_datetime")
+        .map(|(_, v)| v.as_str())
+        .collect();
     let alarms: Vec<Alarm> = alarm_dirs
         .iter()
         .enumerate()
@@ -583,18 +627,36 @@ pub async fn save_event(
         })
         .collect();
 
-    let att_cns: Vec<&str> = form.iter().filter(|(k, _)| k == "attendee_cn").map(|(_, v)| v.as_str()).collect();
-    let att_emails: Vec<&str> = form.iter().filter(|(k, _)| k == "attendee_email").map(|(_, v)| v.as_str()).collect();
-    let att_partstats: Vec<&str> = form.iter().filter(|(k, _)| k == "attendee_partstat").map(|(_, v)| v.as_str()).collect();
-    let attendees: Vec<Attendee> = att_emails.iter().enumerate().filter_map(|(i, email)| {
-        let email = email.trim();
-        if email.is_empty() { return None; }
-        Some(Attendee {
-            cn: att_cns.get(i).copied().unwrap_or("").to_string(),
-            email: email.to_string(),
-            partstat: PartStat::from_ical(att_partstats.get(i).copied().unwrap_or("")),
+    let att_cns: Vec<&str> = form
+        .iter()
+        .filter(|(k, _)| k == "attendee_cn")
+        .map(|(_, v)| v.as_str())
+        .collect();
+    let att_emails: Vec<&str> = form
+        .iter()
+        .filter(|(k, _)| k == "attendee_email")
+        .map(|(_, v)| v.as_str())
+        .collect();
+    let att_partstats: Vec<&str> = form
+        .iter()
+        .filter(|(k, _)| k == "attendee_partstat")
+        .map(|(_, v)| v.as_str())
+        .collect();
+    let attendees: Vec<Attendee> = att_emails
+        .iter()
+        .enumerate()
+        .filter_map(|(i, email)| {
+            let email = email.trim();
+            if email.is_empty() {
+                return None;
+            }
+            Some(Attendee {
+                cn: att_cns.get(i).copied().unwrap_or("").to_string(),
+                email: email.to_string(),
+                partstat: PartStat::from_ical(att_partstats.get(i).copied().unwrap_or("")),
+            })
         })
-    }).collect();
+        .collect();
 
     if summary.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing summary").into_response();
@@ -622,16 +684,36 @@ pub async fn save_event(
         // Try non-destructive update of an existing override VEVENT first.
         // Falls back to generating a fresh override when none exists yet.
         let modified = match update_vcalendar_event(
-            &raw_ical, &summary, &description, &location, &date,
-            start_time, end_time, &tz, is_all_day,
-            Some((rid_value, &tz)), None, &alarms, &attendees,
+            &raw_ical,
+            &summary,
+            &description,
+            &location,
+            &date,
+            start_time,
+            end_time,
+            &tz,
+            is_all_day,
+            Some((rid_value, &tz)),
+            None,
+            &alarms,
+            &attendees,
         ) {
             Some(updated) => updated,
             None => {
                 let override_ical = generate_ical_event(
-                    &uid, &summary, &description, &location, &date,
-                    start_time, end_time, &tz, is_all_day,
-                    Some((rid_value, &tz)), None, &alarms, &attendees,
+                    &uid,
+                    &summary,
+                    &description,
+                    &location,
+                    &date,
+                    start_time,
+                    end_time,
+                    &tz,
+                    is_all_day,
+                    Some((rid_value, &tz)),
+                    None,
+                    &alarms,
+                    &attendees,
                 );
                 let override_vevent = extract_vevent(&override_ical);
                 add_recurrence_override(&raw_ical, &override_vevent, rid_value)
@@ -640,13 +722,27 @@ pub async fn save_event(
 
         match client.put_event(&calendar_href, &uid, &modified).await {
             Ok(_) => {
-                optimistic_upsert(&state, &user.user_id, &calendar_href, &event_href, &modified, &uid).await;
-                state.sync_manager.trigger(&user.user_id, SyncTrigger::Incremental);
+                optimistic_upsert(
+                    &state,
+                    &user.user_id,
+                    &calendar_href,
+                    &event_href,
+                    &modified,
+                    &uid,
+                )
+                .await;
+                state
+                    .sync_manager
+                    .trigger(&user.user_id, SyncTrigger::Incremental);
                 StatusCode::OK.into_response()
             }
             Err(e) => {
                 eprintln!("Failed to update event instance: {e}");
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save event: {e}")).into_response()
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to save event: {e}"),
+                )
+                    .into_response()
             }
         }
     } else {
@@ -659,35 +755,79 @@ pub async fn save_event(
             match original {
                 Ok(orig_ical) => {
                     match update_vcalendar_event(
-                        &orig_ical, &summary, &description, &location, &date,
-                        start_time, end_time, &tz, is_all_day,
-                        None, recurrence.as_ref(), &alarms, &attendees,
+                        &orig_ical,
+                        &summary,
+                        &description,
+                        &location,
+                        &date,
+                        start_time,
+                        end_time,
+                        &tz,
+                        is_all_day,
+                        None,
+                        recurrence.as_ref(),
+                        &alarms,
+                        &attendees,
                     ) {
                         Some(updated) => updated,
                         None => {
-                            eprintln!("update_vcalendar_event: master VEVENT not found in {uid}, falling back");
+                            eprintln!(
+                                "update_vcalendar_event: master VEVENT not found in {uid}, falling back"
+                            );
                             generate_ical_event(
-                                &uid, &summary, &description, &location, &date,
-                                start_time, end_time, &tz, is_all_day,
-                                None, recurrence.as_ref(), &alarms, &attendees,
+                                &uid,
+                                &summary,
+                                &description,
+                                &location,
+                                &date,
+                                start_time,
+                                end_time,
+                                &tz,
+                                is_all_day,
+                                None,
+                                recurrence.as_ref(),
+                                &alarms,
+                                &attendees,
                             )
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to fetch original event {uid} for non-destructive update: {e}");
+                    eprintln!(
+                        "Failed to fetch original event {uid} for non-destructive update: {e}"
+                    );
                     generate_ical_event(
-                        &uid, &summary, &description, &location, &date,
-                        start_time, end_time, &tz, is_all_day,
-                        None, recurrence.as_ref(), &alarms, &attendees,
+                        &uid,
+                        &summary,
+                        &description,
+                        &location,
+                        &date,
+                        start_time,
+                        end_time,
+                        &tz,
+                        is_all_day,
+                        None,
+                        recurrence.as_ref(),
+                        &alarms,
+                        &attendees,
                     )
                 }
             }
         } else {
             generate_ical_event(
-                &uid, &summary, &description, &location, &date,
-                start_time, end_time, &tz, is_all_day,
-                None, recurrence.as_ref(), &alarms, &attendees,
+                &uid,
+                &summary,
+                &description,
+                &location,
+                &date,
+                start_time,
+                end_time,
+                &tz,
+                is_all_day,
+                None,
+                recurrence.as_ref(),
+                &alarms,
+                &attendees,
             )
         };
 
@@ -699,17 +839,33 @@ pub async fn save_event(
                             eprintln!("Failed to delete event from old calendar: {e}");
                         } else {
                             let old_href = format!("{}/{}.ics", orig.trim_end_matches('/'), uid);
-                            let _ = db::delete_event_by_href(&state.db, &user.user_id, orig, &old_href).await;
+                            let _ =
+                                db::delete_event_by_href(&state.db, &user.user_id, orig, &old_href)
+                                    .await;
                         }
                     }
                 }
-                optimistic_upsert(&state, &user.user_id, &calendar_href, &event_href, &ical, &uid).await;
-                state.sync_manager.trigger(&user.user_id, SyncTrigger::Incremental);
+                optimistic_upsert(
+                    &state,
+                    &user.user_id,
+                    &calendar_href,
+                    &event_href,
+                    &ical,
+                    &uid,
+                )
+                .await;
+                state
+                    .sync_manager
+                    .trigger(&user.user_id, SyncTrigger::Incremental);
                 StatusCode::OK.into_response()
             }
             Err(e) => {
                 eprintln!("Failed to save event: {e}");
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save event: {e}")).into_response()
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to save event: {e}"),
+                )
+                    .into_response()
             }
         }
     }
@@ -754,7 +910,11 @@ pub async fn delete_event(
             Ok(s) => s,
             Err(e) => {
                 eprintln!("Failed to GET event for instance delete: {e}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get event: {e}")).into_response();
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get event: {e}"),
+                )
+                    .into_response();
             }
         };
         let tz_ref = if tz.is_empty() { "UTC" } else { &tz };
@@ -762,13 +922,27 @@ pub async fn delete_event(
         return match client.put_event(&calendar_href, &uid, &modified).await {
             Ok(_) => {
                 let event_href = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
-                optimistic_upsert(&state, &user.user_id, &calendar_href, &event_href, &modified, &uid).await;
-                state.sync_manager.trigger(&user.user_id, SyncTrigger::Incremental);
+                optimistic_upsert(
+                    &state,
+                    &user.user_id,
+                    &calendar_href,
+                    &event_href,
+                    &modified,
+                    &uid,
+                )
+                .await;
+                state
+                    .sync_manager
+                    .trigger(&user.user_id, SyncTrigger::Incremental);
                 StatusCode::OK.into_response()
             }
             Err(e) => {
                 eprintln!("Failed to PUT event after instance delete: {e}");
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update event: {e}")).into_response()
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to update event: {e}"),
+                )
+                    .into_response()
             }
         };
     }
@@ -783,12 +957,18 @@ pub async fn delete_event(
                     calendar_href: calendar_href.clone(),
                 },
             );
-            state.sync_manager.trigger(&user.user_id, SyncTrigger::Incremental);
+            state
+                .sync_manager
+                .trigger(&user.user_id, SyncTrigger::Incremental);
             StatusCode::OK.into_response()
         }
         Err(e) => {
             eprintln!("Failed to delete event: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to delete event: {e}")).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to delete event: {e}"),
+            )
+                .into_response()
         }
     }
 }
@@ -803,7 +983,17 @@ async fn optimistic_upsert(
     raw_ical: &str,
     uid: &str,
 ) {
-    if let Err(e) = db::upsert_cached_event_raw(&state.db, user_id, calendar_href, event_href, "", raw_ical, &state.search_mode).await {
+    if let Err(e) = db::upsert_cached_event_raw(
+        &state.db,
+        user_id,
+        calendar_href,
+        event_href,
+        "",
+        raw_ical,
+        &state.search_mode,
+    )
+    .await
+    {
         eprintln!("Optimistic cache update failed: {e}");
     }
     // For non-recurring events embed the full EventJson so the frontend can patch without a round-trip.
@@ -811,7 +1001,9 @@ async fn optimistic_upsert(
         let today = chrono::Local::now().date_naive();
         let wide_start = today - chrono::TimeDelta::days(365);
         let wide_end = today + chrono::TimeDelta::days(730);
-        let calendars = db::get_cached_calendars(&state.db, user_id).await.unwrap_or_default();
+        let calendars = db::get_cached_calendars(&state.db, user_id)
+            .await
+            .unwrap_or_default();
         let color = calendars
             .iter()
             .find(|c| c.href == calendar_href)
@@ -824,11 +1016,14 @@ async fn optimistic_upsert(
     } else {
         None
     };
-    state.sse_broadcaster.send(user_id, crate::sse::SseMessage::EventUpdated {
-        uid: uid.to_string(),
-        calendar_href: calendar_href.to_string(),
-        event_json,
-    });
+    state.sse_broadcaster.send(
+        user_id,
+        crate::sse::SseMessage::EventUpdated {
+            uid: uid.to_string(),
+            calendar_href: calendar_href.to_string(),
+            event_json,
+        },
+    );
 }
 
 pub async fn create_calendar_handler(
@@ -872,9 +1067,7 @@ pub async fn create_calendar_handler(
             state
                 .sse_broadcaster
                 .send(&user.user_id, crate::sse::SseMessage::CalendarsChanged);
-            state
-                .sync_manager
-                .trigger(&user.user_id, SyncTrigger::Full);
+            state.sync_manager.trigger(&user.user_id, SyncTrigger::Full);
             Json(CalendarJson {
                 href,
                 name,
@@ -944,11 +1137,7 @@ pub async fn import_ics(
     for (uid, wrapped_ical) in events {
         match client.put_event(&calendar_href, &uid, &wrapped_ical).await {
             Ok(_) => {
-                let event_href = format!(
-                    "{}/{}.ics",
-                    calendar_href.trim_end_matches('/'),
-                    uid
-                );
+                let event_href = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
                 if let Err(e) = db::upsert_cached_event_raw(
                     &state.db,
                     &user.user_id,
@@ -1017,13 +1206,19 @@ pub async fn search_events(
     }
     let user_id = user.user_id.clone();
 
-    let mut sql = r#"SELECT e.uid, e.calendar_href, e.dtstart, e.raw_ical, c.color AS calendar_color
+    let mut sql =
+        r#"SELECT e.uid, e.calendar_href, e.dtstart, e.raw_ical, c.color AS calendar_color
     FROM events_fts
     JOIN cached_events e ON events_fts.rowid = e.rowid
     JOIN cached_calendars c ON c.user_id = e.user_id AND c.href = e.calendar_href
-    WHERE events_fts MATCH ? AND e.user_id = ?"#.to_string();
-    if start.is_some() { sql.push_str(" AND e.dtstart >= ?"); }
-    if end.is_some() { sql.push_str(" AND e.dtstart <= ?"); }
+    WHERE events_fts MATCH ? AND e.user_id = ?"#
+            .to_string();
+    if start.is_some() {
+        sql.push_str(" AND e.dtstart >= ?");
+    }
+    if end.is_some() {
+        sql.push_str(" AND e.dtstart <= ?");
+    }
     if !cal_hrefs.is_empty() {
         let placeholders = cal_hrefs.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
         sql.push_str(&format!(" AND e.calendar_href IN ({})", placeholders));
@@ -1031,9 +1226,15 @@ pub async fn search_events(
     sql.push_str(" ORDER BY e.dtstart DESC LIMIT 100");
 
     let mut query = sqlx::query(&sql).bind(fts).bind(user_id);
-    if let Some(s) = start { query = query.bind(s); }
-    if let Some(e) = end { query = query.bind(e); }
-    for href in &cal_hrefs { query = query.bind(href.clone()); }
+    if let Some(s) = start {
+        query = query.bind(s);
+    }
+    if let Some(e) = end {
+        query = query.bind(e);
+    }
+    for href in &cal_hrefs {
+        query = query.bind(href.clone());
+    }
 
     match query.fetch_all(&state.db).await {
         Ok(rows) => {
@@ -1045,7 +1246,10 @@ pub async fn search_events(
                 let color: Option<String> = r.get(4);
                 let color_str = color.as_deref().unwrap_or("");
                 if let Ok(date) = NaiveDate::parse_from_str(&dtstart, "%Y-%m-%d") {
-                    if let Some(event) = CalDavClient::events_from_raw_ical(&raw_ical, date, date).into_iter().next() {
+                    if let Some(event) = CalDavClient::events_from_raw_ical(&raw_ical, date, date)
+                        .into_iter()
+                        .next()
+                    {
                         results.push(build_event_json(&event, color_str, &calendar_href));
                     }
                 }

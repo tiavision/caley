@@ -105,7 +105,7 @@ pub async fn handle_login(
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": format!("Connection failed: {e}")})),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -127,7 +127,11 @@ pub async fn handle_login(
 
     if let Err(e) = crate::db::ensure_user(&state.db, &user_id, Some(&display_name)).await {
         eprintln!("Database error creating user on login: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to create user"}))).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to create user"})),
+        )
+            .into_response();
     }
 
     let settings = UserSettings {
@@ -136,19 +140,33 @@ pub async fn handle_login(
         caldav_password: form.caldav_password,
     };
 
-    if let Err(e) = crate::db::upsert_settings(&state.db, &user_id, &settings, &state.encryption_key).await {
+    if let Err(e) =
+        crate::db::upsert_settings(&state.db, &user_id, &settings, &state.encryption_key).await
+    {
         eprintln!("Database error saving settings on login: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to save credentials"}))).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to save credentials"})),
+        )
+            .into_response();
     }
 
     // Rotate the session ID on the privilege transition to prevent session fixation.
     if let Err(e) = session.cycle_id().await {
         eprintln!("Session error: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Session error"}))).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Session error"})),
+        )
+            .into_response();
     }
     if let Err(e) = session.insert("user_id", &user_id).await {
         eprintln!("Session error: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Session error"}))).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Session error"})),
+        )
+            .into_response();
     }
     if let Err(e) = session.insert("display_name", &display_name).await {
         eprintln!("Session error: {e}");
@@ -157,7 +175,9 @@ pub async fn handle_login(
     clear_login_attempts(&user_id);
 
     state.sync_manager.ensure_task_for(&user_id);
-    state.sync_manager.trigger(&user_id, SyncTrigger::Incremental);
+    state
+        .sync_manager
+        .trigger(&user_id, SyncTrigger::Incremental);
 
     Json(json!({"status": "ok"})).into_response()
 }
@@ -171,7 +191,11 @@ pub async fn delete_account(
 
     if let Err(e) = crate::db::delete_user(&state.db, &user.user_id).await {
         eprintln!("Error deleting user {}: {e}", user.user_id);
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to delete account"}))).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to delete account"})),
+        )
+            .into_response();
     }
 
     // Clean up attachment files for this user

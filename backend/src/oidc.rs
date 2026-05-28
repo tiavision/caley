@@ -1,7 +1,11 @@
+use crate::caldav::CalDavClient;
+use crate::db;
+use crate::email_sync::EmailSyncManager;
+use crate::search::SearchMode;
 use axum::{
     body::Body,
     extract::{FromRequestParts, State},
-    http::{request::Parts, Request, StatusCode},
+    http::{Request, StatusCode, request::Parts},
     response::{IntoResponse, Json, Redirect, Response},
 };
 use axum_oidc::{ClearSessionFlag, EmptyAdditionalClaims, OidcClaims, OidcRpInitiatedLogout};
@@ -16,10 +20,6 @@ use std::{
 use tower::{Layer, Service};
 use tower_sessions::Session;
 use webauthn_rs::Webauthn;
-use crate::caldav::CalDavClient;
-use crate::db;
-use crate::email_sync::EmailSyncManager;
-use crate::search::SearchMode;
 
 #[derive(Clone, Debug, ValueEnum)]
 pub enum UserIdClaim {
@@ -66,14 +66,20 @@ impl FromRequestParts<AppState> for CurrentUser {
                     .and_then(|n| n.get(None).map(|s| s.as_str().to_owned()))
                     .or_else(|| claims.preferred_username().map(|u| u.as_str().to_owned()))
                     .or_else(|| Some(claims.subject().as_str().to_owned()));
-                return Ok(CurrentUser { user_id, display_name });
+                return Ok(CurrentUser {
+                    user_id,
+                    display_name,
+                });
             }
         }
 
         if let Some(session) = parts.extensions.get::<Session>().cloned() {
             if let Some(user_id) = session.get::<String>("user_id").await.ok().flatten() {
                 let display_name = session.get::<String>("display_name").await.ok().flatten();
-                return Ok(CurrentUser { user_id, display_name });
+                return Ok(CurrentUser {
+                    user_id,
+                    display_name,
+                });
             }
         }
 
@@ -81,12 +87,15 @@ impl FromRequestParts<AppState> for CurrentUser {
     }
 }
 
-pub fn extract_user_id(claims: &OidcClaims<EmptyAdditionalClaims>, claim: &UserIdClaim) -> Option<String> {
+pub fn extract_user_id(
+    claims: &OidcClaims<EmptyAdditionalClaims>,
+    claim: &UserIdClaim,
+) -> Option<String> {
     match claim {
         UserIdClaim::Sub => Some(claims.subject().as_str().to_owned()),
-        UserIdClaim::PreferredUsername => claims
-            .preferred_username()
-            .map(|u| u.as_str().to_owned()),
+        UserIdClaim::PreferredUsername => {
+            claims.preferred_username().map(|u| u.as_str().to_owned())
+        }
         UserIdClaim::Email => claims.email().map(|e| e.as_str().to_owned()),
         UserIdClaim::Name => claims
             .name()
@@ -115,18 +124,23 @@ pub async fn require_client(
             let client = CalDavClient::new(s.caldav_base_url, s.caldav_username, s.caldav_password)
                 .map_err(|e| {
                     eprintln!("CalDAV client error: {e}");
-                    (StatusCode::INTERNAL_SERVER_ERROR, "CalDAV configuration error").into_response()
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "CalDAV configuration error",
+                    )
+                        .into_response()
                 })?;
             Ok(client)
         }
-        None => Err((StatusCode::PRECONDITION_FAILED, "CalDAV credentials not configured").into_response()),
+        None => Err((
+            StatusCode::PRECONDITION_FAILED,
+            "CalDAV credentials not configured",
+        )
+            .into_response()),
     }
 }
 
-pub async fn user_info(
-    State(state): State<AppState>,
-    user: CurrentUser,
-) -> impl IntoResponse {
+pub async fn user_info(State(state): State<AppState>, user: CurrentUser) -> impl IntoResponse {
     let display_name = user.display_name.unwrap_or_else(|| user.user_id.clone());
 
     let has_settings = db::get_settings(&state.db, &user.user_id, &state.encryption_key)

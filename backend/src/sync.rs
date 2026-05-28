@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use hkdf::Hkdf;
 use p256::SecretKey;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use sha2::Sha256;
 use tokio::sync::mpsc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 
 use crate::caldav::CalDavClient;
@@ -82,7 +82,11 @@ impl SyncManager {
         }
     }
 
-    async fn run_user_loop(self: Arc<Self>, user_id: String, mut rx: mpsc::UnboundedReceiver<SyncTrigger>) {
+    async fn run_user_loop(
+        self: Arc<Self>,
+        user_id: String,
+        mut rx: mpsc::UnboundedReceiver<SyncTrigger>,
+    ) {
         // Initial population on first login
         if let Err(e) = self.sync_user(&user_id, true).await {
             eprintln!("[sync] initial sync failed for {user_id}: {e}");
@@ -132,7 +136,9 @@ impl SyncManager {
     /// trigger ctag-fallback full-fetches on calendars that haven't changed.
     async fn sync_single_calendar(&self, user_id: &str, calendar_href: &str) -> anyhow::Result<()> {
         let settings = db::get_settings(&self.db, user_id, &self.encryption_key).await?;
-        let Some(settings) = settings else { return Ok(()); };
+        let Some(settings) = settings else {
+            return Ok(());
+        };
         let client = CalDavClient::new(
             settings.caldav_base_url,
             settings.caldav_username,
@@ -160,7 +166,8 @@ impl SyncManager {
             Ok(fresh) if !fresh.is_empty() => {
                 let fresh_hrefs: HashSet<String> = fresh.iter().map(|c| c.href.clone()).collect();
                 let old_cached = db::get_cached_calendars(&self.db, user_id).await?;
-                let old_hrefs: HashSet<String> = old_cached.iter().map(|c| c.href.clone()).collect();
+                let old_hrefs: HashSet<String> =
+                    old_cached.iter().map(|c| c.href.clone()).collect();
                 for cal in &fresh {
                     db::upsert_cached_calendar(
                         &self.db,
@@ -171,7 +178,8 @@ impl SyncManager {
                     )
                     .await?;
                 }
-                db::remove_stale_calendars(&self.db, user_id, &fresh_hrefs, &self.encryption_key).await?;
+                db::remove_stale_calendars(&self.db, user_id, &fresh_hrefs, &self.encryption_key)
+                    .await?;
                 if fresh_hrefs != old_hrefs {
                     self.broadcaster.send(user_id, SseMessage::CalendarsChanged);
                 }
@@ -198,11 +206,22 @@ impl SyncManager {
             if let Err(e) = self.sync_calendar(&client, user_id, &cal.href).await {
                 let err_str = e.to_string();
                 if err_str.contains("404") {
-                    eprintln!("[sync] calendar {} returned 404, removing from cache", cal.href);
+                    eprintln!(
+                        "[sync] calendar {} returned 404, removing from cache",
+                        cal.href
+                    );
                     if let Err(remove_err) = db::delete_calendar_cache(
-                        &self.db, user_id, &cal.href, &self.encryption_key,
-                    ).await {
-                        eprintln!("[sync] failed to remove stale calendar {}: {remove_err}", cal.href);
+                        &self.db,
+                        user_id,
+                        &cal.href,
+                        &self.encryption_key,
+                    )
+                    .await
+                    {
+                        eprintln!(
+                            "[sync] failed to remove stale calendar {}: {remove_err}",
+                            cal.href
+                        );
                     }
                     self.broadcaster.send(user_id, SseMessage::CalendarsChanged);
                 } else {
@@ -219,28 +238,35 @@ impl SyncManager {
         Ok(())
     }
 
-    async fn sync_contacts(
-        &self,
-        client: &CalDavClient,
-        user_id: &str,
-    ) -> anyhow::Result<()> {
+    async fn sync_contacts(&self, client: &CalDavClient, user_id: &str) -> anyhow::Result<()> {
         // Rediscover addressbooks on every sync — ensures new ones are picked up within
         // one sync interval and get push subscriptions registered.
         let addressbooks = match carddav::discover_addressbooks(client).await {
             Ok(fresh) if !fresh.is_empty() => {
                 let fresh_hrefs: HashSet<String> = fresh.iter().map(|a| a.href.clone()).collect();
                 for ab in &fresh {
-                    if let Err(e) = db::upsert_cached_addressbook(&self.db, user_id, &ab.href, &ab.name).await {
+                    if let Err(e) =
+                        db::upsert_cached_addressbook(&self.db, user_id, &ab.href, &ab.name).await
+                    {
                         eprintln!("[sync] upsert_cached_addressbook error: {e}");
                     }
                 }
-                if let Err(e) = db::remove_stale_addressbooks(&self.db, user_id, &fresh_hrefs).await {
+                if let Err(e) = db::remove_stale_addressbooks(&self.db, user_id, &fresh_hrefs).await
+                {
                     eprintln!("[sync] remove_stale_addressbooks error: {e}");
                 }
-                fresh.into_iter().map(|a| db::CachedAddressbook { href: a.href, name: a.name }).collect()
+                fresh
+                    .into_iter()
+                    .map(|a| db::CachedAddressbook {
+                        href: a.href,
+                        name: a.name,
+                    })
+                    .collect()
             }
             Ok(_) => {
-                eprintln!("[sync] discover_addressbooks returned empty for {user_id}, falling back to cache");
+                eprintln!(
+                    "[sync] discover_addressbooks returned empty for {user_id}, falling back to cache"
+                );
                 db::get_cached_addressbooks(&self.db, user_id).await?
             }
             Err(e) => {
@@ -257,15 +283,22 @@ impl SyncManager {
         Ok(())
     }
 
-    async fn sync_single_addressbook(&self, user_id: &str, addressbook_href: &str) -> anyhow::Result<()> {
+    async fn sync_single_addressbook(
+        &self,
+        user_id: &str,
+        addressbook_href: &str,
+    ) -> anyhow::Result<()> {
         let settings = db::get_settings(&self.db, user_id, &self.encryption_key).await?;
-        let Some(settings) = settings else { return Ok(()); };
+        let Some(settings) = settings else {
+            return Ok(());
+        };
         let client = CalDavClient::new(
             settings.caldav_base_url,
             settings.caldav_username,
             settings.caldav_password,
         )?;
-        self.sync_addressbook(&client, user_id, addressbook_href).await
+        self.sync_addressbook(&client, user_id, addressbook_href)
+            .await
     }
 
     async fn sync_addressbook(
@@ -279,7 +312,8 @@ impl SyncManager {
 
         // Try RFC 6578 incremental sync
         if let Some(ref token) = stored_token {
-            match carddav::sync_addressbook_collection(client, addressbook_href, Some(token)).await {
+            match carddav::sync_addressbook_collection(client, addressbook_href, Some(token)).await
+            {
                 Ok(result) => {
                     let apply = db::apply_incremental_contact_sync(
                         &self.db,
@@ -289,40 +323,53 @@ impl SyncManager {
                         result.deleted,
                         &result.new_token,
                         stored_ctag.as_deref(),
-                    ).await?;
+                    )
+                    .await?;
 
                     let total = apply.changed.len() + apply.deleted.len();
                     if total > 5 {
                         self.broadcaster.send(user_id, SseMessage::ContactsRefetch);
                     } else {
                         for cr in &apply.deleted {
-                            self.broadcaster.send(user_id, SseMessage::ContactRemoved {
-                                uid: cr.uid.clone(),
-                                addressbook_href: cr.addressbook_href.clone(),
-                            });
+                            self.broadcaster.send(
+                                user_id,
+                                SseMessage::ContactRemoved {
+                                    uid: cr.uid.clone(),
+                                    addressbook_href: cr.addressbook_href.clone(),
+                                },
+                            );
                         }
                         for cr in &apply.changed {
-                            let contact_json = self.load_contact_json(user_id, &cr.addressbook_href, &cr.uid).await;
-                            self.broadcaster.send(user_id, SseMessage::ContactUpdated {
-                                uid: cr.uid.clone(),
-                                addressbook_href: cr.addressbook_href.clone(),
-                                contact_json,
-                            });
+                            let contact_json = self
+                                .load_contact_json(user_id, &cr.addressbook_href, &cr.uid)
+                                .await;
+                            self.broadcaster.send(
+                                user_id,
+                                SseMessage::ContactUpdated {
+                                    uid: cr.uid.clone(),
+                                    addressbook_href: cr.addressbook_href.clone(),
+                                    contact_json,
+                                },
+                            );
                         }
                     }
-                    self.try_subscribe_push_contact(client, user_id, addressbook_href).await;
+                    self.try_subscribe_push_contact(client, user_id, addressbook_href)
+                        .await;
                     return Ok(());
                 }
                 Err(e) => {
-                    eprintln!("[sync] contact sync-collection unsupported for {addressbook_href}: {e}, falling back to ctag");
+                    eprintln!(
+                        "[sync] contact sync-collection unsupported for {addressbook_href}: {e}, falling back to ctag"
+                    );
                 }
             }
         }
 
         // Fall back to ctag
-        let (new_ctag, new_token) = carddav::get_addressbook_ctag_and_token(client, addressbook_href)
-            .await
-            .unwrap_or((None, None));
+        let (new_ctag, new_token) =
+            carddav::get_addressbook_ctag_and_token(client, addressbook_href)
+                .await
+                .unwrap_or((None, None));
 
         let need_full = match (&stored_ctag, &new_ctag) {
             (Some(old), Some(new)) => old != new,
@@ -338,16 +385,25 @@ impl SyncManager {
                 all_raw,
                 new_ctag.as_deref(),
                 new_token.as_deref(),
-            ).await?;
+            )
+            .await?;
             self.broadcaster.send(user_id, SseMessage::ContactsRefetch);
         }
 
-        self.try_subscribe_push_contact(client, user_id, addressbook_href).await;
+        self.try_subscribe_push_contact(client, user_id, addressbook_href)
+            .await;
         Ok(())
     }
 
-    async fn load_contact_json(&self, user_id: &str, addressbook_href: &str, uid: &str) -> Option<String> {
-        let contact = db::get_contact(&self.db, user_id, addressbook_href, uid).await.ok()??;
+    async fn load_contact_json(
+        &self,
+        user_id: &str,
+        addressbook_href: &str,
+        uid: &str,
+    ) -> Option<String> {
+        let contact = db::get_contact(&self.db, user_id, addressbook_href, uid)
+            .await
+            .ok()??;
         let cj = crate::contacts::cached_to_json_pub(&contact);
         serde_json::to_string(&cj).ok()
     }
@@ -371,7 +427,8 @@ impl SyncManager {
             }
         }
 
-        let (p256dh, auth) = match derive_push_keys(&self.encryption_key, user_id, addressbook_href) {
+        let (p256dh, auth) = match derive_push_keys(&self.encryption_key, user_id, addressbook_href)
+        {
             Some(keys) => keys,
             None => {
                 eprintln!("[push] contact key derivation failed for {addressbook_href}");
@@ -386,12 +443,24 @@ impl SyncManager {
             token
         );
 
-        match client.register_push(addressbook_href, &callback_url, &p256dh, &auth).await {
+        match client
+            .register_push(addressbook_href, &callback_url, &p256dh, &auth)
+            .await
+        {
             Ok(Some(expires_at)) => {
                 if let Err(e) = db::upsert_contact_push_subscription(
-                    &self.db, user_id, addressbook_href, &token, "web-push", expires_at,
-                ).await {
-                    eprintln!("[push] failed to store contact subscription for {addressbook_href}: {e}");
+                    &self.db,
+                    user_id,
+                    addressbook_href,
+                    &token,
+                    "web-push",
+                    expires_at,
+                )
+                .await
+                {
+                    eprintln!(
+                        "[push] failed to store contact subscription for {addressbook_href}: {e}"
+                    );
                 }
             }
             Ok(None) => {}
@@ -430,20 +499,27 @@ impl SyncManager {
                         self.broadcaster.send(user_id, SseMessage::EventsRefetch);
                     } else {
                         for ev in &apply_result.deleted {
-                            self.broadcaster.send(user_id, SseMessage::EventRemoved {
-                                uid: ev.uid.clone(),
-                                calendar_href: ev.calendar_href.clone(),
-                            });
+                            self.broadcaster.send(
+                                user_id,
+                                SseMessage::EventRemoved {
+                                    uid: ev.uid.clone(),
+                                    calendar_href: ev.calendar_href.clone(),
+                                },
+                            );
                         }
                         for ev in &apply_result.changed {
-                            self.broadcaster.send(user_id, SseMessage::EventUpdated {
-                                uid: ev.uid.clone(),
-                                calendar_href: ev.calendar_href.clone(),
-                                event_json: None,
-                            });
+                            self.broadcaster.send(
+                                user_id,
+                                SseMessage::EventUpdated {
+                                    uid: ev.uid.clone(),
+                                    calendar_href: ev.calendar_href.clone(),
+                                    event_json: None,
+                                },
+                            );
                         }
                     }
-                    self.try_subscribe_push(client, user_id, calendar_href).await;
+                    self.try_subscribe_push(client, user_id, calendar_href)
+                        .await;
                     return Ok(());
                 }
                 Err(e) => {
@@ -480,16 +556,12 @@ impl SyncManager {
             self.broadcaster.send(user_id, SseMessage::EventsRefetch);
         }
 
-        self.try_subscribe_push(client, user_id, calendar_href).await;
+        self.try_subscribe_push(client, user_id, calendar_href)
+            .await;
         Ok(())
     }
 
-    async fn try_subscribe_push(
-        &self,
-        client: &CalDavClient,
-        user_id: &str,
-        calendar_href: &str,
-    ) {
+    async fn try_subscribe_push(&self, client: &CalDavClient, user_id: &str, calendar_href: &str) {
         let now = chrono::Utc::now().timestamp();
         let renew_threshold = now + self.sync_interval.as_secs() as i64 * 2;
 
@@ -518,11 +590,21 @@ impl SyncManager {
             token
         );
 
-        match client.register_push(calendar_href, &callback_url, &p256dh, &auth).await {
+        match client
+            .register_push(calendar_href, &callback_url, &p256dh, &auth)
+            .await
+        {
             Ok(Some(expires_at)) => {
                 if let Err(e) = db::upsert_push_subscription(
-                    &self.db, user_id, calendar_href, &token, "web-push", expires_at,
-                ).await {
+                    &self.db,
+                    user_id,
+                    calendar_href,
+                    &token,
+                    "web-push",
+                    expires_at,
+                )
+                .await
+                {
                     eprintln!("[push] failed to store subscription for {calendar_href}: {e}");
                 }
             }

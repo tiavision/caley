@@ -1,10 +1,10 @@
 use axum::{
     body::Body,
     extract::{Query, State},
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::{IntoResponse, Json, Response},
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
@@ -158,7 +158,10 @@ pub async fn register_finish(
         }
     };
 
-    match state.webauthn.finish_passkey_registration(&reg_cred, &reg_state) {
+    match state
+        .webauthn
+        .finish_passkey_registration(&reg_cred, &reg_state)
+    {
         Ok(passkey) => {
             let cred_id = URL_SAFE_NO_PAD.encode(passkey.cred_id());
             let passkey_json = match serde_json::to_string(&passkey) {
@@ -215,7 +218,11 @@ pub async fn authenticate_start(
 
     let passkeys: Vec<Passkey> = rows
         .iter()
-        .filter(|r| body.credential_id.as_ref().map_or(true, |id| id == &r.cred_id))
+        .filter(|r| {
+            body.credential_id
+                .as_ref()
+                .map_or(true, |id| id == &r.cred_id)
+        })
         .filter_map(|r| serde_json::from_str::<Passkey>(&r.passkey).ok())
         .collect();
 
@@ -291,7 +298,10 @@ pub async fn authenticate_finish(
         }
     };
 
-    match state.webauthn.finish_passkey_authentication(&auth_cred, &auth_state) {
+    match state
+        .webauthn
+        .finish_passkey_authentication(&auth_cred, &auth_state)
+    {
         Ok(auth_result) => {
             let matched_id = URL_SAFE_NO_PAD.encode(auth_result.cred_id());
             for row in &rows {
@@ -640,8 +650,13 @@ pub async fn create_pending_device(
     if !owns_credential(&state, &user.user_id, &body.device.cred_id).await {
         return (StatusCode::BAD_REQUEST, "invalid device credential").into_response();
     }
-    let has_vault = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM pgp_vaults WHERE user_id = ?")
-        .bind(&user.user_id).fetch_one(&state.db).await.unwrap_or(0) > 0;
+    let has_vault =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM pgp_vaults WHERE user_id = ?")
+            .bind(&user.user_id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(0)
+            > 0;
     if !has_vault {
         return (StatusCode::CONFLICT, "vault not initialized").into_response();
     }
@@ -656,8 +671,13 @@ pub async fn create_pending_device(
     .execute(&state.db).await;
     match result {
         Ok(_) => {
-            let _ = sqlx::query("UPDATE webauthn_credentials SET has_prf = 1 WHERE cred_id = ? AND user_id = ?")
-                .bind(&body.device.cred_id).bind(&user.user_id).execute(&state.db).await;
+            let _ = sqlx::query(
+                "UPDATE webauthn_credentials SET has_prf = 1 WHERE cred_id = ? AND user_id = ?",
+            )
+            .bind(&body.device.cred_id)
+            .bind(&user.user_id)
+            .execute(&state.db)
+            .await;
             StatusCode::CREATED.into_response()
         }
         Err(e) => {
@@ -793,7 +813,9 @@ pub async fn save_public_key(
     Json(body): Json<SavePublicKeyBody>,
 ) -> impl IntoResponse {
     if body.fingerprint.trim().is_empty()
-        || !body.armored.contains("-----BEGIN PGP PUBLIC KEY BLOCK-----")
+        || !body
+            .armored
+            .contains("-----BEGIN PGP PUBLIC KEY BLOCK-----")
     {
         return (StatusCode::BAD_REQUEST, "invalid public key").into_response();
     }
@@ -851,7 +873,14 @@ pub async fn raw_email(
     user: CurrentUser,
     Query(q): Query<RawEmailQuery>,
 ) -> impl IntoResponse {
-    match email_db::get_account(&state.db, &q.account_id, &user.user_id, &state.encryption_key).await {
+    match email_db::get_account(
+        &state.db,
+        &q.account_id,
+        &user.user_id,
+        &state.encryption_key,
+    )
+    .await
+    {
         Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
         Err(e) => {
             eprintln!("[pgp] raw_email account lookup: {e}");

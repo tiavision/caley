@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_imap::Client;
 use futures_util::StreamExt;
 use rustls_pki_types::ServerName;
 use tokio::net::TcpStream;
-use tokio_rustls::{rustls, TlsConnector};
+use tokio_rustls::{TlsConnector, rustls};
 
 use crate::email_db::MessageHeader;
 
@@ -35,16 +35,19 @@ pub async fn connect(host: &str, port: u16, username: &str, password: &str) -> R
 }
 
 /// Returns (name, delimiter, subscribed) for every mailbox on the server.
-pub async fn list_mailboxes(session: &mut ImapSession) -> Result<Vec<(String, Option<String>, bool)>> {
+pub async fn list_mailboxes(
+    session: &mut ImapSession,
+) -> Result<Vec<(String, Option<String>, bool)>> {
     let mut stream = session.list(None, Some("*")).await?;
     let mut out = Vec::new();
     while let Some(item) = stream.next().await {
         let name_info = item?;
         let name = name_info.name().to_owned();
         let delim = name_info.delimiter().map(|d| d.to_owned());
-        let subscribed = !name_info.attributes().iter().any(|a| {
-            matches!(a, async_imap::types::NameAttribute::NoSelect)
-        });
+        let subscribed = !name_info
+            .attributes()
+            .iter()
+            .any(|a| matches!(a, async_imap::types::NameAttribute::NoSelect));
         out.push((name, delim, subscribed));
     }
     Ok(out)
@@ -67,16 +70,12 @@ pub async fn fetch_all_uids(session: &mut ImapSession) -> Result<Vec<u32>> {
 }
 
 /// Fetches headers for a list of UIDs. Returns parsed MessageHeaders.
-pub async fn fetch_headers(
-    session: &mut ImapSession,
-    uids: &[u32],
-) -> Result<Vec<MessageHeader>> {
+pub async fn fetch_headers(session: &mut ImapSession, uids: &[u32]) -> Result<Vec<MessageHeader>> {
     if uids.is_empty() {
         return Ok(vec![]);
     }
     let uid_set = uids_to_set(uids);
-    let fetch_items =
-        "(FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO)])";
+    let fetch_items = "(FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO)])";
 
     let mut stream = session.uid_fetch(&uid_set, fetch_items).await?;
     let mut headers = Vec::new();
@@ -104,8 +103,16 @@ pub async fn fetch_headers(
         let flags_json = serde_json::to_string(&flags).unwrap_or_default();
 
         let (
-            message_id, thread_id, from_addr, to_addrs, cc_addrs, subject, sent_at,
-            from_emails, to_emails, cc_emails,
+            message_id,
+            thread_id,
+            from_addr,
+            to_addrs,
+            cc_addrs,
+            subject,
+            sent_at,
+            from_emails,
+            to_emails,
+            cc_emails,
         ) = if let Some(header_bytes) = fetch.header() {
             parse_header_bytes(header_bytes)
         } else {
@@ -149,10 +156,13 @@ pub struct AttachmentPart {
 pub fn detect_pgp(raw: &[u8]) -> (bool, bool) {
     let hdr_end = raw.len().min(4096);
     let hdr = String::from_utf8_lossy(&raw[..hdr_end]).to_ascii_lowercase();
-    let is_encrypted = (hdr.contains("multipart/encrypted") && hdr.contains("application/pgp-encrypted"))
+    let is_encrypted = (hdr.contains("multipart/encrypted")
+        && hdr.contains("application/pgp-encrypted"))
         || raw.windows(27).any(|w| w == b"-----BEGIN PGP MESSAGE-----");
     let is_signed = (hdr.contains("multipart/signed") && hdr.contains("application/pgp-signature"))
-        || raw.windows(34).any(|w| w == b"-----BEGIN PGP SIGNED MESSAGE-----");
+        || raw
+            .windows(34)
+            .any(|w| w == b"-----BEGIN PGP SIGNED MESSAGE-----");
     (is_encrypted, is_signed)
 }
 
@@ -160,7 +170,16 @@ pub fn detect_pgp(raw: &[u8]) -> (bool, bool) {
 pub async fn fetch_bodies(
     session: &mut ImapSession,
     uids: &[u32],
-) -> Result<Vec<(u32, Vec<u8>, String, Option<String>, bool, Vec<AttachmentPart>)>> {
+) -> Result<
+    Vec<(
+        u32,
+        Vec<u8>,
+        String,
+        Option<String>,
+        bool,
+        Vec<AttachmentPart>,
+    )>,
+> {
     if uids.is_empty() {
         return Ok(Vec::new());
     }
@@ -197,15 +216,21 @@ pub async fn move_message_on_server(
         session.uid_copy(&uid_str, dest_mailbox).await?;
         {
             let mut stream = session.uid_store(&uid_str, "+FLAGS (\\Deleted)").await?;
-            while let Some(r) = stream.next().await { let _ = r; }
+            while let Some(r) = stream.next().await {
+                let _ = r;
+            }
         }
         let uidplus = session.capabilities().await?.has_str("UIDPLUS");
         if uidplus {
             let mut stream = Box::pin(session.uid_expunge(&uid_str).await?);
-            while let Some(r) = stream.next().await { let _ = r; }
+            while let Some(r) = stream.next().await {
+                let _ = r;
+            }
         } else {
             let mut stream = Box::pin(session.expunge().await?);
-            while let Some(r) = stream.next().await { let _ = r; }
+            while let Some(r) = stream.next().await {
+                let _ = r;
+            }
         }
     }
     Ok(())
@@ -217,7 +242,9 @@ pub async fn delete_on_server(session: &mut ImapSession, uid: u32) -> Result<()>
     {
         // Scope the stream so the borrow on session ends before expunge
         let mut stream = session.uid_store(&uid_str, "+FLAGS (\\Deleted)").await?;
-        while let Some(r) = stream.next().await { let _ = r; }
+        while let Some(r) = stream.next().await {
+            let _ = r;
+        }
     }
     // Expunge only the targeted UID when the server supports UIDPLUS, so other
     // messages flagged \Deleted aren't purged as collateral; otherwise fall back
@@ -227,16 +254,25 @@ pub async fn delete_on_server(session: &mut ImapSession, uid: u32) -> Result<()>
     let uidplus = session.capabilities().await?.has_str("UIDPLUS");
     if uidplus {
         let mut stream = Box::pin(session.uid_expunge(&uid_str).await?);
-        while let Some(r) = stream.next().await { let _ = r; }
+        while let Some(r) = stream.next().await {
+            let _ = r;
+        }
     } else {
         let mut stream = Box::pin(session.expunge().await?);
-        while let Some(r) = stream.next().await { let _ = r; }
+        while let Some(r) = stream.next().await {
+            let _ = r;
+        }
     }
     Ok(())
 }
 
 /// Sets or clears flags on the server.
-pub async fn set_flags(session: &mut ImapSession, uid: u32, flags: &[&str], set: bool) -> Result<()> {
+pub async fn set_flags(
+    session: &mut ImapSession,
+    uid: u32,
+    flags: &[&str],
+    set: bool,
+) -> Result<()> {
     let uid_str = uid.to_string();
     let flag_list = flags.join(" ");
     let cmd = if set {
@@ -269,20 +305,26 @@ pub async fn append_to_sent(
     Ok(sent_mailbox)
 }
 
-async fn append_message(session: &mut ImapSession, mailbox: &str, raw_message: &[u8]) -> Result<()> {
+async fn append_message(
+    session: &mut ImapSession,
+    mailbox: &str,
+    raw_message: &[u8],
+) -> Result<()> {
     use async_imap::imap_proto::{Response, Status};
     use tokio::io::AsyncWriteExt;
 
     let mailbox_arg = quote_imap_string(mailbox)?;
     let request_id = session
-        .run_command(format!("APPEND {mailbox_arg} (\\Seen) {{{}}}", raw_message.len()))
+        .run_command(format!(
+            "APPEND {mailbox_arg} (\\Seen) {{{}}}",
+            raw_message.len()
+        ))
         .await?;
 
     loop {
-        let response = session
-            .read_response()
-            .await
-            .ok_or_else(|| anyhow!("IMAP connection closed while appending to mailbox {mailbox:?}"))??;
+        let response = session.read_response().await.ok_or_else(|| {
+            anyhow!("IMAP connection closed while appending to mailbox {mailbox:?}")
+        })??;
         match response.parsed() {
             Response::Continue { .. } => break,
             Response::Done {
@@ -305,10 +347,9 @@ async fn append_message(session: &mut ImapSession, mailbox: &str, raw_message: &
     session.as_mut().flush().await?;
 
     loop {
-        let response = session
-            .read_response()
-            .await
-            .ok_or_else(|| anyhow!("IMAP connection closed while completing APPEND to mailbox {mailbox:?}"))??;
+        let response = session.read_response().await.ok_or_else(|| {
+            anyhow!("IMAP connection closed while completing APPEND to mailbox {mailbox:?}")
+        })??;
         if let Response::Done {
             tag,
             status,
@@ -334,7 +375,10 @@ fn quote_imap_string(value: &str) -> Result<String> {
     if value.chars().any(|c| c == '\r' || c == '\n' || c == '\0') {
         return Err(anyhow!("invalid IMAP mailbox name"));
     }
-    Ok(format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")))
+    Ok(format!(
+        "\"{}\"",
+        value.replace('\\', "\\\\").replace('"', "\\\"")
+    ))
 }
 
 async fn find_sent_mailbox(session: &mut ImapSession) -> Result<Option<String>> {
@@ -357,7 +401,10 @@ async fn find_sent_mailbox(session: &mut ImapSession) -> Result<Option<String>> 
             .unwrap_or(&name)
             .to_ascii_lowercase();
         if fallback.is_none()
-            && matches!(leaf.as_str(), "sent" | "sent mail" | "sent messages" | "gesendet")
+            && matches!(
+                leaf.as_str(),
+                "sent" | "sent mail" | "sent messages" | "gesendet"
+            )
         {
             fallback = Some(name);
         }
@@ -370,16 +417,16 @@ async fn find_sent_mailbox(session: &mut ImapSession) -> Result<Option<String>> 
 fn parse_header_bytes(
     bytes: &[u8],
 ) -> (
-    Option<String>,           // message_id
-    Option<String>,           // thread_id (from In-Reply-To / References)
-    Option<String>,           // from_addr
-    Option<Vec<String>>,      // to_addrs
-    Option<Vec<String>>,      // cc_addrs
-    Option<String>,           // subject
-    Option<i64>,              // sent_at
-    Vec<String>,              // from_emails (lowercased, name stripped)
-    Vec<String>,              // to_emails
-    Vec<String>,              // cc_emails
+    Option<String>,      // message_id
+    Option<String>,      // thread_id (from In-Reply-To / References)
+    Option<String>,      // from_addr
+    Option<Vec<String>>, // to_addrs
+    Option<Vec<String>>, // cc_addrs
+    Option<String>,      // subject
+    Option<i64>,         // sent_at
+    Vec<String>,         // from_emails (lowercased, name stripped)
+    Vec<String>,         // to_emails
+    Vec<String>,         // cc_emails
 ) {
     use mail_parser::MessageParser;
     let parser = MessageParser::default();
@@ -392,8 +439,7 @@ fn parse_header_bytes(
 
     // Store the direct reply parent when available, otherwise the nearest
     // referenced ancestor for messages without In-Reply-To.
-    let thread_id = hv_first_text(msg.in_reply_to())
-        .or_else(|| hv_last_text(msg.references()));
+    let thread_id = hv_first_text(msg.in_reply_to()).or_else(|| hv_last_text(msg.references()));
 
     let from_addr = msg.from().map(|a| {
         let addrs = address_to_strings(a);
@@ -408,31 +454,35 @@ fn parse_header_bytes(
     let sent_at = msg.date().map(|dt| dt.to_timestamp());
 
     (
-        message_id, thread_id, from_addr, to_addrs, cc_addrs, subject, sent_at,
-        from_emails, to_emails, cc_emails,
+        message_id,
+        thread_id,
+        from_addr,
+        to_addrs,
+        cc_addrs,
+        subject,
+        sent_at,
+        from_emails,
+        to_emails,
+        cc_emails,
     )
 }
 
 fn hv_first_text(hv: &mail_parser::HeaderValue<'_>) -> Option<String> {
     match hv {
-        mail_parser::HeaderValue::Text(t) => {
-            t.split_whitespace().next().map(str::to_owned)
-        }
-        mail_parser::HeaderValue::TextList(list) => {
-            list.first().and_then(|t| t.split_whitespace().next().map(str::to_owned))
-        }
+        mail_parser::HeaderValue::Text(t) => t.split_whitespace().next().map(str::to_owned),
+        mail_parser::HeaderValue::TextList(list) => list
+            .first()
+            .and_then(|t| t.split_whitespace().next().map(str::to_owned)),
         _ => None,
     }
 }
 
 fn hv_last_text(hv: &mail_parser::HeaderValue<'_>) -> Option<String> {
     match hv {
-        mail_parser::HeaderValue::Text(t) => {
-            t.split_whitespace().last().map(str::to_owned)
-        }
-        mail_parser::HeaderValue::TextList(list) => {
-            list.last().and_then(|t| t.split_whitespace().last().map(str::to_owned))
-        }
+        mail_parser::HeaderValue::Text(t) => t.split_whitespace().last().map(str::to_owned),
+        mail_parser::HeaderValue::TextList(list) => list
+            .last()
+            .and_then(|t| t.split_whitespace().last().map(str::to_owned)),
         _ => None,
     }
 }
@@ -440,9 +490,10 @@ fn hv_last_text(hv: &mail_parser::HeaderValue<'_>) -> Option<String> {
 fn address_to_strings(addr: &mail_parser::Address<'_>) -> Vec<String> {
     match addr {
         mail_parser::Address::List(addrs) => addrs.iter().map(format_addr).collect(),
-        mail_parser::Address::Group(groups) => {
-            groups.iter().flat_map(|g| g.addresses.iter().map(format_addr)).collect()
-        }
+        mail_parser::Address::Group(groups) => groups
+            .iter()
+            .flat_map(|g| g.addresses.iter().map(format_addr))
+            .collect(),
     }
 }
 
@@ -478,7 +529,14 @@ fn parse_body_bytes(bytes: &[u8]) -> Result<(String, Option<String>, bool, Vec<A
     let parser = MessageParser::default();
     let msg = match parser.parse(bytes) {
         Some(m) => m,
-        None => return Ok((String::from_utf8_lossy(bytes).into_owned(), None, false, Vec::new())),
+        None => {
+            return Ok((
+                String::from_utf8_lossy(bytes).into_owned(),
+                None,
+                false,
+                Vec::new(),
+            ));
+        }
     };
 
     let has_attachments = msg.attachments().count() > 0;
@@ -502,38 +560,39 @@ fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
     use mail_parser::MimeHeaders;
     let mut attachments = Vec::new();
     for (idx, part) in msg.parts.iter().enumerate() {
-        let is_attachment = part.content_disposition().map_or(false, |cd| {
-            cd.ctype().to_ascii_lowercase() == "attachment"
-        });
+        let is_attachment = part
+            .content_disposition()
+            .map_or(false, |cd| cd.ctype().to_ascii_lowercase() == "attachment");
         let has_filename = part.attachment_name().is_some();
-        let is_inline_image = part.content_disposition().map_or(false, |cd| {
-            cd.ctype().to_ascii_lowercase() == "inline"
-        }) && part.content_type().map_or(false, |ct| {
-            ct.ctype().starts_with("image/")
-        });
+        let is_inline_image = part
+            .content_disposition()
+            .map_or(false, |cd| cd.ctype().to_ascii_lowercase() == "inline")
+            && part
+                .content_type()
+                .map_or(false, |ct| ct.ctype().starts_with("image/"));
 
         if !is_attachment && !has_filename && !is_inline_image {
             continue;
         }
 
-        let filename = part
-            .attachment_name()
-            .map(|s| s.to_owned())
-            .or_else(|| {
-                part.content_id().map(|cid| {
-                    let safe = cid.trim_start_matches('<').trim_end_matches('>').replace(['/', '\\', ':', ' '], "_");
-                    format!("{safe}.bin")
-                })
-            });
+        let filename = part.attachment_name().map(|s| s.to_owned()).or_else(|| {
+            part.content_id().map(|cid| {
+                let safe = cid
+                    .trim_start_matches('<')
+                    .trim_end_matches('>')
+                    .replace(['/', '\\', ':', ' '], "_");
+                format!("{safe}.bin")
+            })
+        });
 
         let content_type = part
             .content_type()
             .map(|ct| format!("{}/{}", ct.ctype(), ct.subtype().unwrap_or("octet-stream")))
             .unwrap_or_else(|| "application/octet-stream".to_string());
 
-        let content_id = part.content_id().map(|cid| {
-            cid.trim_start_matches('<').trim_end_matches('>').to_owned()
-        });
+        let content_id = part
+            .content_id()
+            .map(|cid| cid.trim_start_matches('<').trim_end_matches('>').to_owned());
 
         let size = match &part.body {
             mail_parser::PartType::Binary(b) => b.len(),
@@ -556,7 +615,19 @@ fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
 
 fn strip_tags(html: &str) -> String {
     const BLOCK: &[&str] = &[
-        "p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "hr",
+        "p",
+        "div",
+        "br",
+        "li",
+        "tr",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "blockquote",
+        "hr",
     ];
 
     let mut result = String::with_capacity(html.len());
@@ -659,23 +730,33 @@ pub async fn send_email(
     attachments: Vec<(String, String, Vec<u8>)>,
 ) -> Result<Vec<u8>> {
     use lettre::{
-        message::{header::ContentType, Attachment, MultiPart, SinglePart},
         AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
+        message::{Attachment, MultiPart, SinglePart, header::ContentType},
         transport::smtp::authentication::Credentials,
     };
 
     let mut builder = Message::builder()
-        .from(from.parse().map_err(|e| anyhow!("invalid from address: {e}"))?)
+        .from(
+            from.parse()
+                .map_err(|e| anyhow!("invalid from address: {e}"))?,
+        )
         .subject(subject);
 
     for addr in to {
-        builder = builder.to(addr.parse().map_err(|e| anyhow!("invalid to address: {e}"))?);
+        builder = builder.to(addr
+            .parse()
+            .map_err(|e| anyhow!("invalid to address: {e}"))?);
     }
     for addr in cc {
-        builder = builder.cc(addr.parse().map_err(|e| anyhow!("invalid cc address: {e}"))?);
+        builder = builder.cc(addr
+            .parse()
+            .map_err(|e| anyhow!("invalid cc address: {e}"))?);
     }
     for addr in bcc {
-        builder = builder.bcc(addr.parse().map_err(|e| anyhow!("invalid bcc address: {e}"))?);
+        builder = builder.bcc(
+            addr.parse()
+                .map_err(|e| anyhow!("invalid bcc address: {e}"))?,
+        );
     }
     if let Some(reply_to) = in_reply_to {
         builder = builder.in_reply_to(reply_to.to_owned());
@@ -711,12 +792,12 @@ pub async fn send_email(
         AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(smtp_host)
     }
     .map_err(|e| anyhow!("SMTP relay error: {e}"))?;
-    let mailer = builder
-        .port(smtp_port)
-        .credentials(creds)
-        .build();
+    let mailer = builder.port(smtp_port).credentials(creds).build();
 
-    mailer.send(email).await.map_err(|e| anyhow!("SMTP send failed: {e}"))?;
+    mailer
+        .send(email)
+        .await
+        .map_err(|e| anyhow!("SMTP send failed: {e}"))?;
     Ok(raw_message)
 }
 
@@ -731,15 +812,21 @@ pub async fn send_raw_email(
     raw_mime: &[u8],
 ) -> Result<()> {
     use lettre::{
+        AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
         address::{Address, Envelope},
         transport::smtp::authentication::Credentials,
-        AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
     };
 
-    let sender: Address = from.parse().map_err(|e| anyhow!("invalid from address: {e}"))?;
+    let sender: Address = from
+        .parse()
+        .map_err(|e| anyhow!("invalid from address: {e}"))?;
     let recipient_addresses = recipients
         .iter()
-        .map(|recipient| recipient.parse::<Address>().map_err(|e| anyhow!("invalid recipient address: {e}")))
+        .map(|recipient| {
+            recipient
+                .parse::<Address>()
+                .map_err(|e| anyhow!("invalid recipient address: {e}"))
+        })
         .collect::<Result<Vec<_>>>()?;
     let envelope = Envelope::new(Some(sender), recipient_addresses)
         .map_err(|e| anyhow!("invalid SMTP envelope: {e}"))?;
@@ -777,5 +864,4 @@ mod tests {
         let (_, parent, ..) = parse_header_bytes(raw);
         assert_eq!(parent.as_deref(), Some("parent@example.test"));
     }
-
 }

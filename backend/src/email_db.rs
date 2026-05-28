@@ -41,7 +41,10 @@ pub async fn list_accounts(
             username: crypto::decrypt(r.get::<String, _>(4).as_str(), key)?,
             password: crypto::decrypt(r.get::<String, _>(5).as_str(), key)?,
             use_tls: r.get::<i64, _>(6) != 0,
-            smtp_host: r.get::<Option<String>, _>(7).map(|s| crypto::decrypt(&s, key)).transpose()?,
+            smtp_host: r
+                .get::<Option<String>, _>(7)
+                .map(|s| crypto::decrypt(&s, key))
+                .transpose()?,
             smtp_port: r.get(8),
             sort_order: r.get(9),
         });
@@ -74,7 +77,10 @@ pub async fn get_account(
             username: crypto::decrypt(r.get::<String, _>(4).as_str(), key)?,
             password: crypto::decrypt(r.get::<String, _>(5).as_str(), key)?,
             use_tls: r.get::<i64, _>(6) != 0,
-            smtp_host: r.get::<Option<String>, _>(7).map(|s| crypto::decrypt(&s, key)).transpose()?,
+            smtp_host: r
+                .get::<Option<String>, _>(7)
+                .map(|s| crypto::decrypt(&s, key))
+                .transpose()?,
             smtp_port: r.get(8),
             sort_order: r.get(9),
         })),
@@ -131,12 +137,27 @@ pub async fn upsert_account(
 
 pub async fn delete_account(pool: &SqlitePool, account_id: &str, user_id: &str) -> Result<()> {
     let mut tx = pool.begin().await?;
-    sqlx::query("DELETE FROM cached_messages WHERE account_id = ?").bind(account_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM cached_mailboxes WHERE account_id = ?").bind(account_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM cached_attachments WHERE account_id = ?").bind(account_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM virtual_folder_rules WHERE account_id = ?").bind(account_id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM cached_messages WHERE account_id = ?")
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM cached_mailboxes WHERE account_id = ?")
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM cached_attachments WHERE account_id = ?")
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM virtual_folder_rules WHERE account_id = ?")
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("DELETE FROM imap_accounts WHERE account_id = ? AND user_id = ?")
-        .bind(account_id).bind(user_id).execute(&mut *tx).await?;
+        .bind(account_id)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -318,12 +339,15 @@ pub async fn get_mailbox_uidvalidity(
     account_id: &str,
     mailbox: &str,
 ) -> Result<Option<u32>> {
-    let row = sqlx::query("SELECT uidvalidity FROM cached_mailboxes WHERE account_id = ? AND name = ?")
-        .bind(account_id)
-        .bind(mailbox)
-        .fetch_optional(pool)
-        .await?;
-    Ok(row.and_then(|r| r.get::<Option<i64>, _>(0)).map(|v| v as u32))
+    let row =
+        sqlx::query("SELECT uidvalidity FROM cached_mailboxes WHERE account_id = ? AND name = ?")
+            .bind(account_id)
+            .bind(mailbox)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row
+        .and_then(|r| r.get::<Option<i64>, _>(0))
+        .map(|v| v as u32))
 }
 
 pub async fn delete_messages_for_mailbox(
@@ -368,7 +392,9 @@ pub async fn upsert_message_header(
     from_idx: Option<&str>,
     to_idx: Option<&str>,
 ) -> Result<()> {
-    let is_unread = h.flags.as_deref()
+    let is_unread = h
+        .flags
+        .as_deref()
         .map(|f| if f.contains("\\Seen") { 0i64 } else { 1i64 })
         .unwrap_or(1);
     sqlx::query(
@@ -654,7 +680,8 @@ fn push_keyset_forward(qb: &mut QueryBuilder<Sqlite>, cursor: &PageCursor) {
                 .push(") OR m.sent_at IS NULL)");
         }
         None => {
-            qb.push(" AND m.sent_at IS NULL AND m.rowid < ").push_bind(cursor.rowid);
+            qb.push(" AND m.sent_at IS NULL AND m.rowid < ")
+                .push_bind(cursor.rowid);
         }
     }
 }
@@ -855,7 +882,6 @@ pub async fn delete_attachments_for_message(
     Ok(())
 }
 
-
 pub async fn list_messages(
     pool: &SqlitePool,
     account_id: &str,
@@ -913,16 +939,19 @@ pub async fn list_messages(
             if let Some(ref c) = cursor {
                 push_keyset_forward(&mut qb, c);
             }
-            qb.push(" ORDER BY m.sent_at DESC, m.rowid DESC LIMIT ").push_bind(fetch_limit);
+            qb.push(" ORDER BY m.sent_at DESC, m.rowid DESC LIMIT ")
+                .push_bind(fetch_limit);
         }
         PageDirection::Backward => {
             if let Some(ref c) = cursor {
                 push_keyset_backward(&mut qb, c);
             }
-            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ").push_bind(fetch_limit);
+            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ")
+                .push_bind(fetch_limit);
         }
         PageDirection::Last => {
-            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ").push_bind(fetch_limit);
+            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ")
+                .push_bind(fetch_limit);
         }
     }
 
@@ -1014,16 +1043,19 @@ pub async fn list_messages_virtual(
             if let Some(ref c) = cursor {
                 push_keyset_forward(&mut qb, c);
             }
-            qb.push(" ORDER BY m.sent_at DESC, m.rowid DESC LIMIT ").push_bind(fetch_limit);
+            qb.push(" ORDER BY m.sent_at DESC, m.rowid DESC LIMIT ")
+                .push_bind(fetch_limit);
         }
         PageDirection::Backward => {
             if let Some(ref c) = cursor {
                 push_keyset_backward(&mut qb, c);
             }
-            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ").push_bind(fetch_limit);
+            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ")
+                .push_bind(fetch_limit);
         }
         PageDirection::Last => {
-            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ").push_bind(fetch_limit);
+            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ")
+                .push_bind(fetch_limit);
         }
     }
 
@@ -1221,17 +1253,25 @@ pub async fn search_messages(
     push_filter_clauses(&mut qb, filters);
     match direction {
         PageDirection::Forward => {
-            if let Some(ref c) = cursor { push_keyset_forward(&mut qb, c); }
-            qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC, m.rowid DESC LIMIT ").push_bind(limit);
+            if let Some(ref c) = cursor {
+                push_keyset_forward(&mut qb, c);
+            }
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC, m.rowid DESC LIMIT ")
+                .push_bind(limit);
         }
         PageDirection::Backward | PageDirection::Last => {
-            if let Some(ref c) = cursor { push_keyset_backward(&mut qb, c); }
-            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ").push_bind(limit);
+            if let Some(ref c) = cursor {
+                push_keyset_backward(&mut qb, c);
+            }
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ")
+                .push_bind(limit);
         }
     }
     let rows = qb.build().fetch_all(pool).await?;
     let mut messages: Vec<MessageRow> = rows.iter().map(row_to_message).collect();
-    if matches!(direction, PageDirection::Backward | PageDirection::Last) { messages.reverse(); }
+    if matches!(direction, PageDirection::Backward | PageDirection::Last) {
+        messages.reverse();
+    }
     Ok(messages)
 }
 
@@ -1270,21 +1310,32 @@ pub async fn search_messages_mailbox(
         )
         .push_bind(user_id);
     }
-    qb.push(" AND m.account_id = ").push_bind(account_id).push(" AND m.mailbox = ").push_bind(mailbox);
+    qb.push(" AND m.account_id = ")
+        .push_bind(account_id)
+        .push(" AND m.mailbox = ")
+        .push_bind(mailbox);
     push_filter_clauses(&mut qb, filters);
     match direction {
         PageDirection::Forward => {
-            if let Some(ref c) = cursor { push_keyset_forward(&mut qb, c); }
-            qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC, m.rowid DESC LIMIT ").push_bind(limit);
+            if let Some(ref c) = cursor {
+                push_keyset_forward(&mut qb, c);
+            }
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC, m.rowid DESC LIMIT ")
+                .push_bind(limit);
         }
         PageDirection::Backward | PageDirection::Last => {
-            if let Some(ref c) = cursor { push_keyset_backward(&mut qb, c); }
-            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ").push_bind(limit);
+            if let Some(ref c) = cursor {
+                push_keyset_backward(&mut qb, c);
+            }
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ")
+                .push_bind(limit);
         }
     }
     let rows = qb.build().fetch_all(pool).await?;
     let mut messages: Vec<MessageRow> = rows.iter().map(row_to_message).collect();
-    if matches!(direction, PageDirection::Backward | PageDirection::Last) { messages.reverse(); }
+    if matches!(direction, PageDirection::Backward | PageDirection::Last) {
+        messages.reverse();
+    }
     Ok(messages)
 }
 
@@ -1343,17 +1394,25 @@ pub async fn search_messages_virtual(
     push_filter_clauses(&mut qb, filters);
     match direction {
         PageDirection::Forward => {
-            if let Some(ref c) = cursor { push_keyset_forward(&mut qb, c); }
-            qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC, m.rowid DESC LIMIT ").push_bind(limit);
+            if let Some(ref c) = cursor {
+                push_keyset_forward(&mut qb, c);
+            }
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC, m.rowid DESC LIMIT ")
+                .push_bind(limit);
         }
         PageDirection::Backward | PageDirection::Last => {
-            if let Some(ref c) = cursor { push_keyset_backward(&mut qb, c); }
-            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ").push_bind(limit);
+            if let Some(ref c) = cursor {
+                push_keyset_backward(&mut qb, c);
+            }
+            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ")
+                .push_bind(limit);
         }
     }
     let rows = qb.build().fetch_all(pool).await?;
     let mut messages: Vec<MessageRow> = rows.iter().map(row_to_message).collect();
-    if matches!(direction, PageDirection::Backward | PageDirection::Last) { messages.reverse(); }
+    if matches!(direction, PageDirection::Backward | PageDirection::Last) {
+        messages.reverse();
+    }
     Ok(messages)
 }
 
@@ -1395,7 +1454,10 @@ pub struct VirtualFolderRule {
     pub mailbox_pattern: Option<String>,
 }
 
-pub async fn list_virtual_folders(pool: &SqlitePool, user_id: &str) -> Result<Vec<VirtualFolderRow>> {
+pub async fn list_virtual_folders(
+    pool: &SqlitePool,
+    user_id: &str,
+) -> Result<Vec<VirtualFolderRow>> {
     let folders = sqlx::query(
         "SELECT folder_id, display_name, sort_order, only_flagged, only_attachments FROM virtual_folders WHERE user_id = ? ORDER BY sort_order, display_name",
     )
@@ -1421,8 +1483,12 @@ pub async fn list_virtual_folders(pool: &SqlitePool, user_id: &str) -> Result<Ve
             rules: rules
                 .iter()
                 .map(|r| VirtualFolderRule {
-                    account_id: r.get::<Option<String>, _>(0).and_then(|s| if s.is_empty() { None } else { Some(s) }),
-                    mailbox_pattern: r.get::<Option<String>, _>(1).and_then(|s| if s.is_empty() { None } else { Some(s) }),
+                    account_id: r
+                        .get::<Option<String>, _>(0)
+                        .and_then(|s| if s.is_empty() { None } else { Some(s) }),
+                    mailbox_pattern: r
+                        .get::<Option<String>, _>(1)
+                        .and_then(|s| if s.is_empty() { None } else { Some(s) }),
                 })
                 .collect(),
         });
@@ -1506,14 +1572,24 @@ pub async fn update_virtual_folder(
     Ok(())
 }
 
-pub async fn delete_virtual_folder(pool: &SqlitePool, folder_id: &str, user_id: &str) -> Result<()> {
+pub async fn delete_virtual_folder(
+    pool: &SqlitePool,
+    folder_id: &str,
+    user_id: &str,
+) -> Result<()> {
     let mut tx = pool.begin().await?;
     let rows = sqlx::query("DELETE FROM virtual_folders WHERE folder_id = ? AND user_id = ?")
-        .bind(folder_id).bind(user_id).execute(&mut *tx).await?;
+        .bind(folder_id)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
     if rows.rows_affected() == 0 {
         return Ok(());
     }
-    sqlx::query("DELETE FROM virtual_folder_rules WHERE folder_id = ?").bind(folder_id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM virtual_folder_rules WHERE folder_id = ?")
+        .bind(folder_id)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -1521,12 +1597,11 @@ pub async fn delete_virtual_folder(pool: &SqlitePool, folder_id: &str, user_id: 
 // ── Image origin whitelist ────────────────────────────────────────────────────
 
 pub async fn get_image_whitelist(pool: &SqlitePool, user_id: &str) -> Result<Vec<String>> {
-    let rows = sqlx::query(
-        "SELECT origin FROM email_image_whitelist WHERE user_id = ? ORDER BY origin",
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
+    let rows =
+        sqlx::query("SELECT origin FROM email_image_whitelist WHERE user_id = ? ORDER BY origin")
+            .bind(user_id)
+            .fetch_all(pool)
+            .await?;
     Ok(rows.iter().map(|r| r.get(0)).collect())
 }
 
@@ -1542,64 +1617,58 @@ pub async fn is_origin_whitelisted(pool: &SqlitePool, user_id: &str, origin: &st
 }
 
 pub async fn add_image_origin(pool: &SqlitePool, user_id: &str, origin: &str) -> Result<()> {
-    sqlx::query(
-        "INSERT OR IGNORE INTO email_image_whitelist (user_id, origin) VALUES (?, ?)",
-    )
-    .bind(user_id)
-    .bind(origin)
-    .execute(pool)
-    .await?;
+    sqlx::query("INSERT OR IGNORE INTO email_image_whitelist (user_id, origin) VALUES (?, ?)")
+        .bind(user_id)
+        .bind(origin)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
 pub async fn remove_image_origin(pool: &SqlitePool, user_id: &str, origin: &str) -> Result<()> {
-    sqlx::query(
-        "DELETE FROM email_image_whitelist WHERE user_id = ? AND origin = ?",
-    )
-    .bind(user_id)
-    .bind(origin)
-    .execute(pool)
-    .await?;
+    sqlx::query("DELETE FROM email_image_whitelist WHERE user_id = ? AND origin = ?")
+        .bind(user_id)
+        .bind(origin)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
 // ── Image origin blacklist ─────────────────────────────────────────────────
 
 pub async fn get_image_blacklist(pool: &SqlitePool, user_id: &str) -> Result<Vec<String>> {
-    let rows = sqlx::query(
-        "SELECT origin FROM email_image_blacklist WHERE user_id = ? ORDER BY origin",
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
+    let rows =
+        sqlx::query("SELECT origin FROM email_image_blacklist WHERE user_id = ? ORDER BY origin")
+            .bind(user_id)
+            .fetch_all(pool)
+            .await?;
     Ok(rows.iter().map(|r| r.get(0)).collect())
 }
 
 pub async fn add_image_blacklist(pool: &SqlitePool, user_id: &str, origin: &str) -> Result<()> {
-    sqlx::query(
-        "INSERT OR IGNORE INTO email_image_blacklist (user_id, origin) VALUES (?, ?)",
-    )
-    .bind(user_id)
-    .bind(origin)
-    .execute(pool)
-    .await?;
+    sqlx::query("INSERT OR IGNORE INTO email_image_blacklist (user_id, origin) VALUES (?, ?)")
+        .bind(user_id)
+        .bind(origin)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
 pub async fn remove_image_blacklist(pool: &SqlitePool, user_id: &str, origin: &str) -> Result<()> {
-    sqlx::query(
-        "DELETE FROM email_image_blacklist WHERE user_id = ? AND origin = ?",
-    )
-    .bind(user_id)
-    .bind(origin)
-    .execute(pool)
-    .await?;
+    sqlx::query("DELETE FROM email_image_blacklist WHERE user_id = ? AND origin = ?")
+        .bind(user_id)
+        .bind(origin)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
 /// Returns (account_id, mailbox, unread_count) for all mailboxes with at least
 /// one unread message. Unread = \\Seen flag absent from the JSON flags array.
-pub async fn get_unread_counts(pool: &SqlitePool, user_id: &str) -> Result<Vec<(String, String, i64)>> {
+pub async fn get_unread_counts(
+    pool: &SqlitePool,
+    user_id: &str,
+) -> Result<Vec<(String, String, i64)>> {
     let rows = sqlx::query(
         "SELECT m.account_id, m.mailbox, COUNT(*) as cnt
          FROM cached_messages m
@@ -1611,12 +1680,18 @@ pub async fn get_unread_counts(pool: &SqlitePool, user_id: &str) -> Result<Vec<(
     .bind(user_id)
     .fetch_all(pool)
     .await?;
-    Ok(rows.iter().map(|r| (r.get(0), r.get(1), r.get(2))).collect())
+    Ok(rows
+        .iter()
+        .map(|r| (r.get(0), r.get(1), r.get(2)))
+        .collect())
 }
 
 /// Returns (folder_id, unread_count) for all virtual folders with at least one
 /// unread message. Deduplicates messages matched by multiple rules via DISTINCT.
-pub async fn get_unread_counts_virtual(pool: &SqlitePool, user_id: &str) -> Result<Vec<(String, i64)>> {
+pub async fn get_unread_counts_virtual(
+    pool: &SqlitePool,
+    user_id: &str,
+) -> Result<Vec<(String, i64)>> {
     let rows = sqlx::query(
         "SELECT sub.folder_id, COUNT(*) FROM (
              SELECT DISTINCT r.folder_id, m.account_id, m.mailbox, m.uid
@@ -1693,8 +1768,13 @@ mod tests {
         insert_thread_message(&pool, "account", "Archive", 3, "leaf", Some("reply"), 3).await;
         insert_thread_message(&pool, "other", "INBOX", 4, "foreign", Some("reply"), 4).await;
 
-        let messages = list_thread_messages(&pool, "account", "Archive", 3).await.unwrap();
-        let ids: Vec<_> = messages.iter().filter_map(|m| m.message_id.as_deref()).collect();
+        let messages = list_thread_messages(&pool, "account", "Archive", 3)
+            .await
+            .unwrap();
+        let ids: Vec<_> = messages
+            .iter()
+            .filter_map(|m| m.message_id.as_deref())
+            .collect();
         assert_eq!(ids, vec!["root", "reply", "leaf"]);
     }
 }

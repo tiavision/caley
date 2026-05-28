@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader;
+use quick_xml::events::Event as XmlEvent;
 
 pub struct AutodiscoverResult {
     pub provider_name: Option<String>,
@@ -13,10 +13,7 @@ pub struct AutodiscoverResult {
     pub smtp_port: u16,
 }
 
-pub async fn autodiscover(
-    email: &str,
-    client: &reqwest::Client,
-) -> Option<AutodiscoverResult> {
+pub async fn autodiscover(email: &str, client: &reqwest::Client) -> Option<AutodiscoverResult> {
     let domain = email.split('@').nth(1)?;
 
     let urls = [

@@ -1,10 +1,10 @@
-use anyhow::{bail, Context};
-use quick_xml::events::Event as XmlEvent;
+use anyhow::{Context, bail};
 use quick_xml::Reader;
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
+use quick_xml::events::Event as XmlEvent;
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 
-use crate::caldav::{extract_ctag_and_token, extract_hrefs, resolve_url, CalDavClient};
+use crate::caldav::{CalDavClient, extract_ctag_and_token, extract_hrefs, resolve_url};
 
 #[derive(Serialize, Clone)]
 pub struct Addressbook {
@@ -100,7 +100,9 @@ async fn client_start_url(client: &CalDavClient) -> String {
         if r.status().is_redirection() {
             if let Some(loc) = r.headers().get("location") {
                 if let Ok(s) = loc.to_str() {
-                    return resolve_url(&well_known, s).trim_end_matches('/').to_string();
+                    return resolve_url(&well_known, s)
+                        .trim_end_matches('/')
+                        .to_string();
                 }
             }
         }
@@ -157,8 +159,11 @@ fn parse_addressbooks(xml: &str, base_url: &str) -> anyhow::Result<Vec<Addressbo
             }
             XmlEvent::Text(e) => {
                 let text = e.unescape()?.to_string();
-                if in_href { current_href = Some(text); }
-                else if in_displayname { current_name = Some(text); }
+                if in_href {
+                    current_href = Some(text);
+                } else if in_displayname {
+                    current_name = Some(text);
+                }
             }
             XmlEvent::End(e) => {
                 let lname = e.local_name();
@@ -170,11 +175,21 @@ fn parse_addressbooks(xml: &str, base_url: &str) -> anyhow::Result<Vec<Addressbo
                         if is_addressbook {
                             if let Some(href) = &current_href {
                                 let resolved = resolve_url(base_url, href);
-                                if resolved.trim_end_matches('/') != base_resolved.trim_end_matches('/') {
+                                if resolved.trim_end_matches('/')
+                                    != base_resolved.trim_end_matches('/')
+                                {
                                     let name = current_name.clone().unwrap_or_else(|| {
-                                        resolved.trim_end_matches('/').rsplit('/').next().unwrap_or("Contacts").to_string()
+                                        resolved
+                                            .trim_end_matches('/')
+                                            .rsplit('/')
+                                            .next()
+                                            .unwrap_or("Contacts")
+                                            .to_string()
                                     });
-                                    books.push(Addressbook { href: resolved, name });
+                                    books.push(Addressbook {
+                                        href: resolved,
+                                        name,
+                                    });
                                 }
                             }
                         }
@@ -245,7 +260,10 @@ pub async fn sync_addressbook_collection(
     extract_card_sync_result(&xml, addressbook_href)
 }
 
-fn extract_contacts_with_hrefs(xml: &str, base_url: &str) -> anyhow::Result<Vec<(String, String, String)>> {
+fn extract_contacts_with_hrefs(
+    xml: &str,
+    base_url: &str,
+) -> anyhow::Result<Vec<(String, String, String)>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
@@ -282,9 +300,13 @@ fn extract_contacts_with_hrefs(xml: &str, base_url: &str) -> anyhow::Result<Vec<
             }
             XmlEvent::Text(e) => {
                 let text = e.unescape()?;
-                if in_address_data { current_vcard.push_str(&text); }
-                else if in_href { current_href.push_str(&text); }
-                else if in_etag { current_etag.push_str(&text); }
+                if in_address_data {
+                    current_vcard.push_str(&text);
+                } else if in_href {
+                    current_href.push_str(&text);
+                } else if in_etag {
+                    current_etag.push_str(&text);
+                }
             }
             XmlEvent::End(e) => {
                 let lname = e.local_name();
@@ -362,11 +384,17 @@ fn extract_card_sync_result(xml: &str, base_url: &str) -> anyhow::Result<CardSyn
             }
             XmlEvent::Text(e) => {
                 let text = e.unescape()?;
-                if in_sync_token_top { new_token.push_str(&text); }
-                else if in_address_data { current_vcard.push_str(&text); }
-                else if in_href { current_href.push_str(&text); }
-                else if in_etag { current_etag.push_str(&text); }
-                else if in_status { current_status.push_str(&text); }
+                if in_sync_token_top {
+                    new_token.push_str(&text);
+                } else if in_address_data {
+                    current_vcard.push_str(&text);
+                } else if in_href {
+                    current_href.push_str(&text);
+                } else if in_etag {
+                    current_etag.push_str(&text);
+                } else if in_status {
+                    current_status.push_str(&text);
+                }
             }
             XmlEvent::End(e) => {
                 let lname = e.local_name();
@@ -398,7 +426,11 @@ fn extract_card_sync_result(xml: &str, base_url: &str) -> anyhow::Result<CardSyn
             _ => {}
         }
     }
-    Ok(CardSyncResult { new_token, changed, deleted })
+    Ok(CardSyncResult {
+        new_token,
+        changed,
+        deleted,
+    })
 }
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
@@ -412,7 +444,10 @@ pub async fn put_contact(
     let mut url = contact_href.to_string();
     for _ in 0..5 {
         let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/vcard; charset=utf-8"));
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("text/vcard; charset=utf-8"),
+        );
         if is_new {
             headers.insert("If-None-Match", HeaderValue::from_static("*"));
         }
@@ -439,7 +474,8 @@ pub async fn put_contact(
             let text = resp.text().await.unwrap_or_default();
             bail!("PUT contact returned {status}: {text}");
         }
-        let new_etag = resp.headers()
+        let new_etag = resp
+            .headers()
             .get("etag")
             .and_then(|v| v.to_str().ok())
             .map(|v| v.trim().trim_matches('"').to_string());
@@ -577,19 +613,30 @@ pub fn parse_vcard(raw: &str) -> ContactFields {
                                 k == "VALUE" && vals.iter().any(|v| v.eq_ignore_ascii_case("uri"))
                             });
                             let is_b64 = params.iter().any(|(k, vals)| {
-                                k == "ENCODING" && vals.iter().any(|v| {
-                                    v.eq_ignore_ascii_case("b") || v.eq_ignore_ascii_case("base64")
-                                })
+                                k == "ENCODING"
+                                    && vals.iter().any(|v| {
+                                        v.eq_ignore_ascii_case("b")
+                                            || v.eq_ignore_ascii_case("base64")
+                                    })
                             });
-                            if v.starts_with("data:") || is_uri || (!is_b64 && (v.starts_with("http://") || v.starts_with("https://"))) {
+                            if v.starts_with("data:")
+                                || is_uri
+                                || (!is_b64
+                                    && (v.starts_with("http://") || v.starts_with("https://")))
+                            {
                                 photo = Some(v.clone());
                             } else if is_b64 {
-                                let mime = params.iter()
+                                let mime = params
+                                    .iter()
                                     .find(|(k, _)| k == "TYPE")
                                     .and_then(|(_, vals)| vals.first())
                                     .map(|t| t.to_lowercase())
                                     .unwrap_or_else(|| "jpeg".to_string());
-                                let mime = if mime.contains('/') { mime } else { format!("image/{mime}") };
+                                let mime = if mime.contains('/') {
+                                    mime
+                                } else {
+                                    format!("image/{mime}")
+                                };
                                 photo = Some(format!("data:{mime};base64,{v}"));
                             }
                         }
@@ -600,7 +647,15 @@ pub fn parse_vcard(raw: &str) -> ContactFields {
         }
     }
 
-    ContactFields { uid, fn_name, emails, phones, addresses, org, photo }
+    ContactFields {
+        uid,
+        fn_name,
+        emails,
+        phones,
+        addresses,
+        org,
+        photo,
+    }
 }
 
 pub fn build_vcard(
@@ -720,7 +775,9 @@ pub fn build_vcard_preserving(
     let mut out = lines.join("\r\n");
     for p in &preserved {
         out.push_str("\r\n");
-        out.push_str(&normalize_crlf(p.trim_end_matches(|c| c == '\r' || c == '\n')));
+        out.push_str(&normalize_crlf(
+            p.trim_end_matches(|c| c == '\r' || c == '\n'),
+        ));
     }
     out.push_str("\r\nEND:VCARD\r\n");
     out
@@ -814,7 +871,10 @@ fn vcard_type_param(type_label: &str) -> String {
 }
 
 fn escape_vcard(s: &str) -> String {
-    s.replace('\\', "\\\\").replace(',', "\\,").replace(';', "\\;").replace('\n', "\\n")
+    s.replace('\\', "\\\\")
+        .replace(',', "\\,")
+        .replace(';', "\\;")
+        .replace('\n', "\\n")
 }
 
 fn unescape_vcard(s: &str) -> String {

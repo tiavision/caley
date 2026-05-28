@@ -1,11 +1,11 @@
-use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::IntoResponse;
+use axum::response::sse::{Event, KeepAlive, Sse};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::broadcast;
-use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt as _;
+use tokio_stream::wrappers::BroadcastStream;
 
 use crate::db;
 use crate::oidc::{AppState, CurrentUser};
@@ -21,19 +21,39 @@ pub enum SseMessage {
     /// A single event was deleted
     EventRemoved { uid: String, calendar_href: String },
     /// A single event was created or updated
-    EventUpdated { uid: String, calendar_href: String, event_json: Option<String> },
+    EventUpdated {
+        uid: String,
+        calendar_href: String,
+        event_json: Option<String>,
+    },
     /// One or more contacts changed — client should re-fetch /api/contacts
     ContactsRefetch,
     /// A single contact was deleted
-    ContactRemoved { uid: String, addressbook_href: String },
+    ContactRemoved {
+        uid: String,
+        addressbook_href: String,
+    },
     /// A single contact was created or updated (contact_json is inline to avoid a roundtrip)
-    ContactUpdated { uid: String, addressbook_href: String, contact_json: Option<String> },
+    ContactUpdated {
+        uid: String,
+        addressbook_href: String,
+        contact_json: Option<String>,
+    },
     /// One or more emails changed — client should re-fetch the mailbox
     EmailsRefetch { account_id: String, mailbox: String },
     /// A single email was deleted
-    EmailRemoved { account_id: String, uid: u32, mailbox: String },
+    EmailRemoved {
+        account_id: String,
+        uid: u32,
+        mailbox: String,
+    },
     /// A single email was created or its flags changed
-    EmailUpdated { account_id: String, uid: u32, mailbox: String, flags: Vec<String> },
+    EmailUpdated {
+        account_id: String,
+        uid: u32,
+        mailbox: String,
+        flags: Vec<String>,
+    },
     /// A newly delivered unread inbox email suitable for a client notification
     NewEmail {
         account_id: String,
@@ -88,7 +108,10 @@ pub async fn events_stream(
 
     // Ensure CalDAV and email sync tasks are running for this user.
     state.sync_manager.ensure_task_for(&user.user_id);
-    state.email_sync_manager.ensure_tasks_for_user(&user.user_id).await;
+    state
+        .email_sync_manager
+        .ensure_tasks_for_user(&user.user_id)
+        .await;
     let stream = BroadcastStream::new(rx).filter_map(|msg| {
         let event: Option<Event> = match msg {
             Ok(SseMessage::EventsRefetch) => {
@@ -206,8 +229,12 @@ pub async fn push_webhook(
     // Check calendar push subscriptions first
     match db::get_user_and_calendar_from_push_token(&state.db, &token).await {
         Ok(Some((user_id, calendar_href))) => {
-            eprintln!("[push] webhook matched user {user_id} calendar {calendar_href}, triggering targeted sync");
-            state.sync_manager.trigger(&user_id, SyncTrigger::Calendar(calendar_href));
+            eprintln!(
+                "[push] webhook matched user {user_id} calendar {calendar_href}, triggering targeted sync"
+            );
+            state
+                .sync_manager
+                .trigger(&user_id, SyncTrigger::Calendar(calendar_href));
             return axum::http::StatusCode::CREATED.into_response();
         }
         Ok(None) => {}
@@ -217,8 +244,12 @@ pub async fn push_webhook(
     // Check contact push subscriptions
     match db::get_user_and_addressbook_from_push_token(&state.db, &token).await {
         Ok(Some((user_id, addressbook_href))) => {
-            eprintln!("[push] webhook matched user {user_id} addressbook {addressbook_href}, triggering contact sync");
-            state.sync_manager.trigger(&user_id, SyncTrigger::Addressbook(addressbook_href));
+            eprintln!(
+                "[push] webhook matched user {user_id} addressbook {addressbook_href}, triggering contact sync"
+            );
+            state
+                .sync_manager
+                .trigger(&user_id, SyncTrigger::Addressbook(addressbook_href));
             axum::http::StatusCode::CREATED.into_response()
         }
         _ => {

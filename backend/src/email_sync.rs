@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use async_imap::extensions::idle::IdleResponse;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 use crate::email_db;
 use crate::imap_client;
@@ -175,7 +175,10 @@ impl EmailSyncManager {
         tasks.remove(&account_id);
     }
 
-    async fn load_session(&self, account_id: &str) -> anyhow::Result<(imap_client::ImapSession, String)> {
+    async fn load_session(
+        &self,
+        account_id: &str,
+    ) -> anyhow::Result<(imap_client::ImapSession, String)> {
         // We need user_id to look up the account; get it from DB
         let row = sqlx::query("SELECT user_id FROM imap_accounts WHERE account_id = ?")
             .bind(account_id)
@@ -207,13 +210,26 @@ impl EmailSyncManager {
         let server_mailboxes = imap_client::list_mailboxes(&mut session).await?;
         let mut changed = false;
         for (name, delim, subscribed) in &server_mailboxes {
-            email_db::upsert_mailbox(&self.db, account_id, name, delim.as_deref(), None, *subscribed).await?;
+            email_db::upsert_mailbox(
+                &self.db,
+                account_id,
+                name,
+                delim.as_deref(),
+                None,
+                *subscribed,
+            )
+            .await?;
         }
         if !server_mailboxes.is_empty() {
             changed = true;
         }
         if changed {
-            self.broadcaster.send(&user_id, SseMessage::MailboxesChanged { account_id: account_id.to_owned() });
+            self.broadcaster.send(
+                &user_id,
+                SseMessage::MailboxesChanged {
+                    account_id: account_id.to_owned(),
+                },
+            );
         }
 
         // Sync each subscribed mailbox
@@ -221,15 +237,23 @@ impl EmailSyncManager {
             if !subscribed {
                 continue;
             }
-            self.broadcaster.send(&user_id, SseMessage::SyncStarted {
-                account_id: account_id.to_owned(),
-                mailbox: name.to_owned(),
-            });
-            let result = self.sync_mailbox_session(&mut session, account_id, &user_id, name).await;
-            self.broadcaster.send(&user_id, SseMessage::SyncCompleted {
-                account_id: account_id.to_owned(),
-                mailbox: name.to_owned(),
-            });
+            self.broadcaster.send(
+                &user_id,
+                SseMessage::SyncStarted {
+                    account_id: account_id.to_owned(),
+                    mailbox: name.to_owned(),
+                },
+            );
+            let result = self
+                .sync_mailbox_session(&mut session, account_id, &user_id, name)
+                .await;
+            self.broadcaster.send(
+                &user_id,
+                SseMessage::SyncCompleted {
+                    account_id: account_id.to_owned(),
+                    mailbox: name.to_owned(),
+                },
+            );
             if let Err(e) = result {
                 eprintln!("[email_sync] mailbox {name} sync error: {e}");
             }
@@ -241,15 +265,23 @@ impl EmailSyncManager {
 
     async fn sync_mailbox(&self, account_id: &str, mailbox: &str) -> anyhow::Result<()> {
         let (mut session, user_id) = self.load_session(account_id).await?;
-        self.broadcaster.send(&user_id, SseMessage::SyncStarted {
-            account_id: account_id.to_owned(),
-            mailbox: mailbox.to_owned(),
-        });
-        let result = self.sync_mailbox_session(&mut session, account_id, &user_id, mailbox).await;
-        self.broadcaster.send(&user_id, SseMessage::SyncCompleted {
-            account_id: account_id.to_owned(),
-            mailbox: mailbox.to_owned(),
-        });
+        self.broadcaster.send(
+            &user_id,
+            SseMessage::SyncStarted {
+                account_id: account_id.to_owned(),
+                mailbox: mailbox.to_owned(),
+            },
+        );
+        let result = self
+            .sync_mailbox_session(&mut session, account_id, &user_id, mailbox)
+            .await;
+        self.broadcaster.send(
+            &user_id,
+            SseMessage::SyncCompleted {
+                account_id: account_id.to_owned(),
+                mailbox: mailbox.to_owned(),
+            },
+        );
         let _ = session.logout().await;
         result
     }
@@ -265,7 +297,9 @@ impl EmailSyncManager {
                     backoff = Duration::from_secs(5);
                 }
                 Ok(false) => {
-                    eprintln!("[idle] {account_id}: server does not support IDLE, falling back to polling");
+                    eprintln!(
+                        "[idle] {account_id}: server does not support IDLE, falling back to polling"
+                    );
                     break;
                 }
                 Err(e) => {
@@ -286,42 +320,57 @@ impl EmailSyncManager {
     async fn idle_once(&self, account_id: &str) -> anyhow::Result<bool> {
         let (mut session, _user_id) = self.load_session(account_id).await?;
 
-        let caps = session.capabilities().await
+        let caps = session
+            .capabilities()
+            .await
             .map_err(|e| anyhow::anyhow!("CAPABILITY failed: {e}"))?;
         if !caps.has_str("IDLE") {
             return Ok(false);
         }
 
-        session.select("INBOX").await
+        session
+            .select("INBOX")
+            .await
             .map_err(|e| anyhow::anyhow!("SELECT INBOX failed: {e}"))?;
 
         let mut handle = session.idle();
-        handle.init().await
+        handle
+            .init()
+            .await
             .map_err(|e| anyhow::anyhow!("IDLE init failed: {e}"))?;
 
         loop {
             // RFC 2177: re-issue IDLE at least every 29 minutes. We use 25 min to be safe.
             let (wait_fut, _stop_source) = handle.wait_with_timeout(Duration::from_secs(25 * 60));
-            let resp = wait_fut.await
+            let resp = wait_fut
+                .await
                 .map_err(|e| anyhow::anyhow!("IDLE wait error: {e}"))?;
 
             match resp {
                 IdleResponse::NewData(_) => {
-                    let session = handle.done().await
+                    let session = handle
+                        .done()
+                        .await
                         .map_err(|e| anyhow::anyhow!("IDLE done failed: {e}"))?;
                     self.trigger(account_id, EmailSyncTrigger::Mailbox("INBOX".to_owned()));
                     // Brief pause so the sync task can consume the trigger before we re-IDLE
                     sleep(Duration::from_millis(500)).await;
                     handle = session.idle();
-                    handle.init().await
+                    handle
+                        .init()
+                        .await
                         .map_err(|e| anyhow::anyhow!("IDLE re-init failed: {e}"))?;
                 }
                 IdleResponse::Timeout => {
                     // Keep the connection alive by sending DONE and re-issuing IDLE
-                    let session = handle.done().await
+                    let session = handle
+                        .done()
+                        .await
                         .map_err(|e| anyhow::anyhow!("IDLE done (timeout) failed: {e}"))?;
                     handle = session.idle();
-                    handle.init().await
+                    handle
+                        .init()
+                        .await
                         .map_err(|e| anyhow::anyhow!("IDLE re-init (timeout) failed: {e}"))?;
                 }
                 IdleResponse::ManualInterrupt => {
@@ -340,29 +389,38 @@ impl EmailSyncManager {
         mailbox: &str,
     ) -> anyhow::Result<()> {
         let (uidvalidity, _exists) = imap_client::select_mailbox(session, mailbox).await?;
-        let cached_uidvalidity = email_db::get_mailbox_uidvalidity(&self.db, account_id, mailbox).await?;
-        let notify_new_inbox_mail = mailbox.eq_ignore_ascii_case("INBOX")
-            && cached_uidvalidity == Some(uidvalidity);
+        let cached_uidvalidity =
+            email_db::get_mailbox_uidvalidity(&self.db, account_id, mailbox).await?;
+        let notify_new_inbox_mail =
+            mailbox.eq_ignore_ascii_case("INBOX") && cached_uidvalidity == Some(uidvalidity);
 
         // UIDVALIDITY changed → full re-fetch
         if cached_uidvalidity.map_or(false, |v| v != uidvalidity) {
             email_db::delete_attachments_for_mailbox(&self.db, account_id, mailbox).await?;
             email_db::delete_messages_for_mailbox(&self.db, account_id, mailbox).await?;
             // Delete the mailbox's entire .eml directory
-            let mailbox_dir = self.data_dir
+            let mailbox_dir = self
+                .data_dir
                 .join("messages")
                 .join(account_id)
                 .join(sha2_hex(mailbox.to_owned()));
             let _ = tokio::fs::remove_dir_all(&mailbox_dir).await;
-            self.broadcaster.send(user_id, SseMessage::EmailsRefetch {
-                account_id: account_id.to_owned(),
-                mailbox: mailbox.to_owned(),
-            });
+            self.broadcaster.send(
+                user_id,
+                SseMessage::EmailsRefetch {
+                    account_id: account_id.to_owned(),
+                    mailbox: mailbox.to_owned(),
+                },
+            );
         }
 
-        email_db::upsert_mailbox(&self.db, account_id, mailbox, None, Some(uidvalidity), true).await?;
+        email_db::upsert_mailbox(&self.db, account_id, mailbox, None, Some(uidvalidity), true)
+            .await?;
 
-        let server_uids: HashSet<u32> = imap_client::fetch_all_uids(session).await?.into_iter().collect();
+        let server_uids: HashSet<u32> = imap_client::fetch_all_uids(session)
+            .await?
+            .into_iter()
+            .collect();
         let cached_uids: HashSet<u32> = email_db::get_cached_uids(&self.db, account_id, mailbox)
             .await?
             .into_iter()
@@ -372,16 +430,20 @@ impl EmailSyncManager {
         let deleted: Vec<u32> = cached_uids.difference(&server_uids).copied().collect();
         if !deleted.is_empty() {
             for &uid in &deleted {
-                let _ = tokio::fs::remove_file(eml_path(&self.data_dir, account_id, mailbox, uid)).await;
+                let _ = tokio::fs::remove_file(eml_path(&self.data_dir, account_id, mailbox, uid))
+                    .await;
             }
             email_db::delete_attachments_by_uids(&self.db, account_id, mailbox, &deleted).await?;
             email_db::delete_messages_by_uids(&self.db, account_id, mailbox, &deleted).await?;
             for uid in &deleted {
-                self.broadcaster.send(user_id, SseMessage::EmailRemoved {
-                    account_id: account_id.to_owned(),
-                    uid: *uid,
-                    mailbox: mailbox.to_owned(),
-                });
+                self.broadcaster.send(
+                    user_id,
+                    SseMessage::EmailRemoved {
+                        account_id: account_id.to_owned(),
+                        uid: *uid,
+                        mailbox: mailbox.to_owned(),
+                    },
+                );
             }
         }
 
@@ -390,44 +452,70 @@ impl EmailSyncManager {
         if !new_uids.is_empty() {
             let headers = imap_client::fetch_headers(session, &new_uids).await?;
             for h in &headers {
-                let subject_idx = h.subject.as_deref().map(|s| self.search_mode.normalize_text(s));
-                let from_idx = h.from_addr.as_deref().map(|s| self.search_mode.normalize_text(s));
-                let to_idx = h.to_addrs.as_deref()
+                let subject_idx = h
+                    .subject
+                    .as_deref()
+                    .map(|s| self.search_mode.normalize_text(s));
+                let from_idx = h
+                    .from_addr
+                    .as_deref()
+                    .map(|s| self.search_mode.normalize_text(s));
+                let to_idx = h
+                    .to_addrs
+                    .as_deref()
                     .and_then(|json| serde_json::from_str::<Vec<String>>(json).ok())
                     .map(|addrs| self.search_mode.normalize_text(&addrs.join(" ")));
                 email_db::upsert_message_header(
-                    &self.db, account_id, mailbox, h,
+                    &self.db,
+                    account_id,
+                    mailbox,
+                    h,
                     subject_idx.as_deref(),
                     from_idx.as_deref(),
                     to_idx.as_deref(),
-                ).await?;
+                )
+                .await?;
                 email_db::replace_message_addresses(
-                    &self.db, account_id, mailbox, h.uid,
-                    &h.from_emails, &h.to_emails, &h.cc_emails,
-                ).await?;
+                    &self.db,
+                    account_id,
+                    mailbox,
+                    h.uid,
+                    &h.from_emails,
+                    &h.to_emails,
+                    &h.cc_emails,
+                )
+                .await?;
                 if notify_new_inbox_mail
                     && !h.flags.as_deref().unwrap_or_default().contains("\\Seen")
                 {
-                    self.broadcaster.send(user_id, SseMessage::NewEmail {
-                        account_id: account_id.to_owned(),
-                        uid: h.uid as u32,
-                        mailbox: mailbox.to_owned(),
-                        from_addr: h.from_addr.clone(),
-                        subject: h.subject.clone(),
-                    });
+                    self.broadcaster.send(
+                        user_id,
+                        SseMessage::NewEmail {
+                            account_id: account_id.to_owned(),
+                            uid: h.uid as u32,
+                            mailbox: mailbox.to_owned(),
+                            from_addr: h.from_addr.clone(),
+                            subject: h.subject.clone(),
+                        },
+                    );
                 }
             }
             if !headers.is_empty() {
-                self.broadcaster.send(user_id, SseMessage::EmailsRefetch {
-                    account_id: account_id.to_owned(),
-                    mailbox: mailbox.to_owned(),
-                });
+                self.broadcaster.send(
+                    user_id,
+                    SseMessage::EmailsRefetch {
+                        account_id: account_id.to_owned(),
+                        mailbox: mailbox.to_owned(),
+                    },
+                );
             }
         }
 
         // Fetch bodies + attachments eagerly for any cached messages missing them
-        let missing_body_uids = email_db::get_cached_uids_missing_body(&self.db, account_id, mailbox).await?;
-        let uids_to_fetch: Vec<u32> = new_uids.into_iter()
+        let missing_body_uids =
+            email_db::get_cached_uids_missing_body(&self.db, account_id, mailbox).await?;
+        let uids_to_fetch: Vec<u32> = new_uids
+            .into_iter()
             .chain(missing_body_uids)
             .collect::<HashSet<_>>()
             .into_iter()
@@ -461,8 +549,8 @@ impl EmailSyncManager {
                         tokio::fs::create_dir_all(dir).await?;
                     }
                     let compressed = {
-                        use flate2::write::GzEncoder;
                         use flate2::Compression;
+                        use flate2::write::GzEncoder;
                         use std::io::Write;
                         let mut enc = GzEncoder::new(Vec::new(), Compression::default());
                         enc.write_all(&raw_bytes)?;
@@ -470,13 +558,16 @@ impl EmailSyncManager {
                     };
                     tokio::fs::write(&path, compressed).await?;
 
-                    let att_params = attachments.into_iter().map(|att| PreparedAttachment {
-                        filename: att.filename.unwrap_or_else(|| "untitled".to_owned()),
-                        content_type: att.content_type,
-                        size: att.size,
-                        part_index: att.part_index,
-                        content_id: att.content_id,
-                    }).collect();
+                    let att_params = attachments
+                        .into_iter()
+                        .map(|att| PreparedAttachment {
+                            filename: att.filename.unwrap_or_else(|| "untitled".to_owned()),
+                            content_type: att.content_type,
+                            size: att.size,
+                            part_index: att.part_index,
+                            content_id: att.content_id,
+                        })
+                        .collect();
 
                     prepared.push(PreparedMessage {
                         uid,
@@ -495,16 +586,31 @@ impl EmailSyncManager {
                 let mut tx = self.db.begin().await?;
                 for m in &prepared {
                     email_db::update_message_body(
-                        &mut *tx, account_id, mailbox, m.uid,
-                        &m.body_text, m.html.as_deref(), &m.body_idx, m.has_attach,
-                        m.is_encrypted, m.is_signed,
-                    ).await?;
+                        &mut *tx,
+                        account_id,
+                        mailbox,
+                        m.uid,
+                        &m.body_text,
+                        m.html.as_deref(),
+                        &m.body_idx,
+                        m.has_attach,
+                        m.is_encrypted,
+                        m.is_signed,
+                    )
+                    .await?;
                     for att in &m.attachments {
                         email_db::insert_attachment(
-                            &mut *tx, account_id, mailbox, m.uid,
-                            &att.filename, &att.content_type, att.size,
-                            att.part_index as i64, att.content_id.as_deref(),
-                        ).await?;
+                            &mut *tx,
+                            account_id,
+                            mailbox,
+                            m.uid,
+                            &att.filename,
+                            &att.content_type,
+                            att.size,
+                            att.part_index as i64,
+                            att.content_id.as_deref(),
+                        )
+                        .await?;
                     }
                 }
                 tx.commit().await?;
@@ -543,11 +649,15 @@ fn sha2_hex(input: String) -> String {
 }
 
 /// Deterministic path to the compressed `.eml.gz` file for a given message.
-pub fn eml_path(data_dir: &std::path::Path, account_id: &str, mailbox: &str, uid: u32) -> std::path::PathBuf {
+pub fn eml_path(
+    data_dir: &std::path::Path,
+    account_id: &str,
+    mailbox: &str,
+    uid: u32,
+) -> std::path::PathBuf {
     data_dir
         .join("messages")
         .join(account_id)
         .join(sha2_hex(mailbox.to_owned()))
         .join(format!("{uid}.eml.gz"))
 }
-

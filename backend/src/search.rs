@@ -70,12 +70,14 @@ impl std::str::FromStr for SearchMode {
             "trigram" => Ok(Self::Trigram),
             name => serde_json::from_str::<Algorithm>(&format!("\"{name}\""))
                 .map(Self::Stemmed)
-                .map_err(|_| format!(
-                    "unknown search mode '{name}' — use 'default', 'trigram', or a Snowball \
+                .map_err(|_| {
+                    format!(
+                        "unknown search mode '{name}' — use 'default', 'trigram', or a Snowball \
                      algorithm name: Arabic, Danish, Dutch, English, Finnish, French, German, \
                      Greek, Hungarian, Italian, Norwegian, Portuguese, Romanian, Russian, \
                      Spanish, Swedish, Tamil, Turkish"
-                )),
+                    )
+                }),
         }
     }
 }

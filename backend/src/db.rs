@@ -260,11 +260,12 @@ pub async fn get_user_and_calendar_from_push_token(
     pool: &SqlitePool,
     token: &str,
 ) -> anyhow::Result<Option<(String, String)>> {
-    let row =
-        sqlx::query("SELECT user_id, calendar_href FROM push_subscriptions WHERE webhook_token = ?")
-            .bind(token)
-            .fetch_optional(pool)
-            .await?;
+    let row = sqlx::query(
+        "SELECT user_id, calendar_href FROM push_subscriptions WHERE webhook_token = ?",
+    )
+    .bind(token)
+    .fetch_optional(pool)
+    .await?;
     Ok(row.map(|r| (r.get(0), r.get(1))))
 }
 
@@ -314,13 +315,12 @@ pub async fn get_calendar_sync_state(
     user_id: &str,
     href: &str,
 ) -> anyhow::Result<(Option<String>, Option<String>)> {
-    let row = sqlx::query(
-        "SELECT ctag, sync_token FROM cached_calendars WHERE user_id = ? AND href = ?",
-    )
-    .bind(user_id)
-    .bind(href)
-    .fetch_optional(pool)
-    .await?;
+    let row =
+        sqlx::query("SELECT ctag, sync_token FROM cached_calendars WHERE user_id = ? AND href = ?")
+            .bind(user_id)
+            .bind(href)
+            .fetch_optional(pool)
+            .await?;
     match row {
         Some(r) => Ok((r.get(0), r.get(1))),
         None => Ok((None, None)),
@@ -336,7 +336,11 @@ pub async fn remove_stale_calendars(
 ) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
 
-    let placeholders = fresh_hrefs.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let placeholders = fresh_hrefs
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
 
     if !fresh_hrefs.is_empty() {
         let sql = format!(
@@ -381,12 +385,11 @@ pub async fn remove_stale_calendars(
     }
 
     // deactivated_calendars hrefs are encrypted with random nonces, so decrypt each to compare
-    let rows = sqlx::query(
-        "SELECT rowid, calendar_href FROM deactivated_calendars WHERE user_id = ?",
-    )
-    .bind(user_id)
-    .fetch_all(&mut *tx)
-    .await?;
+    let rows =
+        sqlx::query("SELECT rowid, calendar_href FROM deactivated_calendars WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_all(&mut *tx)
+            .await?;
     for row in rows {
         let rowid: i64 = row.get(0);
         let enc_href: String = row.get(1);
@@ -426,12 +429,11 @@ pub async fn delete_calendar_cache(
         .await?;
 
     // deactivated_calendars hrefs are encrypted, so decrypt each to compare
-    let rows = sqlx::query(
-        "SELECT rowid, calendar_href FROM deactivated_calendars WHERE user_id = ?",
-    )
-    .bind(user_id)
-    .fetch_all(&mut *tx)
-    .await?;
+    let rows =
+        sqlx::query("SELECT rowid, calendar_href FROM deactivated_calendars WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_all(&mut *tx)
+            .await?;
     for row in rows {
         let rowid: i64 = row.get(0);
         let enc_href: String = row.get(1);
@@ -461,16 +463,34 @@ pub async fn delete_calendar_cache(
 fn ical_dt_to_date_str(s: &str) -> String {
     let date_part = s.split('T').next().unwrap_or(s).trim();
     if date_part.len() >= 8 {
-        format!("{}-{}-{}", &date_part[..4], &date_part[4..6], &date_part[6..8])
+        format!(
+            "{}-{}-{}",
+            &date_part[..4],
+            &date_part[4..6],
+            &date_part[6..8]
+        )
     } else {
         date_part.to_string()
     }
 }
 
-fn extract_ical_metadata(raw_ical: &str) -> (String, String, String, String, String, String, bool, bool) {
+fn extract_ical_metadata(
+    raw_ical: &str,
+) -> (String, String, String, String, String, String, bool, bool) {
     let calendar = match ical::IcalParser::new(raw_ical.as_bytes()).next() {
         Some(Ok(c)) => c,
-        _ => return (String::new(), String::new(), String::new(), String::new(), String::new(), String::new(), false, false),
+        _ => {
+            return (
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                false,
+                false,
+            );
+        }
     };
 
     let mut uid = String::new();
@@ -486,14 +506,34 @@ fn extract_ical_metadata(raw_ical: &str) -> (String, String, String, String, Str
         for prop in &event.properties {
             match prop.name.as_str() {
                 "UID" => uid = prop.value.clone().unwrap_or_default(),
-                "SUMMARY" => summary = prop.value.as_deref().map(unescape_ical_text).unwrap_or_default(),
-                "DESCRIPTION" => description = prop.value.as_deref().map(unescape_ical_text).unwrap_or_default(),
-                "LOCATION" => location = prop.value.as_deref().map(unescape_ical_text).unwrap_or_default(),
+                "SUMMARY" => {
+                    summary = prop
+                        .value
+                        .as_deref()
+                        .map(unescape_ical_text)
+                        .unwrap_or_default()
+                }
+                "DESCRIPTION" => {
+                    description = prop
+                        .value
+                        .as_deref()
+                        .map(unescape_ical_text)
+                        .unwrap_or_default()
+                }
+                "LOCATION" => {
+                    location = prop
+                        .value
+                        .as_deref()
+                        .map(unescape_ical_text)
+                        .unwrap_or_default()
+                }
                 "DTSTART" => {
                     if let Some(ref val) = prop.value {
                         dtstart_date = ical_dt_to_date_str(val);
                         let value_is_date = prop.params.as_ref().map_or(false, |params| {
-                            params.iter().any(|(k, v)| k == "VALUE" && v.iter().any(|s| s == "DATE"))
+                            params
+                                .iter()
+                                .any(|(k, v)| k == "VALUE" && v.iter().any(|s| s == "DATE"))
                         });
                         is_all_day = value_is_date || !val.contains('T');
                     }
@@ -516,7 +556,16 @@ fn extract_ical_metadata(raw_ical: &str) -> (String, String, String, String, Str
         dtend_date = dtstart_date.clone();
     }
 
-    (uid, summary, dtstart_date, dtend_date, description, location, is_all_day, is_recurring)
+    (
+        uid,
+        summary,
+        dtstart_date,
+        dtend_date,
+        description,
+        location,
+        is_all_day,
+        is_recurring,
+    )
 }
 
 pub async fn upsert_cached_event_raw(
@@ -585,14 +634,12 @@ pub async fn delete_event_by_href(
     calendar_href: &str,
     event_href: &str,
 ) -> anyhow::Result<()> {
-    sqlx::query(
-        "DELETE FROM cached_events WHERE user_id = ? AND calendar_href = ? AND href = ?",
-    )
-    .bind(user_id)
-    .bind(calendar_href)
-    .bind(event_href)
-    .execute(pool)
-    .await?;
+    sqlx::query("DELETE FROM cached_events WHERE user_id = ? AND calendar_href = ? AND href = ?")
+        .bind(user_id)
+        .bind(calendar_href)
+        .bind(event_href)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -602,14 +649,12 @@ pub async fn delete_cached_event(
     calendar_href: &str,
     uid: &str,
 ) -> anyhow::Result<()> {
-    sqlx::query(
-        "DELETE FROM cached_events WHERE user_id = ? AND calendar_href = ? AND uid = ?",
-    )
-    .bind(user_id)
-    .bind(calendar_href)
-    .bind(uid)
-    .execute(pool)
-    .await?;
+    sqlx::query("DELETE FROM cached_events WHERE user_id = ? AND calendar_href = ? AND uid = ?")
+        .bind(user_id)
+        .bind(calendar_href)
+        .bind(uid)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -687,7 +732,10 @@ pub async fn apply_incremental_sync(
         .bind(&location_idx)
         .execute(&mut *tx)
         .await?;
-        changed_result.push(EventRef { uid, calendar_href: calendar_href.to_string() });
+        changed_result.push(EventRef {
+            uid,
+            calendar_href: calendar_href.to_string(),
+        });
     }
 
     let mut deleted_result: Vec<EventRef> = Vec::new();
@@ -701,7 +749,10 @@ pub async fn apply_incremental_sync(
         .fetch_optional(&mut *tx)
         .await?;
         if let Some(uid) = uid {
-            deleted_result.push(EventRef { uid, calendar_href: calendar_href.to_string() });
+            deleted_result.push(EventRef {
+                uid,
+                calendar_href: calendar_href.to_string(),
+            });
         }
         sqlx::query(
             "DELETE FROM cached_events WHERE user_id = ? AND calendar_href = ? AND href = ?",
@@ -724,7 +775,10 @@ pub async fn apply_incremental_sync(
     .await?;
 
     tx.commit().await?;
-    Ok(SyncApplyResult { changed: changed_result, deleted: deleted_result })
+    Ok(SyncApplyResult {
+        changed: changed_result,
+        deleted: deleted_result,
+    })
 }
 
 /// Replace all cached events for a calendar atomically: clear, insert all, update
@@ -891,32 +945,51 @@ pub async fn remove_stale_addressbooks(
 ) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
     if !fresh_hrefs.is_empty() {
-        let placeholders = fresh_hrefs.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders = fresh_hrefs
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
 
         let sql = format!(
             "DELETE FROM contact_push_subscriptions WHERE user_id = ? AND addressbook_href NOT IN ({placeholders})"
         );
         let mut q = sqlx::query(&sql).bind(user_id);
-        for h in fresh_hrefs { q = q.bind(h.as_str()); }
+        for h in fresh_hrefs {
+            q = q.bind(h.as_str());
+        }
         q.execute(&mut *tx).await?;
 
         let sql = format!(
             "DELETE FROM cached_contacts WHERE user_id = ? AND addressbook_href NOT IN ({placeholders})"
         );
         let mut q = sqlx::query(&sql).bind(user_id);
-        for h in fresh_hrefs { q = q.bind(h.as_str()); }
+        for h in fresh_hrefs {
+            q = q.bind(h.as_str());
+        }
         q.execute(&mut *tx).await?;
 
         let sql = format!(
             "DELETE FROM cached_addressbooks WHERE user_id = ? AND href NOT IN ({placeholders})"
         );
         let mut q = sqlx::query(&sql).bind(user_id);
-        for h in fresh_hrefs { q = q.bind(h.as_str()); }
+        for h in fresh_hrefs {
+            q = q.bind(h.as_str());
+        }
         q.execute(&mut *tx).await?;
     } else {
-        sqlx::query("DELETE FROM contact_push_subscriptions WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM cached_contacts WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM cached_addressbooks WHERE user_id = ?").bind(user_id).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM contact_push_subscriptions WHERE user_id = ?")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM cached_contacts WHERE user_id = ?")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM cached_addressbooks WHERE user_id = ?")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
     }
     tx.commit().await?;
     Ok(())
@@ -1036,7 +1109,6 @@ pub async fn delete_contact_from_cache(
     Ok(())
 }
 
-
 pub struct ContactRef {
     pub uid: String,
     pub addressbook_href: String,
@@ -1062,10 +1134,15 @@ pub async fn apply_incremental_contact_sync(
     let mut changed_result: Vec<ContactRef> = Vec::new();
     for (href, etag, raw_vcard) in changed {
         let fields = parse_vcard(&raw_vcard);
-        if fields.uid.is_empty() { continue; }
-        let emails_json = serde_json::to_string(&fields.emails).unwrap_or_else(|_| "[]".to_string());
-        let phones_json = serde_json::to_string(&fields.phones).unwrap_or_else(|_| "[]".to_string());
-        let addresses_json = serde_json::to_string(&fields.addresses).unwrap_or_else(|_| "[]".to_string());
+        if fields.uid.is_empty() {
+            continue;
+        }
+        let emails_json =
+            serde_json::to_string(&fields.emails).unwrap_or_else(|_| "[]".to_string());
+        let phones_json =
+            serde_json::to_string(&fields.phones).unwrap_or_else(|_| "[]".to_string());
+        let addresses_json =
+            serde_json::to_string(&fields.addresses).unwrap_or_else(|_| "[]".to_string());
         sqlx::query(
             "INSERT INTO cached_contacts
                  (user_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
@@ -1095,7 +1172,10 @@ pub async fn apply_incremental_contact_sync(
         .bind(fields.photo.as_deref())
         .execute(&mut *tx)
         .await?;
-        changed_result.push(ContactRef { uid: fields.uid, addressbook_href: addressbook_href.to_string() });
+        changed_result.push(ContactRef {
+            uid: fields.uid,
+            addressbook_href: addressbook_href.to_string(),
+        });
     }
 
     let mut deleted_result: Vec<ContactRef> = Vec::new();
@@ -1109,7 +1189,10 @@ pub async fn apply_incremental_contact_sync(
         .fetch_optional(&mut *tx)
         .await?;
         if let Some(uid) = uid {
-            deleted_result.push(ContactRef { uid: uid.clone(), addressbook_href: addressbook_href.to_string() });
+            deleted_result.push(ContactRef {
+                uid: uid.clone(),
+                addressbook_href: addressbook_href.to_string(),
+            });
             sqlx::query(
                 "DELETE FROM cached_contacts WHERE user_id = ? AND addressbook_href = ? AND uid = ?",
             )
@@ -1141,7 +1224,10 @@ pub async fn apply_incremental_contact_sync(
     .await?;
 
     tx.commit().await?;
-    Ok(ContactSyncApplyResult { changed: changed_result, deleted: deleted_result })
+    Ok(ContactSyncApplyResult {
+        changed: changed_result,
+        deleted: deleted_result,
+    })
 }
 
 pub async fn replace_addressbook_contacts(
@@ -1163,10 +1249,15 @@ pub async fn replace_addressbook_contacts(
 
     for (href, etag, raw_vcard) in all_raw {
         let fields = parse_vcard(&raw_vcard);
-        if fields.uid.is_empty() { continue; }
-        let emails_json = serde_json::to_string(&fields.emails).unwrap_or_else(|_| "[]".to_string());
-        let phones_json = serde_json::to_string(&fields.phones).unwrap_or_else(|_| "[]".to_string());
-        let addresses_json = serde_json::to_string(&fields.addresses).unwrap_or_else(|_| "[]".to_string());
+        if fields.uid.is_empty() {
+            continue;
+        }
+        let emails_json =
+            serde_json::to_string(&fields.emails).unwrap_or_else(|_| "[]".to_string());
+        let phones_json =
+            serde_json::to_string(&fields.phones).unwrap_or_else(|_| "[]".to_string());
+        let addresses_json =
+            serde_json::to_string(&fields.addresses).unwrap_or_else(|_| "[]".to_string());
         sqlx::query(
             "INSERT INTO cached_contacts
                  (user_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
@@ -1280,7 +1371,11 @@ pub async fn get_raw_events(
         return Ok(vec![]);
     }
 
-    let placeholders = calendar_hrefs.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let placeholders = calendar_hrefs
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
     let sql = format!(
         "SELECT calendar_href, raw_ical FROM cached_events
          WHERE user_id = ?
@@ -1309,7 +1404,11 @@ pub async fn get_event_dates_for_month(
         return Ok(vec![]);
     }
 
-    let placeholders = calendar_hrefs.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let placeholders = calendar_hrefs
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
     let sql = format!(
         "SELECT calendar_href, dtstart FROM cached_events
          WHERE user_id = ?
@@ -1320,7 +1419,10 @@ pub async fn get_event_dates_for_month(
         placeholders
     );
 
-    let mut q = sqlx::query(&sql).bind(user_id).bind(month_start).bind(month_end);
+    let mut q = sqlx::query(&sql)
+        .bind(user_id)
+        .bind(month_start)
+        .bind(month_end);
     for href in calendar_hrefs {
         q = q.bind(href.as_str());
     }
@@ -1338,7 +1440,11 @@ pub async fn get_recurring_raw_events(
         return Ok(vec![]);
     }
 
-    let placeholders = calendar_hrefs.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let placeholders = calendar_hrefs
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
     let sql = format!(
         "SELECT calendar_href, raw_ical FROM cached_events
          WHERE user_id = ?
@@ -1377,10 +1483,18 @@ pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::
     if old_is_trigram != new_is_trigram {
         // Tokenizer changes require a full table recreation.
         let tokenizer = mode.fts_tokenizer();
-        sqlx::query("DROP TRIGGER IF EXISTS events_fts_ai").execute(pool).await?;
-        sqlx::query("DROP TRIGGER IF EXISTS events_fts_ad").execute(pool).await?;
-        sqlx::query("DROP TRIGGER IF EXISTS events_fts_au").execute(pool).await?;
-        sqlx::query("DROP TABLE IF EXISTS events_fts").execute(pool).await?;
+        sqlx::query("DROP TRIGGER IF EXISTS events_fts_ai")
+            .execute(pool)
+            .await?;
+        sqlx::query("DROP TRIGGER IF EXISTS events_fts_ad")
+            .execute(pool)
+            .await?;
+        sqlx::query("DROP TRIGGER IF EXISTS events_fts_au")
+            .execute(pool)
+            .await?;
+        sqlx::query("DROP TABLE IF EXISTS events_fts")
+            .execute(pool)
+            .await?;
 
         sqlx::query(&format!(
             "CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
@@ -1422,10 +1536,18 @@ pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::
         .execute(pool)
         .await?;
 
-        sqlx::query("DROP TRIGGER IF EXISTS messages_fts_ai").execute(pool).await?;
-        sqlx::query("DROP TRIGGER IF EXISTS messages_fts_ad").execute(pool).await?;
-        sqlx::query("DROP TRIGGER IF EXISTS messages_fts_au").execute(pool).await?;
-        sqlx::query("DROP TABLE IF EXISTS messages_fts").execute(pool).await?;
+        sqlx::query("DROP TRIGGER IF EXISTS messages_fts_ai")
+            .execute(pool)
+            .await?;
+        sqlx::query("DROP TRIGGER IF EXISTS messages_fts_ad")
+            .execute(pool)
+            .await?;
+        sqlx::query("DROP TRIGGER IF EXISTS messages_fts_au")
+            .execute(pool)
+            .await?;
+        sqlx::query("DROP TABLE IF EXISTS messages_fts")
+            .execute(pool)
+            .await?;
 
         sqlx::query(&format!(
             "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
@@ -1494,11 +1616,10 @@ pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::
         .execute(pool)
         .await?;
 
-    let msg_rows = sqlx::query(
-        "SELECT rowid, subject, from_addr, to_addrs, body_text FROM cached_messages",
-    )
-    .fetch_all(pool)
-    .await?;
+    let msg_rows =
+        sqlx::query("SELECT rowid, subject, from_addr, to_addrs, body_text FROM cached_messages")
+            .fetch_all(pool)
+            .await?;
 
     for row in &msg_rows {
         let rowid: i64 = row.get(0);
@@ -1725,7 +1846,11 @@ pub async fn upsert_pgp_public_key(
     Ok(())
 }
 
-pub async fn delete_pgp_public_key(pool: &Db, user_id: &str, fingerprint: &str) -> anyhow::Result<()> {
+pub async fn delete_pgp_public_key(
+    pool: &Db,
+    user_id: &str,
+    fingerprint: &str,
+) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM pgp_public_keys WHERE user_id = ? AND fingerprint = ?")
         .bind(user_id)
         .bind(fingerprint)

@@ -1,9 +1,9 @@
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use chrono::{NaiveDate, NaiveDateTime, TimeDelta, TimeZone as _, Utc};
-use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
+use quick_xml::events::Event as XmlEvent;
 use reqwest::Client;
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use rrule::RRuleSet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -20,8 +20,8 @@ pub struct Calendar {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Alarm {
-    pub trigger_type: String,    // "start" | "end" | "absolute"
-    pub minutes: Option<i64>,    // for relative: negative = before, positive = after
+    pub trigger_type: String,     // "start" | "end" | "absolute"
+    pub minutes: Option<i64>,     // for relative: negative = before, positive = after
     pub datetime: Option<String>, // for absolute: UTC ISO 8601 (e.g. "20260514T090000Z")
 }
 
@@ -145,10 +145,18 @@ impl CalDavClient {
         })
     }
 
-    pub(crate) fn base_url(&self) -> &str { &self.base_url }
-    pub(crate) fn username(&self) -> &str { &self.username }
-    pub(crate) fn password(&self) -> &str { &self.password }
-    pub(crate) fn http_client(&self) -> &Client { &self.client }
+    pub(crate) fn base_url(&self) -> &str {
+        &self.base_url
+    }
+    pub(crate) fn username(&self) -> &str {
+        &self.username
+    }
+    pub(crate) fn password(&self) -> &str {
+        &self.password
+    }
+    pub(crate) fn http_client(&self) -> &Client {
+        &self.client
+    }
 
     pub async fn calendars(&self) -> anyhow::Result<Vec<Calendar>> {
         let start_url = self.start_url().await;
@@ -206,17 +214,18 @@ impl CalDavClient {
         if resp.status().is_redirection() {
             if let Some(location) = resp.headers().get("location") {
                 let location = location.to_str().ok()?.to_string();
-                return Some(resolve_url(&well_known, &location).trim_end_matches('/').to_string());
+                return Some(
+                    resolve_url(&well_known, &location)
+                        .trim_end_matches('/')
+                        .to_string(),
+                );
             }
         }
 
         None
     }
 
-    async fn discover_calendar_home_sets(
-        &self,
-        start_url: &str,
-    ) -> anyhow::Result<Vec<String>> {
+    async fn discover_calendar_home_sets(&self, start_url: &str) -> anyhow::Result<Vec<String>> {
         let principal_body = r#"<?xml version="1.0" encoding="utf-8"?>
 <propfind xmlns="DAV:">
   <prop>
@@ -239,9 +248,13 @@ impl CalDavClient {
 </propfind>"#;
 
                 let home_xml = self.propfind(&principal_url, "0", home_body).await?;
-                let hrefs = extract_hrefs(&home_xml, "calendar-home-set")
-                    .with_context(|| format!("calendar-home-set not found in response from {principal_url}"))?;
-                Ok(hrefs.into_iter().map(|h| resolve_url(&principal_url, &h)).collect())
+                let hrefs = extract_hrefs(&home_xml, "calendar-home-set").with_context(|| {
+                    format!("calendar-home-set not found in response from {principal_url}")
+                })?;
+                Ok(hrefs
+                    .into_iter()
+                    .map(|h| resolve_url(&principal_url, &h))
+                    .collect())
             }
             _ => {
                 let home_body = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -252,9 +265,13 @@ impl CalDavClient {
 </propfind>"#;
 
                 let home_xml = self.propfind(start_url, "0", home_body).await?;
-                let hrefs = extract_hrefs(&home_xml, "calendar-home-set")
-                    .with_context(|| format!("calendar-home-set not found in response from {start_url}"))?;
-                Ok(hrefs.into_iter().map(|h| resolve_url(start_url, &h)).collect())
+                let hrefs = extract_hrefs(&home_xml, "calendar-home-set").with_context(|| {
+                    format!("calendar-home-set not found in response from {start_url}")
+                })?;
+                Ok(hrefs
+                    .into_iter()
+                    .map(|h| resolve_url(start_url, &h))
+                    .collect())
             }
         }
     }
@@ -313,7 +330,10 @@ impl CalDavClient {
                 bail!("PROPFIND returned {status}");
             }
 
-            let text = resp.text().await.context("failed to read PROPFIND response")?;
+            let text = resp
+                .text()
+                .await
+                .context("failed to read PROPFIND response")?;
             return Ok(text);
         }
         bail!("too many redirects for PROPFIND")
@@ -352,7 +372,10 @@ impl CalDavClient {
                 bail!("REPORT returned {status}");
             }
 
-            let text = resp.text().await.context("failed to read REPORT response")?;
+            let text = resp
+                .text()
+                .await
+                .context("failed to read REPORT response")?;
             return Ok(text);
         }
         bail!("too many redirects for REPORT")
@@ -368,7 +391,10 @@ impl CalDavClient {
         let mut url = url;
         for _ in 0..5 {
             let mut headers = HeaderMap::new();
-            headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/calendar; charset=utf-8"));
+            headers.insert(
+                CONTENT_TYPE,
+                HeaderValue::from_static("text/calendar; charset=utf-8"),
+            );
 
             let resp = self
                 .client
@@ -462,7 +488,10 @@ impl CalDavClient {
 
     /// Fetch all VEVENTs from a calendar without a time-range filter.
     /// Returns `(href, etag, raw_ical)` tuples for cache population.
-    pub async fn fetch_all_raw(&self, calendar_href: &str) -> anyhow::Result<Vec<(String, String, String)>> {
+    pub async fn fetch_all_raw(
+        &self,
+        calendar_href: &str,
+    ) -> anyhow::Result<Vec<(String, String, String)>> {
         let body = r#"<?xml version="1.0" encoding="utf-8"?>
 <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
   <d:prop>
@@ -481,7 +510,10 @@ impl CalDavClient {
 
     /// PROPFIND for `getctag` (Apple) and `sync-token` (RFC 6578).
     /// Returns `(ctag, sync_token)` — either or both may be `None`.
-    pub async fn get_ctag_and_token(&self, calendar_href: &str) -> anyhow::Result<(Option<String>, Option<String>)> {
+    pub async fn get_ctag_and_token(
+        &self,
+        calendar_href: &str,
+    ) -> anyhow::Result<(Option<String>, Option<String>)> {
         let body = r#"<?xml version="1.0" encoding="utf-8"?>
 <d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">
   <d:prop>
@@ -495,7 +527,11 @@ impl CalDavClient {
 
     /// RFC 6578 sync-collection REPORT.
     /// Pass `sync_token = None` for the initial sync (returns everything).
-    pub async fn sync_collection(&self, calendar_href: &str, sync_token: Option<&str>) -> anyhow::Result<SyncResult> {
+    pub async fn sync_collection(
+        &self,
+        calendar_href: &str,
+        sync_token: Option<&str>,
+    ) -> anyhow::Result<SyncResult> {
         let token_val = sync_token.unwrap_or("");
         let body = format!(
             r#"<?xml version="1.0" encoding="utf-8"?>
@@ -608,7 +644,10 @@ impl CalDavClient {
             .map(|c| format!("      <APPLE:calendar-color>{c}</APPLE:calendar-color>\n"))
             .unwrap_or_default();
 
-        let escaped_name = name.replace('<', "&lt;").replace('>', "&gt;").replace('&', "&amp;");
+        let escaped_name = name
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('&', "&amp;");
         let body = format!(
             r#"<?xml version="1.0" encoding="utf-8"?>
 <C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"
@@ -624,8 +663,8 @@ impl CalDavClient {
 </C:mkcalendar>"#
         );
 
-        let method = reqwest::Method::from_bytes(b"MKCALENDAR")
-            .context("invalid method MKCALENDAR")?;
+        let method =
+            reqwest::Method::from_bytes(b"MKCALENDAR").context("invalid method MKCALENDAR")?;
         let resp = self
             .client
             .request(method, &calendar_url)
@@ -724,7 +763,9 @@ pub(crate) fn extract_text_prop(xml: &str, prop_local_name: &str) -> Option<Stri
     loop {
         match reader.read_event_into(&mut buf).ok()? {
             XmlEvent::Start(e) => {
-                let local = std::str::from_utf8(e.local_name().as_ref()).ok()?.to_string();
+                let local = std::str::from_utf8(e.local_name().as_ref())
+                    .ok()?
+                    .to_string();
                 if local == prop_local_name {
                     in_prop = true;
                     text.clear();
@@ -738,7 +779,9 @@ pub(crate) fn extract_text_prop(xml: &str, prop_local_name: &str) -> Option<Stri
                 }
             }
             XmlEvent::End(e) => {
-                let local = std::str::from_utf8(e.local_name().as_ref()).ok()?.to_string();
+                let local = std::str::from_utf8(e.local_name().as_ref())
+                    .ok()?
+                    .to_string();
                 if local == prop_local_name && in_prop {
                     let trimmed = text.trim().to_string();
                     if !trimmed.is_empty() {
@@ -1002,13 +1045,26 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
                         if let Some(params) = &property.params {
                             for (key, vals) in params {
                                 match key.as_str() {
-                                    "CN" => cn = vals.first().map(|s| unescape_ical_text(s)).unwrap_or_default(),
-                                    "PARTSTAT" => partstat = PartStat::from_ical(vals.first().map(|s| s.as_str()).unwrap_or("")),
+                                    "CN" => {
+                                        cn = vals
+                                            .first()
+                                            .map(|s| unescape_ical_text(s))
+                                            .unwrap_or_default()
+                                    }
+                                    "PARTSTAT" => {
+                                        partstat = PartStat::from_ical(
+                                            vals.first().map(|s| s.as_str()).unwrap_or(""),
+                                        )
+                                    }
                                     _ => {}
                                 }
                             }
                         }
-                        attendees.push(Attendee { cn, email, partstat });
+                        attendees.push(Attendee {
+                            cn,
+                            email,
+                            partstat,
+                        });
                     }
                 }
                 _ => {}
@@ -1035,7 +1091,11 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
             }
         } else if let Some(ref dur) = duration_str {
             parse_ical_duration(dur).unwrap_or_else(|| {
-                if dtstart_is_date { TimeDelta::days(1) } else { TimeDelta::zero() }
+                if dtstart_is_date {
+                    TimeDelta::days(1)
+                } else {
+                    TimeDelta::zero()
+                }
             })
         } else if dtstart_is_date {
             TimeDelta::days(1)
@@ -1047,8 +1107,12 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
 
         let mut alarms: Vec<Alarm> = Vec::new();
         for alarm in &event.alarms {
-            let Some(trigger) = alarm.properties.iter().find(|p| p.name == "TRIGGER") else { continue };
-            let Some(ref value) = trigger.value else { continue };
+            let Some(trigger) = alarm.properties.iter().find(|p| p.name == "TRIGGER") else {
+                continue;
+            };
+            let Some(ref value) = trigger.value else {
+                continue;
+            };
 
             let mut is_absolute = false;
             let mut is_end_relative = false;
@@ -1064,10 +1128,18 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
             }
 
             if is_absolute {
-                alarms.push(Alarm { trigger_type: "absolute".to_string(), minutes: None, datetime: Some(value.clone()) });
+                alarms.push(Alarm {
+                    trigger_type: "absolute".to_string(),
+                    minutes: None,
+                    datetime: Some(value.clone()),
+                });
             } else if let Some(mins) = parse_relative_trigger(value) {
                 alarms.push(Alarm {
-                    trigger_type: if is_end_relative { "end".to_string() } else { "start".to_string() },
+                    trigger_type: if is_end_relative {
+                        "end".to_string()
+                    } else {
+                        "start".to_string()
+                    },
                     minutes: Some(mins),
                     datetime: None,
                 });
@@ -1101,13 +1173,20 @@ fn parse_relative_trigger(s: &str) -> Option<i64> {
     let s = s.trim_start_matches(['+', '-']);
     let s = s.strip_prefix('P')?;
     let minutes = if let Some(rest) = s.strip_prefix('T') {
-        if let Some(h) = rest.strip_suffix('H') { h.parse::<i64>().ok()? * 60 }
-        else if let Some(m) = rest.strip_suffix('M') { m.parse::<i64>().ok()? }
-        else if let Some(sec) = rest.strip_suffix('S') { sec.parse::<i64>().ok()? / 60 }
-        else { return None; }
+        if let Some(h) = rest.strip_suffix('H') {
+            h.parse::<i64>().ok()? * 60
+        } else if let Some(m) = rest.strip_suffix('M') {
+            m.parse::<i64>().ok()?
+        } else if let Some(sec) = rest.strip_suffix('S') {
+            sec.parse::<i64>().ok()? / 60
+        } else {
+            return None;
+        }
     } else if let Some(d) = s.strip_suffix('D') {
         d.parse::<i64>().ok()? * 1440
-    } else { return None; };
+    } else {
+        return None;
+    };
     Some(if negative { -minutes } else { minutes })
 }
 
@@ -1177,7 +1256,8 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
 
     for (_, group) in groups {
         let master = group.iter().find(|e| e.recurrence_id.is_none());
-        let overrides: Vec<&RawIcalEvent> = group.iter().filter(|e| e.recurrence_id.is_some()).collect();
+        let overrides: Vec<&RawIcalEvent> =
+            group.iter().filter(|e| e.recurrence_id.is_some()).collect();
 
         let Some(master) = master else { continue };
 
@@ -1186,9 +1266,16 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
             let expanded = expand_recurring(master, start, end);
 
             let master_dtstart_str = if master.dtstart_is_date {
-                format_datetime_with_tz(master.dtstart, "UTC").split('T').next().unwrap_or("").to_string()
+                format_datetime_with_tz(master.dtstart, "UTC")
+                    .split('T')
+                    .next()
+                    .unwrap_or("")
+                    .to_string()
             } else {
-                format_datetime_with_tz(master.dtstart, master.dtstart_tzid.as_deref().unwrap_or("UTC"))
+                format_datetime_with_tz(
+                    master.dtstart,
+                    master.dtstart_tzid.as_deref().unwrap_or("UTC"),
+                )
             };
 
             for dt in expanded {
@@ -1210,10 +1297,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                         override_event.dtstart_is_date,
                         Some(override_event.dtstart + override_event.duration),
                         override_event.dtstart_is_date,
-                        &override_event
-                            .dtstart_tzid
-                            .as_deref()
-                            .unwrap_or("UTC"),
+                        &override_event.dtstart_tzid.as_deref().unwrap_or("UTC"),
                         true,
                         recurrence.clone(),
                         master_dtstart_str.clone(),
@@ -1434,7 +1518,9 @@ fn parse_rrule_info(rrule_str: &str) -> RecurrenceInfo {
 
     for part in rrule_str.split(';') {
         let part = part.trim();
-        let Some((key, val)) = part.split_once('=') else { continue };
+        let Some((key, val)) = part.split_once('=') else {
+            continue;
+        };
         match key {
             "FREQ" => info.freq = val.to_string(),
             "INTERVAL" => info.interval = val.parse().unwrap_or(1),
@@ -1620,7 +1706,10 @@ pub fn generate_ical_event(
     );
 
     ical.push_str(&format!("UID:{}\r\n", uid));
-    ical.push_str(&format!("DTSTAMP:{}\r\n", Utc::now().format("%Y%m%dT%H%M%SZ")));
+    ical.push_str(&format!(
+        "DTSTAMP:{}\r\n",
+        Utc::now().format("%Y%m%dT%H%M%SZ")
+    ));
     ical.push_str("SEQUENCE:0\r\n");
 
     if is_all_day {
@@ -1636,7 +1725,10 @@ pub fn generate_ical_event(
 
     if let Some(rec) = recurrence {
         if !rec.freq.is_empty() {
-            ical.push_str(&format!("RRULE:{}\r\n", recurrence_info_to_rrule(rec, tz, is_all_day)));
+            ical.push_str(&format!(
+                "RRULE:{}\r\n",
+                recurrence_info_to_rrule(rec, tz, is_all_day)
+            ));
         }
     }
 
@@ -1646,9 +1738,15 @@ pub fn generate_ical_event(
             rid_date.replace('-', "")
         } else {
             if rid_tz.is_empty() || rid_tz == "UTC" {
-                format!("{}Z", rid_date.replace('-', "").replace(':', "").replace('T', "T"))
+                format!(
+                    "{}Z",
+                    rid_date.replace('-', "").replace(':', "").replace('T', "T")
+                )
             } else {
-                format!("{}", rid_date.replace('-', "").replace(':', "").replace('T', "T"))
+                format!(
+                    "{}",
+                    rid_date.replace('-', "").replace(':', "").replace('T', "T")
+                )
             }
         };
         if is_date && is_all_day {
@@ -1658,7 +1756,10 @@ pub fn generate_ical_event(
             if rid_tz.is_empty() || rid_tz == "UTC" {
                 ical.push_str(&format!("RECURRENCE-ID:{}T000000Z\r\n", rid_ical));
             } else {
-                ical.push_str(&format!("RECURRENCE-ID;TZID={}:{}T000000\r\n", rid_tz, rid_ical));
+                ical.push_str(&format!(
+                    "RECURRENCE-ID;TZID={}:{}T000000\r\n",
+                    rid_tz, rid_ical
+                ));
             }
         } else if rid_tz.is_empty() || rid_tz == "UTC" {
             ical.push_str(&format!("RECURRENCE-ID:{}\r\n", rid_ical));
@@ -1669,7 +1770,10 @@ pub fn generate_ical_event(
 
     ical.push_str(&format!("SUMMARY:{}\r\n", escape_ical_text(summary)));
     if !description.is_empty() {
-        ical.push_str(&format!("DESCRIPTION:{}\r\n", escape_ical_text(description)));
+        ical.push_str(&format!(
+            "DESCRIPTION:{}\r\n",
+            escape_ical_text(description)
+        ));
     }
     if !location.is_empty() {
         ical.push_str(&format!("LOCATION:{}\r\n", escape_ical_text(location)));
@@ -1700,7 +1804,11 @@ pub fn generate_ical_event(
             "end" => {
                 if let Some(mins) = alarm.minutes {
                     let sign = if mins < 0 { "-" } else { "" };
-                    ical.push_str(&format!("TRIGGER;RELATED=END:{}PT{}M\r\n", sign, mins.unsigned_abs()));
+                    ical.push_str(&format!(
+                        "TRIGGER;RELATED=END:{}PT{}M\r\n",
+                        sign,
+                        mins.unsigned_abs()
+                    ));
                 }
             }
             _ => {
@@ -1727,13 +1835,34 @@ pub fn recurrence_info_to_rrule(info: &RecurrenceInfo, tz: &str, is_all_day: boo
         parts.push(format!("BYDAY={}", info.by_day.join(",")));
     }
     if !info.by_month_day.is_empty() {
-        parts.push(format!("BYMONTHDAY={}", info.by_month_day.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(",")));
+        parts.push(format!(
+            "BYMONTHDAY={}",
+            info.by_month_day
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
     }
     if !info.by_month.is_empty() {
-        parts.push(format!("BYMONTH={}", info.by_month.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(",")));
+        parts.push(format!(
+            "BYMONTH={}",
+            info.by_month
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
     }
     if !info.by_set_pos.is_empty() {
-        parts.push(format!("BYSETPOS={}", info.by_set_pos.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(",")));
+        parts.push(format!(
+            "BYSETPOS={}",
+            info.by_set_pos
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
     }
     if let Some(count) = info.count {
         parts.push(format!("COUNT={}", count));
@@ -1770,7 +1899,10 @@ fn parse_datetime(date: &str, time: &str) -> (String, String) {
     }
 }
 
-fn extract_events_with_hrefs(xml: &str, base_url: &str) -> anyhow::Result<Vec<(String, String, String)>> {
+fn extract_events_with_hrefs(
+    xml: &str,
+    base_url: &str,
+) -> anyhow::Result<Vec<(String, String, String)>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
@@ -1807,9 +1939,13 @@ fn extract_events_with_hrefs(xml: &str, base_url: &str) -> anyhow::Result<Vec<(S
             }
             XmlEvent::Text(e) => {
                 let text = e.unescape()?;
-                if in_calendar_data { current_ical.push_str(&text); }
-                else if in_href { current_href.push_str(&text); }
-                else if in_etag { current_etag.push_str(&text); }
+                if in_calendar_data {
+                    current_ical.push_str(&text);
+                } else if in_href {
+                    current_href.push_str(&text);
+                } else if in_etag {
+                    current_etag.push_str(&text);
+                }
             }
             XmlEvent::End(e) => {
                 let lname = e.local_name();
@@ -1887,11 +2023,17 @@ fn extract_sync_result(xml: &str, base_url: &str) -> anyhow::Result<SyncResult> 
             }
             XmlEvent::Text(e) => {
                 let text = e.unescape()?;
-                if in_sync_token_top { new_token.push_str(&text); }
-                else if in_calendar_data { current_ical.push_str(&text); }
-                else if in_href { current_href.push_str(&text); }
-                else if in_etag { current_etag.push_str(&text); }
-                else if in_status { current_status.push_str(&text); }
+                if in_sync_token_top {
+                    new_token.push_str(&text);
+                } else if in_calendar_data {
+                    current_ical.push_str(&text);
+                } else if in_href {
+                    current_href.push_str(&text);
+                } else if in_etag {
+                    current_etag.push_str(&text);
+                } else if in_status {
+                    current_status.push_str(&text);
+                }
             }
             XmlEvent::End(e) => {
                 let lname = e.local_name();
@@ -1923,7 +2065,11 @@ fn extract_sync_result(xml: &str, base_url: &str) -> anyhow::Result<SyncResult> 
             _ => {}
         }
     }
-    Ok(SyncResult { new_token, changed, deleted })
+    Ok(SyncResult {
+        new_token,
+        changed,
+        deleted,
+    })
 }
 
 pub(crate) fn extract_ctag_and_token(xml: &str) -> (Option<String>, Option<String>) {
@@ -1951,8 +2097,11 @@ pub(crate) fn extract_ctag_and_token(xml: &str) -> (Option<String>, Option<Strin
                 if let Ok(text) = e.unescape() {
                     let text = text.trim().to_string();
                     if !text.is_empty() {
-                        if in_ctag { ctag = Some(text); }
-                        else if in_token { sync_token = Some(text); }
+                        if in_ctag {
+                            ctag = Some(text);
+                        } else if in_token {
+                            sync_token = Some(text);
+                        }
                     }
                 }
             }
@@ -2089,7 +2238,11 @@ pub fn add_recurrence_override(
 
     // Match overrides by the 8-digit YYYYMMDD date only, so VALUE=DATE and
     // datetime formats (e.g. T000000Z) both hit for the same calendar date.
-    let rid_date: String = recurrence_id_value.replace('-', "").chars().take(8).collect();
+    let rid_date: String = recurrence_id_value
+        .replace('-', "")
+        .chars()
+        .take(8)
+        .collect();
 
     let mut result = String::new();
     let mut found = false;
@@ -2138,7 +2291,11 @@ pub fn add_recurrence_override(
         if let Some(pos) = result.rfind("END:VCALENDAR") {
             let before = result[..pos].to_string();
             let after = result[pos..].to_string();
-            let sep = if override_vevent.ends_with('\n') { "" } else { "\n" };
+            let sep = if override_vevent.ends_with('\n') {
+                ""
+            } else {
+                "\n"
+            };
             result = format!("{}{}{}{}", before, override_vevent, sep, after);
         }
     }
@@ -2164,7 +2321,10 @@ pub fn add_exdate(ical_data: &str, occurrence_dtstart: &str, tz: &str) -> String
         let date_compact = parts[0].replace('-', "");
         let time_str = parts.get(1).copied().unwrap_or("000000Z");
         // Keep only the digit portion of the time component.
-        let time_compact: String = time_str.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let time_compact: String = time_str
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
         if occurrence_dtstart.ends_with('Z') || tz.is_empty() || tz == "UTC" {
             format!("EXDATE:{}T{}Z", date_compact, time_compact)
         } else {
@@ -2173,7 +2333,11 @@ pub fn add_exdate(ical_data: &str, occurrence_dtstart: &str, tz: &str) -> String
     };
 
     // 8-digit YYYYMMDD for matching existing override VEVENTs.
-    let rid_date: String = occurrence_dtstart.replace('-', "").chars().take(8).collect();
+    let rid_date: String = occurrence_dtstart
+        .replace('-', "")
+        .chars()
+        .take(8)
+        .collect();
 
     let mut result = String::new();
     let mut search_from = 0;
@@ -2316,7 +2480,12 @@ fn update_attendee_partstat(line: &str, new_partstat: &str) -> String {
     let new_params = if let Some(ps) = params.find("PARTSTAT=") {
         let after = &params[ps + 9..];
         let end = after.find(';').unwrap_or(after.len());
-        format!("{}PARTSTAT={}{}", &params[..ps], new_partstat, &after[end..])
+        format!(
+            "{}PARTSTAT={}{}",
+            &params[..ps],
+            new_partstat,
+            &after[end..]
+        )
     } else {
         format!("{};PARTSTAT={}", params, new_partstat)
     };
@@ -2382,11 +2551,15 @@ fn rebuild_vevent(
             in_valarm = false;
             // Preserve VALARMs whose ACTION is not DISPLAY — those are managed
             // by other clients (EMAIL, AUDIO) and should survive our edits.
-            let is_display = current_valarm.iter()
+            let is_display = current_valarm
+                .iter()
                 .any(|l| l.trim().eq_ignore_ascii_case("ACTION:DISPLAY"));
             if !is_display {
                 let mut blk = String::from("BEGIN:VALARM\n");
-                for vl in &current_valarm { blk.push_str(vl); blk.push('\n'); }
+                for vl in &current_valarm {
+                    blk.push_str(vl);
+                    blk.push('\n');
+                }
                 blk.push_str("END:VALARM\n");
                 preserved_valarns.push(blk);
             }
@@ -2433,7 +2606,10 @@ fn rebuild_vevent(
 
     if let Some(rec) = recurrence {
         if !rec.freq.is_empty() {
-            out.push_str(&format!("RRULE:{}\n", recurrence_info_to_rrule(rec, tz, is_all_day)));
+            out.push_str(&format!(
+                "RRULE:{}\n",
+                recurrence_info_to_rrule(rec, tz, is_all_day)
+            ));
         }
     }
 
@@ -2452,7 +2628,10 @@ fn rebuild_vevent(
             if rid_tz.is_empty() || rid_tz == "UTC" {
                 out.push_str(&format!("RECURRENCE-ID:{}T000000Z\n", rid_ical));
             } else {
-                out.push_str(&format!("RECURRENCE-ID;TZID={}:{}T000000\n", rid_tz, rid_ical));
+                out.push_str(&format!(
+                    "RECURRENCE-ID;TZID={}:{}T000000\n",
+                    rid_tz, rid_ical
+                ));
             }
         } else if rid_tz.is_empty() || rid_tz == "UTC" {
             out.push_str(&format!("RECURRENCE-ID:{}\n", rid_ical));
@@ -2480,10 +2659,22 @@ fn rebuild_vevent(
                 == Some(email_lower.as_str())
         });
         if let Some(orig_line) = orig {
-            out.push_str(&update_attendee_partstat(orig_line, &att.partstat.to_ical()));
+            out.push_str(&update_attendee_partstat(
+                orig_line,
+                &att.partstat.to_ical(),
+            ));
         } else {
-            let cn = if !att.cn.is_empty() { format!(";CN={}", att.cn) } else { String::new() };
-            out.push_str(&format!("ATTENDEE{};PARTSTAT={}:mailto:{}", cn, att.partstat.to_ical(), att.email));
+            let cn = if !att.cn.is_empty() {
+                format!(";CN={}", att.cn)
+            } else {
+                String::new()
+            };
+            out.push_str(&format!(
+                "ATTENDEE{};PARTSTAT={}:mailto:{}",
+                cn,
+                att.partstat.to_ical(),
+                att.email
+            ));
         }
         out.push('\n');
     }
@@ -2503,7 +2694,11 @@ fn rebuild_vevent(
             "end" => {
                 if let Some(mins) = alarm.minutes {
                     let sign = if mins < 0 { "-" } else { "" };
-                    out.push_str(&format!("TRIGGER;RELATED=END:{}PT{}M\n", sign, mins.unsigned_abs()));
+                    out.push_str(&format!(
+                        "TRIGGER;RELATED=END:{}PT{}M\n",
+                        sign,
+                        mins.unsigned_abs()
+                    ));
                 }
             }
             _ => {
@@ -2548,8 +2743,8 @@ pub fn update_vcalendar_event(
 ) -> Option<String> {
     let text = unfold_lines(original_ical);
 
-    let rid_date_prefix: Option<String> = target_recurrence_id
-        .map(|(rv, _)| rv.replace('-', "").chars().take(8).collect());
+    let rid_date_prefix: Option<String> =
+        target_recurrence_id.map(|(rv, _)| rv.replace('-', "").chars().take(8).collect());
 
     let mut result = String::new();
     let mut search_from = 0;
@@ -2572,9 +2767,9 @@ pub fn update_vcalendar_event(
             match &rid_date_prefix {
                 None => {
                     // Master VEVENT: no RECURRENCE-ID line present.
-                    !block.lines().any(|l| {
-                        l.starts_with("RECURRENCE-ID:") || l.starts_with("RECURRENCE-ID;")
-                    })
+                    !block
+                        .lines()
+                        .any(|l| l.starts_with("RECURRENCE-ID:") || l.starts_with("RECURRENCE-ID;"))
                 }
                 Some(rid_prefix) => {
                     // Override VEVENT: RECURRENCE-ID value starts with this date.

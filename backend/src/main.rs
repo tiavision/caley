@@ -1,5 +1,5 @@
-mod calendar;
 mod caldav;
+mod calendar;
 mod carddav;
 mod contacts;
 mod crypto;
@@ -18,13 +18,13 @@ mod sse;
 mod sync;
 mod version;
 
+use axum::Router;
 use axum::error_handling::HandleErrorLayer;
 use axum::extract::Request;
 use axum::http::HeaderValue;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{delete, get, patch, post, put};
-use axum::Router;
 use axum_oidc::error::MiddlewareError;
 use axum_oidc::{EmptyAdditionalClaims, OidcAuthLayer, OidcLoginLayer};
 use clap::Parser;
@@ -35,7 +35,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
-use tower_sessions::{cookie::SameSite, Expiry, Session, SessionManagerLayer};
+use tower_sessions::{Expiry, Session, SessionManagerLayer, cookie::SameSite};
 use tower_sessions_sqlx_store::SqliteStore;
 use webauthn_rs::prelude::*;
 
@@ -65,7 +65,11 @@ struct Cli {
     sync_interval_mins: u64,
     #[arg(long, env = "SEARCH_MODE", default_value = "default")]
     search_mode: String,
-    #[arg(long, env = "MAP_URL", default_value = "https://www.openstreetmap.org/search?query={q}")]
+    #[arg(
+        long,
+        env = "MAP_URL",
+        default_value = "https://www.openstreetmap.org/search?query={q}"
+    )]
     map_url: String,
     #[arg(long, env = "WEBAUTHN_EXTRA_ORIGINS")]
     webauthn_extra_origins: Vec<String>,
@@ -74,7 +78,9 @@ struct Cli {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
-    rustls::crypto::ring::default_provider().install_default().unwrap();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .unwrap();
     let args = Cli::parse();
 
     let db = db::init_db(&args.database_path).await?;
@@ -135,7 +141,11 @@ async fn main() -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!("Invalid WEBAUTHN_EXTRA_ORIGINS entry: {e}"))?;
             builder = builder.append_allowed_origin(&extra_url);
         }
-        Arc::new(builder.build().map_err(|e| anyhow::anyhow!("Webauthn build error: {e:?}"))?)
+        Arc::new(
+            builder
+                .build()
+                .map_err(|e| anyhow::anyhow!("Webauthn build error: {e:?}"))?,
+        )
     };
 
     let state = AppState {
@@ -153,7 +163,8 @@ async fn main() -> anyhow::Result<()> {
         webauthn,
     };
 
-    let static_dir = args.static_dir
+    let static_dir = args
+        .static_dir
         .unwrap_or_else(|| concat!(env!("CARGO_MANIFEST_DIR"), "/../frontend/dist").to_string());
 
     let session_layer = SessionManagerLayer::new(session_store)
@@ -223,10 +234,22 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/email/export", get(email::export_account))
         .route("/api/email/image-origins", get(email::list_image_origins))
         .route("/api/email/image-origins", post(email::add_image_origin))
-        .route("/api/email/image-origins", delete(email::remove_image_origin))
-        .route("/api/email/image-blacklist", get(email::list_image_blacklist))
-        .route("/api/email/image-blacklist", post(email::add_image_blacklist_origin))
-        .route("/api/email/image-blacklist", delete(email::remove_image_blacklist_origin))
+        .route(
+            "/api/email/image-origins",
+            delete(email::remove_image_origin),
+        )
+        .route(
+            "/api/email/image-blacklist",
+            get(email::list_image_blacklist),
+        )
+        .route(
+            "/api/email/image-blacklist",
+            post(email::add_image_blacklist_origin),
+        )
+        .route(
+            "/api/email/image-blacklist",
+            delete(email::remove_image_blacklist_origin),
+        )
         .route("/api/email/identities", get(email::list_identities))
         .route("/api/email/identity", post(email::save_identity))
         .route("/api/email/identity", put(email::save_identity))
@@ -234,8 +257,14 @@ async fn main() -> anyhow::Result<()> {
         // WebAuthn + PGP endpoints
         .route("/api/webauthn/register/start", post(pgp::register_start))
         .route("/api/webauthn/register/finish", post(pgp::register_finish))
-        .route("/api/webauthn/authenticate/start", post(pgp::authenticate_start))
-        .route("/api/webauthn/authenticate/finish", post(pgp::authenticate_finish))
+        .route(
+            "/api/webauthn/authenticate/start",
+            post(pgp::authenticate_start),
+        )
+        .route(
+            "/api/webauthn/authenticate/finish",
+            post(pgp::authenticate_finish),
+        )
         .route("/api/webauthn/credentials", get(pgp::list_credentials))
         .route("/api/webauthn/credential", delete(pgp::delete_credential))
         .route("/api/pgp/vault", get(pgp::get_vault))
@@ -281,15 +310,18 @@ async fn main() -> anyhow::Result<()> {
             .with_state(state)
             .layer(
                 ServiceBuilder::new()
-                    .layer(HandleErrorLayer::new(|session: Session, err: MiddlewareError| async move {
-                        match err {
-                            MiddlewareError::RequestToken(_) | MiddlewareError::ClaimsVerification(_) => {
-                                session.remove_value("axum-oidc").await.unwrap_or_default();
-                                Redirect::to("/").into_response()
+                    .layer(HandleErrorLayer::new(
+                        |session: Session, err: MiddlewareError| async move {
+                            match err {
+                                MiddlewareError::RequestToken(_)
+                                | MiddlewareError::ClaimsVerification(_) => {
+                                    session.remove_value("axum-oidc").await.unwrap_or_default();
+                                    Redirect::to("/").into_response()
+                                }
+                                _ => err.into_response(),
                             }
-                            _ => err.into_response(),
-                        }
-                    }))
+                        },
+                    ))
                     .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new())
                     .into_inner(),
             );
@@ -303,15 +335,18 @@ async fn main() -> anyhow::Result<()> {
             .merge(private)
             .layer(
                 ServiceBuilder::new()
-                    .layer(HandleErrorLayer::new(|session: Session, err: MiddlewareError| async move {
-                        match err {
-                            MiddlewareError::RequestToken(_) | MiddlewareError::ClaimsVerification(_) => {
-                                session.remove_value("axum-oidc").await.unwrap_or_default();
-                                Redirect::to("/").into_response()
+                    .layer(HandleErrorLayer::new(
+                        |session: Session, err: MiddlewareError| async move {
+                            match err {
+                                MiddlewareError::RequestToken(_)
+                                | MiddlewareError::ClaimsVerification(_) => {
+                                    session.remove_value("axum-oidc").await.unwrap_or_default();
+                                    Redirect::to("/").into_response()
+                                }
+                                _ => err.into_response(),
                             }
-                            _ => err.into_response(),
-                        }
-                    }))
+                        },
+                    ))
                     .layer(oidc_auth_layer)
                     .into_inner(),
             )
@@ -353,7 +388,10 @@ async fn security_headers(req: Request, next: Next) -> Response {
     let mut resp = next.run(req).await;
     let h = resp.headers_mut();
     h.insert("content-security-policy", HeaderValue::from_static(CSP));
-    h.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    h.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
     h.insert("x-frame-options", HeaderValue::from_static("DENY"));
     h.insert(
         "referrer-policy",
