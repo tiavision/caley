@@ -12,8 +12,8 @@
   import { openVault, getKeys, isUnlocked } from '../lib/pgp/session.ts';
   import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
   import { buildProtectedMime, parseEnvelopeAddresses } from '../lib/pgp/compose.ts';
+  import { prepareEmailHtml, htmlToPlainText, imageOriginsFromHtml } from '../lib/mail-html.ts';
   import type * as openpgp from 'openpgp';
-  import DOMPurify from 'dompurify';
 
   export let standalone = false;
   export let initialMessage: { accountId: string; mailbox: string; uid: number } | null = null;
@@ -617,11 +617,13 @@
           data: attachment.data,
         }));
         await loadMessagePublicKeyCandidates(msg, pgpAttachments);
-        if (result.isHtml) {
-          const withInlineImages = insertDecryptedInlineImages(result.plaintext, result.attachments);
-          pgpDecryptedHtml = DOMPurify.sanitize(withInlineImages, { FORCE_BODY: true, FORBID_TAGS: ['script', 'style'] });
-        } else {
-          pgpDecryptedText = result.plaintext;
+        if (result.html) {
+          const withInlineImages = insertDecryptedInlineImages(result.html, result.attachments);
+          pgpDecryptedHtml = prepareEmailHtml(withInlineImages);
+          pgpDecryptedText = result.text ?? htmlToPlainText(result.html);
+          viewMode = htmlAddsValue(result.html) ? 'html' : 'text';
+        } else if (result.text) {
+          pgpDecryptedText = result.text;
         }
       }
     } catch {
@@ -2840,27 +2842,26 @@
   $: pageStart = totalMessages === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   $: pageEnd = Math.min(currentPage * pageSize, totalMessages);
 
+  $: renderedHtml = selectedMessage?.body_html
+    ? prepareEmailHtml(selectedMessage.body_html, {
+      accountId: selectedMessage.account_id,
+      mailbox: selectedMessage.mailbox,
+      uid: selectedMessage.uid,
+    })
+    : '';
   $: htmlHasValue = htmlAddsValue(selectedMessage?.body_html ?? null);
-  $: bodyTextSegments = linkifySegments(selectedMessage?.body_text ?? '');
+  $: encryptedHtmlHasValue = htmlAddsValue(pgpDecryptedHtml || null);
+  $: canToggleBodyView = selectedMessage?.is_encrypted ? encryptedHtmlHasValue : htmlHasValue;
+  $: displayedText = selectedMessage?.is_encrypted
+    ? pgpDecryptedText
+    : (selectedMessage?.body_text ?? '');
+  $: bodyTextSegments = linkifySegments(displayedText);
   $: visibleServerAttachments = selectedMessage?.attachments.filter(att =>
     !isPgpSignatureAttachment(att) &&
     (!selectedMessage?.is_encrypted || !isPgpTransportAttachment(att))
   ) ?? [];
 
-  $: emailOrigins = (() => {
-    if (!selectedMessage?.body_html) return [];
-    const found = new Set<string>();
-    const re = /\/api\/email\/proxy-image\?url=([^"&\s]+)/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(selectedMessage.body_html)) !== null) {
-      try {
-        const decoded = decodeURIComponent(m[1]);
-        const u = new URL(decoded);
-        found.add(`${u.protocol}//${u.host}`);
-      } catch {}
-    }
-    return [...found];
-  })();
+  $: emailOrigins = imageOriginsFromHtml(renderedHtml);
 
   $: blockedOrigins = emailOrigins.filter(o => !imageOrigins.includes(o) && !blacklistOrigins.includes(o));
   $: allowedEmailOrigins = emailOrigins.filter(o => imageOrigins.includes(o));
@@ -3377,8 +3378,8 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2 4 12 13 22 4"/></svg>
                     {selectedMessage.is_read ? tl('mail_markUnread') : tl('mail_markRead')}
                   </button>
-                  {#if htmlHasValue}
-                    {#if emailOrigins.length > 0}
+                  {#if canToggleBodyView}
+                    {#if !selectedMessage.is_encrypted && emailOrigins.length > 0}
                       <button role="menuitem" on:click={() => { actionsOpen = false; openOriginsForEmail(); }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>{tl('mail_imageSourcesEmail')}</button>
                     {/if}
 
@@ -3567,7 +3568,7 @@
             {#if pgpPublicKeyImportSuccess}<p class="pgp-success">{pgpPublicKeyImportSuccess}</p>{/if}
             {#if selectedMessage.is_encrypted}
               <!-- PGP encrypted message -->
-              {#if pgpDecryptedHtml}
+              {#if viewMode === 'html' && encryptedHtmlHasValue}
                 <!-- Decrypted HTML: sandboxed iframe WITHOUT allow-same-origin -->
                 {#key iframeKey}
                   <iframe
@@ -3581,7 +3582,7 @@
                   ></iframe>
                 {/key}
               {:else if pgpDecryptedText}
-                <pre class="body-text">{pgpDecryptedText}</pre>
+                <pre class="body-text">{#each bodyTextSegments as seg}{#if 'href' in seg}<a href={seg.href} target="_blank" rel="noopener noreferrer">{seg.text}</a>{:else}{seg.text}{/if}{/each}</pre>
               {:else if pgpDecryptError}
                 <p class="pgp-error">{pgpDecryptError}</p>
               {:else if pgpDecrypting}
@@ -3619,7 +3620,7 @@
                   bind:this={iframeEl}
                   on:load={fitIframeToContent}
                   sandbox="allow-popups allow-same-origin"
-                  srcdoc={selectedMessage.body_html}
+                  srcdoc={renderedHtml}
                   title={tl('nav_mail')}
                   class="html-body"
                   scrolling="no"

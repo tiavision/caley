@@ -14,8 +14,8 @@ export type DecryptBadge =
   | 'decrypt_failed'; // decryption error
 
 export interface DecryptResult {
-  plaintext: string;
-  isHtml: boolean;
+  text: string | null;
+  html: string | null;
   badges: DecryptBadge[];
   attachments: DecryptedAttachment[];
 }
@@ -86,7 +86,7 @@ export function extractPublicKey(privateKey: openpgp.PrivateKey): string {
  * privateKeys — unlocked in-memory private keys (tried in order)
  * rawMime     — the raw .eml bytes fetched from /api/email/raw
  * publicKeys  — trusted public keys available for signer verification
- * Returns the decrypted plaintext + signature status badges.
+ * Returns decrypted text/html bodies plus signature status badges.
  */
 export async function decryptMessage(
   privateKeys: openpgp.PrivateKey[],
@@ -99,7 +99,7 @@ export async function decryptMessage(
   // Extract the PGP block from the MIME structure.
   const pgpBlock = extractPgpBlock(mimeStr);
   if (!pgpBlock) {
-    return { plaintext: mimeStr, isHtml: false, badges: [], attachments: [] };
+    return { text: mimeStr, html: null, badges: [], attachments: [] };
   }
 
   let message: openpgp.Message<string | Uint8Array>;
@@ -107,9 +107,9 @@ export async function decryptMessage(
     message = await openpgp.readMessage({ armoredMessage: pgpBlock.ciphertext });
   } catch (e) {
     if (hasArgon2(e)) {
-      return { plaintext: '', isHtml: false, badges: ['unsupported_alg'], attachments: [] };
+      return { text: null, html: null, badges: ['unsupported_alg'], attachments: [] };
     }
-    return { plaintext: '', isHtml: false, badges: ['decrypt_failed'], attachments: [] };
+    return { text: null, html: null, badges: ['decrypt_failed'], attachments: [] };
   }
 
   let decrypted: openpgp.DecryptMessageResult;
@@ -122,9 +122,9 @@ export async function decryptMessage(
     });
   } catch (e) {
     if (hasArgon2(e)) {
-      return { plaintext: '', isHtml: false, badges: ['unsupported_alg'], attachments: [] };
+      return { text: null, html: null, badges: ['unsupported_alg'], attachments: [] };
     }
-    return { plaintext: '', isHtml: false, badges: ['decrypt_failed'], attachments: [] };
+    return { text: null, html: null, badges: ['decrypt_failed'], attachments: [] };
   }
 
   badges.push('encrypted');
@@ -165,17 +165,19 @@ export async function decryptMessage(
   // server cannot see inner bodies or attachments without the private key.
   const inner = parseDecryptedMime(decryptedText);
   if (inner) {
-    if (inner.html !== null) {
-      return { plaintext: inner.html, isHtml: true, badges, attachments: inner.attachments };
-    }
-    return { plaintext: inner.text ?? '', isHtml: false, badges, attachments: inner.attachments };
+    return { text: inner.text, html: inner.html, badges, attachments: inner.attachments };
   }
 
   // Inline PGP commonly decrypts to an ordinary body rather than a MIME entity.
   const isHtml = decryptedText.trimStart().toLowerCase().startsWith('<!doctype html') ||
     decryptedText.trimStart().toLowerCase().startsWith('<html');
 
-  return { plaintext: decryptedText, isHtml, badges, attachments: [] };
+  return {
+    text: isHtml ? null : decryptedText,
+    html: isHtml ? decryptedText : null,
+    badges,
+    attachments: [],
+  };
 }
 
 /**

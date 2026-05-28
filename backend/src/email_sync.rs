@@ -452,8 +452,7 @@ impl EmailSyncManager {
                     let (body_text, body_html) = if is_encrypted {
                         (String::new(), None)
                     } else {
-                        let html = body_html.map(|h| imap_client::rewrite_cid_urls(&h, account_id, mailbox, uid));
-                        (body_text, html)
+                        (body_text, body_html)
                     };
                     let body_idx = self.search_mode.normalize_text(&body_text);
 
