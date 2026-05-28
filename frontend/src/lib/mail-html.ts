@@ -7,6 +7,18 @@ export interface MailHtmlContext {
 }
 
 const imageDataPattern = /^data:image\/(?!svg\b)[a-z0-9.+-]+;base64,/i;
+const allowedTags = [
+  'a', 'abbr', 'b', 'blockquote', 'br', 'cite', 'code', 'col', 'colgroup',
+  'del', 'div', 'dl', 'dt', 'dd', 'em', 'font', 'h1', 'h2', 'h3', 'h4',
+  'h5', 'h6', 'hr', 'i', 'img', 'ins', 'li', 'ol', 'p', 'pre', 's',
+  'small', 'span', 'strike', 'strong', 'sub', 'sup',
+  'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul',
+];
+const allowedAttrs = [
+  'align', 'alt', 'bgcolor', 'border', 'cellpadding', 'cellspacing', 'class',
+  'color', 'colspan', 'dir', 'face', 'height', 'href', 'rel', 'rowspan',
+  'size', 'span', 'src', 'style', 'target', 'title', 'valign', 'width',
+];
 
 function encode(value: string): string {
   return encodeURIComponent(value);
@@ -38,8 +50,18 @@ export function prepareEmailHtml(html: string, context: MailHtmlContext = {}): s
     if (!(node instanceof Element)) return;
 
     if (node instanceof HTMLAnchorElement) {
-      node.setAttribute('target', '_blank');
-      node.setAttribute('rel', 'noopener noreferrer');
+      const href = node.getAttribute('href');
+      const lower = href?.trimStart().toLowerCase() ?? '';
+      if (href && (lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('mailto:'))) {
+        node.setAttribute('target', '_blank');
+        node.setAttribute('rel', 'noopener noreferrer');
+      } else {
+        node.removeAttribute('href');
+        node.removeAttribute('target');
+        node.removeAttribute('rel');
+      }
+    } else {
+      node.removeAttribute('href');
     }
 
     if (node instanceof HTMLImageElement) {
@@ -56,7 +78,10 @@ export function prepareEmailHtml(html: string, context: MailHtmlContext = {}): s
       } else if (!imageDataPattern.test(src)) {
         node.removeAttribute('src');
       }
+    } else {
+      node.removeAttribute('src');
     }
+    node.removeAttribute('srcset');
 
     const style = node.getAttribute('style');
     if (style !== null) {
@@ -70,7 +95,9 @@ export function prepareEmailHtml(html: string, context: MailHtmlContext = {}): s
   try {
     return DOMPurify.sanitize(html, {
       FORCE_BODY: true,
-      FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
+      ALLOWED_TAGS: allowedTags,
+      ALLOWED_ATTR: allowedAttrs,
+      ALLOW_DATA_ATTR: false,
       ADD_URI_SAFE_ATTR: ['src'],
       ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|cid):|data:image\/(?!svg\b)|\/api\/email\/proxy-image\?)/i,
     });

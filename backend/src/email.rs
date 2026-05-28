@@ -1326,6 +1326,18 @@ enum AllowedImage {
     Avif,
 }
 
+impl AllowedImage {
+    fn content_type(self) -> &'static str {
+        match self {
+            Self::Png => "image/png",
+            Self::Jpeg => "image/jpeg",
+            Self::Gif => "image/gif",
+            Self::WebP => "image/webp",
+            Self::Avif => "image/avif",
+        }
+    }
+}
+
 fn detect_allowed_image(data: &[u8]) -> Option<AllowedImage> {
     match infer::get(data).map(|t| t.mime_type()) {
         Some("image/png") => Some(AllowedImage::Png),
@@ -1364,18 +1376,15 @@ pub async fn proxy_image(
             None => return transparent_pixel(),
         };
 
-        // Only serve inline attachments as images. The content type comes straight
-        // from the (untrusted) MIME part; serving e.g. text/html same-origin would
-        // be a stored-XSS vector if the resource URL were opened directly.
-        let ct = att.content_type.unwrap_or_else(|| "application/octet-stream".to_string());
-        let ct_lower = ct.to_ascii_lowercase();
-        if !ct_lower.starts_with("image/") || ct_lower.contains("svg") {
+        // Sniff bytes before serving inline attachments. Declared MIME type is
+        // untrusted and could otherwise make active content same-origin.
+        let Some(kind) = detect_allowed_image(&bytes) else {
             return transparent_pixel();
-        }
+        };
         return (
             StatusCode::OK,
             [
-                (header::CONTENT_TYPE, ct),
+                (header::CONTENT_TYPE, kind.content_type().to_string()),
                 (header::CACHE_CONTROL, "private, max-age=3600".to_string()),
                 (header::HeaderName::from_static("x-content-type-options"), "nosniff".to_string()),
             ],
@@ -1430,14 +1439,6 @@ pub async fn proxy_image(
         return transparent_pixel();
     }
 
-    let ct = resp
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-
-    let ct_owned = ct.clone();
     let bytes = match resp.bytes().await {
         Ok(b) => b,
         Err(_) => {
@@ -1445,16 +1446,15 @@ pub async fn proxy_image(
         }
     };
 
-    let kind = detect_allowed_image(&bytes);
-    let _ = match kind {
+    let kind = match detect_allowed_image(&bytes) {
         Some(k) => k,
-        None => return transparent_pixel()
+        None => return transparent_pixel(),
     };
 
     (
         StatusCode::OK,
         [
-            (header::CONTENT_TYPE, ct_owned),
+            (header::CONTENT_TYPE, kind.content_type().to_string()),
             (header::CACHE_CONTROL, "private, max-age=3600".to_string()),
             (header::HeaderName::from_static("x-content-type-options"), "nosniff".to_string()),
         ],
@@ -1916,7 +1916,7 @@ pub async fn autodiscover_handler(
 
 #[cfg(test)]
 mod tests {
-    use super::{attachment_disposition, can_preview_attachment, dedupe_thread_messages};
+    use super::{attachment_disposition, can_preview_attachment, dedupe_thread_messages, detect_allowed_image, AllowedImage};
     use crate::email_db::MessageRow;
 
     fn thread_row(mailbox: &str, uid: i64, message_id: &str, sent_at: i64) -> MessageRow {
@@ -1999,5 +1999,17 @@ mod tests {
             attachment_disposition("text/html", "file.html"),
             "attachment; filename=\"file.html\""
         );
+    }
+
+    #[test]
+    fn image_detection_sniffs_bytes_not_declared_type() {
+        let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89";
+        assert_eq!(detect_allowed_image(png), Some(AllowedImage::Png));
+
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>"#;
+        assert_eq!(detect_allowed_image(svg), None);
+
+        let html = b"<!doctype html><script>alert(1)</script>";
+        assert_eq!(detect_allowed_image(html), None);
     }
 }
