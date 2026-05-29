@@ -7,6 +7,8 @@
   import EventDetail from './EventDetail.svelte';
   import type { EventJson, DayEventsJson, CalendarJson, MonthGridJson, CalDavAccountJson } from '../types/calendar.ts';
   import { getMonday, fmtDate, fmtYM } from '../lib/date.ts';
+  import MonthView from './MonthView.svelte';
+  import DayEventsDialog from './DayEventsDialog.svelte';
 
   // ── i18n ───────────────────────────────────────────────────────────────────
   let locale = 'en';
@@ -16,9 +18,11 @@
   let calendars: CalendarJson[] = [];
   let accounts: CalDavAccountJson[] = [];
   let days: DayEventsJson[] = [];
+  let monthViewDays: DayEventsJson[] = [];
   let monthGrid: MonthGridJson | null = null;
   let eventsLoading = false;
   let monthPickerOpen = false;
+  let viewMode: 'week' | 'month' = 'week';
 
   let selectedWeekStart: Date = getMonday(new Date());
   let gridMonth: string = fmtYM(selectedWeekStart);
@@ -27,6 +31,8 @@
   let touchStartY = 0;
 
   $: weekEnd = (() => { const d = new Date(selectedWeekStart); d.setDate(d.getDate() + 6); return d; })();
+
+  $: monthRangeText = monthGrid ? monthGrid.month_name + ' ' + monthGrid.year : '';
 
   $: weekRangeText = (() => {
     locale;
@@ -69,11 +75,26 @@
     eventsLoading = false;
   }
 
+  async function fetchMonthViewEvents() {
+    if (!monthGrid?.days.length) return;
+    eventsLoading = true;
+    try {
+      const start = monthGrid.days[0].date_str;
+      const end = monthGrid.days[monthGrid.days.length - 1].date_str;
+      const res = await fetch(`/api/events?start=${start}&end=${end}`);
+      if (res.ok) monthViewDays = await res.json();
+    } catch {}
+    eventsLoading = false;
+  }
+
   async function fetchMonthGrid(month?: string) {
     try {
       const m = month || gridMonth;
       const res = await fetch(`/api/calendar?month=${m}`);
-      if (res.ok) monthGrid = await res.json();
+      if (res.ok) {
+        monthGrid = await res.json();
+        if (viewMode === 'month') await fetchMonthViewEvents();
+      }
     } catch {}
   }
 
@@ -158,6 +179,23 @@
     fetchMonthGrid(month);
   }
 
+  function navigateMonth(delta: number) {
+    const [y, m] = gridMonth.split('-').map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    gridMonth = fmtYM(d);
+    fetchMonthGrid(gridMonth);
+  }
+
+  function switchView(mode: 'week' | 'month') {
+    viewMode = mode;
+    localStorage.setItem('cal_view_mode', mode);
+    if (mode === 'month') {
+      fetchMonthViewEvents();
+    } else {
+      fetchEvents();
+    }
+  }
+
   function navigateToday() {
     const today = new Date();
     selectedWeekStart = getMonday(today);
@@ -187,6 +225,9 @@
   // ── Event form ─────────────────────────────────────────────────────────────
   let formDialog: EventFormDialog;
   let focusedEventDate = '';
+
+  // ── Day events dialog (month view) ─────────────────────────────────────────
+  let dayEventsDialog: DayEventsDialog;
 
 
   // ── Past days / collapsing ──────────────────────────────────────────────────
@@ -315,16 +356,26 @@
     }
     if (e.key === 'c') { e.preventDefault(); formDialog.openNewEventForm(); }
     else if (e.key === 't') { e.preventDefault(); navigateToday(); }
-    else if (e.key === 'n') { e.preventDefault(); navigateWeek(7); }
-    else if (e.key === 'N') { e.preventDefault(); navigateWeek(28); }
-    else if (e.key === 'p') { e.preventDefault(); navigateWeek(-7); }
-    else if (e.key === 'P') { e.preventDefault(); navigateWeek(-28); }
+    else if (viewMode === 'month') {
+      if (e.key === 'n') { e.preventDefault(); navigateMonth(1); }
+      else if (e.key === 'N') { e.preventDefault(); navigateMonth(3); }
+      else if (e.key === 'p') { e.preventDefault(); navigateMonth(-1); }
+      else if (e.key === 'P') { e.preventDefault(); navigateMonth(-3); }
+    } else {
+      if (e.key === 'n') { e.preventDefault(); navigateWeek(7); }
+      else if (e.key === 'N') { e.preventDefault(); navigateWeek(28); }
+      else if (e.key === 'p') { e.preventDefault(); navigateWeek(-7); }
+      else if (e.key === 'P') { e.preventDefault(); navigateWeek(-28); }
+    }
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
   onMount(async () => {
     await initI18n();
     locale = getLocale();
+
+    const savedView = localStorage.getItem('cal_view_mode');
+    if (savedView === 'month') viewMode = 'month';
 
     window.addEventListener('keydown', handleKeydown);
 
@@ -350,13 +401,27 @@
   <div class="weekly" role="application" ontouchstart={handleTouchStart} ontouchend={handleTouchEnd}>
     <div class="weekly-header">
       <div class="week-nav-wrapper">
-        <button class="nav-btn" aria-label="Previous week" onclick={() => navigateWeek(-7)}><span class="arrow">‹</span></button>
-        <button class="week-range-btn" onclick={() => monthPickerOpen = !monthPickerOpen} aria-expanded={monthPickerOpen} aria-haspopup="true">
-          <span class="week-range">{weekRangeText}</span>
-          <span class="picker-caret" aria-hidden="true"></span>
+        <button class="nav-btn"
+          aria-label={viewMode === 'month' ? 'Previous month' : 'Previous week'}
+          onclick={() => viewMode === 'month' ? navigateMonth(-1) : navigateWeek(-7)}>
+          <span class="arrow">‹</span>
         </button>
-        <button class="nav-btn" aria-label="Next week" onclick={() => navigateWeek(7)}><span class="arrow">›</span></button>
-        {#if monthPickerOpen}
+        {#if viewMode === 'week'}
+          <button class="week-range-btn" onclick={() => monthPickerOpen = !monthPickerOpen} aria-expanded={monthPickerOpen} aria-haspopup="true">
+            <span class="week-range">{weekRangeText}</span>
+            <span class="picker-caret" aria-hidden="true"></span>
+          </button>
+        {:else}
+          <span class="week-range-btn month-range-label">
+            <span class="week-range">{monthRangeText}</span>
+          </span>
+        {/if}
+        <button class="nav-btn"
+          aria-label={viewMode === 'month' ? 'Next month' : 'Next week'}
+          onclick={() => viewMode === 'month' ? navigateMonth(1) : navigateWeek(7)}>
+          <span class="arrow">›</span>
+        </button>
+        {#if monthPickerOpen && viewMode === 'week'}
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
           <div class="popover-backdrop" onclick={() => monthPickerOpen = false}></div>
           <div class="month-picker-popover">
@@ -373,74 +438,94 @@
         {/if}
       </div>
       <div class="header-actions">
+        <div class="view-toggle" role="group">
+          <button class="view-toggle-btn" class:active={viewMode === 'week'} onclick={() => switchView('week')}>{tl('cal_view_week')}</button>
+          <button class="view-toggle-btn" class:active={viewMode === 'month'} onclick={() => switchView('month')}>{tl('cal_view_month')}</button>
+        </div>
         <button class="today-btn" onclick={navigateToday}>{tl('cal_today')}</button>
       </div>
     </div>
 
-    <div
-      class="calendar"
-      class:events-loading={eventsLoading}
-      role="grid"
-      aria-label="Weekly calendar"
-      tabindex="0"
-      style="position:relative"
-      onkeydown={handleGridKeydown}
-    >
-      {#if eventsLoading}
-        <div class="week-loading">{tl('weekly_loading')}</div>
-      {/if}
+    {#if viewMode === 'week'}
+      <div
+        class="calendar"
+        class:events-loading={eventsLoading}
+        role="grid"
+        aria-label="Weekly calendar"
+        tabindex="0"
+        style="position:relative"
+        onkeydown={handleGridKeydown}
+      >
+        {#if eventsLoading}
+          <div class="week-loading">{tl('weekly_loading')}</div>
+        {/if}
 
-      {#each days as day (day.date_iso)}
-        {@const past = isPastDay(day.date_iso)}
-        {@const collapsed = isDefaultCollapsed(day.date_iso) !== toggledDays.has(day.date_iso)}
-        <div
-          class="day"
-          class:today={day.is_today}
-          class:day-past={past}
-          class:day-past-empty={past && day.events.length === 0}
-          class:day-collapsed={collapsed}
-          class:day-collapsible={day.events.length > 0}
-          data-date={day.date_iso}
-        >
-          <div class="day-header-row">
-            <button type="button" class="day-heading"
-              title={new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { dateStyle: 'long' })}
-              onclick={() => { focusedEventDate = day.date_iso; if (day.events.length > 0) toggleDay(day.date_iso); }}>
-              {new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { weekday: 'long' })}
-              {#if collapsed && day.events.length > 0}
-                <span class="day-past-count">{day.events.length}</span>
-              {/if}
-              {#if day.events.length > 0}
-                <span class="day-expand-icon" aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
-              {/if}
-              <span class="day-date">{new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { month: 'short', day: 'numeric' })}</span>
-            </button>
-            <button type="button" class="day-add-btn" aria-label={tl('event_new')}
-              onclick={() => { focusedEventDate = day.date_iso; formDialog.openNewEventForm(); }}>
-              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
-                <line x1="8" y1="2" x2="8" y2="14"/><line x1="2" y1="8" x2="14" y2="8"/>
-              </svg>
-            </button>
+        {#each days as day (day.date_iso)}
+          {@const past = isPastDay(day.date_iso)}
+          {@const collapsed = isDefaultCollapsed(day.date_iso) !== toggledDays.has(day.date_iso)}
+          <div
+            class="day"
+            class:today={day.is_today}
+            class:day-past={past}
+            class:day-past-empty={past && day.events.length === 0}
+            class:day-collapsed={collapsed}
+            class:day-collapsible={day.events.length > 0}
+            data-date={day.date_iso}
+          >
+            <div class="day-header-row">
+              <button type="button" class="day-heading"
+                title={new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { dateStyle: 'long' })}
+                onclick={() => { focusedEventDate = day.date_iso; if (day.events.length > 0) toggleDay(day.date_iso); }}>
+                {new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { weekday: 'long' })}
+                {#if collapsed && day.events.length > 0}
+                  <span class="day-past-count">{day.events.length}</span>
+                {/if}
+                {#if day.events.length > 0}
+                  <span class="day-expand-icon" aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
+                {/if}
+                <span class="day-date">{new Date(day.date_iso + 'T00:00:00').toLocaleDateString(locale, { month: 'short', day: 'numeric' })}</span>
+              </button>
+              <button type="button" class="day-add-btn" aria-label={tl('event_new')}
+                onclick={() => { focusedEventDate = day.date_iso; formDialog.openNewEventForm(); }}>
+                <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+                  <line x1="8" y1="2" x2="8" y2="14"/><line x1="2" y1="8" x2="14" y2="8"/>
+                </svg>
+              </button>
+            </div>
+            <div class="appointments">
+              {#each day.events as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
+                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                <article
+                  class="appointment event-trigger"
+                  style="border-left: 3px solid {event.color}"
+                  tabindex="-1"
+                  onclick={() => eventDetail.open(event)}
+                  onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); eventDetail.open(event); } }}
+                >
+                  <div class="appt-content">
+                    <span class="appt-time">{event.time_range.split('-')[0]}</span> · {event.summary}
+                  </div>
+                </article>
+              {/each}
+            </div>
           </div>
-          <div class="appointments">
-            {#each day.events as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
-              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-              <article
-                class="appointment event-trigger"
-                style="border-left: 3px solid {event.color}"
-                tabindex="-1"
-                onclick={() => eventDetail.open(event)}
-                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); eventDetail.open(event); } }}
-              >
-                <div class="appt-content">
-                  <span class="appt-time">{event.time_range.split('-')[0]}</span> · {event.summary}
-                </div>
-              </article>
-            {/each}
-          </div>
-        </div>
-      {/each}
-    </div>
+        {/each}
+      </div>
+    {:else}
+      <div class="month-view-wrapper" class:events-loading={eventsLoading}>
+        {#if eventsLoading}
+          <div class="week-loading" style="display:flex">{tl('weekly_loading')}</div>
+        {/if}
+        <MonthView
+          {monthGrid}
+          days={monthViewDays}
+          {todayStr}
+          {locale}
+          onEventClick={(ev) => eventDetail.open(ev)}
+          onMoreClick={(date, evs) => dayEventsDialog.open(date, evs)}
+        />
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -464,6 +549,13 @@
   ondeleted={() => { fetchEvents(); fetchMonthGrid(); }}
 />
 
+<!-- ── Day events dialog (month view) ────────────────────────────────────── -->
+<DayEventsDialog
+  bind:this={dayEventsDialog}
+  {locale}
+  onEventClick={(ev) => eventDetail.open(ev)}
+/>
+
 
 <!-- FAB -->
 <button class="fab" aria-label={tl('event_new')} title={tl('event_new')} onclick={() => formDialog.openNewEventForm()}>
@@ -479,7 +571,8 @@
   .layout {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    flex: 1;
+    min-height: 0;
   }
 
   /* Weekly header */
@@ -537,6 +630,14 @@
     background: var(--pico-primary-background);
     color: var(--pico-primary-inverse);
     border-color: var(--pico-primary-background);
+  }
+
+  /* Weekly container */
+  .weekly {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
   }
 
   /* Weekly grid */
@@ -656,6 +757,59 @@
   :global(.event-trigger:hover) { filter: brightness(0.95); }
   :global(.event-trigger:focus-visible) { outline: 2px solid var(--pico-primary-background, #0074d9); outline-offset: 2px; }
 
+
+  /* View toggle — each button carries its own border so height matches today-btn exactly */
+  .view-toggle {
+    display: flex;
+    margin-bottom: 0;
+  }
+  .view-toggle-btn {
+    background: none;
+    border: var(--pico-border-width) solid var(--pico-muted-border-color);
+    border-radius: 0;
+    padding: 0.2rem 0.65rem;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    color: var(--pico-muted-color);
+    cursor: pointer;
+    margin: 0;
+    margin-bottom: 0;
+    transition: background 0.12s, color 0.12s;
+  }
+  .view-toggle-btn:first-child {
+    border-radius: var(--pico-border-radius) 0 0 var(--pico-border-radius);
+  }
+  .view-toggle-btn:last-child {
+    border-radius: 0 var(--pico-border-radius) var(--pico-border-radius) 0;
+  }
+  .view-toggle-btn + .view-toggle-btn {
+    border-left: none;
+  }
+  .view-toggle-btn.active {
+    background: var(--pico-primary-background);
+    color: var(--pico-primary-inverse);
+    border-color: var(--pico-primary-background);
+  }
+  .view-toggle-btn:not(.active):hover {
+    background: rgba(0,0,0,0.05);
+    color: var(--pico-color);
+  }
+  @media (prefers-color-scheme: dark) {
+    .view-toggle-btn:not(.active):hover { background: rgba(255,255,255,0.07); }
+  }
+
+  .month-range-label {
+    cursor: default;
+  }
+
+  /* Month view wrapper */
+  .month-view-wrapper {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
 
   /* FAB */
   .fab {
