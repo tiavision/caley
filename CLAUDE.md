@@ -4,143 +4,265 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Caley** is a CalDAV calendar viewer. It's a two-package monorepo with independent frontend and backend. Users authenticate (via OIDC or directly with CalDAV credentials), then fetch and view calendar events. Events can be created, edited (including recurring event modifications), and deleted.
+**Caley** is a personal groupware web app. It is no longer only a CalDAV calendar viewer: the app now includes calendar management, CardDAV contacts, IMAP/SMTP email, full-text search, email identities, image privacy controls, and WebAuthn-backed OpenPGP key management.
+
+The repository is a two-package monorepo with independent frontend and backend tooling:
+
+- **`backend/`** — Rust 2024 Axum binary. Handles auth, CalDAV/CardDAV/IMAP/SMTP clients, SQLite persistence, encryption, sync tasks, SSE, and static frontend serving.
+- **`frontend/`** — Vite + Svelte 5 static multi-page app. Pico CSS + Sass, compile-time i18n via `@inlang/paraglide-js`.
+
+There is no root-level package manager or Cargo workspace.
 
 ## Authentication
 
-CalDAV-credential login is **always** available; OIDC login is **additive** — offered alongside it when configured. Both can authenticate users at the same time. The unified login page lives at `/` (the index): a CalDAV form (server URL, username, password) plus, when OIDC is configured, a "sign in via provider" button.
+CalDAV-credential login is **always** available. OIDC login is **additive** and shown alongside it when configured. The unified login page lives at `/`.
 
-**CalDAV-credential login** (always on):
-- User submits credentials to `POST /auth/login`; they are validated against the CalDAV server (PROPFIND), then saved to the DB and a session is created
-- User ID derived as `username@hostname` (e.g. `user@dav.myurl.tld`); display name fetched via PROPFIND on the principal URL
-- Authenticated state = a `user_id` key in the session
+**CalDAV-credential login**:
 
-**OIDC login** (when `OIDC_ISSUER` + `OIDC_CLIENT_ID` + `OIDC_CLIENT_SECRET` are all set):
-- The login button links to `/auth/oidc`, which is wrapped by `OidcLoginLayer` and redirects to the provider; on return the code is exchanged on that same route, then the user is sent to `/calendar/`
-- **The IdP redirect URI must be `{APP_BASE_URL}/auth/oidc`** (not `/auth/callback`, which no longer exists)
-- `OidcAuthLayer` wraps the whole app (a safe no-op for CalDAV-only users) so `OidcClaims` are populated when an OIDC session exists
-- User ID extracted from the configured OIDC claim (`OIDC_USER_ID_CLAIM`); CalDAV credentials configured separately in settings after login
+- `POST /auth/login` validates CalDAV credentials with PROPFIND, stores them encrypted, and creates a session.
+- User ID is derived as `username@hostname`.
+- Display name is fetched from the CalDAV principal when possible.
 
-**Gating** (`RequireAuthLayer` in `oidc.rs`): public paths (`/`, `/auth/*`, `/logout`, `/api/auth/config`, static assets) always pass; otherwise authenticated = (OIDC claims present) OR (session `user_id` present). Unauthenticated `/api/*` requests get 401 JSON; all other unauthenticated paths redirect to `/`.
+**OIDC login**:
 
-`/logout` is unified: it does RP-initiated logout when an OIDC session is present (extracted via `Option<OidcRpInitiatedLogout>`), otherwise just flushes the session.
+- Enabled only when `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` are all set.
+- Login goes through `/auth/oidc`; the IdP redirect URI must be `{APP_BASE_URL}/auth/oidc`.
+- CalDAV, email, and encryption settings are configured inside the app after OIDC login.
+- User ID comes from `OIDC_USER_ID_CLAIM` (`sub` by default).
 
-The `CurrentUser` struct in `oidc.rs` is the unified extractor used by all handlers — it tries OIDC claims first, then the session. No handler takes `OidcClaims` directly. `GET /api/auth/config` is a public endpoint reporting `{ oidc_enabled }` so the login page knows whether to show the OIDC button.
+`CurrentUser` in `oidc.rs` is the unified extractor for protected handlers. It tries OIDC claims first, then the server-side session. Do not use `OidcClaims` directly in handlers.
 
-## Architecture
+`RequireAuthLayer` allows public paths (`/`, `/auth/*`, `/logout`, `/api/auth/config`, `/api/push/webhook`, `/api/email/navigate`, and static assets) and requires either OIDC claims or a session user for everything else. Unauthenticated API requests return 401; page requests redirect to `/`.
 
-### Backend (`backend/`)
-- **Language**: Rust (edition 2024)
-- **Framework**: Axum web server
-- **Key Dependencies**:
-  - `axum-oidc`: OIDC authentication middleware (active when OIDC is configured)
-  - `sqlx`: SQLite database (bundled)
-  - `ical` + `rrule`: iCalendar parsing and recurrence rules
-  - `reqwest`: CalDAV client HTTP requests
-  - `aes-gcm` + `hkdf`: Encryption for stored credentials (AES-256-GCM)
-  - `dotenvy`: Environment variable loading
-  - `tower-sessions`: In-memory session store
+Sessions are stored in SQLite via `tower-sessions-sqlx-store` and expire after 7 days of inactivity.
 
-**Key Modules**:
-- `main.rs`: Server setup, routing, unified auth middleware stack (CalDAV login always wired; OIDC layers added when configured)
-- `search.rs`: `SearchMode` enum (`Default`, `Trigram`, `Stemmed(Algorithm)`). Parsed from `SEARCH_MODE` env var via `FromStr` — `"German"` etc. deserialised into `rust_stemmers::Algorithm` using serde. `normalize_text()` applies Snowball stemming for `Stemmed` mode; passthrough for others. `build_fts_query()` builds the FTS5 MATCH expression (prefix wildcards for default/stemmed, raw terms for trigram). Used in `AppState`, `SyncManager`, and all db insert paths.
-- `oidc.rs`: `CurrentUser` extractor (claims-then-session), `AppState` (`oidc_enabled: bool`), `RequireAuthLayer`, handlers (`user_info`, `auth_config`, unified `logout_handler`, `oidc_post_login`)
-- `local_auth.rs`: CalDAV login handler (`handle_login`), `delete_account`, `derive_user_id`
-- `caldav.rs`: CalDAV client implementation, iCalendar parsing, event/calendar operations, `get_display_name()`
-- `calendar.rs`: HTTP endpoints for calendar/event operations (list, create, edit, delete)
-- `db.rs`: SQLite schema and operations (user identity record, CalDAV accounts, deactivated calendars, event cache). CalDAV credentials encrypted with AES-256-GCM. `ensure_user()` creates the identity row on login; `get_settings()`/`upsert_settings()` operate on the user's active CalDAV account; `delete_user()` for account deletion.
-- `settings.rs`: Settings form endpoint, credential validation via test CalDAV connection
-- `crypto.rs`: Encryption/decryption using HKDF-SHA256 key derivation from `ENCRYPTION_KEY` env var
-- `sync.rs`: Background CalDAV sync manager
-- `sse.rs`: Server-sent events for real-time calendar updates
+## Backend
 
-**Database Schema**:
-- `user_settings`: Per-user identity record (`user_id`, `display_name`). Exists for every authenticated user, even with no CalDAV account configured; referenced by the cache/contacts/email tables.
-- `caldav_accounts`: Per-user CalDAV credentials (encrypted at rest), keyed by `account_id` with a `user_id` foreign column. Modelled to hold multiple accounts per user; downstream sync/cache currently use the single active account (`get_settings` returns the first by `sort_order`).
-- `deactivated_calendars`: Tracks which calendars are hidden per user (encrypted hrefs)
-- `cached_calendars`, `cached_events`: Event/calendar cache for fast reads. `cached_events` has `summary_idx`, `description_idx`, `location_idx` columns that hold the FTS-indexed text (stemmed for `de`/`en`, raw otherwise). `events_fts` virtual table indexes these columns.
-- `push_subscriptions`: WebDAV Push notification subscriptions
-- `app_config`: Key/value store for app-level config (currently stores `search_mode` to detect tokenizer changes on restart)
+### Key Modules
 
-**Routing**:
-- `POST /auth/login` — CalDAV-credential login (validates credentials, sets session) — always available
-- `/auth/oidc` — OIDC login trigger + callback (only when OIDC configured); IdP redirect URI must point here
-- `/api/auth/config` — Public; reports `{ oidc_enabled }` for the login page
-- `/api/user` — Current user info JSON (`display_name`, `has_settings`, `has_caldav`, `oidc_enabled`)
-- `/api/calendars` — List calendars
-- `/api/calendar/toggle` — Show/hide calendar
-- `/api/calendar` — Get month grid for a single calendar
-- `/api/events` — Get all events for date range
-- `/api/events/stream` — SSE stream for real-time updates
-- `/api/settings/form` — Get existing settings JSON
-- `/api/settings` — Save CalDAV credentials (validates connection first)
-- `/api/event` — Create/update/delete events
-- `/api/account` — `DELETE`: delete all user data, flush session, redirect to `/`
-- `/api/push/webhook` — WebDAV Push webhook (public)
-- `/logout` — Unified logout (OIDC RP-initiated logout when an OIDC session is present, otherwise session flush + redirect to `/`)
-- `*` — Fallback: serve frontend static files
+- `main.rs`: CLI/env config, database init, state construction, WebAuthn setup, routing, auth layers, security headers.
+- `oidc.rs`: `CurrentUser`, auth config, user info, logout, auth gating.
+- `local_auth.rs`: CalDAV login, user ID derivation, account deletion.
+- `settings.rs`: CalDAV account settings, multiple CalDAV account CRUD, connection validation.
+- `caldav.rs`, `calendar.rs`, `sync.rs`: CalDAV client, iCalendar parsing, calendar/event CRUD, imports, recurring event handling, background sync.
+- `carddav.rs`, `contacts.rs`: CardDAV addressbook/contact sync and contact CRUD.
+- `email.rs`, `email_db.rs`, `email_sync.rs`, `imap_client.rs`, `email_autodiscover.rs`: IMAP account setup, autodiscovery, mailbox/message cache, SMTP sending, virtual folders, identities, search, attachments, image privacy controls, background/IDLE sync.
+- `pgp.rs`: WebAuthn credential enrollment/authentication, synced OpenPGP vault endpoints, public key storage, raw message access for PGP processing.
+- `crypto.rs`: HKDF-SHA256 key derivation and AES-256-GCM encryption for stored secrets.
+- `search.rs`: `SEARCH_MODE` parsing and FTS query/index text normalization.
+- `sse.rs`: Server-sent events for calendar, contacts, and email updates.
 
-### Frontend (`frontend/`)
-- **Framework**: Vite + Svelte 5
-- **Styling**: Pico CSS + Sass (via `sass-embedded`, not dart-sass)
-- **Internationalization**: i18n with English and German translations via `@inlang/paraglide-js`
+### Configuration
 
-**Pages** (Vite multi-page build entries):
-- `/` (`index.html`) — Login page; mounts `LoginPage.svelte`
-- `/calendar/` (`calendar/index.html`) — Main calendar view; mounts `CalendarApp.svelte`
-- `/settings/` (`settings/index.html`) — Settings page (authenticated only); mounts `SettingsForm.svelte`
+`dotenvy` loads `backend/.env` automatically. Required variables:
 
-**Components**:
-- `LoginPage.svelte`: Login form (submits CalDAV credentials to `/auth/login`) plus, when `/api/auth/config` reports `oidc_enabled`, a button linking to `/auth/oidc`. Redirects to `/calendar/` if already authenticated.
-- `CalendarApp.svelte`: Full calendar UI (month grid, week view, event CRUD)
-- `SettingsForm.svelte`: Authenticated settings page — CalDAV connection form (submits to `/api/settings`), calendars tab, language selector, and the "Delete account" button. No longer handles login.
+- `APP_BASE_URL`
+- `ENCRYPTION_KEY`
 
-**Dev Server Proxy**: `vite.config.ts` proxies `/api`, `/auth`, and `/logout` to `http://localhost:3000` (backend).
+Optional variables:
+
+- `CALDAV_PORT` — listen port, default `3000`.
+- `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` — all three enable OIDC.
+- `OIDC_LOGOUT` — default `true`.
+- `OIDC_USER_ID_CLAIM` — default `sub`.
+- `DATABASE_PATH` — default `./data/caley.db`; parent directory is created automatically.
+- `STATIC_DIR` — default `../frontend/dist`.
+- `SYNC_INTERVAL_MINS` — calendar/email sync interval, default `5`.
+- `SEARCH_MODE` — `default`, `trigram`, or a Snowball algorithm name such as `German` or `English`.
+- `MAP_URL` — map fallback URL template with `{q}` placeholder.
+- `WEBAUTHN_EXTRA_ORIGINS` — additional allowed WebAuthn origins.
+
+### Storage
+
+SQLite is the only database. Migrations live in `backend/migrations/`.
+
+Important persisted data:
+
+- Users and encrypted CalDAV accounts.
+- Cached calendars, events, recurrence-derived search data, and hidden calendars.
+- Cached CardDAV addressbooks and contacts, including contact photos/addresses.
+- Encrypted IMAP accounts, mailboxes, messages, addresses, attachments, identities, virtual folders, image allow/block lists, unread state, and local `.eml` files under the database data directory.
+- WebAuthn credentials.
+- OpenPGP public keys.
+- Synced encrypted OpenPGP private-key vault data, devices, and vault wraps.
+- SQLite-backed session data.
+
+Secrets such as CalDAV and IMAP passwords are encrypted at rest using AES-256-GCM with a key derived from `ENCRYPTION_KEY` via HKDF-SHA256. PGP private keys are handled by the frontend vault flow and stored as encrypted key records.
+
+### Main API Surface
+
+Auth/account:
+
+- `POST /auth/login`
+- `GET /auth/oidc`
+- `GET /logout`
+- `GET /api/auth/config`
+- `GET /api/user`
+- `DELETE /api/account`
+
+Calendar/search:
+
+- `GET /api/calendars`
+- `POST /api/calendar/toggle`
+- `GET|POST /api/calendar`
+- `GET /api/events`
+- `POST|DELETE /api/event`
+- `POST /api/import`
+- `POST /api/import/preview`
+- `GET /api/search`
+- `GET /api/events/stream`
+- `POST /api/push/webhook`
+
+CalDAV/CardDAV settings and contacts:
+
+- `GET /api/settings/form`
+- `POST /api/settings`
+- `GET /api/caldav/accounts`
+- `POST|PUT|DELETE /api/caldav/account`
+- `GET /api/contacts`
+- `POST|DELETE /api/contact`
+- `GET /api/contact/photo`
+
+Email:
+
+- `GET /api/email/autodiscover`
+- `GET /api/email/accounts`
+- `POST|PUT|DELETE /api/email/account`
+- `GET /api/email/mailboxes`
+- `POST /api/email/sync`
+- `GET /api/email/unread-counts`
+- `GET /api/email/folders`
+- `POST|PUT|DELETE /api/email/folder`
+- `GET /api/email/messages`
+- `GET /api/email/message`
+- `GET /api/email/thread`
+- `PATCH /api/email/message/flags`
+- `POST /api/email/message/move`
+- `DELETE /api/email/message`
+- `POST /api/email/send`
+- `POST /api/email/send-raw`
+- `GET /api/email/search`
+- `GET /api/email/suggest-addrs`
+- `GET /api/email/proxy-image`
+- `GET /api/email/attachment`
+- `GET /api/email/export`
+- `GET|POST|DELETE /api/email/image-origins`
+- `GET|POST|DELETE /api/email/image-blacklist`
+- `GET /api/email/identities`
+- `POST|PUT|DELETE /api/email/identity`
+- `GET /api/email/navigate` public helper route.
+
+WebAuthn/OpenPGP:
+
+- `POST /api/webauthn/register/start`
+- `POST /api/webauthn/register/finish`
+- `POST /api/webauthn/authenticate/start`
+- `POST /api/webauthn/authenticate/finish`
+- `GET /api/webauthn/credentials`
+- `DELETE /api/webauthn/credential`
+- `GET|PUT|DELETE /api/pgp/vault`
+- `POST /api/pgp/vault/initialize`
+- `POST /api/pgp/devices/pending`
+- `GET /api/pgp/keys`
+- `POST|DELETE /api/pgp/key`
+- `GET /api/email/raw`
+
+## Frontend
+
+### Pages
+
+Vite builds multiple HTML entries:
+
+- `/` — login page (`LoginPage.svelte`).
+- `/calendar/` — calendar app (`CalendarApp.svelte`).
+- `/contacts/` — contacts app (`ContactsPage.svelte`).
+- `/mail/` — mail app (`MailApp.svelte`).
+- `/mail/view/` — standalone mail message view.
+- `/search/` — calendar search page (`SearchPage.svelte`).
+- `/settings/` — settings and encryption management (`SettingsForm.svelte`).
+
+### User-Visible Capabilities
+
+Calendar:
+
+- Month/week-style calendar UI, active-calendar filtering, event create/edit/delete, recurring event override support, ICS import/preview, location map fallback.
+
+Contacts:
+
+- CardDAV addressbook listing, contact search/filtering, create/edit/delete contacts, emails/phones/addresses/org fields, contact photos, native `geo:` map launch with URL fallback.
+
+Email:
+
+- IMAP account setup with autodiscovery and SMTP settings.
+- Multiple email accounts and identities.
+- Mailbox browsing, unread counts, message pagination, search filters, threads, flag/read state, move/delete, attachments, export, and new-mail notifications.
+- SMTP compose/send, raw MIME send, and protected MIME generation for PGP flows.
+- Remote image privacy controls through image origin allow/block lists and same-origin image proxying.
+- PGP-aware message display: encrypted/signed detection, decryption, signature verification, public key attachment handling, Autocrypt key discovery.
+
+Encryption/settings:
+
+- WebAuthn/passkey enrollment using PRF-capable credentials.
+- Synced encrypted OpenPGP private-key vault.
+- Device approval/pending-device flow.
+- Private key import, own public key management, identity management on keys.
+- Trusted sender public key import/delete.
+- Unlock/lock session state for local PGP operations.
+
+### Frontend Notes
+
+- Svelte 5 with TypeScript strict mode.
+- Styling uses Pico CSS and `sass-embedded`.
+- i18n messages live in `frontend/messages/`.
+- `vite.config.ts` proxies `/api`, `/auth`, and `/logout` to `http://localhost:3000`.
+- The dev server defaults to Vite's port, usually `localhost:5173`.
+- There is a Vitest test script for frontend tests.
 
 ## Development Commands
 
-### Backend
+Backend:
+
 ```bash
 cd backend
-cargo run                    # Start server on :3000 (loads .env if present)
-cargo build --release       # Build optimized binary
-cargo check                 # Check without building
+cargo run
+cargo check
+cargo build --release
+cargo test
 ```
 
-**Environment Variables** (set in `backend/.env` or as env vars):
-- `APP_BASE_URL` — Public URL (e.g., `http://localhost:3000` for local dev) **required**
-- `ENCRYPTION_KEY` — Passphrase for deriving AES-256-GCM encryption key **required**
-- `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` — All three required to enable OIDC login (additive; CalDAV-credential login is always available). Omit them to offer CalDAV login only. When set, register `{APP_BASE_URL}/auth/oidc` as the IdP redirect URI.
-- `CALDAV_PORT` — Listen port (default: `3000`)
-- `OIDC_LOGOUT` — Enable OIDC RP-initiated logout (default: `true`)
-- `OIDC_USER_ID_CLAIM` — OIDC claim for user ID: `sub`, `preferred-username`, `email`, or `name` (default: `sub`)
-- `DATABASE_PATH` — SQLite database file (default: `./data/caley.db`)
-- `STATIC_DIR` — Frontend dist directory (default: `../frontend/dist`)
-- `SYNC_INTERVAL_MINS` — Background sync interval in minutes (default: `5`)
-- `MAP_URL` — URL template for the map fallback link on location fields. Use `{q}` as the placeholder for the URL-encoded query (default: `https://www.openstreetmap.org/search?query={q}`)
-- `SEARCH_MODE` — Full-text search strategy: `default` (unicode-aware prefix matching), `trigram` (SQLite trigram tokenizer, language-agnostic substring matching), or a Snowball algorithm name (e.g. `German`, `English`, `French` — full list: Arabic, Danish, Dutch, English, Finnish, French, German, Greek, Hungarian, Italian, Norwegian, Portuguese, Romanian, Russian, Spanish, Swedish, Tamil, Turkish). Parsed via serde — the string must match the `rust_stemmers::Algorithm` variant name exactly. Changing this rebuilds the FTS index on startup. (default: `default`)
+Frontend:
 
-No linter, formatter, or test runner configured. No tests yet.
-
-### Frontend
 ```bash
 cd frontend
-npm install                 # Install dependencies
-npm run dev                 # Dev server on localhost:5173 (proxies /api, /auth, /logout to backend)
-npm run build               # Build static site to dist/
-npm run preview             # Preview built site locally
+npm install
+npm run dev
+npm run build
+npm run preview
+npm test
 ```
 
-No linter, formatter, or test runner configured.
+No root-level commands are configured.
 
 ## Docker
 
-**Build**:
+Build:
+
 ```bash
 docker build -t caley .
 ```
 
-**Run (CalDAV login + OIDC)** — register `https://calendar.example.com/auth/oidc` as the IdP redirect URI:
+Run with local CalDAV login only:
+
+```bash
+docker run -p 3000:3000 \
+  -v caley-data:/data \
+  -e APP_BASE_URL=https://calendar.example.com \
+  -e ENCRYPTION_KEY=your-passphrase \
+  caley
+```
+
+Run with OIDC also enabled:
+
 ```bash
 docker run -p 3000:3000 \
   -v caley-data:/data \
@@ -152,55 +274,14 @@ docker run -p 3000:3000 \
   caley
 ```
 
-**Run (CalDAV login only)** — omit the OIDC vars:
-```bash
-docker run -p 3000:3000 \
-  -v caley-data:/data \
-  -e APP_BASE_URL=https://calendar.example.com \
-  -e ENCRYPTION_KEY=your-passphrase \
-  caley
-```
+The image builds the frontend with Node, builds the Rust backend, and serves the static frontend from the backend. Persist `/data` or the configured database path so SQLite data, cached mail files, sessions, credentials, and vault metadata survive restarts.
 
-Multi-stage build: Node builds frontend, Rust builds backend (musl target), final image is scratch with binary and `/static` directory. Frontend dist is served as fallback when no API route matches.
+## Implementation Notes
 
-## Local Development Workflow
-
-1. **Start backend**: `cd backend && cargo run` (`APP_BASE_URL` and `ENCRYPTION_KEY` required; add the OIDC vars to also offer OIDC login)
-2. **Start frontend dev server**: `cd frontend && npm run dev`
-3. **Open browser**: `http://localhost:5173`
-4. **Log in** at `/`: enter CalDAV server URL, username, and password, or (if configured) click the OIDC button
-5. **Set up CalDAV** (OIDC users): configure a CalDAV connection in `/settings/` after login
-
-## Key Implementation Details
-
-### Auth layer
-- `RequireAuthLayer` in `oidc.rs` lets the public allow-list (`/`, `/auth/*`, `/logout`, `/api/auth/config`, static assets) through, then requires either OIDC claims (populated by the broad `OidcAuthLayer`) or a session `user_id`
-- `OidcAuthLayer` wraps the whole app and is a safe no-op when there is no OIDC session; `OidcLoginLayer` wraps only `/auth/oidc` so it doesn't auto-redirect every request to the IdP
-- Static assets (file extension in path, or `/assets/` prefix) always pass through — otherwise the page's own JS/CSS would be redirected
-
-### CalDAV
-- Credentials stored encrypted per-user in SQLite
-- CalDAV client fetches calendars (PROPFIND), events (REPORT), supports basic auth
-- iCalendar parsing with `ical` crate; recurrence rules via `rrule`
-- Events can have recurrence info; editing a recurring event creates an override instance
-- All-day events handled differently from timed events (no timezone)
-- `get_display_name()` on `CalDavClient` does PROPFIND for `current-user-principal` then `displayname`
-
-### Encryption
-- `ENCRYPTION_KEY` env var is hashed with HKDF-SHA256 to derive a 32-byte key
-- Credentials encrypted with AES-256-GCM; stored as base64 in database
-- Each encrypted field includes a random nonce (not reused)
-
-### Frontend–Backend Communication
-- Frontend is a static Vite/Svelte build
-- `fetch()` calls to `/api/` endpoints return JSON
-- SSE stream (`/api/events/stream`) pushes `events_refetch`, `calendars_changed`, and `event_removed` events
-- `SettingsForm.svelte` calls `/api/user` on mount to detect auth mode (401 → login mode)
-
-## Notes
-
-- **No CI/CD configured**: No GitHub Actions, linters, formatters, or test runners
-- **No root workspace**: `frontend/` and `backend/` are independent packages; no root `package.json` or Cargo workspace
-- **Session storage**: In-memory only; sessions lost on restart. For production, consider persistent session store
-- **Reverse proxy required**: App does not handle TLS; recommended to run behind Caddy, nginx, or Traefik
-- **Podman compatible**: Works as drop-in replacement for Docker
+- Keep handlers using `CurrentUser`; do not split auth behavior by handler unless a route is intentionally public.
+- Preserve the independent package structure. Do not add root tooling unless explicitly requested.
+- Respect existing encrypted-at-rest patterns for new stored credentials or secrets.
+- Email sync and calendar/contact sync both use SSE to refresh live UI state.
+- OpenPGP private-key material should remain client-side decrypted only. Backend PGP endpoints store encrypted vault records and public metadata.
+- Security headers in `main.rs` intentionally restrict script/image/frame behavior; update CSP carefully when adding frontend capabilities.
+- The app does not terminate TLS. Use a reverse proxy in production and keep `APP_BASE_URL` set to the public HTTPS origin, especially for OIDC and WebAuthn.

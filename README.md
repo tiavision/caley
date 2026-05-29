@@ -1,82 +1,148 @@
 # Caley
 
-CalDAV calendar viewer. Supports two authentication modes:
+Caley is a self-hosted personal groupware web app for calendars, contacts, email, and OpenPGP-assisted mail workflows.
 
-- **OIDC** — authenticate via an external OIDC provider (Pocket ID, Keycloak, Authelia, Authentik, …). Configure CalDAV credentials separately in the settings page after login.
-- **Local (CalDAV login)** — no OIDC required. Users log in directly with their CalDAV server URL, username, and password. The user ID is derived as `username@hostname` (e.g. `user@dav.myurl.tld`). The display name is fetched from the CalDAV server.
+It connects to existing CalDAV, CardDAV, IMAP, and SMTP servers, stores local cache data in SQLite, and serves a Svelte web UI from a Rust backend.
+
+## Features
+
+- Calendar: CalDAV calendar sync, active-calendar filtering, event creation/editing/deletion, recurring event overrides, ICS import/preview, full-text calendar search, live updates through SSE.
+- Contacts: CardDAV addressbook sync, contact search/filtering, create/edit/delete contacts, contact photos, email/phone/address/org fields, map links for addresses.
+- Email: IMAP accounts with autodiscovery, SMTP sending, multiple accounts and identities, mailbox browsing, unread counts, message threads, flags/read state, move/delete, attachments, export, virtual folders, full-text search, new-mail notifications.
+- Privacy: remote email image allow/block controls and same-origin image proxying.
+- OpenPGP: public key storage, trusted sender keys, private key import, encrypted synced private-key vault, WebAuthn/passkey unlock, device approval flow, encrypted/signed message display, signature verification, Autocrypt key discovery, and protected MIME compose paths.
+- Authentication: direct CalDAV login is always available; OIDC login can be added with Pocket ID, Keycloak, Authelia, Authentik, or another OIDC provider.
+- Storage: SQLite database plus cached mail files under the configured data directory. Stored CalDAV and IMAP passwords are encrypted at rest.
 
 ## Architecture
 
-- **backend/** — Rust (edition 2024) Axum server. CalDAV client, iCalendar parser, SQLite cache. Serves the frontend as static files.
-- **frontend/** — Vite + Svelte 5 static site. Pico CSS + Sass. Calendar UI wired to the backend via fetch/SSE.
+- **`backend/`** — Rust 2024 Axum server. Handles auth, CalDAV/CardDAV/IMAP/SMTP clients, SQLite persistence, encryption, sync tasks, WebAuthn/OpenPGP endpoints, SSE, and static frontend serving.
+- **`frontend/`** — Vite + Svelte 5 static multi-page app. Pico CSS, Sass, TypeScript, and `@inlang/paraglide-js` i18n.
+
+There is no root-level package manager or workspace. Run backend and frontend commands from their own directories.
+
+## Requirements
+
+- Rust toolchain with edition 2024 support.
+- Node.js and npm for frontend development/builds.
+- A CalDAV server for local login and calendar/contact setup.
+- Optional: IMAP/SMTP account for email.
+- Optional: OIDC provider for external authentication.
+- Optional but recommended for PGP vault use: a PRF-capable passkey/WebAuthn authenticator and HTTPS origin.
+
+## Configuration
+
+All backend configuration is via environment variables. `backend/.env` is loaded automatically if present.
+
+| Variable | Description | Required |
+|---|---|---|
+| `APP_BASE_URL` | Public URL of this app, for example `https://calendar.example.com` or `http://localhost:3000` locally. Also used for OIDC and WebAuthn origin setup. | Yes |
+| `ENCRYPTION_KEY` | Passphrase used to derive the AES-256-GCM key for encrypted stored credentials. | Yes |
+| `OIDC_ISSUER` | OIDC provider issuer URL. | Only for OIDC |
+| `OIDC_CLIENT_ID` | OIDC client ID. | Only for OIDC |
+| `OIDC_CLIENT_SECRET` | OIDC client secret. | Only for OIDC |
+| `CALDAV_PORT` | Backend listen port. Default: `3000`. | No |
+| `OIDC_LOGOUT` | Set to `false` to skip OIDC RP-initiated logout. Default: `true`. | No |
+| `OIDC_USER_ID_CLAIM` | OIDC claim used as user ID: `sub`, `preferred-username`, `email`, or `name`. Default: `sub`. | No |
+| `DATABASE_PATH` | SQLite database path. Default: `./data/caley.db`. | No |
+| `STATIC_DIR` | Frontend dist directory. Default: `../frontend/dist`. | No |
+| `SYNC_INTERVAL_MINS` | Background calendar/email sync interval. Default: `5`. | No |
+| `SEARCH_MODE` | Full-text strategy: `default`, `trigram`, or a Snowball algorithm name such as `English` or `German`. Changing it rebuilds FTS indexes on startup. Default: `default`. | No |
+| `MAP_URL` | Fallback map URL template. Use `{q}` for the URL-encoded query. Default: `https://www.openstreetmap.org/search?query={q}`. | No |
+| `WEBAUTHN_EXTRA_ORIGINS` | Additional allowed WebAuthn origins. | No |
+
+OIDC is enabled only when all three OIDC variables are set. If OIDC is enabled, register this redirect URI with the provider:
+
+```text
+{APP_BASE_URL}/auth/oidc
+```
 
 ## Local Development
 
-### Backend
+Start the backend:
 
-All configuration is via environment variables. A `.env` file in `backend/` is also loaded automatically if present.
+```bash
+cd backend
+APP_BASE_URL=http://localhost:3000 ENCRYPTION_KEY=dev-secret cargo run
+```
 
-| Variable | Description | Required? |
-|---|---|---|
-| `APP_BASE_URL` | Public URL of this app (e.g. `https://calendar.mydomain.ltd`) | Yes |
-| `ENCRYPTION_KEY` | Passphrase used to derive an AES-256-GCM key for encrypting stored CalDAV credentials | Yes |
-| `OIDC_ISSUER` | OIDC provider issuer URL | OIDC mode only |
-| `OIDC_CLIENT_ID` | OIDC client ID | OIDC mode only |
-| `OIDC_CLIENT_SECRET` | OIDC client secret | OIDC mode only |
-| `CALDAV_PORT` | Listen port (default: `3000`) | No |
-| `OIDC_LOGOUT` | Set to `false` to skip OIDC logout (default: `true`) | No |
-| `OIDC_USER_ID_CLAIM` | OIDC claim to use as user ID: `sub` (default), `preferred-username`, `email`, or `name` | No |
-| `DATABASE_PATH` | Path to SQLite database file (default: `./data/caley.db`) | No |
-| `STATIC_DIR` | Path to frontend dist directory (default: `../frontend/dist`) | No |
-| `SYNC_INTERVAL_MINS` | Background sync interval in minutes (default: `5`) | No |
-| `SEARCH_MODE` | Full-text search strategy: `default` (unicode-aware prefix matching), `trigram` (substring matching, any language), or a Snowball algorithm name for language-specific stemming: `Arabic`, `Danish`, `Dutch`, `English`, `Finnish`, `French`, `German`, `Greek`, `Hungarian`, `Italian`, `Norwegian`, `Portuguese`, `Romanian`, `Russian`, `Spanish`, `Swedish`, `Tamil`, `Turkish`. Changing this rebuilds the search index on next start. (default: `default`) | No |
-| `MAP_URL` | URL template opened when tapping a location on a device that has no native maps app. Use `{q}` as a placeholder for the URL-encoded address (default: `https://www.openstreetmap.org/search?query={q}`) | No |
-
-If all three OIDC variables are set, OIDC mode is used. Otherwise the app starts in local CalDAV login mode — no OIDC provider needed.
-
-CalDAV credentials (base URL, username, password) are encrypted at rest using a key derived from `ENCRYPTION_KEY`.
-
-### Frontend
+Start the frontend dev server in another terminal:
 
 ```bash
 cd frontend
 npm install
-npm run dev     # dev server on localhost:4321
-npm run build   # static build to dist/
+npm run dev
 ```
+
+Open `http://localhost:5173`. The Vite dev server proxies `/api`, `/auth`, and `/logout` to `http://localhost:3000`.
+
+Useful commands:
+
+```bash
+cd backend
+cargo check
+cargo test
+cargo build --release
+```
+
+```bash
+cd frontend
+npm run build
+npm run preview
+npm test
+```
+
+## Running The Built App
+
+Build the frontend:
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+Run the backend and serve the built frontend:
+
+```bash
+cd backend
+APP_BASE_URL=http://localhost:3000 ENCRYPTION_KEY=change-me cargo run
+```
+
+The backend serves `frontend/dist` by default. Use `STATIC_DIR` if the built frontend lives somewhere else.
 
 ## Docker
 
-### Build
+Build:
 
 ```bash
 docker build -t caley .
 ```
 
-### Run
+Run with local CalDAV login only:
 
 ```bash
-# OIDC mode
 docker run -p 3000:3000 \
   -v caley-data:/data \
-  -e OIDC_ISSUER=https://auth.mydomain.ltd \
-  -e OIDC_CLIENT_ID=caley \
-  -e OIDC_CLIENT_SECRET=secret \
-  -e APP_BASE_URL=http://localhost:3000 \
-  -e ENCRYPTION_KEY=your-passphrase \
-  caley
-
-# Local CalDAV login mode (no OIDC)
-docker run -p 3000:3000 \
-  -v caley-data:/data \
-  -e APP_BASE_URL=http://localhost:3000 \
+  -e APP_BASE_URL=https://calendar.example.com \
   -e ENCRYPTION_KEY=your-passphrase \
   caley
 ```
 
-All environment variables from the table above can be passed with `-e`. `STATIC_DIR` is preset to `/static` in the image and doesn't need to be overridden. Mount a volume at `/data` (or your configured `DATABASE_PATH`) to persist the SQLite database across container restarts.
+Run with OIDC also enabled:
 
-### Docker Compose
+```bash
+docker run -p 3000:3000 \
+  -v caley-data:/data \
+  -e OIDC_ISSUER=https://auth.example.com \
+  -e OIDC_CLIENT_ID=caley \
+  -e OIDC_CLIENT_SECRET=secret \
+  -e APP_BASE_URL=https://calendar.example.com \
+  -e ENCRYPTION_KEY=your-passphrase \
+  caley
+```
+
+Docker Compose example:
 
 ```yaml
 services:
@@ -87,29 +153,35 @@ services:
     volumes:
       - caley-data:/data
     environment:
-      - OIDC_ISSUER=https://auth.example.com   # omit all three OIDC_ vars for local login mode
-      - OIDC_CLIENT_ID=caley
-      - OIDC_CLIENT_SECRET=secret
-      - APP_BASE_URL=https://calendar.example.com
-      - ENCRYPTION_KEY=your-passphrase
+      APP_BASE_URL: https://calendar.example.com
+      ENCRYPTION_KEY: your-passphrase
+      # Omit all three OIDC variables to use only CalDAV login.
+      OIDC_ISSUER: https://auth.example.com
+      OIDC_CLIENT_ID: caley
+      OIDC_CLIENT_SECRET: secret
+
 volumes:
   caley-data:
 ```
 
-### Podman
+Persist `/data` or your configured `DATABASE_PATH` directory so SQLite data, cached mail files, sessions, credentials, and OpenPGP vault metadata survive restarts.
 
-Podman works as a drop-in replacement. Use `podman build` and `podman run` with the same flags as above, or `podman-compose` with the compose file.
+Podman works with the same build/run flags.
 
-## OIDC Provider
+## Authentication Modes
 
-When using OIDC mode, [Pocket ID](https://pocket-id.org/) has been tested and confirmed working. Other providers implementing the OIDC standard (Keycloak, Authelia, Authentik, etc.) should work as well.
+CalDAV login is always available. Users log in with a CalDAV server URL, username, and password. Caley validates the credentials, derives a local user ID as `username@hostname`, stores the credentials encrypted, and starts a server-side session.
 
-If no OIDC provider is available, omit the three `OIDC_*` variables entirely to use local CalDAV login instead.
+OIDC login is additive. When configured, the login page also shows the OIDC provider option. OIDC users configure CalDAV, email, and encryption settings after login.
+
+## Data And Security Notes
+
+- CalDAV and IMAP passwords are encrypted at rest using AES-256-GCM with a key derived from `ENCRYPTION_KEY` via HKDF-SHA256.
+- OpenPGP private keys are stored through the encrypted vault flow and should only be decrypted client-side after WebAuthn unlock.
+- Sessions are stored in SQLite and expire after 7 days of inactivity.
+- The app does not terminate TLS. Put it behind Caddy, nginx, Traefik, or another reverse proxy for HTTPS.
+- Use the public HTTPS URL as `APP_BASE_URL` in production, especially for OIDC and WebAuthn.
 
 ## Account Management
 
-Users can delete their account (all stored credentials and cached data) from the settings page. In local login mode this also ends the session and redirects back to the login form.
-
-## Reverse Proxy
-
-This app does not handle TLS termination. Running behind a reverse proxy (Caddy, nginx, Traefik) is recommended for HTTPS. When behind a proxy, set `APP_BASE_URL` to the public `https://` URL of the application.
+Users can delete their account from the settings page. This removes stored credentials, database-backed cached data, email metadata, contacts, calendar data, OpenPGP vault metadata, and flushes the current session.
