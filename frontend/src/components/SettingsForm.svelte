@@ -930,7 +930,6 @@
     <p aria-busy="true">{tl('nav_loading')}</p>
   {:else if tab === 'settings'}
     <div class="settings-panel">
-      <p class="settings-subtitle">{tl('settings_subtitle')}</p>
       <div class="cal-actions">
         <button class="cal-action-btn" onclick={openAddAccountDialog}>
           {tl('mail_addAccount')}
@@ -946,7 +945,7 @@
       {#if calendarsLoading}
         <p aria-busy="true">{tl('nav_loading')}</p>
       {:else if caldavAccounts.length === 0}
-        <p>{tl('settings_subtitle')}</p>
+        <p class="settings-subtitle">{tl('settings_subtitle')}</p>
       {:else}
         <div class="caldav-account-list">
           {#each caldavAccounts as account (account.account_id)}
@@ -996,6 +995,7 @@
       </button>
     </div>
   {:else if tab === 'encryption'}
+  <div class="encryption-panel">
     {#if pgpVault}
       <div class="pgp-heading">
         <h3>{tl('pgp_vaultHeading')}</h3>
@@ -1143,7 +1143,9 @@
       </ul>
 
       {#if pgpVault.devices.some(device => device.status === 'pending')}
-        <h4>{tl('pgp_pendingDevices')}</h4>
+        <div class="pgp-section-heading">
+          <h4>{tl('pgp_pendingDevices')}</h4>
+        </div>
         <ul class="pgp-key-list">
           {#each pgpVault.devices.filter(device => device.status === 'pending') as device (device.cred_id)}
             <li class="pgp-key-item">
@@ -1247,6 +1249,7 @@
         </ul>
       {/if}
     </section>
+  </div>
   {/if}
 </div>
 
@@ -1877,5 +1880,77 @@
 
   .pgp-global-actions button {
     margin-bottom: 0;
+    width: auto;
+  }
+
+  /* ── CalDAV account cards ────────────────────────────────────────────────── */
+
+  .caldav-account-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .caldav-account {
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    padding: 0.875rem 1rem;
+  }
+
+  .caldav-account-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.65rem;
+  }
+
+  .caldav-account-header h3 {
+    margin: 0 0 0.15rem;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .caldav-account-header p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--pico-muted-color);
+  }
+
+  .caldav-account-actions {
+    display: flex;
+    gap: 0.35rem;
+    flex-shrink: 0;
+    align-items: flex-start;
+  }
+
+  /* Match global fieldset legend style for sub-section labels */
+  .caldav-account h4 {
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+    color: var(--pico-muted-color);
+    margin: 0.5rem 0 0.35rem;
+  }
+
+  /* ── Encryption panel ────────────────────────────────────────────────────── */
+
+  .encryption-panel {
+    max-width: 32rem;
+  }
+
+  /* ── Danger secondary button ─────────────────────────────────────────────── */
+
+  button.secondary.danger {
+    --pico-color: var(--pico-del-color);
+    --pico-border-color: color-mix(in srgb, var(--pico-del-color) 50%, transparent);
+  }
+
+  button.secondary.danger:hover,
+  button.secondary.danger:focus {
+    --pico-background-color: color-mix(in srgb, var(--pico-del-color) 10%, transparent);
+    --pico-border-color: var(--pico-del-color);
   }
 </style>
