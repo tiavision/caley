@@ -20,6 +20,7 @@
   let days: DayEventsJson[] = [];
   let monthViewDays: DayEventsJson[] = [];
   let monthGrid: MonthGridJson | null = null;
+  let pickerGrid: MonthGridJson | null = null;
   let eventsLoading = false;
   let monthPickerOpen = false;
   let viewMode: 'week' | 'month' = 'week';
@@ -172,6 +173,19 @@
     const nm = String(y) + '-' + String(mo).padStart(2, '0');
     if (nm !== gridMonth) { gridMonth = nm; fetchMonthGrid(nm); }
     window.scrollTo(0, 0);
+  }
+
+  function selectMonthFromDay(dateStr: string) {
+    monthPickerOpen = false;
+    const [y, mo] = dateStr.split('-');
+    navigateToMonth(y + '-' + mo);
+  }
+
+  async function fetchPickerGrid(month: string) {
+    try {
+      const res = await fetch(`/api/calendar?month=${month}`);
+      if (res.ok) pickerGrid = await res.json();
+    } catch {}
   }
 
   function navigateToMonth(month: string) {
@@ -412,27 +426,28 @@
             <span class="picker-caret" aria-hidden="true"></span>
           </button>
         {:else}
-          <span class="week-range-btn month-range-label">
+          <button class="week-range-btn" onclick={() => { if (!monthPickerOpen) pickerGrid = monthGrid; monthPickerOpen = !monthPickerOpen; }} aria-expanded={monthPickerOpen} aria-haspopup="true">
             <span class="week-range">{monthRangeText}</span>
-          </span>
+            <span class="picker-caret" aria-hidden="true"></span>
+          </button>
         {/if}
         <button class="nav-btn"
           aria-label={viewMode === 'month' ? 'Next month' : 'Next week'}
           onclick={() => viewMode === 'month' ? navigateMonth(1) : navigateWeek(7)}>
           <span class="arrow">›</span>
         </button>
-        {#if monthPickerOpen && viewMode === 'week'}
+        {#if monthPickerOpen}
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
           <div class="popover-backdrop" onclick={() => monthPickerOpen = false}></div>
           <div class="month-picker-popover">
             <MonthPicker
-              {monthGrid}
+              monthGrid={viewMode === 'month' ? pickerGrid : monthGrid}
               weekStart={selectedWeekStart}
               {weekEnd}
               {todayStr}
               {locale}
-              onselectDay={(d) => selectDay(d)}
-              onnavigateToMonth={(m) => navigateToMonth(m)}
+              onselectDay={viewMode === 'week' ? (d) => selectDay(d) : (d) => selectMonthFromDay(d)}
+              onnavigateToMonth={viewMode === 'week' ? (m) => navigateToMonth(m) : (m) => fetchPickerGrid(m)}
             />
           </div>
         {/if}
