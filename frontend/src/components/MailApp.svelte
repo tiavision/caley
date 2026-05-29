@@ -293,6 +293,10 @@
   let composeKeysRequest = 0;
   let composeFileInput: HTMLInputElement;
   let filePickerOpen = false;
+  let recipientSuggestions: string[] = [];
+  let recipientSuggestionIdx = -1;
+  let recipientActiveField: 'to' | 'cc' | 'bcc' | null = null;
+  let recipientSuggestTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Virtual folder form
   let folderName = '';
@@ -2423,6 +2427,88 @@
     reconcileComposeSigning(composeIdentityId, composeSignOptedOut, composeTrustedKeys, composeStoredSigningFingerprints);
   }
 
+  function getRecipientToken(value: string): string {
+    const parts = value.split(',');
+    return parts[parts.length - 1].trim();
+  }
+
+  async function fetchRecipientSuggestions(token: string) {
+    if (token.length < 2) { recipientSuggestions = []; return; }
+    const q = token.toLowerCase();
+    const contactMatches = contactSuggestions
+      .filter(c => c.email.toLowerCase().includes(q) || c.name.toLowerCase().includes(q))
+      .slice(0, 5)
+      .map(c => c.name ? `${c.name} <${c.email}>` : c.email);
+    const contactEmailSet = new Set(
+      contactSuggestions
+        .filter(c => c.email.toLowerCase().includes(q) || c.name.toLowerCase().includes(q))
+        .map(c => c.email.toLowerCase())
+    );
+    try {
+      const res = await fetch(`/api/email/suggest-addrs?q=${encodeURIComponent(token)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const apiOnly = (data.addrs as string[]).filter(a => !contactEmailSet.has(a.toLowerCase()));
+        recipientSuggestions = [...contactMatches, ...apiOnly].slice(0, 7);
+      } else {
+        recipientSuggestions = contactMatches;
+      }
+    } catch { recipientSuggestions = contactMatches; }
+  }
+
+  function onRecipientInput(field: 'to' | 'cc' | 'bcc', value: string) {
+    loadContactSuggestions();
+    recipientActiveField = field;
+    recipientSuggestionIdx = -1;
+    const token = getRecipientToken(value);
+    if (recipientSuggestTimer) clearTimeout(recipientSuggestTimer);
+    recipientSuggestTimer = setTimeout(() => fetchRecipientSuggestions(token), 200);
+  }
+
+  function applyRecipientSuggestion(addr: string) {
+    const getCurrent = () => recipientActiveField === 'to' ? composeTo : recipientActiveField === 'cc' ? composeCc : composeBcc;
+    const setCurrent = (v: string) => { if (recipientActiveField === 'to') composeTo = v; else if (recipientActiveField === 'cc') composeCc = v; else composeBcc = v; };
+    const current = getCurrent();
+    const lastComma = current.lastIndexOf(',');
+    const prefix = lastComma >= 0 ? current.slice(0, lastComma + 1) + ' ' : '';
+    setCurrent(prefix + addr + ', ');
+    recipientSuggestions = [];
+    recipientSuggestionIdx = -1;
+  }
+
+  function onRecipientKeydown(e: KeyboardEvent) {
+    if (!recipientSuggestions.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      recipientSuggestionIdx = Math.min(recipientSuggestionIdx + 1, recipientSuggestions.length - 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      recipientSuggestionIdx = Math.max(recipientSuggestionIdx - 1, -1);
+    } else if (e.key === 'Enter' && recipientSuggestionIdx >= 0) {
+      e.preventDefault();
+      applyRecipientSuggestion(recipientSuggestions[recipientSuggestionIdx]);
+    } else if (e.key === 'Tab') {
+      if (recipientSuggestionIdx >= 0) {
+        e.preventDefault();
+        applyRecipientSuggestion(recipientSuggestions[recipientSuggestionIdx]);
+      } else if (recipientSuggestions.length === 1) {
+        e.preventDefault();
+        applyRecipientSuggestion(recipientSuggestions[0]);
+      }
+    } else if (e.key === 'Escape') {
+      recipientSuggestions = [];
+      recipientSuggestionIdx = -1;
+    }
+  }
+
+  function onRecipientBlur() {
+    setTimeout(() => {
+      recipientSuggestions = [];
+      recipientSuggestionIdx = -1;
+      recipientActiveField = null;
+    }, 150);
+  }
+
   async function sendEmail() {
     composeSending = true;
     composeError = '';
@@ -4035,7 +4121,24 @@
       {/if}
       <div class="compose-row">
         <span class="compose-label">{tl('mail_composeTo')}</span>
-        <input class="compose-input" bind:value={composeTo} placeholder={tl('mail_composeToPlaceholder')} />
+        <div class="compose-input-wrap">
+          <input class="compose-input" bind:value={composeTo} placeholder={tl('mail_composeToPlaceholder')}
+            on:input={(e) => onRecipientInput('to', e.currentTarget.value)}
+            on:keydown={onRecipientKeydown}
+            on:blur={onRecipientBlur}
+          />
+          {#if recipientActiveField === 'to' && recipientSuggestions.length > 0}
+            <ul class="addr-suggestions" role="listbox">
+              {#each recipientSuggestions as addr, i}
+                <li role="option" aria-selected={i === recipientSuggestionIdx}>
+                  <button type="button" class:active={i === recipientSuggestionIdx}
+                    on:mousedown={(e) => { e.preventDefault(); applyRecipientSuggestion(addr); }}
+                  >{addr}</button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
         <div class="compose-security-controls">
           <button
             type="button"
@@ -4069,11 +4172,45 @@
       {#if showComposeCcBcc}
         <div class="compose-row">
           <span class="compose-label">{tl('mail_composeCc')}</span>
-          <input class="compose-input" bind:value={composeCc} placeholder={tl('mail_composeCcPlaceholder')} />
+          <div class="compose-input-wrap">
+            <input class="compose-input" bind:value={composeCc} placeholder={tl('mail_composeCcPlaceholder')}
+              on:input={(e) => onRecipientInput('cc', e.currentTarget.value)}
+              on:keydown={onRecipientKeydown}
+              on:blur={onRecipientBlur}
+            />
+            {#if recipientActiveField === 'cc' && recipientSuggestions.length > 0}
+              <ul class="addr-suggestions" role="listbox">
+                {#each recipientSuggestions as addr, i}
+                  <li role="option" aria-selected={i === recipientSuggestionIdx}>
+                    <button type="button" class:active={i === recipientSuggestionIdx}
+                      on:mousedown={(e) => { e.preventDefault(); applyRecipientSuggestion(addr); }}
+                    >{addr}</button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
         </div>
         <div class="compose-row">
           <span class="compose-label">{tl('mail_composeBcc')}</span>
-          <input class="compose-input" bind:value={composeBcc} placeholder={tl('mail_composeBccPlaceholder')} />
+          <div class="compose-input-wrap">
+            <input class="compose-input" bind:value={composeBcc} placeholder={tl('mail_composeBccPlaceholder')}
+              on:input={(e) => onRecipientInput('bcc', e.currentTarget.value)}
+              on:keydown={onRecipientKeydown}
+              on:blur={onRecipientBlur}
+            />
+            {#if recipientActiveField === 'bcc' && recipientSuggestions.length > 0}
+              <ul class="addr-suggestions" role="listbox">
+                {#each recipientSuggestions as addr, i}
+                  <li role="option" aria-selected={i === recipientSuggestionIdx}>
+                    <button type="button" class:active={i === recipientSuggestionIdx}
+                      on:mousedown={(e) => { e.preventDefault(); applyRecipientSuggestion(addr); }}
+                    >{addr}</button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
         </div>
       {/if}
       <div class="compose-row">
@@ -5672,6 +5809,13 @@
     text-align: right;
   }
 
+  .compose-input-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+  }
+
   .compose-input {
     flex: 1;
     min-width: 0;
@@ -5683,6 +5827,27 @@
     margin: 0 !important;
     font-size: 0.9rem;
     color: inherit;
+  }
+
+  .addr-suggestions {
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
+    margin: 0.125rem 0 0; padding: 0.25rem; list-style: none;
+    background: var(--pico-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    box-shadow: 0 0.25rem 0.75rem rgba(0,0,0,0.15);
+  }
+  .addr-suggestions li { list-style: none; padding: 0; margin: 0; }
+  .addr-suggestions button {
+    width: 100%; text-align: left; border: none; background: none; margin: 0;
+    padding: 0.375rem 0.75rem; cursor: pointer; font-size: 0.875rem;
+    border-radius: calc(var(--pico-border-radius, 0.25rem) - 0.125rem);
+    color: var(--pico-color); transition: background 0.1s;
+  }
+  .addr-suggestions button:hover,
+  .addr-suggestions button.active {
+    background: var(--pico-primary-background);
+    color: var(--pico-primary-inverse);
   }
 
   .compose-input:focus {
