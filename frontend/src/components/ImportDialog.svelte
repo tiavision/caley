@@ -16,13 +16,23 @@
   let selectedAccountId = '';
   let newCalName = '';
   let fileInput: HTMLInputElement;
+  let selectedFile: File | null = null;
   let error = '';
   let successMsg = '';
   let importing = false;
+  let previewing = false;
+  let previewEvents: {
+    uid: string;
+    summary: string;
+    dtstart: string;
+    dtend: string;
+    is_all_day: boolean;
+    location: string;
+  }[] = [];
 
   $: isNewCal = selectedHref === NEW_CAL_SENTINEL;
 
-  export function open() {
+  export function open(file?: File) {
     const stored = localStorage.getItem('defaultCalendar');
     const active = calendars.find(c => c.is_active);
     const fallback = active?.href || calendars[0]?.href || NEW_CAL_SENTINEL;
@@ -34,14 +44,53 @@
     error = '';
     successMsg = '';
     importing = false;
+    previewing = false;
+    previewEvents = [];
+    selectedFile = file ?? null;
     if (fileInput) fileInput.value = '';
     dialogEl?.showModal();
+  }
+
+  function onFileChange() {
+    selectedFile = fileInput?.files?.[0] ?? null;
+    previewEvents = [];
+    error = '';
+    successMsg = '';
+  }
+
+  function formatEventDate(event: { dtstart: string; dtend: string; is_all_day: boolean }) {
+    if (!event.dtstart) return '';
+    if (event.is_all_day) return event.dtstart;
+    const start = event.dtstart.replace('T', ' ').slice(0, 16);
+    const end = event.dtend ? event.dtend.replace('T', ' ').slice(0, 16) : '';
+    return end ? `${start} - ${end}` : start;
+  }
+
+  async function preview() {
+    error = '';
+    successMsg = '';
+    previewEvents = [];
+    const file = selectedFile;
+    if (!file) { error = tl('cal_importFile'); return; }
+
+    previewing = true;
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const resp = await fetch('/api/import/preview', { method: 'POST', body: fd });
+      if (!resp.ok) { error = await resp.text(); return; }
+      previewEvents = await resp.json();
+    } catch {
+      error = tl('cal_importPreviewError');
+    } finally {
+      previewing = false;
+    }
   }
 
   async function submit() {
     error = '';
     successMsg = '';
-    const file = fileInput?.files?.[0];
+    const file = selectedFile;
     if (!file) { error = tl('cal_importFile'); return; }
 
     importing = true;
@@ -109,8 +158,32 @@
     <form onsubmit={(e) => { e.preventDefault(); submit(); }}>
       <label>
         <span>{tl('cal_importFile')}</span>
-        <input type="file" accept=".ics" bind:this={fileInput} required />
+        <input type="file" accept=".ics,.ical,text/calendar" bind:this={fileInput} required={!selectedFile} onchange={onFileChange} />
       </label>
+
+      {#if selectedFile}
+        <div class="import-file-summary">
+          <span>{selectedFile.name}</span>
+          <button type="button" class="outline secondary small" onclick={preview} disabled={previewing || importing} aria-busy={previewing}>
+            {tl('cal_importPreview')}
+          </button>
+        </div>
+      {/if}
+
+      {#if previewEvents.length > 0}
+        <div class="import-preview" aria-live="polite">
+          <h4>{tl('cal_importPreviewHeading')}</h4>
+          <ul>
+            {#each previewEvents as event (event.uid)}
+              <li>
+                <strong>{event.summary || tl('cal_importUntitledEvent')}</strong>
+                <span>{formatEventDate(event)}</span>
+                {#if event.location}<span>{event.location}</span>{/if}
+              </li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
 
       <label>
         <span>{tl('cal_importCalendar')}</span>
@@ -167,3 +240,59 @@
     </form>
   </article>
 </dialog>
+
+<style>
+  .import-file-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin: -0.35rem 0 0.75rem;
+    color: var(--pico-muted-color);
+    font-size: 0.875rem;
+  }
+
+  .import-file-summary span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .import-file-summary button {
+    flex-shrink: 0;
+    margin: 0;
+  }
+
+  .import-preview {
+    border-left: 3px solid var(--pico-primary-background);
+    padding-left: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .import-preview h4 {
+    margin: 0 0 0.5rem;
+    font-size: 0.95rem;
+  }
+
+  .import-preview ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  .import-preview li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+
+  .import-preview li span {
+    color: var(--pico-muted-color);
+    font-size: 0.85rem;
+  }
+</style>

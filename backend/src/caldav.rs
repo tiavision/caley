@@ -1650,6 +1650,32 @@ pub fn split_vcalendar_into_events(ical_content: &str) -> Vec<(String, String)> 
         .collect()
 }
 
+pub fn preview_events_from_raw_ical(raw_ical: &str) -> Vec<Event> {
+    parse_raw_events(raw_ical)
+        .into_iter()
+        .filter(|raw| raw.recurrence_id.is_none())
+        .map(|raw| {
+            let recurrence = raw.rrule.as_ref().map(|r| parse_rrule_info(r));
+            create_event(
+                &raw.uid,
+                &raw.summary,
+                &raw.description,
+                &raw.location,
+                raw.dtstart,
+                raw.dtstart_is_date,
+                Some(raw.dtstart + raw.duration),
+                raw.dtstart_is_date,
+                &raw.dtstart_tzid.as_deref().unwrap_or("UTC"),
+                raw.rrule.is_some() || !raw.rdates.is_empty(),
+                recurrence,
+                String::new(),
+                raw.alarms,
+                raw.attendees,
+            )
+        })
+        .collect()
+}
+
 fn escape_ical_text(s: &str) -> String {
     s.replace('\\', "\\\\")
         .replace('\n', "\\n")

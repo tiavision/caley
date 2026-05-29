@@ -5,6 +5,7 @@
   import { type NewMailNotification, showNewMailNotification } from '../lib/mail-notifications.ts';
   import SelectDropdown from './SelectDropdown.svelte';
   import UiIcon from './UiIcon.svelte';
+  import ImportDialog from './ImportDialog.svelte';
   import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey, validateVault, eraseBytes } from '../lib/pgp/vault.ts';
   import { unlock } from '../lib/pgp/webauthn.ts';
   import { decryptMessage, verifySignedMessage, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
@@ -13,6 +14,7 @@
   import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
   import { buildProtectedMime, parseEnvelopeAddresses } from '../lib/pgp/compose.ts';
   import { prepareEmailHtml, htmlToPlainText, imageOriginsFromHtml } from '../lib/mail-html.ts';
+  import type { CalendarJson, CalDavAccountJson } from '../types/calendar.ts';
   import type * as openpgp from 'openpgp';
 
   export let standalone = false;
@@ -159,11 +161,22 @@
         /\.(asc|pgp|gpg|pub)$/.test(filename));
   }
 
+  function isIcsAttachment(attachment: Attachment): boolean {
+    const filename = attachment.filename.toLowerCase();
+    const contentType = attachment.content_type?.split(';', 1)[0].trim().toLowerCase() ?? '';
+    return contentType === 'text/calendar' ||
+      contentType === 'application/ics' ||
+      contentType === 'application/icalendar' ||
+      /\.(ics|ical)$/.test(filename);
+  }
+
   // ── State ────────────────────────────────────────────────────────────────
 
   let accounts: Account[] = [];
   let identities: Identity[] = [];
   let mailboxesByAccount: Record<string, Mailbox[]> = {};
+  let calendars: CalendarJson[] = [];
+  let calendarAccounts: CalDavAccountJson[] = [];
   let virtualFolders: VirtualFolder[] = [];
   let syncingMailboxes: Set<string> = new Set();
   let mailboxUnreadCounts: Record<string, Record<string, number>> = {};
@@ -301,6 +314,7 @@
   let pgpUnlocking = false;
   let pgpUnlockError = '';
   let pgpPublicKeyImporting = '';
+  let icsImportingAttachment = '';
   let pgpPublicKeyImportError = '';
   let pgpPublicKeyImportSuccess = '';
   let pgpImportablePublicKeyAttachments = new Set<string>();
@@ -665,6 +679,30 @@
     pgpPublicKeyImporting = '';
   }
 
+  async function openIcsImport(attachment: Attachment, decryptedData?: Uint8Array) {
+    icsImportingAttachment = attachment.filename;
+    pgpPublicKeyImportError = '';
+    pgpPublicKeyImportSuccess = '';
+    try {
+      const msg = selectedMessage;
+      if (!msg) throw new Error('no message');
+      let bytes = decryptedData;
+      if (!bytes) {
+        const url = `/api/email/attachment?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}&filename=${encodeURIComponent(attachment.filename)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('attachment fetch failed');
+        bytes = new Uint8Array(await res.arrayBuffer());
+      }
+      if (calendarAccounts.length === 0) await loadCalendarData();
+      const file = new File([bytes], attachment.filename, { type: attachment.content_type || 'text/calendar' });
+      importDialog?.open(file);
+    } catch {
+      pgpPublicKeyImportError = tl('cal_importError');
+    } finally {
+      icsImportingAttachment = '';
+    }
+  }
+
   function pgpBadgeLabel(badge: string): string {
     const map: Record<string, string> = {
       encrypted: tl('pgp_badgeEncrypted'),
@@ -692,6 +730,7 @@
   let composeDialog: HTMLDialogElement;
   let folderDialog: HTMLDialogElement;
   let threadDialog: HTMLDialogElement;
+  let importDialog: ImportDialog;
   let sidebarOpen = false;
 
   let usesDetailOverlay = false;
@@ -969,7 +1008,7 @@
   // ── Data loading ─────────────────────────────────────────────────────────
 
   async function loadAll() {
-    await Promise.all([loadAccounts(), loadIdentities(), loadVirtualFolders(), loadImageOrigins(), loadBlacklistOrigins(), loadUnreadCounts()]);
+    await Promise.all([loadAccounts(), loadIdentities(), loadVirtualFolders(), loadImageOrigins(), loadBlacklistOrigins(), loadUnreadCounts(), loadCalendarData()]);
     for (const acc of accounts) {
       await loadMailboxes(acc.account_id);
     }
@@ -1041,6 +1080,7 @@
       loadMailboxes(initialMessage.accountId),
       loadImageOrigins(),
       loadBlacklistOrigins(),
+      loadCalendarData(),
     ]);
     await openMessage(locatorMessage(initialMessage));
     await tick();
@@ -1054,6 +1094,17 @@
         const data = await r.json();
         accounts = data.accounts || [];
       }
+    } catch {}
+  }
+
+  async function loadCalendarData() {
+    try {
+      const [calendarRes, accountRes] = await Promise.all([
+        fetch('/api/calendars'),
+        fetch('/api/caldav/accounts'),
+      ]);
+      if (calendarRes.ok) calendars = await calendarRes.json();
+      if (accountRes.ok) calendarAccounts = (await accountRes.json()).accounts || [];
     } catch {}
   }
 
@@ -3519,6 +3570,18 @@
                           <UiIcon name="import" />
                         </button>
                       {/if}
+                      {#if isIcsAttachment(att)}
+                        <button
+                          class="pgp-import-public-btn"
+                          on:click={() => openIcsImport(att)}
+                          disabled={icsImportingAttachment === att.filename}
+                          aria-busy={icsImportingAttachment === att.filename}
+                          title={tl('cal_import')}
+                          aria-label={tl('cal_import')}
+                        >
+                          <UiIcon name="import" />
+                        </button>
+                      {/if}
                     </div>
                   {/each}
                 </div>
@@ -3555,6 +3618,18 @@
                           aria-busy={pgpPublicKeyImporting === att.filename}
                           title={tl('pgp_importPublicKeyButton')}
                           aria-label={tl('pgp_importPublicKeyButton')}
+                        >
+                          <UiIcon name="import" />
+                        </button>
+                      {/if}
+                      {#if isIcsAttachment(att)}
+                        <button
+                          class="pgp-import-public-btn"
+                          on:click={() => openIcsImport(att, att.data)}
+                          disabled={icsImportingAttachment === att.filename}
+                          aria-busy={icsImportingAttachment === att.filename}
+                          title={tl('cal_import')}
+                          aria-label={tl('cal_import')}
                         >
                           <UiIcon name="import" />
                         </button>
@@ -3647,6 +3722,14 @@
     </section>
   </div>
 </div>
+
+<ImportDialog
+  bind:this={importDialog}
+  {calendars}
+  accounts={calendarAccounts}
+  {locale}
+  onimported={() => { void loadCalendarData(); }}
+/>
 
 <!-- ── Conversation threads dialog ───────────────────────────────────────── -->
 <dialog

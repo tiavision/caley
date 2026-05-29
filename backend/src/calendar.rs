@@ -10,7 +10,8 @@ use url::form_urlencoded;
 
 use crate::caldav::{
     Alarm, Attendee, CalDavClient, PartStat, RecurrenceInfo, add_exdate, add_recurrence_override,
-    generate_ical_event, generate_new_uid, split_vcalendar_into_events, update_vcalendar_event,
+    generate_ical_event, generate_new_uid, preview_events_from_raw_ical,
+    split_vcalendar_into_events, update_vcalendar_event,
 };
 use crate::db;
 use crate::oidc::{AppState, CurrentUser};
@@ -1167,6 +1168,73 @@ pub async fn create_calendar_handler(
 struct ImportResult {
     imported: usize,
     errors: usize,
+}
+
+#[derive(serde::Serialize)]
+struct ImportPreviewEvent {
+    uid: String,
+    summary: String,
+    dtstart: String,
+    dtend: String,
+    is_all_day: bool,
+    location: String,
+}
+
+async fn read_ics_multipart(mut multipart: Multipart) -> Result<String, Response> {
+    let mut ics_content: Option<String> = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        if field.name() == Some("file") {
+            match field.text().await {
+                Ok(text) => ics_content = Some(text),
+                Err(e) => {
+                    return Err((StatusCode::BAD_REQUEST, format!("Failed to read file: {e}"))
+                        .into_response());
+                }
+            }
+        }
+    }
+
+    ics_content.ok_or_else(|| (StatusCode::BAD_REQUEST, "Missing ICS file").into_response())
+}
+
+pub async fn preview_ics_import(
+    State(_state): State<crate::oidc::AppState>,
+    _user: CurrentUser,
+    multipart: Multipart,
+) -> Response {
+    let ics = match read_ics_multipart(multipart).await {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+
+    let events = split_vcalendar_into_events(&ics);
+    if events.is_empty() {
+        return (StatusCode::BAD_REQUEST, "No events found in ICS file").into_response();
+    }
+
+    let previews: Vec<ImportPreviewEvent> = events
+        .into_iter()
+        .filter_map(|(_, wrapped_ical)| {
+            preview_events_from_raw_ical(&wrapped_ical)
+                .into_iter()
+                .next()
+                .map(|event| ImportPreviewEvent {
+                    uid: event.uid,
+                    summary: event.summary,
+                    dtstart: event.dtstart,
+                    dtend: event.dtend.unwrap_or_default(),
+                    is_all_day: event.is_all_day,
+                    location: event.location,
+                })
+        })
+        .collect();
+
+    if previews.is_empty() {
+        return (StatusCode::BAD_REQUEST, "No importable events found in ICS file").into_response();
+    }
+
+    Json(previews).into_response()
 }
 
 pub async fn import_ics(

@@ -191,6 +191,11 @@ async fn main() -> anyhow::Result<()> {
             post(calendar::import_ics)
                 .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
         )
+        .route(
+            "/api/import/preview",
+            post(calendar::preview_ics_import)
+                .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
+        )
         .route("/api/user", get(oidc::user_info))
         .route("/api/settings/form", get(settings::settings_form))
         .route("/api/settings", post(settings::save_settings))
