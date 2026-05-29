@@ -381,3 +381,28 @@ pub async fn get_contact_photo(
 
     StatusCode::NOT_FOUND.into_response()
 }
+
+// GET /api/contact/vcf
+pub async fn get_contact_vcf(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<PhotoQuery>,
+) -> Response {
+    match db::get_user_id_for_caldav_account(&state.db, &q.account_id).await {
+        Ok(Some(owner)) if owner == user.user_id => {}
+        Ok(_) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            eprintln!("[contacts] account lookup error: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    }
+    let contact = match db::get_contact(&state.db, &q.account_id, &q.addressbook_href, &q.uid).await {
+        Ok(Some(c)) => c,
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    (
+        [(header::CONTENT_TYPE, "text/vcard; charset=utf-8")],
+        contact.raw_vcard,
+    )
+        .into_response()
+}

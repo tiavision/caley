@@ -3,6 +3,7 @@
   import { initI18n, getLocale, makeTl } from '../lib/i18n.ts';
   import { getUser } from '../lib/user.ts';
   import type { ContactJson, AddressbookJson, ContactsResponse, TypedEntry, AddressEntry } from '../types/calendar.ts';
+  import ShareMenu from './ShareMenu.svelte';
 
   let locale = 'en';
   $: tl = makeTl(locale);
@@ -430,6 +431,7 @@
       <h3>{selectedContact?.fn_name || ''}</h3>
       <div class="header-actions">
         {#if selectedContact}
+          <ShareMenu contact={selectedContact} {locale} />
           <button
             class="edit-btn"
             title={tl('contacts_edit')}

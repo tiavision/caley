@@ -3,6 +3,7 @@
   import { makeTl } from '../lib/i18n.ts';
   import type { EventJson } from '../types/calendar.ts';
   import { formatEventTime, formatRecurrence, formatAlarm, partstatKey } from '../lib/format.ts';
+  import ShareMenu from './ShareMenu.svelte';
 
   export let locale: string;
   export let isOpen = false;
@@ -87,6 +88,7 @@
       <h3>{detailEvent?.summary || ''}</h3>
       <div class="header-actions">
         {#if detailEvent}
+          <ShareMenu event={detailEvent} {locale} />
           <div class="edit-wrap">
             <button
               class="edit-btn"

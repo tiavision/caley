@@ -450,5 +450,9 @@
   "pgp_composeUnlockSigningKey": "Unlock the vault containing the signing key for this identity.",
   "pgp_composeMissingKeys": "Missing encryption keys for: {emails}",
   "pgp_sourceAutocrypt": "Learned from Autocrypt (trusted on first use)",
-  "pgp_sourceSignedAttachment": "Learned from verified signed mail"
+  "pgp_sourceSignedAttachment": "Learned from verified signed mail",
+  "share_share": "Share",
+  "share_downloadIcs": "Download .ics",
+  "share_downloadVCard": "Download .vCard",
+  "share_email": "Send by email"
 }

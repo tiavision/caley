@@ -977,6 +977,21 @@
     }
     connectSSE();
 
+    const pendingCompose = sessionStorage.getItem('caley_compose');
+    if (pendingCompose) {
+      sessionStorage.removeItem('caley_compose');
+      try {
+        const { subject, filename, mimeType, content } = JSON.parse(pendingCompose);
+        composeSubject = subject ?? '';
+        composeAttachments = [new File([content], filename, { type: mimeType })];
+        composeIdentityId = (identities.find(i => i.is_default) ?? identities[0])?.identity_id ?? '';
+        reconcileComposeSigning(composeIdentityId, composeSignOptedOut, composeTrustedKeys, composeStoredSigningFingerprints);
+        void loadComposeTrustedKeys();
+        await tick();
+        composeDialog?.showModal();
+      } catch {}
+    }
+
     if (usesDetailOverlay) void tick().then(fitIframeToContent);
 
     window.addEventListener('mousemove', handleResizeMove);

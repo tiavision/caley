@@ -1,10 +1,10 @@
 use axum::{
-    extract::{Multipart, RawQuery, State},
-    http::StatusCode,
+    extract::{Multipart, Query, RawQuery, State},
+    http::{StatusCode, header},
     response::{IntoResponse, Json, Response},
 };
 use chrono::{Datelike, NaiveDate, NaiveDateTime, TimeZone as _, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use url::form_urlencoded;
 
@@ -1423,5 +1423,46 @@ pub async fn search_events(
             eprintln!("Search query failed: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "Search failed").into_response()
         }
+    }
+}
+
+// GET /api/event/ics
+#[derive(Deserialize)]
+pub struct EventIcsQuery {
+    pub account_id: String,
+    pub calendar_href: String,
+    pub uid: String,
+}
+
+pub async fn get_event_ics(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<EventIcsQuery>,
+) -> Response {
+    match db::get_user_id_for_caldav_account(&state.db, &q.account_id).await {
+        Ok(Some(owner)) if owner == user.user_id => {}
+        Ok(_) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            eprintln!("[calendar] account lookup error: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    }
+    let raw: Option<String> = sqlx::query_scalar(
+        "SELECT raw_ical FROM cached_events WHERE account_id = ? AND calendar_href = ? AND uid = ?",
+    )
+    .bind(&q.account_id)
+    .bind(&q.calendar_href)
+    .bind(&q.uid)
+    .fetch_optional(&state.db)
+    .await
+    .unwrap_or(None);
+
+    match raw {
+        Some(ical) => (
+            [(header::CONTENT_TYPE, "text/calendar; charset=utf-8")],
+            ical,
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
     }
 }

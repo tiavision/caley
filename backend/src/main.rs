@@ -205,11 +205,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/caldav/account", delete(settings::delete_caldav_account))
         .route("/api/event", post(calendar::save_event))
         .route("/api/event", delete(calendar::delete_event))
+        .route("/api/event/ics", get(calendar::get_event_ics))
         .route("/api/search", get(calendar::search_events))
         .route("/api/contacts", get(contacts::list_contacts))
         .route("/api/contact", post(contacts::save_contact))
         .route("/api/contact", delete(contacts::delete_contact))
         .route("/api/contact/photo", get(contacts::get_contact_photo))
+        .route("/api/contact/vcf", get(contacts::get_contact_vcf))
         .route("/api/account", delete(local_auth::delete_account))
         // Email routes
         .route("/api/email/autodiscover", get(email::autodiscover_handler))

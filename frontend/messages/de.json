@@ -450,5 +450,9 @@
   "pgp_composeUnlockSigningKey": "Entsperre den Tresor mit dem Signaturschlüssel für diese Identität.",
   "pgp_composeMissingKeys": "Fehlende Verschlüsselungsschlüssel für: {emails}",
   "pgp_sourceAutocrypt": "Aus Autocrypt gelernt (bei erster Verwendung vertraut)",
-  "pgp_sourceSignedAttachment": "Aus verifizierter signierter E-Mail gelernt"
+  "pgp_sourceSignedAttachment": "Aus verifizierter signierter E-Mail gelernt",
+  "share_share": "Teilen",
+  "share_downloadIcs": ".ics herunterladen",
+  "share_downloadVCard": ".vCard herunterladen",
+  "share_email": "Per E-Mail senden"
 }
