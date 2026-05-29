@@ -1,0 +1,27 @@
+name: Build and push main image
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  REGISTRY: git.tia.sh
+  IMAGE_NAME: ${{ github.event.repository.name }}
+
+jobs:
+  docker:
+    runs-on: linux
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Log in to registry
+        run: echo "${{ secrets.REGISTRY_PASSWORD }}" | /usr/bin/podman login ${{ env.REGISTRY }} -u "${{ secrets.REGISTRY_USER }}" --password-stdin
+
+      - name: Build image
+        run: /usr/bin/podman build -t ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:main .
+
+      - name: Push image
+        run: /usr/bin/podman push ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:main
