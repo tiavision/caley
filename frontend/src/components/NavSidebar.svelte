@@ -18,6 +18,7 @@
   let collapsed = false;
   let mobileOpen = false;
   let mobileHeaderEl: HTMLElement;
+  let mobileQuery: MediaQueryList | null = null;
   let notificationSupported = false;
   let notificationPermission: NotificationPermission = 'default';
   let notificationEnabled = false;
@@ -39,17 +40,30 @@
       authed = true;
       document.body.classList.add('has-nav');
       await tick();
-      if (window.innerWidth < 768) {
-        document.querySelector('main > #app')?.prepend(mobileHeaderEl);
-      }
+      mobileQuery = window.matchMedia('(max-width: 767px)');
+      mobileQuery.addEventListener('change', placeMobileHeader);
+      placeMobileHeader();
       initializeNotifications();
     }
   });
 
   onDestroy(() => {
+    mobileQuery?.removeEventListener('change', placeMobileHeader);
     notificationSource?.close();
     if (notificationReconnect) clearTimeout(notificationReconnect);
   });
+
+  function placeMobileHeader() {
+    if (!mobileHeaderEl) return;
+    const appEl = document.querySelector('main > #app');
+    if (!appEl) return;
+    if (mobileQuery?.matches) {
+      if (mobileHeaderEl.parentElement !== appEl) appEl.prepend(mobileHeaderEl);
+    } else {
+      const navEl = document.getElementById('nav');
+      if (navEl && mobileHeaderEl.parentElement !== navEl) navEl.prepend(mobileHeaderEl);
+    }
+  }
 
   function toggleCollapse() {
     collapsed = !collapsed;
@@ -357,14 +371,13 @@
   /* Mobile header bar — in document flow, scrolls away naturally */
   .nav-mobile-header {
     display: none;
-    height: 2rem;
     align-items: center;
     gap: 0.5rem;
+    margin: 0 0 0.6rem;
+    padding: 0.4rem 0;
     border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
     background: var(--pico-background-color, #fff);
     flex-shrink: 0;
-    margin-bottom: 0.8rem;
-    padding-bottom: 0.8rem;
   }
   .nav-mobile-brand {
     display: inline-flex;
@@ -407,7 +420,10 @@
   }
 
   @media (max-width: 767px) {
-    .nav-mobile-header { display: flex; }
+    .nav-mobile-header { 
+      display: flex;
+      padding-top: 0;
+    }
     .nav-collapse-btn { display: none; }
     .nav-drawer-close { display: flex; }
     .nav-rail {

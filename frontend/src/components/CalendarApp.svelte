@@ -837,6 +837,9 @@
     .calendar {
       padding-inline: var(--pico-spacing, 1rem);
     }
+    :global(header.nav-mobile-header) {
+      margin-left: var(--pico-spacing) !important;
+    }
   }
 
   /* FAB */

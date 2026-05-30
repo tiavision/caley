@@ -55,8 +55,6 @@ main {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    /* Reset Pico's container-fluid padding so app pages fill edge-to-edge */
-    padding: 0;
 }
 
 /* Allow pages that need vertical scroll (settings, contacts, search) to scroll within #app */
