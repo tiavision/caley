@@ -228,7 +228,8 @@
     const dx = e.changedTouches[0].clientX - touchStartX;
     const dy = e.changedTouches[0].clientY - touchStartY;
     if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
-    navigateWeek(dx > 0 ? -7 : 7);
+    if (viewMode === 'month') navigateMonth(dx > 0 ? -1 : 1);
+    else navigateWeek(dx > 0 ? -7 : 7);
   }
 
   // ── Event detail ───────────────────────────────────────────────────────────
