@@ -825,6 +825,18 @@
     flex-direction: column;
     position: relative;
   }
+  @media (max-width: 959px) {
+    :global(main.container-fluid) {
+      padding-inline: 0;
+    }
+    .weekly-header {
+      padding-inline: var(--pico-spacing, 1rem);
+    }
+    /* Week view restores the padding that month view intentionally omits */
+    .calendar {
+      padding-inline: var(--pico-spacing, 1rem);
+    }
+  }
 
   /* FAB */
   .fab {

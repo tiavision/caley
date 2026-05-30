@@ -221,6 +221,7 @@
   }
 
   @media (max-width: 959px) {
+    .month-cell { padding-left: 0; padding-right: 0; }
     .month-cell.has-events { cursor: pointer; }
     .month-cell.has-events:hover { background: var(--pico-card-background-color, rgba(0,0,0,0.02)); }
   }
@@ -266,8 +267,9 @@
   }
   @media (max-width: 959px) {
     :global(article.appointment.month-appointment) {
-      padding: 0.3rem !important;
-      margin-bottom: 0.4rem !important;
+      border-left-width: 2px !important;
+      padding: 0.25rem 0.15rem !important;
+      margin-bottom: 0.3rem !important;
     }
   }
   /* Override weekly-view line-clamp: plain cut, break-all, no ellipsis */
