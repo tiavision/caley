@@ -42,6 +42,7 @@ pub struct AppState {
     pub map_url: String,
     pub data_dir: PathBuf,
     pub webauthn: Arc<Webauthn>,
+    pub demo_mode: bool,
 }
 
 pub struct CurrentUser {

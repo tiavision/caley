@@ -86,6 +86,22 @@ pub async fn handle_login(
 ) -> Response {
     let user_id = derive_user_id(&form.caldav_base_url, &form.caldav_username);
 
+    if state.demo_mode {
+        // In demo mode accept any credentials and bind them to the fixed demo user.
+        let demo_user_id = crate::demo::DEMO_USER_ID;
+        if let Err(e) = crate::db::ensure_user(&state.db, demo_user_id, Some("Demo User")).await {
+            eprintln!("Demo login: ensure_user failed: {e}");
+        }
+        if let Err(e) = session.cycle_id().await {
+            eprintln!("Session error: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Session error"}))).into_response();
+        }
+        let _ = session.insert("user_id", demo_user_id).await;
+        let _ = session.insert("display_name", "Demo User").await;
+        state.sync_manager.ensure_task_for(demo_user_id);
+        return Json(json!({"status": "ok"})).into_response();
+    }
+
     if login_rate_limited(&user_id) {
         return (
             StatusCode::TOO_MANY_REQUESTS,

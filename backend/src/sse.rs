@@ -111,10 +111,12 @@ pub async fn events_stream(
 
     // Ensure CalDAV and email sync tasks are running for this user.
     state.sync_manager.ensure_task_for(&user.user_id);
-    state
-        .email_sync_manager
-        .ensure_tasks_for_user(&user.user_id)
-        .await;
+    if !state.demo_mode {
+        state
+            .email_sync_manager
+            .ensure_tasks_for_user(&user.user_id)
+            .await;
+    }
     let stream = BroadcastStream::new(rx).filter_map(|msg| {
         let event: Option<Event> = match msg {
             Ok(SseMessage::EventsRefetch) => {

@@ -143,30 +143,34 @@ pub async fn save_caldav_account(
         caldav_password: password,
     };
 
-    let client = match crate::caldav::CalDavClient::new(
-        settings.caldav_base_url.clone(),
-        settings.caldav_username.clone(),
-        settings.caldav_password.clone(),
-    ) {
-        Ok(c) => c,
-        Err(e) => {
+    let discovered_display_name = if state.demo_mode {
+        None
+    } else {
+        let client = match crate::caldav::CalDavClient::new(
+            settings.caldav_base_url.clone(),
+            settings.caldav_username.clone(),
+            settings.caldav_password.clone(),
+        ) {
+            Ok(c) => c,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!("Connection failed: {e}")})),
+                )
+                    .into_response();
+            }
+        };
+
+        if let Err(e) = client.calendars().await {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": format!("Connection failed: {e}")})),
+                Json(json!({"error": format!("Connection test failed: {e}")})),
             )
                 .into_response();
         }
+
+        client.get_display_name().await.ok().flatten()
     };
-
-    if let Err(e) = client.calendars().await {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": format!("Connection test failed: {e}")})),
-        )
-            .into_response();
-    }
-
-    let discovered_display_name = client.get_display_name().await.ok().flatten();
     let display_name = form
         .display_name
         .as_deref()
@@ -283,27 +287,29 @@ pub async fn save_settings(
         caldav_password: password,
     };
 
-    let client = match crate::caldav::CalDavClient::new(
-        settings.caldav_base_url.clone(),
-        settings.caldav_username.clone(),
-        settings.caldav_password.clone(),
-    ) {
-        Ok(c) => c,
-        Err(e) => {
+    if !state.demo_mode {
+        let client = match crate::caldav::CalDavClient::new(
+            settings.caldav_base_url.clone(),
+            settings.caldav_username.clone(),
+            settings.caldav_password.clone(),
+        ) {
+            Ok(c) => c,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!("Connection failed: {e}")})),
+                )
+                    .into_response();
+            }
+        };
+
+        if let Err(e) = client.calendars().await {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": format!("Connection failed: {e}")})),
+                Json(json!({"error": format!("Connection test failed: {e}")})),
             )
                 .into_response();
         }
-    };
-
-    if let Err(e) = client.calendars().await {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": format!("Connection test failed: {e}")})),
-        )
-            .into_response();
     }
 
     if let Err(e) =

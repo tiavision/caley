@@ -33,6 +33,7 @@ pub struct SyncManager {
     sync_interval: Duration,
     search_mode: SearchMode,
     tasks: Mutex<HashMap<String, mpsc::UnboundedSender<SyncTrigger>>>,
+    demo_mode: bool,
 }
 
 impl SyncManager {
@@ -43,6 +44,7 @@ impl SyncManager {
         app_base_url: String,
         sync_interval_mins: u64,
         search_mode: SearchMode,
+        demo_mode: bool,
     ) -> Arc<Self> {
         Arc::new(Self {
             db,
@@ -52,6 +54,7 @@ impl SyncManager {
             sync_interval: Duration::from_secs(sync_interval_mins.saturating_mul(60)),
             search_mode,
             tasks: Mutex::new(HashMap::new()),
+            demo_mode,
         })
     }
 
@@ -148,6 +151,9 @@ impl SyncManager {
     }
 
     async fn sync_user(&self, user_id: &str, _full: bool) -> anyhow::Result<()> {
+        if self.demo_mode {
+            return Ok(());
+        }
         let accounts = db::list_caldav_accounts(&self.db, user_id, &self.encryption_key).await?;
         if accounts.is_empty() {
             return Ok(()); // no CalDAV credentials configured yet

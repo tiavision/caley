@@ -29,6 +29,7 @@ pub struct EmailSyncManager {
     tasks: Mutex<HashMap<String, mpsc::UnboundedSender<EmailSyncTrigger>>>,
     /// persistent IDLE connections, one per account — keyed by account_id
     idle_tasks: Mutex<HashMap<String, JoinHandle<()>>>,
+    demo_mode: bool,
 }
 
 impl EmailSyncManager {
@@ -39,6 +40,7 @@ impl EmailSyncManager {
         sync_interval_mins: u64,
         search_mode: SearchMode,
         data_dir: PathBuf,
+        demo_mode: bool,
     ) -> Arc<Self> {
         Arc::new(Self {
             db,
@@ -49,6 +51,7 @@ impl EmailSyncManager {
             data_dir,
             tasks: Mutex::new(HashMap::new()),
             idle_tasks: Mutex::new(HashMap::new()),
+            demo_mode,
         })
     }
 
@@ -204,6 +207,9 @@ impl EmailSyncManager {
     }
 
     async fn sync_account(&self, account_id: &str) -> anyhow::Result<()> {
+        if self.demo_mode {
+            return Ok(());
+        }
         let (mut session, user_id) = self.load_session(account_id).await?;
 
         // Discover + cache mailboxes
@@ -264,6 +270,9 @@ impl EmailSyncManager {
     }
 
     async fn sync_mailbox(&self, account_id: &str, mailbox: &str) -> anyhow::Result<()> {
+        if self.demo_mode {
+            return Ok(());
+        }
         let (mut session, user_id) = self.load_session(account_id).await?;
         self.broadcaster.send(
             &user_id,
@@ -289,6 +298,9 @@ impl EmailSyncManager {
     // ── IMAP IDLE ─────────────────────────────────────────────────────────────
 
     async fn run_idle_loop(self: Arc<Self>, account_id: String) {
+        if self.demo_mode {
+            return;
+        }
         let mut backoff = Duration::from_secs(5);
         const MAX_BACKOFF: Duration = Duration::from_secs(300);
         loop {

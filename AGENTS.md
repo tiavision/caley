@@ -73,6 +73,23 @@ CalDAV-credential login is always available; OIDC login is shown alongside it wh
 
 `DELETE /api/account` deletes all user data from the database. In local login mode it also clears the session and redirects to `/`.
 
+## Demo Mode
+
+Set `DEMO_MODE=true` to start the backend without any external infrastructure. Use this to test the full UI end-to-end.
+
+```bash
+cd backend
+DEMO_MODE=true APP_BASE_URL=http://localhost:3000 ENCRYPTION_KEY=demo-key cargo run
+```
+
+- Uses an isolated `./data/demo.db` (never touches the configured `DATABASE_PATH`).
+- Accepts any credentials on the login page — always binds to the fixed demo user `demo@demo.example`.
+- Seed data is inserted with `INSERT OR IGNORE` on startup, so the DB survives restarts and the user can make edits that persist. Account rows (IMAP/CalDAV credentials) use `ON CONFLICT DO UPDATE` so re-keying with a different `ENCRYPTION_KEY` is corrected automatically.
+- Pre-seeded: 3 calendars, ~16 events (including recurring), 1 addressbook, 31 contacts, 2 IMAP accounts (Work + Personal), 6 mailboxes each, 22+ messages with styled HTML bodies.
+- All outbound network calls are suppressed: CalDAV PUT/DELETE, IMAP connect (sync, IDLE, flag updates, delete, move), SMTP send, email autodiscovery.
+- SMTP compose returns 200 OK without sending. Flag changes, deletes, and moves update only the local DB.
+- OIDC and WebAuthn/PGP are not available in demo mode (they require external infrastructure).
+
 ## Notes
 
 - No CI is configured.

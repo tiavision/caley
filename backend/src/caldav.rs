@@ -129,6 +129,7 @@ pub struct CalDavClient {
     base_url: String,
     username: String,
     password: String,
+    pub demo_mode: bool,
 }
 
 impl CalDavClient {
@@ -142,7 +143,18 @@ impl CalDavClient {
             base_url: base_url.trim_end_matches('/').to_string(),
             username,
             password,
+            demo_mode: false,
         })
+    }
+
+    pub fn demo() -> Self {
+        Self {
+            client: Client::new(),
+            base_url: String::new(),
+            username: String::new(),
+            password: String::new(),
+            demo_mode: true,
+        }
     }
 
     pub(crate) fn base_url(&self) -> &str {
@@ -159,6 +171,9 @@ impl CalDavClient {
     }
 
     pub async fn calendars(&self) -> anyhow::Result<Vec<Calendar>> {
+        if self.demo_mode {
+            return Ok(vec![]);
+        }
         let start_url = self.start_url().await;
         let home_sets = self.discover_calendar_home_sets(&start_url).await?;
         let mut all = Vec::new();
@@ -171,6 +186,9 @@ impl CalDavClient {
     }
 
     pub async fn get_display_name(&self) -> anyhow::Result<Option<String>> {
+        if self.demo_mode {
+            return Ok(Some("Demo User".to_string()));
+        }
         let start_url = self.start_url().await;
         let principal_body = r#"<?xml version="1.0" encoding="utf-8"?>
 <propfind xmlns="DAV:">
@@ -387,6 +405,9 @@ impl CalDavClient {
         uid: &str,
         ical_data: &str,
     ) -> anyhow::Result<()> {
+        if self.demo_mode {
+            return Ok(());
+        }
         let url = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
         let mut url = url;
         for _ in 0..5 {
@@ -424,6 +445,9 @@ impl CalDavClient {
     }
 
     pub async fn delete_event(&self, calendar_href: &str, uid: &str) -> anyhow::Result<()> {
+        if self.demo_mode {
+            return Ok(());
+        }
         let url = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
         let mut url = url;
         for _ in 0..5 {
@@ -532,6 +556,13 @@ impl CalDavClient {
         calendar_href: &str,
         sync_token: Option<&str>,
     ) -> anyhow::Result<SyncResult> {
+        if self.demo_mode {
+            return Ok(SyncResult {
+                new_token: "demo-token".into(),
+                changed: vec![],
+                deleted: vec![],
+            });
+        }
         let token_val = sync_token.unwrap_or("");
         let body = format!(
             r#"<?xml version="1.0" encoding="utf-8"?>
@@ -563,6 +594,9 @@ impl CalDavClient {
         p256dh: &str,
         auth: &str,
     ) -> anyhow::Result<Option<i64>> {
+        if self.demo_mode {
+            return Ok(None);
+        }
         let expires_at_default = chrono::Utc::now().timestamp() + 86400;
         // IMF-fixdate as required by the BitFire WebDAV Push spec
         let expires_str = chrono::DateTime::from_timestamp(expires_at_default, 0)
@@ -618,6 +652,9 @@ impl CalDavClient {
     }
 
     pub async fn create_calendar(&self, name: &str, color: Option<&str>) -> anyhow::Result<String> {
+        if self.demo_mode {
+            anyhow::bail!("Cannot create calendars in demo mode");
+        }
         let start = self.start_url().await;
         let home_sets = self.discover_calendar_home_sets(&start).await?;
         let home = home_sets

@@ -119,13 +119,15 @@ pub async fn save_account(
         }
     };
 
-    // Validate by attempting to connect
-    if let Err(e) = imap_client::connect(&body.host, body.port, &body.username, &password).await {
-        return (
-            StatusCode::BAD_REQUEST,
-            format!("IMAP connection failed: {e}"),
-        )
-            .into_response();
+    // Validate by attempting to connect (skipped in demo mode)
+    if !state.demo_mode {
+        if let Err(e) = imap_client::connect(&body.host, body.port, &body.username, &password).await {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!("IMAP connection failed: {e}"),
+            )
+                .into_response();
+        }
     }
 
     if let Err(e) = email_db::upsert_account(
@@ -170,9 +172,10 @@ pub async fn save_account(
     }
 
     // Stop any existing IDLE watcher so it reconnects with updated credentials
-    state.email_sync_manager.stop_idle_for(&account_id);
-    // Kick off sync (and IDLE) for this account
-    state.email_sync_manager.ensure_task_for(&account_id);
+    if !state.demo_mode {
+        state.email_sync_manager.stop_idle_for(&account_id);
+        state.email_sync_manager.ensure_task_for(&account_id);
+    }
     state
         .sse_broadcaster
         .send(&user.user_id, SseMessage::AccountsChanged);
@@ -383,9 +386,11 @@ pub async fn trigger_mailbox_sync(
         }
         Ok(Some(_)) => {}
     }
-    state
-        .email_sync_manager
-        .trigger(&q.account_id, EmailSyncTrigger::Mailbox(q.mailbox));
+    if !state.demo_mode {
+        state
+            .email_sync_manager
+            .trigger(&q.account_id, EmailSyncTrigger::Mailbox(q.mailbox));
+    }
     StatusCode::ACCEPTED.into_response()
 }
 
@@ -766,27 +771,29 @@ pub async fn update_flags(
         }
     };
 
-    // Apply on server
-    match imap_client::connect(
-        &account.host,
-        account.port as u16,
-        &account.username,
-        &account.password,
-    )
-    .await
-    {
-        Ok(mut session) => {
-            if let Ok(_) = imap_client::select_mailbox(&mut session, &body.mailbox).await {
-                let flag_strs: Vec<&str> = body.flags.iter().map(|s| s.as_str()).collect();
-                if let Err(e) =
-                    imap_client::set_flags(&mut session, body.uid, &flag_strs, body.set).await
-                {
-                    eprintln!("[email] set_flags error: {e}");
+    // Apply on server (skipped in demo mode)
+    if !state.demo_mode {
+        match imap_client::connect(
+            &account.host,
+            account.port as u16,
+            &account.username,
+            &account.password,
+        )
+        .await
+        {
+            Ok(mut session) => {
+                if let Ok(_) = imap_client::select_mailbox(&mut session, &body.mailbox).await {
+                    let flag_strs: Vec<&str> = body.flags.iter().map(|s| s.as_str()).collect();
+                    if let Err(e) =
+                        imap_client::set_flags(&mut session, body.uid, &flag_strs, body.set).await
+                    {
+                        eprintln!("[email] set_flags error: {e}");
+                    }
                 }
+                let _ = session.logout().await;
             }
-            let _ = session.logout().await;
+            Err(e) => eprintln!("[email] connect for flags error: {e}"),
         }
-        Err(e) => eprintln!("[email] connect for flags error: {e}"),
     }
 
     // Update cached flags
@@ -878,29 +885,32 @@ pub async fn delete_message(
             .unwrap_or(None)
     };
 
-    match imap_client::connect(
-        &account.host,
-        account.port as u16,
-        &account.username,
-        &account.password,
-    )
-    .await
-    {
-        Ok(mut session) => {
-            if let Ok(_) = imap_client::select_mailbox(&mut session, &q.mailbox).await {
-                if let Some(ref trash) = trash_mailbox {
-                    if let Err(e) =
-                        imap_client::move_message_on_server(&mut session, q.uid, trash).await
+    if !state.demo_mode {
+        match imap_client::connect(
+            &account.host,
+            account.port as u16,
+            &account.username,
+            &account.password,
+        )
+        .await
+        {
+            Ok(mut session) => {
+                if let Ok(_) = imap_client::select_mailbox(&mut session, &q.mailbox).await {
+                    if let Some(ref trash) = trash_mailbox {
+                        if let Err(e) =
+                            imap_client::move_message_on_server(&mut session, q.uid, trash).await
+                        {
+                            eprintln!("[email] move_to_trash error: {e}");
+                        }
+                    } else if let Err(e) = imap_client::delete_on_server(&mut session, q.uid).await
                     {
-                        eprintln!("[email] move_to_trash error: {e}");
+                        eprintln!("[email] delete_on_server error: {e}");
                     }
-                } else if let Err(e) = imap_client::delete_on_server(&mut session, q.uid).await {
-                    eprintln!("[email] delete_on_server error: {e}");
                 }
+                let _ = session.logout().await;
             }
-            let _ = session.logout().await;
+            Err(e) => eprintln!("[email] connect for delete error: {e}"),
         }
-        Err(e) => eprintln!("[email] connect for delete error: {e}"),
     }
 
     // Delete .eml and DB rows
@@ -953,26 +963,31 @@ pub async fn move_message(
         }
     };
 
-    match imap_client::connect(
-        &account.host,
-        account.port as u16,
-        &account.username,
-        &account.password,
-    )
-    .await
-    {
-        Ok(mut session) => {
-            if let Ok(_) = imap_client::select_mailbox(&mut session, &body.mailbox).await {
-                if let Err(e) =
-                    imap_client::move_message_on_server(&mut session, body.uid, &body.dest_mailbox)
-                        .await
-                {
-                    eprintln!("[email] move_message_on_server error: {e}");
+    if !state.demo_mode {
+        match imap_client::connect(
+            &account.host,
+            account.port as u16,
+            &account.username,
+            &account.password,
+        )
+        .await
+        {
+            Ok(mut session) => {
+                if let Ok(_) = imap_client::select_mailbox(&mut session, &body.mailbox).await {
+                    if let Err(e) = imap_client::move_message_on_server(
+                        &mut session,
+                        body.uid,
+                        &body.dest_mailbox,
+                    )
+                    .await
+                    {
+                        eprintln!("[email] move_message_on_server error: {e}");
+                    }
                 }
+                let _ = session.logout().await;
             }
-            let _ = session.logout().await;
+            Err(e) => eprintln!("[email] connect for move error: {e}"),
         }
-        Err(e) => eprintln!("[email] connect for move error: {e}"),
     }
 
     let _ = tokio::fs::remove_file(eml_path(
@@ -1133,6 +1148,11 @@ pub async fn send_email(
         );
         (acc, from)
     };
+
+    if state.demo_mode {
+        eprintln!("[demo] send_email suppressed: to={to:?} subject={subject:?}");
+        return StatusCode::OK.into_response();
+    }
 
     let smtp_host = account.smtp_host.as_deref().unwrap_or(&account.host);
     let smtp_port = account.smtp_port.unwrap_or(587) as u16;
@@ -1321,6 +1341,11 @@ pub async fn send_raw_email(
         .any(|recipient| recipient.parse::<lettre::Address>().is_err())
     {
         return (StatusCode::BAD_REQUEST, "invalid recipient address").into_response();
+    }
+
+    if state.demo_mode {
+        eprintln!("[demo] send_raw_email suppressed for identity {}", identity.email);
+        return StatusCode::OK.into_response();
     }
 
     let smtp_host = account.smtp_host.as_deref().unwrap_or(&account.host);
@@ -2240,9 +2265,25 @@ pub struct AutodiscoverQuery {
 }
 
 pub async fn autodiscover_handler(
+    State(state): State<AppState>,
     _user: CurrentUser,
     Query(params): Query<AutodiscoverQuery>,
 ) -> impl IntoResponse {
+    if state.demo_mode {
+        let local = params.email.split('@').next().unwrap_or(&params.email);
+        return Json(json!({
+            "found": true,
+            "provider_name": "Demo Mail",
+            "imap_host": "imap.demo.example",
+            "imap_port": 993,
+            "imap_use_tls": true,
+            "imap_username": local,
+            "smtp_host": "smtp.demo.example",
+            "smtp_port": 587,
+        }))
+        .into_response();
+    }
+
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .user_agent(crate::version::USER_AGENT)

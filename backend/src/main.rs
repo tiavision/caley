@@ -4,6 +4,7 @@ mod carddav;
 mod contacts;
 mod crypto;
 mod db;
+mod demo;
 mod email;
 mod email_autodiscover;
 mod email_db;
@@ -73,6 +74,8 @@ struct Cli {
     map_url: String,
     #[arg(long, env = "WEBAUTHN_EXTRA_ORIGINS")]
     webauthn_extra_origins: Vec<String>,
+    #[arg(long, env = "DEMO_MODE", default_value_t = false)]
+    demo_mode: bool,
 }
 
 #[tokio::main]
@@ -83,7 +86,18 @@ async fn main() -> anyhow::Result<()> {
         .unwrap();
     let args = Cli::parse();
 
-    let db = db::init_db(&args.database_path).await?;
+    // In demo mode use an isolated database so the dev/prod DB is never touched.
+    let database_path = if args.demo_mode {
+        let data_dir = std::path::Path::new(&args.database_path)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("./data"));
+        data_dir.join("demo.db").to_string_lossy().into_owned()
+    } else {
+        args.database_path.clone()
+    };
+
+    let db = db::init_db(&database_path).await?;
 
     let search_mode = args.search_mode.parse::<SearchMode>().unwrap_or_else(|e| {
         eprintln!("Warning: invalid SEARCH_MODE — {e}");
@@ -93,13 +107,18 @@ async fn main() -> anyhow::Result<()> {
 
     let encryption_key = crypto::derive_key(&args.encryption_key);
 
+    if args.demo_mode {
+        println!("Demo mode: seeding demo database");
+        demo::seed(&db, &encryption_key).await?;
+    }
+
     let sse_broadcaster = Arc::new(sse::SseBroadcaster::new());
 
     let use_oidc = args.oidc_issuer.is_some()
         && args.oidc_client_id.is_some()
         && args.oidc_client_secret.is_some();
 
-    let data_dir = PathBuf::from(&args.database_path)
+    let data_dir = PathBuf::from(&database_path)
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("./data"));
@@ -111,6 +130,7 @@ async fn main() -> anyhow::Result<()> {
         args.app_base_url.clone(),
         args.sync_interval_mins,
         search_mode.clone(),
+        args.demo_mode,
     );
 
     let email_sync_manager = email_sync::EmailSyncManager::new(
@@ -120,6 +140,7 @@ async fn main() -> anyhow::Result<()> {
         args.sync_interval_mins,
         search_mode.clone(),
         data_dir.clone(),
+        args.demo_mode,
     );
 
     let session_store = SqliteStore::new(db.clone());
@@ -161,7 +182,12 @@ async fn main() -> anyhow::Result<()> {
         map_url: args.map_url,
         data_dir,
         webauthn,
+        demo_mode: args.demo_mode,
     };
+
+    if args.demo_mode {
+        println!("Demo mode: active — no external network calls will be made");
+    }
 
     let static_dir = args
         .static_dir

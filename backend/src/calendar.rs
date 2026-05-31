@@ -201,6 +201,9 @@ async fn require_account_client(
     user: &CurrentUser,
     account_id: &str,
 ) -> Result<CalDavClient, Response> {
+    if state.demo_mode {
+        return Ok(CalDavClient::demo());
+    }
     match db::get_caldav_account(&state.db, &user.user_id, account_id, &state.encryption_key).await {
         Ok(Some(account)) => CalDavClient::new(
             account.caldav_base_url,
@@ -714,11 +717,26 @@ pub async fn save_event(
     };
 
     if scope == "this_instance" {
-        let raw_ical = match client.get_event(&calendar_href, &uid).await {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("Failed to fetch event for override: {e}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read event").into_response();
+        let raw_ical = if state.demo_mode {
+            match sqlx::query_scalar::<_, String>(
+                "SELECT raw_ical FROM cached_events WHERE account_id = ? AND calendar_href = ? AND uid = ? LIMIT 1",
+            )
+            .bind(&account_id)
+            .bind(&calendar_href)
+            .bind(&uid)
+            .fetch_optional(&state.db)
+            .await
+            {
+                Ok(Some(s)) => s,
+                _ => return (StatusCode::NOT_FOUND, "Event not found").into_response(),
+            }
+        } else {
+            match client.get_event(&calendar_href, &uid).await {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Failed to fetch event for override: {e}");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read event").into_response();
+                }
             }
         };
         let orig_dt = original_dtstart.unwrap_or("");
@@ -978,15 +996,30 @@ pub async fn delete_event(
     };
 
     if scope == "this_instance" && !original_dtstart.is_empty() {
-        let raw_ical = match client.get_event(&calendar_href, &uid).await {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("Failed to GET event for instance delete: {e}");
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get event: {e}"),
-                )
-                    .into_response();
+        let raw_ical = if state.demo_mode {
+            match sqlx::query_scalar::<_, String>(
+                "SELECT raw_ical FROM cached_events WHERE account_id = ? AND calendar_href = ? AND uid = ? LIMIT 1",
+            )
+            .bind(&account_id)
+            .bind(&calendar_href)
+            .bind(&uid)
+            .fetch_optional(&state.db)
+            .await
+            {
+                Ok(Some(s)) => s,
+                _ => return (StatusCode::NOT_FOUND, "Event not found").into_response(),
+            }
+        } else {
+            match client.get_event(&calendar_href, &uid).await {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Failed to GET event for instance delete: {e}");
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to get event: {e}"),
+                    )
+                        .into_response();
+                }
             }
         };
         let tz_ref = if tz.is_empty() { "UTC" } else { &tz };

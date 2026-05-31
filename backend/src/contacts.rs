@@ -77,6 +77,9 @@ async fn require_account_client(
     user: &CurrentUser,
     account_id: &str,
 ) -> Result<crate::caldav::CalDavClient, Response> {
+    if state.demo_mode {
+        return Ok(crate::caldav::CalDavClient::demo());
+    }
     match db::get_caldav_account(&state.db, &user.user_id, account_id, &state.encryption_key).await {
         Ok(Some(account)) => crate::caldav::CalDavClient::new(
             account.caldav_base_url,

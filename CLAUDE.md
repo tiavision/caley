@@ -218,6 +218,24 @@ Encryption/settings:
 - The dev server defaults to Vite's port, usually `localhost:5173`.
 - There is a Vitest test script for frontend tests.
 
+## Demo Mode
+
+Set `DEMO_MODE=true` to start the backend in a fully self-contained demo mode — no external network calls are made. Use this to test the full UI end-to-end without any CalDAV, CardDAV, IMAP, or SMTP infrastructure.
+
+- Uses an isolated `./data/demo.db` database (never touches the configured `DATABASE_PATH`).
+- Accepts any credentials on the login page — always binds to the fixed demo user.
+- Seeds realistic fixture data on startup (3 calendars, ~15 events, 8 contacts, 10 inbox messages). Uses `INSERT OR IGNORE` so data seeded in a previous run is preserved.
+- CalDAV/CardDAV write ops (create/edit/delete event, contact) update the local DB only.
+- SMTP sends are logged to stdout and silently discarded.
+- Email autodiscovery returns a fixture response without HTTP calls.
+- OIDC and WebAuthn/PGP are not available in demo mode.
+
+```bash
+# Run backend in demo mode (frontend dev server still needed separately)
+cd backend
+DEMO_MODE=true APP_BASE_URL=http://localhost:3000 ENCRYPTION_KEY=demo-key cargo run
+```
+
 ## Development Commands
 
 Backend:

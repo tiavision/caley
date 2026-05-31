@@ -57,6 +57,53 @@ OIDC is enabled only when all three OIDC variables are set. If OIDC is enabled, 
 {APP_BASE_URL}/auth/oidc
 ```
 
+## Try It — Demo Mode
+
+Demo mode lets you explore the full Caley UI without connecting to any external server (no CalDAV, no IMAP, no SMTP). It pre-seeds a realistic dataset so every part of the app has something to show.
+
+### What's included
+
+| Area | Data |
+|---|---|
+| Calendars | Work, Personal, Family — colour-coded |
+| Events | ~16 seeds (recurring standups, appointments, vacation block, school events) expanding to 30+ occurrences |
+| Contacts | 31 contacts with emails, phone numbers, and organisations |
+| Email — Work account | 14 inbox messages (invoices, PRs, alerts, meeting notes), Sent, Archive, Junk |
+| Email — Personal account | 8 inbox messages (bank statement, friend threads, newsletters), Sent |
+
+Messages have styled HTML bodies. Unread/read state, flags, delete, and move all work locally. Compose returns success without sending.
+
+### Run with Docker
+
+```bash
+docker run --rm -p 3000:3000 \
+  -e DEMO_MODE=true \
+  -e APP_BASE_URL=http://localhost:3000 \
+  -e ENCRYPTION_KEY=demo-key \
+  caley
+```
+
+Open `http://localhost:3000` and log in with any CalDAV URL and any username/password.
+
+### Run locally
+
+```bash
+cd backend
+DEMO_MODE=true APP_BASE_URL=http://localhost:3000 ENCRYPTION_KEY=demo-key cargo run
+```
+
+Open `http://localhost:3000`. Or start the Vite dev server alongside it for hot-reload:
+
+```bash
+cd frontend && npm install && npm run dev   # http://localhost:5173
+```
+
+### Notes
+
+- Demo data lives in `./data/demo.db`, separate from the regular `caley.db`. Delete it to reset to the original seed data.
+- Credential rows are re-encrypted on every startup, so you can freely change `ENCRYPTION_KEY` between runs.
+- OIDC login and the WebAuthn/OpenPGP vault are not available in demo mode.
+
 ## Local Development
 
 Start the backend:
