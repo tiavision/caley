@@ -901,16 +901,12 @@ pub async fn raw_email(
         }
     };
 
-    let raw = {
-        use flate2::read::GzDecoder;
-        use std::io::Read;
-        let mut dec = GzDecoder::new(compressed.as_slice());
-        let mut out = Vec::new();
-        if let Err(e) = dec.read_to_end(&mut out) {
+    let raw = match zstd::decode_all(compressed.as_slice()) {
+        Ok(b) => b,
+        Err(e) => {
             eprintln!("[pgp] raw_email decompress: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "decompress error").into_response();
         }
-        out
     };
 
     Response::builder()

@@ -560,14 +560,8 @@ impl EmailSyncManager {
                     if let Some(dir) = path.parent() {
                         tokio::fs::create_dir_all(dir).await?;
                     }
-                    let compressed = {
-                        use flate2::Compression;
-                        use flate2::write::GzEncoder;
-                        use std::io::Write;
-                        let mut enc = GzEncoder::new(Vec::new(), Compression::default());
-                        enc.write_all(&raw_bytes)?;
-                        enc.finish()?
-                    };
+                    let compressed = zstd::encode_all(raw_bytes.as_slice(), 6)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
                     tokio::fs::write(&path, compressed).await?;
 
                     let att_params = attachments
@@ -660,7 +654,7 @@ fn sha2_hex(input: String) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-/// Deterministic path to the compressed `.eml.gz` file for a given message.
+/// Deterministic path to the compressed `.eml.zst` file for a given message.
 pub fn eml_path(
     data_dir: &std::path::Path,
     account_id: &str,
@@ -671,5 +665,5 @@ pub fn eml_path(
         .join("messages")
         .join(account_id)
         .join(sha2_hex(mailbox.to_owned()))
-        .join(format!("{uid}.eml.gz"))
+        .join(format!("{uid}.eml.zst"))
 }

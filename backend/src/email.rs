@@ -20,12 +20,7 @@ use crate::sse::SseMessage;
 use crate::version;
 
 fn decompress_eml(bytes: &[u8]) -> std::io::Result<Vec<u8>> {
-    use flate2::read::GzDecoder;
-    use std::io::Read;
-    let mut dec = GzDecoder::new(bytes);
-    let mut out = Vec::new();
-    dec.read_to_end(&mut out)?;
-    Ok(out)
+    zstd::decode_all(bytes)
 }
 
 fn extract_part_bytes(eml_bytes: &[u8], part_index: usize) -> Option<Vec<u8>> {
