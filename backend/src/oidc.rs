@@ -3,15 +3,21 @@ use crate::email_sync::EmailSyncManager;
 use crate::search::SearchMode;
 use axum::{
     body::Body,
-    extract::{FromRequestParts, State},
+    extract::{FromRequestParts, Query, State},
     http::{Request, StatusCode, request::Parts},
     response::{IntoResponse, Json, Redirect, Response},
 };
-use axum_oidc::{ClearSessionFlag, EmptyAdditionalClaims, OidcClaims, OidcRpInitiatedLogout};
 use clap::ValueEnum;
 use futures_util::future::BoxFuture;
+use openidconnect::{
+    AuthorizationCode, CsrfToken, EndSessionUrl, EndpointMaybeSet, EndpointNotSet, EndpointSet,
+    LogoutRequest, Nonce, PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl, Scope,
+    TokenResponse,
+};
+use openidconnect::core::{CoreAuthenticationFlow, CoreClient};
 use serde_json::json;
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::Arc,
     task::{Context, Poll},
@@ -19,6 +25,24 @@ use std::{
 use tower::{Layer, Service};
 use tower_sessions::Session;
 use webauthn_rs::Webauthn;
+
+/// The concrete CoreClient type produced by `from_provider_metadata` after discovery.
+/// HasAuthUrl=Set (authorization_endpoint always present in discovery),
+/// HasTokenUrl=MaybeSet, HasUserInfoUrl=MaybeSet (both optional in discovery).
+pub type OidcCoreClient = CoreClient<
+    EndpointSet,
+    EndpointNotSet,
+    EndpointNotSet,
+    EndpointNotSet,
+    EndpointMaybeSet,
+    EndpointMaybeSet,
+>;
+
+pub struct OidcProvider {
+    pub client: OidcCoreClient,
+    pub end_session_endpoint: Option<EndSessionUrl>,
+    pub http_client: reqwest::Client,
+}
 
 #[derive(Clone, Debug, ValueEnum)]
 pub enum UserIdClaim {
@@ -43,6 +67,8 @@ pub struct AppState {
     pub data_dir: PathBuf,
     pub webauthn: Arc<Webauthn>,
     pub demo_mode: bool,
+    pub oidc_provider: Option<Arc<OidcProvider>>,
+    pub app_base_url: String,
 }
 
 pub struct CurrentUser {
@@ -55,24 +81,8 @@ impl FromRequestParts<AppState> for CurrentUser {
 
     async fn from_request_parts(
         parts: &mut Parts,
-        state: &AppState,
+        _state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        // Prefer an OIDC session (claims populated by OidcAuthLayer) when present,
-        // otherwise fall back to a CalDAV-credential session. Both can be active.
-        if let Some(claims) = parts.extensions.get::<OidcClaims<EmptyAdditionalClaims>>() {
-            if let Some(user_id) = extract_user_id(claims, &state.oidc_user_id_claim) {
-                let display_name = claims
-                    .name()
-                    .and_then(|n| n.get(None).map(|s| s.as_str().to_owned()))
-                    .or_else(|| claims.preferred_username().map(|u| u.as_str().to_owned()))
-                    .or_else(|| Some(claims.subject().as_str().to_owned()));
-                return Ok(CurrentUser {
-                    user_id,
-                    display_name,
-                });
-            }
-        }
-
         if let Some(session) = parts.extensions.get::<Session>().cloned() {
             if let Some(user_id) = session.get::<String>("user_id").await.ok().flatten() {
                 let display_name = session.get::<String>("display_name").await.ok().flatten();
@@ -82,13 +92,15 @@ impl FromRequestParts<AppState> for CurrentUser {
                 });
             }
         }
-
         Err((StatusCode::UNAUTHORIZED, "Unauthorized").into_response())
     }
 }
 
 pub fn extract_user_id(
-    claims: &OidcClaims<EmptyAdditionalClaims>,
+    claims: &openidconnect::IdTokenClaims<
+        openidconnect::EmptyAdditionalClaims,
+        openidconnect::core::CoreGenderClaim,
+    >,
     claim: &UserIdClaim,
 ) -> Option<String> {
     match claim {
@@ -99,7 +111,8 @@ pub fn extract_user_id(
         UserIdClaim::Email => claims.email().map(|e| e.as_str().to_owned()),
         UserIdClaim::Name => claims
             .name()
-            .and_then(|n| n.get(None).map(|s| s.as_str().to_owned())),
+            .and_then(|n| n.get(None))
+            .map(|s| s.as_str().to_owned()),
     }
 }
 
@@ -130,58 +143,203 @@ pub async fn auth_config(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
-/// Unified logout for both auth styles. `OidcRpInitiatedLogout` is only present
-/// for users with a valid OIDC session, so it is extracted optionally — a
-/// CalDAV-credential user simply gets a session flush.
-pub async fn logout_handler(
-    State(state): State<AppState>,
-    session: Session,
-    logout: Option<OidcRpInitiatedLogout>,
-) -> Response {
-    match logout {
-        Some(logout) if state.do_oidc_logout => {
-            let mut response = match logout.uri() {
-                Ok(uri) => Redirect::to(&uri.to_string()).into_response(),
-                Err(_) => Redirect::to("/").into_response(),
-            };
-            response.extensions_mut().insert(ClearSessionFlag);
-            session.flush().await.ok();
-            response
-        }
-        _ => {
-            session.flush().await.ok();
-            Redirect::to("/").into_response()
+/// Unified logout. For OIDC sessions, performs RP-initiated logout using the
+/// end_session_endpoint from discovery. CalDAV sessions just get a flush.
+pub async fn logout_handler(State(state): State<AppState>, session: Session) -> Response {
+    let is_oidc = session
+        .get::<bool>("oidc_session")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(false);
+    let id_token_hint = session
+        .get::<String>("id_token_hint")
+        .await
+        .ok()
+        .flatten();
+    session.flush().await.ok();
+
+    if is_oidc && state.do_oidc_logout {
+        if let Some(provider) = &state.oidc_provider {
+            if let Some(end_session_endpoint) = &provider.end_session_endpoint {
+                let post_logout = format!("{}/", state.app_base_url);
+                let redirect_uri = PostLogoutRedirectUrl::new(post_logout)
+                    .unwrap_or_else(|_| PostLogoutRedirectUrl::new("/".to_owned()).unwrap());
+                let mut url = LogoutRequest::from(end_session_endpoint.clone())
+                    .set_post_logout_redirect_uri(redirect_uri)
+                    .http_get_url();
+                // id_token_hint is stored as a raw JWT string; append it directly.
+                if let Some(hint) = id_token_hint {
+                    url.query_pairs_mut().append_pair("id_token_hint", &hint);
+                }
+                return Redirect::to(url.as_str()).into_response();
+            }
         }
     }
+    Redirect::to("/").into_response()
 }
 
-/// Handler behind `/auth/oidc`. The OidcLoginLayer wrapping this route forces the
-/// IdP redirect when unauthenticated and exchanges the code on return; by the
-/// time this runs the user is authenticated, so just send them to the app.
-pub async fn oidc_post_login(
+/// Handles both legs of the OIDC authorization code flow at `GET /auth/oidc`.
+///
+/// - Error leg: IdP rejected a `prompt=none` silent auth attempt → show login page.
+/// - Initiate leg: no `code` param → generate PKCE/state, redirect to IdP.
+/// - Callback leg: `code` + `state` present → exchange code, verify token, write session.
+pub async fn oidc_handler(
     State(state): State<AppState>,
-    user: CurrentUser,
-) -> impl IntoResponse {
-    if let Err(e) = db::ensure_user(&state.db, &user.user_id, user.display_name.as_deref()).await {
-        eprintln!("ensure_user failed for OIDC user {}: {e}", user.user_id);
+    session: Session,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    // Error leg: IdP returned an error (e.g. prompt=none with no active session).
+    if params.contains_key("error") {
+        return Redirect::to("/").into_response();
     }
-    Redirect::to("/calendar/")
+
+    let provider = match &state.oidc_provider {
+        Some(p) => Arc::clone(p),
+        None => return Redirect::to("/").into_response(),
+    };
+
+    if let Some(code) = params.get("code").cloned() {
+        // Callback leg.
+        let csrf_token: CsrfToken =
+            match session.get("oidc_csrf").await.ok().flatten() {
+                Some(t) => t,
+                None => return Redirect::to("/").into_response(),
+            };
+        let nonce: Nonce = match session.get("oidc_nonce").await.ok().flatten() {
+            Some(n) => n,
+            None => return Redirect::to("/").into_response(),
+        };
+        let pkce_verifier: PkceCodeVerifier =
+            match session.get("oidc_pkce_verifier").await.ok().flatten() {
+                Some(v) => v,
+                None => return Redirect::to("/").into_response(),
+            };
+
+        // Remove one-time-use keys before making any network calls.
+        session.remove_value("oidc_csrf").await.ok();
+        session.remove_value("oidc_nonce").await.ok();
+        session.remove_value("oidc_pkce_verifier").await.ok();
+
+        // Validate state parameter to prevent CSRF.
+        if params.get("state").map(|s| s.as_str()) != Some(csrf_token.secret()) {
+            return Redirect::to("/").into_response();
+        }
+
+        let code_req = match provider.client.exchange_code(AuthorizationCode::new(code)) {
+            Ok(req) => req.set_pkce_verifier(pkce_verifier),
+            Err(e) => {
+                eprintln!("OIDC token endpoint not available: {e}");
+                return Redirect::to("/").into_response();
+            }
+        };
+        let token_response =
+            match code_req.request_async(&provider.http_client).await {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("OIDC token request failed: {e}");
+                    return Redirect::to("/").into_response();
+                }
+            };
+
+        let id_token = match token_response.id_token() {
+            Some(t) => t,
+            None => {
+                eprintln!("OIDC response missing ID token");
+                return Redirect::to("/").into_response();
+            }
+        };
+
+        let verifier = provider.client.id_token_verifier();
+        let claims = match id_token.claims(&verifier, &nonce) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("OIDC claims verification failed: {e}");
+                return Redirect::to("/").into_response();
+            }
+        };
+
+        let id_token_hint = id_token.to_string();
+
+        let user_id = extract_user_id(claims, &state.oidc_user_id_claim)
+            .unwrap_or_else(|| claims.subject().as_str().to_owned());
+        let display_name = claims
+            .name()
+            .and_then(|n| n.get(None))
+            .map(|s| s.as_str().to_owned())
+            .or_else(|| claims.preferred_username().map(|u| u.as_str().to_owned()))
+            .or_else(|| Some(claims.subject().as_str().to_owned()));
+
+        if let Err(e) =
+            db::ensure_user(&state.db, &user_id, display_name.as_deref()).await
+        {
+            eprintln!("ensure_user failed for OIDC user {user_id}: {e}");
+        }
+
+        if let Err(e) = session.cycle_id().await {
+            eprintln!("session cycle_id failed: {e}");
+        }
+        session.insert("user_id", &user_id).await.ok();
+        if let Some(ref dn) = display_name {
+            session.insert("display_name", dn).await.ok();
+        }
+        session.insert("oidc_session", true).await.ok();
+        session.insert("id_token_hint", &id_token_hint).await.ok();
+
+        let _ = state.sync_manager.ensure_task_for(&user_id);
+
+        return Redirect::to("/calendar/").into_response();
+    }
+
+    // Initiate leg: generate PKCE + state and redirect to IdP.
+    let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+
+    let mut auth_req = provider
+        .client
+        .authorize_url(
+            CoreAuthenticationFlow::AuthorizationCode,
+            CsrfToken::new_random,
+            Nonce::new_random,
+        )
+        .add_scope(Scope::new("profile".to_owned()))
+        .set_pkce_challenge(pkce_challenge);
+
+    // Silent re-auth: RequireAuthLayer appends ?auto=1 for unauthenticated page requests
+    // when OIDC is enabled. If the IdP has an active session it redirects back immediately;
+    // if not, it responds with error=login_required which we handle in the error leg above.
+    if params.get("auto").map(|v| v == "1").unwrap_or(false) {
+        auth_req = auth_req.add_extra_param("prompt", "none");
+    }
+
+    let (auth_url, csrf_token, nonce) = auth_req.url();
+
+    session.insert("oidc_csrf", &csrf_token).await.ok();
+    session.insert("oidc_nonce", &nonce).await.ok();
+    session.insert("oidc_pkce_verifier", &pkce_verifier).await.ok();
+
+    Redirect::to(auth_url.as_str()).into_response()
 }
 
 #[derive(Clone)]
-pub struct RequireAuthLayer;
+pub struct RequireAuthLayer {
+    pub oidc_enabled: bool,
+}
 
 impl<S> Layer<S> for RequireAuthLayer {
     type Service = RequireAuthService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        RequireAuthService { inner }
+        RequireAuthService {
+            inner,
+            oidc_enabled: self.oidc_enabled,
+        }
     }
 }
 
 #[derive(Clone)]
 pub struct RequireAuthService<S> {
     inner: S,
+    oidc_enabled: bool,
 }
 
 impl<S> Service<Request<Body>> for RequireAuthService<S>
@@ -200,11 +358,11 @@ where
     fn call(&mut self, request: Request<Body>) -> Self::Future {
         let inner = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, inner);
+        let oidc_enabled = self.oidc_enabled;
 
         let path = request.uri().path().to_string();
         // Always-public paths: the login page, auth endpoints, and static assets.
-        let is_static = path.starts_with("/assets/")
-            || path.rsplit('/').next().map_or(false, |f| f.contains('.'));
+        let is_static = path.starts_with("/assets/");
         if path == "/"
             || path.starts_with("/auth/")
             || path == "/logout"
@@ -214,27 +372,28 @@ where
             return Box::pin(async move { inner.call(request).await });
         }
 
-        // Authenticated via OIDC claims (already in extensions) or a CalDAV session.
-        let has_claims = request
-            .extensions()
-            .get::<OidcClaims<EmptyAdditionalClaims>>()
-            .is_some();
         let session = request.extensions().get::<Session>().cloned();
         Box::pin(async move {
-            let authenticated = has_claims
-                || match &session {
-                    Some(s) => s.get::<String>("user_id").await.ok().flatten().is_some(),
-                    None => false,
-                };
+            let authenticated = match &session {
+                Some(s) => s.get::<String>("user_id").await.ok().flatten().is_some(),
+                None => false,
+            };
             if authenticated {
                 return inner.call(request).await;
             }
             if path.starts_with("/api/") {
                 return Ok((
                     StatusCode::UNAUTHORIZED,
-                    Json(serde_json::json!({"error": "Unauthorized"})),
+                    Json(json!({"error": "Unauthorized"})),
                 )
                     .into_response());
+            }
+            // Silent re-auth: if OIDC is enabled, redirect to the OIDC handler with
+            // prompt=none so users who are still logged into the IdP are re-authenticated
+            // without seeing the login page. The IdP returns error=login_required if no
+            // session exists, and oidc_handler falls back to showing the login page.
+            if oidc_enabled {
+                return Ok(Redirect::temporary("/auth/oidc?auto=1").into_response());
             }
             Ok(Redirect::temporary("/").into_response())
         })

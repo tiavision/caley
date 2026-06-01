@@ -20,23 +20,21 @@ mod sync;
 mod version;
 
 use axum::Router;
-use axum::error_handling::HandleErrorLayer;
-use axum::extract::{OriginalUri, Request};
-use axum::http::{HeaderValue, StatusCode};
+use axum::extract::Request;
+use axum::http::HeaderValue;
 use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Json, Redirect, Response};
+use axum::response::Response;
 use axum::routing::{delete, get, patch, post, put};
-use axum_oidc::error::MiddlewareError;
-use axum_oidc::{EmptyAdditionalClaims, OidcAuthLayer, OidcLoginLayer};
 use clap::Parser;
 use dotenvy::dotenv;
-use oidc::{AppState, UserIdClaim};
+use oidc::{AppState, OidcProvider, UserIdClaim};
+use openidconnect::{ClientId, ClientSecret, IssuerUrl, ProviderMetadataWithLogout, RedirectUrl};
+use openidconnect::core::CoreClient;
 use search::SearchMode;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
-use tower_sessions::{Expiry, Session, SessionManagerLayer, cookie::SameSite};
+use tower_sessions::{Expiry, SessionManagerLayer, cookie::SameSite};
 use tower_sessions_sqlx_store::SqliteStore;
 use webauthn_rs::prelude::*;
 
@@ -169,6 +167,35 @@ async fn main() -> anyhow::Result<()> {
         )
     };
 
+    let oidc_provider: Option<Arc<OidcProvider>> = if use_oidc {
+        let http_client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?;
+        let issuer = IssuerUrl::new(args.oidc_issuer.clone().unwrap())?;
+        let provider_meta = ProviderMetadataWithLogout::discover_async(issuer, &http_client)
+            .await
+            .map_err(|e| anyhow::anyhow!("OIDC discovery failed: {e}"))?;
+        let end_session_endpoint =
+            provider_meta.additional_metadata().end_session_endpoint.clone();
+        let client =
+            CoreClient::from_provider_metadata(
+                provider_meta,
+                ClientId::new(args.oidc_client_id.clone().unwrap()),
+                Some(ClientSecret::new(args.oidc_client_secret.clone().unwrap())),
+            )
+            .set_redirect_uri(RedirectUrl::new(format!(
+                "{}/auth/oidc",
+                args.app_base_url
+            ))?);
+        Some(Arc::new(OidcProvider {
+            client,
+            end_session_endpoint,
+            http_client,
+        }))
+    } else {
+        None
+    };
+
     let state = AppState {
         db,
         do_oidc_logout: args.oidc_logout,
@@ -183,6 +210,8 @@ async fn main() -> anyhow::Result<()> {
         data_dir,
         webauthn,
         demo_mode: args.demo_mode,
+        oidc_provider,
+        app_base_url: args.app_base_url.clone(),
     };
 
     if args.demo_mode {
@@ -314,101 +343,28 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/pgp/key", delete(pgp::delete_public_key))
         .route("/api/email/raw", get(pgp::raw_email));
 
-    // Protected routes plus the always-available CalDAV login + unified logout.
-    // RequireAuthLayer lets the public allow-list through and otherwise requires
-    // either OIDC claims or a CalDAV session.
+    // Protected routes: OIDC handler + CalDAV login + unified logout + everything else.
+    // RequireAuthLayer allows public paths and requires a session user_id for all others.
+    // When OIDC is enabled, unauthenticated page requests are redirected to /auth/oidc?auto=1
+    // for silent re-authentication; API requests always get 401.
     let private = shared_private
+        .route("/auth/oidc", get(oidc::oidc_handler))
         .route("/auth/login", post(local_auth::handle_login))
         .route("/logout", get(oidc::logout_handler))
         .with_state(state.clone())
         .fallback_service(ServeDir::new(&static_dir))
-        .layer(oidc::RequireAuthLayer);
+        .layer(oidc::RequireAuthLayer { oidc_enabled: use_oidc });
 
-    let app = if use_oidc {
-        let oidc_issuer = args.oidc_issuer.unwrap();
-        let oidc_client_id = args.oidc_client_id.unwrap();
-        let oidc_client_secret = args.oidc_client_secret.unwrap();
-        let app_base_uri = args.app_base_url.parse()?;
-
-        let oidc_auth_layer = OidcAuthLayer::<EmptyAdditionalClaims>::discover_client(
-            app_base_uri,
-            oidc_issuer,
-            oidc_client_id,
-            Some(oidc_client_secret),
-            vec!["openid".into(), "profile".into(), "offline_access".into()],
-        )
-        .await?;
-
-        // Explicit OIDC trigger + callback route. OidcLoginLayer wraps ONLY this
-        // route, so unauthenticated requests elsewhere are not bounced to the IdP.
-        // The IdP redirect URI must be `{APP_BASE_URL}/auth/oidc`.
-        let oidc_trigger = Router::new()
-            .route("/auth/oidc", get(oidc::oidc_post_login))
-            .with_state(state)
-            .layer(
-                ServiceBuilder::new()
-                    .layer(HandleErrorLayer::new(
-                        |session: Session, err: MiddlewareError| async move {
-                            match err {
-                                MiddlewareError::RequestToken(_)
-                                | MiddlewareError::ClaimsVerification(_) => {
-                                    session.remove_value("axum-oidc").await.unwrap_or_default();
-                                    Redirect::to("/").into_response()
-                                }
-                                _ => err.into_response(),
-                            }
-                        },
-                    ))
-                    .layer(OidcLoginLayer::<EmptyAdditionalClaims>::new())
-                    .into_inner(),
-            );
-
+    if use_oidc {
         println!("Auth: CalDAV login + OIDC enabled");
-        // OidcAuthLayer wraps everything (safe no-op when no OIDC session) so that
-        // claims are populated before RequireAuthLayer and the trigger route run.
-        Router::new()
-            .merge(public)
-            .merge(oidc_trigger)
-            .merge(private)
-            .layer(
-                ServiceBuilder::new()
-                    .layer(HandleErrorLayer::new(
-                        |original_uri: OriginalUri, session: Session, err: MiddlewareError| async move {
-                            match err {
-                                // ClaimsVerification means the stored token is cryptographically
-                                // invalid — clear the session and force re-auth.
-                                MiddlewareError::ClaimsVerification(_) => {
-                                    session.remove_value("axum-oidc").await.unwrap_or_default();
-                                    if original_uri.path().starts_with("/api/") {
-                                        (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))).into_response()
-                                    } else {
-                                        Redirect::to("/").into_response()
-                                    }
-                                }
-                                // RequestToken is a transient IdP network error during refresh —
-                                // don't wipe the session; just return 401 so the client retries.
-                                MiddlewareError::RequestToken(_) => {
-                                    if original_uri.path().starts_with("/api/") {
-                                        (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))).into_response()
-                                    } else {
-                                        Redirect::to("/").into_response()
-                                    }
-                                }
-                                _ => err.into_response(),
-                            }
-                        },
-                    ))
-                    .layer(oidc_auth_layer)
-                    .into_inner(),
-            )
-            .layer(session_layer)
     } else {
         println!("Auth: CalDAV login (OIDC not configured)");
-        Router::new()
-            .merge(public)
-            .merge(private)
-            .layer(session_layer)
-    };
+    }
+
+    let app = Router::new()
+        .merge(public)
+        .merge(private)
+        .layer(session_layer);
 
     let app = app.layer(middleware::from_fn(security_headers));
 
