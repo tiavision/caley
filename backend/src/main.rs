@@ -21,10 +21,10 @@ mod version;
 
 use axum::Router;
 use axum::error_handling::HandleErrorLayer;
-use axum::extract::Request;
-use axum::http::HeaderValue;
+use axum::extract::{OriginalUri, Request};
+use axum::http::{HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Json, Redirect, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum_oidc::error::MiddlewareError;
 use axum_oidc::{EmptyAdditionalClaims, OidcAuthLayer, OidcLoginLayer};
@@ -335,7 +335,7 @@ async fn main() -> anyhow::Result<()> {
             oidc_issuer,
             oidc_client_id,
             Some(oidc_client_secret),
-            vec!["openid".into(), "profile".into()],
+            vec!["openid".into(), "profile".into(), "offline_access".into()],
         )
         .await?;
 
@@ -373,12 +373,26 @@ async fn main() -> anyhow::Result<()> {
             .layer(
                 ServiceBuilder::new()
                     .layer(HandleErrorLayer::new(
-                        |session: Session, err: MiddlewareError| async move {
+                        |original_uri: OriginalUri, session: Session, err: MiddlewareError| async move {
                             match err {
-                                MiddlewareError::RequestToken(_)
-                                | MiddlewareError::ClaimsVerification(_) => {
+                                // ClaimsVerification means the stored token is cryptographically
+                                // invalid — clear the session and force re-auth.
+                                MiddlewareError::ClaimsVerification(_) => {
                                     session.remove_value("axum-oidc").await.unwrap_or_default();
-                                    Redirect::to("/").into_response()
+                                    if original_uri.path().starts_with("/api/") {
+                                        (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))).into_response()
+                                    } else {
+                                        Redirect::to("/").into_response()
+                                    }
+                                }
+                                // RequestToken is a transient IdP network error during refresh —
+                                // don't wipe the session; just return 401 so the client retries.
+                                MiddlewareError::RequestToken(_) => {
+                                    if original_uri.path().starts_with("/api/") {
+                                        (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))).into_response()
+                                    } else {
+                                        Redirect::to("/").into_response()
+                                    }
                                 }
                                 _ => err.into_response(),
                             }
