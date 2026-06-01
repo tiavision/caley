@@ -156,7 +156,7 @@
                 class="more-btn"
                 onclick={(e) => { e.stopPropagation(); onMoreClick(cell.date_str, events); }}
               >
-                +{hidden} {tl('cal_month_more')}
+                +{hidden}
               </button>
             {/if}
           </div>
