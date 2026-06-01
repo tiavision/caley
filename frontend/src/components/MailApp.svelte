@@ -2960,6 +2960,11 @@
     };
   });
 
+  $: {
+    const totalUnread = sidebarAccountSections.reduce((sum, s) => sum + s.unread_count, 0);
+    document.title = totalUnread > 0 ? `(${totalUnread > 999 ? '999+' : totalUnread}) Caley - Mail` : 'Caley - Mail';
+  }
+
   $: isSentFolder = !!(selectedMailbox && /sent/i.test(selectedMailbox));
   $: selectedMessages = messages.filter(msg => markedMessageKeys.has(messageKey(msg)));
   $: bulkAccountId = selectedMessages.length > 0 &&
