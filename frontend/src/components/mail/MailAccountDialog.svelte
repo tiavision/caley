@@ -471,6 +471,16 @@
     margin-top: 0.5rem;
   }
 
+  .link-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--pico-primary, #0172ad);
+    font-size: 0.8rem;
+    text-align: left;
+    padding: 0;
+  }
+
   .header-icon-link {
     color: var(--pico-muted-color);
     display: inline-flex;

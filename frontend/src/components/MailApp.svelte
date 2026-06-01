@@ -2607,59 +2607,6 @@
 {/if}
 
 <style>
-  .folder-mailbox-label {
-    font-size: 0.875rem;
-    font-weight: 500;
-    margin: 1rem 0 0.25rem;
-  }
-  .folder-mailbox-list {
-    max-height: 280px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    margin-bottom: 0.5rem;
-    border: 1px solid var(--pico-form-element-border-color);
-    border-radius: var(--pico-border-radius);
-    padding: 0.75rem;
-  }
-  .folder-account-group h4 {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--pico-muted-color);
-    margin: 0 0 0.25rem;
-  }
-  .folder-account-group label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.875rem;
-    cursor: pointer;
-    margin-bottom: 0.15rem;
-  }
-  .folder-hint {
-    font-size: 0.8rem;
-    color: var(--pico-muted-color);
-    margin: 0.25rem 0 0.75rem;
-  }
-  .folder-filters {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    margin-bottom: 1rem;
-  }
-  .folder-filters label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.875rem;
-    cursor: pointer;
-  }
-  .folder-account-group label input[type="checkbox"] {
-    margin: 0;
-  }
-
   .mail-page {
     display: flex;
     flex-direction: column;
@@ -2696,87 +2643,6 @@
   .resize-handle:hover,
   .resize-handle:focus-visible {
     background: var(--pico-primary, #0172ad);
-  }
-
-  /* Sidebar */
-
-  .account-collapse-btn:focus-visible {
-    opacity: 1;
-  }
-
-  .folder-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .folder-icon {
-    display: inline-flex;
-    align-items: center;
-    flex-shrink: 0;
-    color: var(--pico-muted-color, #888);
-  }
-
-  .icon-btn {
-    display: inline-flex;
-    align-items: center;
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0 0.2rem;
-    opacity: 0.4;
-    font-size: 0.8rem;
-    color: inherit;
-  }
-
-  .icon-btn:hover {
-    opacity: 1;
-  }
-
-  .delete-btn:hover {
-    color: var(--pico-del-color, #c0392b);
-  }
-
-  .link-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--pico-primary, #0172ad);
-    font-size: 0.8rem;
-    text-align: left;
-    padding: 0;
-  }
-
-  /* Message list */
-
-  .filter-suggestions {
-    max-height: 300px;
-    overflow-y: auto;
-  }
-
-  .filter-date-label {
-    display: flex;
-    flex-direction: column;
-    font-size: 0.8rem;
-    gap: 0.15rem;
-    margin-bottom: 0.5rem;
-    color: var(--pico-muted-color, #666);
-  }
-
-  .filter-date-label input[type='date'] {
-    font-size: 0.82rem;
-    margin: 0;
-    height: auto;
-  }
-
-  .message-row-icons {
-    display: flex;
-    align-items: center;
-    gap: 0.1rem;
-    flex-shrink: 0;
-    font-size: 0.75rem;
-    line-height: 1;
   }
 
   /* Message detail */
@@ -3293,35 +3159,6 @@
     border-radius: var(--pico-border-radius, 4px);
   }
 
-  .view-toggle {
-    display: flex;
-    gap: 0;
-    margin-bottom: 0.75rem;
-    border: 1px solid var(--pico-muted-border-color, #ccc);
-    border-radius: 4px;
-    overflow: hidden;
-    width: fit-content;
-  }
-
-  .view-toggle button {
-    padding: 0.3rem 0.75rem;
-    border: none;
-    background: none;
-    cursor: pointer;
-    font-size: 0.8rem;
-    color: inherit;
-    border-right: 1px solid var(--pico-muted-border-color, #ccc);
-  }
-
-  .view-toggle button:last-child {
-    border-right: none;
-  }
-
-  .view-toggle button.active {
-    background: var(--pico-primary, #0172ad);
-    color: white;
-  }
-
   .images-notice {
     display: flex;
     flex-wrap: wrap;
@@ -3544,71 +3381,6 @@
     box-shadow: 0 0.35rem 1.25rem rgba(0,0,0,0.3);
   }
 
-  /* Identity management */
-  .identity-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    margin-bottom: 1rem;
-  }
-
-  .identity-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem 0.5rem;
-    border-radius: 4px;
-    background: var(--pico-card-sectioning-background-color, rgba(0,0,0,0.03));
-  }
-
-  .identity-info {
-    flex: 1;
-    display: flex;
-    align-items: baseline;
-    gap: 0.4rem;
-    overflow: hidden;
-  }
-
-  .identity-name {
-    font-weight: 500;
-    white-space: nowrap;
-  }
-
-  .identity-email {
-    font-size: 0.8rem;
-    color: var(--pico-muted-color, #888);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .identity-default-badge {
-    font-size: 0.7rem;
-    padding: 0.1rem 0.4rem;
-    border-radius: 3px;
-    background: var(--pico-primary-background, #1095c1);
-    color: var(--pico-primary-inverse, #fff);
-    white-space: nowrap;
-  }
-
-  .identity-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    flex-shrink: 0;
-  }
-
-  .identity-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-top: 0.75rem;
-  }
-
-  .identity-add-btn {
-    margin-top: 0.5rem;
-  }
-
   /* Responsive */
   @media (max-width: 1023px) {
     .message-detail {
@@ -3759,10 +3531,6 @@
     .mail-layout {
       position: relative;
       display: flex;
-    }
-
-    .mail-sidebar.open {
-      transform: translateX(0);
     }
 
     .resize-handle {
