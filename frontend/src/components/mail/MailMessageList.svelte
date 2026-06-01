@@ -348,7 +348,6 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
-    border-right: 1px solid var(--pico-muted-border-color, #eee);
     overflow: hidden;
     margin-bottom: 0;
   }

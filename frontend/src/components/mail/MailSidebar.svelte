@@ -235,27 +235,7 @@
     white-space: nowrap;
   }
 
-  .icon-btn {
-    display: inline-flex;
-    align-items: center;
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0 0.2rem;
-    opacity: 0.4;
-    font-size: 0.8rem;
-    color: inherit;
-  }
-
-  .icon-btn:hover {
-    opacity: 1;
-  }
-
-  .delete-btn:hover {
-    color: var(--pico-del-color, #c0392b);
-  }
-
-  .sidebar-actions {
+.sidebar-actions {
     padding: 0.75rem;
     display: flex;
     flex-direction: column;

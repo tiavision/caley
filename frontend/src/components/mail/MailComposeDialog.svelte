@@ -880,35 +880,6 @@
     border-top: 1px solid var(--pico-muted-border-color);
   }
 
-  .compose-attachment-chip {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    background: var(--pico-card-sectioning-background-color);
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: 1rem;
-    padding: 0.15rem 0.5rem 0.15rem 0.4rem;
-    font-size: 0.78rem;
-    max-width: 18rem;
-  }
-
-  .attachment-icon {
-    font-size: 0.8rem;
-    line-height: 1;
-  }
-
-  .attachment-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 10rem;
-  }
-
-  .attachment-size {
-    color: var(--pico-muted-color);
-    flex-shrink: 0;
-  }
-
   .attachment-remove {
     background: none;
     border: none;

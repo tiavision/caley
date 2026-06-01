@@ -168,3 +168,52 @@ dialog footer {
   margin-top: 0.75rem;
 }
 
+/* Subtle icon-only action button used in sidebars and dialogs */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  opacity: 0.4;
+  font-size: 0.8rem;
+  color: inherit;
+}
+.icon-btn:hover {
+  opacity: 1;
+}
+.delete-btn:hover {
+  color: var(--pico-del-color, #c0392b);
+}
+
+/* Attachment chip — shared by compose dialog and email detail view */
+.compose-attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--pico-card-sectioning-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 1rem;
+  padding: 0.15rem 0.5rem 0.15rem 0.4rem;
+  font-size: 0.78rem;
+  max-width: 18rem;
+}
+
+.attachment-icon {
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 10rem;
+}
+
+.attachment-size {
+  color: var(--pico-muted-color);
+  flex-shrink: 0;
+}
+
