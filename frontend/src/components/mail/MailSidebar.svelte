@@ -191,6 +191,22 @@
     opacity: 1;
   }
 
+  .unread-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--pico-primary, #0172ad);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
   .account-unread-badge {
     margin-right: 0.15rem;
   }
