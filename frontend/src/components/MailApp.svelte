@@ -2390,7 +2390,7 @@
                   <iframe
                     bind:this={iframeEl}
                     on:load={fitIframeToContent}
-                    sandbox="allow-popups"
+                    sandbox="allow-popups allow-popups-to-escape-sandbox"
                     srcdoc={pgpDecryptedHtml}
                     title={tl('nav_mail')}
                     class="html-body"
@@ -2435,7 +2435,7 @@
                   bind:this={iframeEl}
                   on:load={fitIframeToContent}
                   scrolling={usesDetailOverlay ? 'no' : undefined}
-                  sandbox="allow-popups allow-same-origin"
+                  sandbox="allow-popups allow-same-origin allow-popups-to-escape-sandbox"
                   srcdoc={renderedHtml}
                   title={tl('nav_mail')}
                   class="html-body"
