@@ -6,6 +6,9 @@
   import SelectDropdown from './SelectDropdown.svelte';
   import UiIcon from './UiIcon.svelte';
   import ImportDialog from './ImportDialog.svelte';
+  import MailComposeDialog from './mail/MailComposeDialog.svelte';
+  import MailAccountDialog from './mail/MailAccountDialog.svelte';
+  import MailFolderDialog from './mail/MailFolderDialog.svelte';
   import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey, validateVault, eraseBytes } from '../lib/pgp/vault.ts';
   import { unlock } from '../lib/pgp/webauthn.ts';
   import { decryptMessage, verifySignedMessage, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
@@ -16,159 +19,14 @@
   import { prepareEmailHtml, htmlToPlainText, imageOriginsFromHtml } from '../lib/mail-html.ts';
   import type { CalendarJson, CalDavAccountJson } from '../types/calendar.ts';
   import type * as openpgp from 'openpgp';
+  import type { Account, Attachment, BodySegment, FolderKind, Identity, Mailbox, Message, SidebarAccountSection, SidebarMailbox, ThreadNode, ThreadTreeNode, VirtualFolder } from './mail/MailTypes.ts';
+  import { attachmentDataUrl, bareMailbox, buildThreadTree, canPreviewAttachment, canPreviewContentType, computePopoverStyle, folderKind, FOLDER_PRIORITY, folderSortKey, formatDate, formatMessageDateTime, htmlAddsValue, humanSize, identityKey, insertDecryptedInlineImages, intrinsicWidth, isIcsAttachment, isPgpPublicKeyAttachment, isPgpSignatureAttachment, isPgpTransportAttachment, keyHasEmail, linkifySegments, messageKey, sameMessage, senderName } from './mail/mailUtils.ts';
 
   export let standalone = false;
   export let initialMessage: { accountId: string; mailbox: string; uid: number } | null = null;
 
   let locale = 'en';
   $: tl = makeTl(locale);
-
-  // ── Types ────────────────────────────────────────────────────────────────
-
-  interface Account {
-    account_id: string;
-    display_name: string;
-    host: string;
-    port: number;
-    username: string;
-    use_tls: boolean;
-    smtp_host: string | null;
-    smtp_port: number | null;
-  }
-
-  interface Identity {
-    identity_id: string;
-    account_id: string;
-    name: string;
-    email: string;
-    is_default: boolean;
-    sort_order: number;
-  }
-
-  interface Mailbox {
-    account_id: string;
-    name: string;
-    delimiter: string | null;
-    subscribed: boolean;
-  }
-
-  interface SidebarMailbox {
-    mailbox: Mailbox;
-    unread_count: number;
-  }
-
-  interface SidebarAccountSection {
-    account: Account;
-    collapsed: boolean;
-    unread_count: number;
-    mailboxes: SidebarMailbox[];
-  }
-
-  interface VirtualFolder {
-    folder_id: string;
-    display_name: string;
-    sort_order: number;
-    only_flagged: boolean;
-    only_attachments: boolean;
-    rules: { account_id: string | null; mailbox_pattern: string | null }[];
-  }
-
-  interface Attachment {
-    filename: string;
-    content_type: string;
-    size: number;
-  }
-
-  interface Message {
-    uid: number;
-    account_id: string;
-    mailbox: string;
-    rowid: number;
-    message_id: string | null;
-    thread_id: string | null;
-    from: string | null;
-    to: string[];
-    cc: string[];
-    subject: string | null;
-    sent_at: number | null;
-    flags: string[];
-    has_attachments: boolean;
-    body_text: string | null;
-    body_html: string | null;
-    is_read: boolean;
-    is_flagged: boolean;
-    is_encrypted: boolean;
-    is_signed: boolean;
-    attachments: Attachment[];
-  }
-
-  interface ThreadNode {
-    uid: number;
-    account_id: string;
-    mailbox: string;
-    message_id: string | null;
-    parent_message_id: string | null;
-    from: string | null;
-    subject: string | null;
-    sent_at: number | null;
-    is_read: boolean;
-  }
-
-  interface ThreadTreeNode {
-    message: ThreadNode;
-    children: ThreadTreeNode[];
-  }
-
-  function canPreviewContentType(value: string | null | undefined): boolean {
-    const contentType = value?.split(';', 1)[0].trim().toLowerCase() ?? '';
-    return [
-      'application/pdf',
-      'text/plain',
-      'image/png',
-      'image/jpeg',
-      'image/gif',
-      'image/webp',
-      'image/avif',
-    ].includes(contentType) ||
-      (contentType.startsWith('audio/') && contentType.length > 'audio/'.length) ||
-      (contentType.startsWith('video/') && contentType.length > 'video/'.length);
-  }
-
-  function canPreviewAttachment(attachment: Attachment): boolean {
-    return canPreviewContentType(attachment.content_type);
-  }
-
-  function isPgpTransportAttachment(attachment: Attachment): boolean {
-    const filename = attachment.filename.toLowerCase();
-    const contentType = attachment.content_type?.split(';', 1)[0].trim().toLowerCase() ?? '';
-    return filename === 'encrypted.asc' ||
-      (/^(encrypted|message|msg)\.(asc|pgp|gpg)$/.test(filename) &&
-        (contentType === 'application/octet-stream' || contentType === 'application/pgp-encrypted'));
-  }
-
-  function isPgpSignatureAttachment(attachment: Attachment): boolean {
-    const filename = attachment.filename.toLowerCase();
-    const contentType = attachment.content_type?.split(';', 1)[0].trim().toLowerCase() ?? '';
-    return contentType === 'application/pgp-signature' ||
-      /^signature\.(asc|sig|pgp|gpg)$/.test(filename);
-  }
-
-  function isPgpPublicKeyAttachment(attachment: Attachment): boolean {
-    const filename = attachment.filename.toLowerCase();
-    const contentType = attachment.content_type?.split(';', 1)[0].trim().toLowerCase() ?? '';
-    return contentType === 'application/pgp-keys' ||
-      (!isPgpTransportAttachment(attachment) && !isPgpSignatureAttachment(attachment) &&
-        /\.(asc|pgp|gpg|pub)$/.test(filename));
-  }
-
-  function isIcsAttachment(attachment: Attachment): boolean {
-    const filename = attachment.filename.toLowerCase();
-    const contentType = attachment.content_type?.split(';', 1)[0].trim().toLowerCase() ?? '';
-    return contentType === 'text/calendar' ||
-      contentType === 'application/ics' ||
-      contentType === 'application/icalendar' ||
-      /\.(ics|ical)$/.test(filename);
-  }
 
   // ── State ────────────────────────────────────────────────────────────────
 
@@ -241,70 +99,6 @@
 
   let sseSource: EventSource | null = null;
 
-  // Account form
-  let accountForm = emptyAccountForm();
-  let accountSaving = false;
-  let accountError = '';
-  let accountStep: 'basic' | 'details' = 'basic';
-  let autodiscoverResult: { provider_name?: string; imap_host: string; imap_port: number; imap_use_tls: boolean; imap_username: string; smtp_host: string; smtp_port: number } | null = null;
-  let autodiscovering = false;
-  let autodiscoverError = '';
-  let showAdvanced = false;
-
-  // Identity form
-  function emptyIdentityForm() {
-    return {
-      identity_id: null as string | null,
-      account_id: '',
-      name: '',
-      email: '',
-    };
-  }
-  let identityForm = emptyIdentityForm();
-  let identitySaving = false;
-  let identityError = '';
-  let identityDialog: HTMLDialogElement;
-  let identityAccountId = '';   // which account's identities are being managed
-  let identityMode: 'idle' | 'add' | 'edit' = 'idle';
-
-  // Compose form
-  let composeTo = '';
-  let composeCc = '';
-  let composeBcc = '';
-  let composeSubject = '';
-  let composeBody = '';
-  let composeIdentityId = '';
-  let composeInReplyTo: string | null = null;
-  let composeReferences: string | null = null;
-  let composeMode: 'new' | 'reply' | 'replyAll' | 'forward' = 'new';
-  let composeSending = false;
-  let composeError = '';
-  let showComposeCcBcc = false;
-  let composeAttachments: File[] = [];
-  let composeReplyAll = false;
-  let composeEncrypt = false;
-  let composeSign = false;
-  let composeCanEncrypt = false;
-  let composeCanSign = false;
-  let composeSignOptedOut = false;
-  let composeTrustedKeys: { record: StoredPublicKey; key: openpgp.PublicKey }[] = [];
-  let composeStoredSigningFingerprints = new Set<string>();
-  let composeKeysLoading = false;
-  let composeKeysRequest = 0;
-  let composeFileInput: HTMLInputElement;
-  let filePickerOpen = false;
-  let recipientSuggestions: string[] = [];
-  let recipientSuggestionIdx = -1;
-  let recipientActiveField: 'to' | 'cc' | 'bcc' | null = null;
-  let recipientSuggestTimer: ReturnType<typeof setTimeout> | null = null;
-
-  // Virtual folder form
-  let folderName = '';
-  let folderSaving = false;
-  let folderSelectedMailboxes: Set<string> = new Set();
-  let folderOnlyFlagged = false;
-  let folderOnlyAttachments = false;
-  let editingFolder: VirtualFolder | null = null;
 
   let displayName = '';
 
@@ -350,170 +144,6 @@
   function clearPgpContentWhenHidden() {
     if (document.hidden) clearPgpContent();
   }
-
-  function attachmentDataUrl(attachment: DecryptedAttachment): string {
-    let binary = '';
-    const chunkSize = 0x8000;
-    for (let offset = 0; offset < attachment.data.length; offset += chunkSize) {
-      binary += String.fromCharCode(...attachment.data.subarray(offset, offset + chunkSize));
-    }
-    return `data:${attachment.contentType};base64,${btoa(binary)}`;
-  }
-
-  function insertDecryptedInlineImages(html: string, attachments: DecryptedAttachment[]): string {
-    let result = html;
-    for (const attachment of attachments) {
-      if (!attachment.contentId || !/^image\/(png|jpeg|gif|webp|avif)$/i.test(attachment.contentType)) continue;
-      const escapedCid = attachment.contentId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      result = result.replace(new RegExp(`cid:${escapedCid}`, 'gi'), attachmentDataUrl(attachment));
-    }
-    return result;
-  }
-
-  function bareMailbox(value: string | null): string {
-    const match = /<([^<>]+)>/.exec(value ?? '');
-    return (match?.[1] ?? value ?? '').trim().toLowerCase();
-  }
-
-  function keyHasEmail(key: { users: { userID?: { email?: string } }[] }, email: string): boolean {
-    return key.users.some(user => user.userID?.email?.trim().toLowerCase() === email.toLowerCase());
-  }
-
-  async function trustedPublicKeys(): Promise<{ record: StoredPublicKey; key: openpgp.PublicKey }[]> {
-    const records = (await listPublicKeys()).filter(record => record.trust === 'trusted');
-    const parsed: { record: StoredPublicKey; key: openpgp.PublicKey }[] = [];
-    for (const record of records) {
-      try {
-        parsed.push({ record, key: await parsePublicKey(record.armored) });
-      } catch {
-        // Corrupt stored keys are unavailable for compose encryption.
-      }
-    }
-    return parsed;
-  }
-
-  function signingKeyForIdentity(identityId: string): openpgp.PrivateKey | null {
-    const identity = identities.find(item => item.identity_id === identityId);
-    if (!identity) return null;
-    return getKeys().find(key => keyHasEmail(key, identity.email)) ?? null;
-  }
-
-  function storedSigningKeyExists(
-    identityId: string,
-    keys: { record: StoredPublicKey; key: openpgp.PublicKey }[],
-    fingerprints: Set<string>,
-  ): boolean {
-    const identity = identities.find(item => item.identity_id === identityId);
-    if (!identity) return false;
-    return keys.some(({ record, key }) =>
-      record.is_own
-      && fingerprints.has(record.fingerprint.toUpperCase())
-      && keyHasEmail(key, identity.email)
-    );
-  }
-
-  function reconcileComposeSigning(
-    identityId: string,
-    optedOut: boolean,
-    keys: { record: StoredPublicKey; key: openpgp.PublicKey }[],
-    fingerprints: Set<string>,
-  ) {
-    composeCanSign = signingKeyForIdentity(identityId) !== null
-      || storedSigningKeyExists(identityId, keys, fingerprints);
-    if (!composeCanSign) {
-      composeSign = false;
-    } else if (!optedOut) {
-      composeSign = true;
-    }
-  }
-
-  function composeEncryptionSelection(
-    identityId: string,
-    toValue: string,
-    ccValue: string,
-    bccValue: string,
-    keys: { record: StoredPublicKey; key: openpgp.PublicKey }[],
-  ): { keys: openpgp.PublicKey[]; missing: string[] } {
-    const identity = identities.find(item => item.identity_id === identityId);
-    const recipients = [
-      ...parseEnvelopeAddresses(toValue),
-      ...parseEnvelopeAddresses(ccValue),
-      ...parseEnvelopeAddresses(bccValue),
-    ];
-    if (!identity || recipients.length === 0) {
-      return { keys: [], missing: identity ? recipients : [''] };
-    }
-
-    const encryptionKeys: openpgp.PublicKey[] = [];
-    const missing: string[] = [];
-    for (const recipient of recipients) {
-      const matching = keys.filter(({ key }) => keyHasEmail(key, recipient));
-      if (matching.length === 0) {
-        missing.push(recipient);
-      } else {
-        for (const { key } of matching) encryptionKeys.push(key);
-      }
-    }
-    const ownKeys = keys.filter(({ record, key }) => record.is_own && keyHasEmail(key, identity.email));
-    if (ownKeys.length === 0) {
-      missing.push(identity.email);
-    } else {
-      for (const { key } of ownKeys) encryptionKeys.push(key);
-    }
-    return { keys: encryptionKeys, missing: [...new Set(missing)] };
-  }
-
-  function reconcileComposeEncryption(
-    identityId: string,
-    toValue: string,
-    ccValue: string,
-    bccValue: string,
-    keys: { record: StoredPublicKey; key: openpgp.PublicKey }[],
-    loading: boolean,
-  ) {
-    const selection = composeEncryptionSelection(identityId, toValue, ccValue, bccValue, keys);
-    composeCanEncrypt = !loading && selection.keys.length > 0 && selection.missing.length === 0;
-    if (!composeCanEncrypt) composeEncrypt = false;
-  }
-
-  async function loadComposeTrustedKeys() {
-    const request = ++composeKeysRequest;
-    composeKeysLoading = true;
-    composeTrustedKeys = [];
-    composeStoredSigningFingerprints = new Set();
-    try {
-      const [keys, vault] = await Promise.all([
-        trustedPublicKeys(),
-        readVault().catch(() => null),
-      ]);
-      if (request === composeKeysRequest) {
-        composeTrustedKeys = keys;
-        composeStoredSigningFingerprints = vault && localActiveDevice(vault)
-          ? new Set(vault.keys.map(record => record.fingerprint.toUpperCase()))
-          : new Set();
-      }
-    } catch {
-      if (request === composeKeysRequest) {
-        composeTrustedKeys = [];
-        composeStoredSigningFingerprints = new Set();
-      }
-    } finally {
-      if (request === composeKeysRequest) composeKeysLoading = false;
-    }
-  }
-
-  function toggleComposeSign() {
-    if (!composeCanSign) return;
-    composeSign = !composeSign;
-    composeSignOptedOut = !composeSign;
-  }
-
-  function toggleComposeEncrypt() {
-    if (composeCanEncrypt) composeEncrypt = !composeEncrypt;
-  }
-
-  $: reconcileComposeSigning(composeIdentityId, composeSignOptedOut, composeTrustedKeys, composeStoredSigningFingerprints);
-  $: reconcileComposeEncryption(composeIdentityId, composeTo, composeCc, composeBcc, composeTrustedKeys, composeKeysLoading);
 
   async function fetchRawMessage(msg: Message): Promise<Uint8Array> {
     const url = `/api/email/raw?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
@@ -585,7 +215,6 @@
         openVault(vaultKey, keys);
         rememberLocalDevice(device.cred_id);
         pgpKeyUnlocked = true;
-        reconcileComposeSigning(composeIdentityId, composeSignOptedOut, composeTrustedKeys, composeStoredSigningFingerprints);
         if (decryptSelected && selectedMessage?.is_encrypted) {
           await pgpDecrypt(selectedMessage);
         }
@@ -730,9 +359,9 @@
   let iframeKey = 0;
 
   // Dialog refs
-  let accountDialog: HTMLDialogElement;
-  let composeDialog: HTMLDialogElement;
-  let folderDialog: HTMLDialogElement;
+  let accountDialog: MailAccountDialog;
+  let composeDialog: MailComposeDialog;
+  let folderDialog: MailFolderDialog;
   let threadDialog: HTMLDialogElement;
   let importDialog: ImportDialog;
   let sidebarOpen = false;
@@ -785,23 +414,6 @@
     iframeResizeObserver?.disconnect();
   }
 
-  function intrinsicWidth(element: HTMLElement): number {
-    const clone = element.cloneNode(true) as HTMLElement;
-    clone.style.position = 'fixed';
-    clone.style.left = '-10000px';
-    clone.style.top = '0';
-    clone.style.width = 'max-content';
-    clone.style.maxWidth = 'none';
-    clone.style.flex = 'none';
-    clone.style.whiteSpace = 'nowrap';
-    clone.style.visibility = 'hidden';
-    clone.style.pointerEvents = 'none';
-    document.body.appendChild(clone);
-    const width = clone.getBoundingClientRect().width;
-    clone.remove();
-    return width;
-  }
-
   function updateDetailHeaderLayout() {
     if (!detailHeaderEl || !detailSubjectLineEl || !detailControlsEl || !selectedMessage) {
       detailHeaderStacked = false;
@@ -849,19 +461,6 @@
   let imagesNoticeDismissed = false;
   let detailOverlayVisible = false;
   const messageRowEls = new Map<string, HTMLButtonElement>();
-
-  function messageKey(msg: Message): string {
-    return `${msg.account_id}\u0000${msg.mailbox}\u0000${msg.uid}`;
-  }
-
-  function identityKey(accountId: string, mailbox: string, uid: number): string {
-    return `${accountId}\u0000${mailbox}\u0000${uid}`;
-  }
-
-  function sameMessage(a: Message | null, b: Message | null): boolean {
-    return !!a && !!b && messageKey(a) === messageKey(b);
-  }
-
   function clearMarkedSelection() {
     markedMessageKeys = new Set();
     selectionAnchorKey = null;
@@ -986,13 +585,9 @@
       sessionStorage.removeItem('caley_compose');
       try {
         const { subject, filename, mimeType, content } = JSON.parse(pendingCompose);
-        composeSubject = subject ?? '';
-        composeAttachments = [new File([content], filename, { type: mimeType })];
-        composeIdentityId = (identities.find(i => i.is_default) ?? identities[0])?.identity_id ?? '';
-        reconcileComposeSigning(composeIdentityId, composeSignOptedOut, composeTrustedKeys, composeStoredSigningFingerprints);
-        void loadComposeTrustedKeys();
+        const attachments = [new File([content], filename, { type: mimeType })];
         await tick();
-        composeDialog?.showModal();
+        composeDialog?.open({ mode: 'new', subject, attachments });
       } catch {}
     }
 
@@ -1420,14 +1015,6 @@
     addrSuggestDebounce = setTimeout(() => fetchAddrSuggestions(addrFilterInput), 300);
   }
 
-  function computePopoverStyle(anchorEl: HTMLElement, popEl: HTMLElement): string {
-    const rect = anchorEl.getBoundingClientRect();
-    const width = popEl.offsetWidth;
-    const top = rect.bottom + 4;
-    const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
-    return `position: fixed; top: ${top}px; left: ${left}px; right: auto;`;
-  }
-
   async function positionAddrPopover() {
     await tick();
     if (addrFilterEl && addrPopoverEl) addrPopoverStyle = computePopoverStyle(addrFilterEl, addrPopoverEl);
@@ -1747,36 +1334,6 @@
     return node.account_id === selectedMessage.account_id &&
       node.mailbox === selectedMessage.mailbox && node.uid === selectedMessage.uid;
   }
-
-  function buildThreadTree(nodes: ThreadNode[]): ThreadTreeNode[] {
-    const ids = new Set(nodes.map(node => node.message_id).filter((id): id is string => !!id));
-    const childrenByParent = new Map<string, ThreadNode[]>();
-    for (const node of nodes) {
-      if (!node.parent_message_id) continue;
-      const children = childrenByParent.get(node.parent_message_id) ?? [];
-      children.push(node);
-      childrenByParent.set(node.parent_message_id, children);
-    }
-
-    const included = new Set<ThreadNode>();
-    const branch = (node: ThreadNode, ancestry: Set<ThreadNode>): ThreadTreeNode => {
-      included.add(node);
-      const nextAncestry = new Set(ancestry).add(node);
-      const children = node.message_id
-        ? (childrenByParent.get(node.message_id) ?? [])
-            .filter(child => !nextAncestry.has(child))
-            .map(child => branch(child, nextAncestry))
-        : [];
-      return { message: node, children };
-    };
-    const roots = nodes.filter(node => !node.parent_message_id || !ids.has(node.parent_message_id));
-    const tree = roots.map(node => branch(node, new Set()));
-    for (const node of nodes) {
-      if (!included.has(node)) tree.push(branch(node, new Set()));
-    }
-    return tree;
-  }
-
   function openThreadMessage(node: ThreadNode) {
     threadDialog?.close();
     clearMarkedSelection();
@@ -2099,13 +1656,13 @@
     if (!msg) return;
     if (!e.shiftKey && e.key === 'r') {
       e.preventDefault();
-      openCompose(msg);
+      composeDialog?.open({ mode: 'reply', replyTo: msg });
     } else if (!e.shiftKey && e.key === 'a') {
       e.preventDefault();
-      openComposeReplyAll(msg);
+      composeDialog?.open({ mode: 'replyAll', replyTo: msg });
     } else if (!e.shiftKey && e.key === 'f') {
       e.preventDefault();
-      openComposeForward(msg);
+      composeDialog?.open({ mode: 'forward', replyTo: msg });
     } else if (!e.shiftKey && e.key === 'e' && archiveMailboxFor(msg)) {
       e.preventDefault();
       archiveMessage(msg);
@@ -2130,133 +1687,6 @@
     window.open(`/mail/view/?${params}`, '_blank', 'popup=yes,width=980,height=760,noopener,noreferrer');
   }
 
-  // ── Account management ───────────────────────────────────────────────────
-
-  function emptyAccountForm() {
-    return {
-      account_id: null as string | null,
-      display_name: '',
-      sender_name: '',
-      host: '',
-      port: 993,
-      username: '',
-      password: '',
-      use_tls: true,
-      smtp_host: '',
-      smtp_port: 587,
-    };
-  }
-
-  function openAddAccount() {
-    accountForm = emptyAccountForm();
-    accountError = '';
-    accountStep = 'basic';
-    autodiscoverResult = null;
-    autodiscoverError = '';
-    showAdvanced = false;
-    accountDialog?.showModal();
-  }
-
-  function openEditAccount(acc: Account) {
-    const defaultIdentity = identities.find(i => i.account_id === acc.account_id && i.is_default);
-    accountForm = {
-      account_id: acc.account_id,
-      display_name: acc.display_name,
-      sender_name: defaultIdentity?.name ?? '',
-      host: acc.host,
-      port: acc.port,
-      username: acc.username,
-      password: '',
-      use_tls: acc.use_tls,
-      smtp_host: acc.smtp_host || '',
-      smtp_port: acc.smtp_port || 587,
-    };
-    accountError = '';
-    accountStep = 'details';
-    autodiscoverResult = null;
-    showAdvanced = true;
-    accountDialog?.showModal();
-  }
-
-  async function continueSetup() {
-    autodiscovering = true;
-    autodiscoverError = '';
-    try {
-      const r = await fetch(`/api/email/autodiscover?email=${encodeURIComponent(accountForm.username)}`);
-      if (r.ok) {
-        const data = await r.json();
-        if (data.found) {
-          autodiscoverResult = data;
-          accountForm.host = data.imap_host;
-          accountForm.port = data.imap_port;
-          accountForm.use_tls = data.imap_use_tls;
-          accountForm.username = data.imap_username;
-          accountForm.smtp_host = data.smtp_host;
-          accountForm.smtp_port = data.smtp_port;
-          if (!accountForm.display_name) {
-            accountForm.display_name = data.provider_name || accountForm.username.split('@')[1] || '';
-          }
-          showAdvanced = false;
-        } else {
-          if (!accountForm.display_name) {
-            accountForm.display_name = accountForm.username.split('@')[1] || '';
-          }
-          showAdvanced = true;
-        }
-      } else {
-        if (!accountForm.display_name) {
-          accountForm.display_name = accountForm.username.split('@')[1] || '';
-        }
-        showAdvanced = true;
-      }
-    } catch {
-      autodiscoverError = tl('mail_autodiscoverError');
-      if (!accountForm.display_name) {
-        accountForm.display_name = accountForm.username.split('@')[1] || '';
-      }
-      showAdvanced = true;
-    }
-    autodiscovering = false;
-    accountStep = 'details';
-  }
-
-  async function saveAccount() {
-    accountSaving = true;
-    accountError = '';
-    try {
-      const r = await fetch('/api/email/account', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          account_id: accountForm.account_id,
-          display_name: accountForm.display_name,
-          sender_name: accountForm.sender_name || null,
-          host: accountForm.host,
-          port: accountForm.port,
-          username: accountForm.username,
-          password: accountForm.password,
-          use_tls: accountForm.use_tls,
-          smtp_host: accountForm.smtp_host || null,
-          smtp_port: accountForm.smtp_port || null,
-        }),
-      });
-      if (!r.ok) {
-        const text = await r.text();
-        accountError = text || tl('mail_saveAccountError');
-      } else {
-        accountDialog?.close();
-        await loadAccounts();
-        await loadIdentities();
-        for (const acc of accounts) {
-          await loadMailboxes(acc.account_id);
-        }
-      }
-    } catch {
-      accountError = tl('mail_saveAccountError');
-    }
-    accountSaving = false;
-  }
-
   async function removeAccount(acc: Account) {
     if (!confirm(tl('mail_removeAccountConfirm', { name: acc.display_name }))) return;
     await fetch(`/api/email/account?account_id=${encodeURIComponent(acc.account_id)}`, { method: 'DELETE' });
@@ -2275,417 +1705,6 @@
       selectedMailbox = null;
       messages = [];
     }
-  }
-
-  // ── Identity management ──────────────────────────────────────────────────
-
-  function openManageIdentities(accountId: string) {
-    identityAccountId = accountId;
-    identityMode = 'idle';
-    identityForm = emptyIdentityForm();
-    identityForm.account_id = accountId;
-    identityError = '';
-    identityDialog?.showModal();
-  }
-
-  function openEditIdentity(id: Identity) {
-    identityForm = {
-      identity_id: id.identity_id,
-      account_id: id.account_id,
-      name: id.name,
-      email: id.email,
-    };
-    identityMode = 'edit';
-    identityError = '';
-  }
-
-  function cancelIdentityForm() {
-    identityMode = 'idle';
-    identityForm = emptyIdentityForm();
-    identityForm.account_id = identityAccountId;
-    identityError = '';
-  }
-
-  async function saveIdentity() {
-    identitySaving = true;
-    identityError = '';
-    try {
-      const r = await fetch('/api/email/identity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          identity_id: identityForm.identity_id,
-          account_id: identityForm.account_id,
-          name: identityForm.name,
-          email: identityForm.email,
-          is_default: false,
-        }),
-      });
-      if (!r.ok) {
-        identityError = (await r.text()) || tl('mail_saveIdentityError');
-      } else {
-        await loadIdentities();
-        identityMode = 'idle';
-        identityForm = emptyIdentityForm();
-        identityForm.account_id = identityAccountId;
-      }
-    } catch {
-      identityError = tl('mail_saveIdentityError');
-    }
-    identitySaving = false;
-  }
-
-  async function setDefaultIdentity(id: Identity) {
-    await fetch('/api/email/identity', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        identity_id: id.identity_id,
-        account_id: id.account_id,
-        name: id.name,
-        email: id.email,
-        is_default: true,
-      }),
-    });
-    await loadIdentities();
-  }
-
-  async function deleteIdentity(id: Identity) {
-    if (!confirm(tl('mail_removeIdentityConfirm', { name: id.name, email: id.email }))) return;
-    await fetch(`/api/email/identity?identity_id=${encodeURIComponent(id.identity_id)}`, { method: 'DELETE' });
-    await loadIdentities();
-  }
-
-  // ── Compose ──────────────────────────────────────────────────────────────
-
-  function openCompose(replyTo?: Message) {
-    composeError = '';
-    composeSending = false;
-    composeCc = '';
-    composeBcc = '';
-    composeAttachments = [];
-    showComposeCcBcc = false;
-    composeReplyAll = false;
-    composeEncrypt = false;
-    composeSign = false;
-    composeSignOptedOut = false;
-    if (replyTo) {
-      composeMode = 'reply';
-      composeTo = replyTo.from || '';
-      composeSubject = replyTo.subject?.startsWith('Re:') ? replyTo.subject : `Re: ${replyTo.subject || ''}`;
-      composeBody = replyQuote(replyTo);
-      composeInReplyTo = replyTo.message_id;
-      composeReferences = replyTo.message_id;
-      // Try to match the identity that was the recipient of the original message
-      const accountIdentities = identities.filter(i => i.account_id === replyTo.account_id);
-      const toAddresses = (replyTo.to ?? []).map(a => a.toLowerCase());
-      const matched = accountIdentities.find(i => toAddresses.some(a => a.includes(i.email.toLowerCase())));
-      const defaultIdentity = accountIdentities.find(i => i.is_default);
-      composeIdentityId = (matched ?? defaultIdentity ?? identities[0])?.identity_id ?? '';
-    } else {
-      composeTo = '';
-      composeSubject = '';
-      composeBody = '';
-      composeInReplyTo = null;
-      composeReferences = null;
-      composeMode = 'new';
-      composeIdentityId = (identities.find(i => i.is_default) ?? identities[0])?.identity_id ?? '';
-    }
-    reconcileComposeSigning(composeIdentityId, composeSignOptedOut, composeTrustedKeys, composeStoredSigningFingerprints);
-    void loadComposeTrustedKeys();
-    composeDialog?.showModal();
-  }
-
-  function openComposeReplyAll(replyTo: Message) {
-    openCompose(replyTo);
-    const myIdentity = identities.find(i => i.identity_id === composeIdentityId);
-    const myEmail = myIdentity?.email.toLowerCase() ?? '';
-    const allRecipients = [...(replyTo.to ?? []), ...(replyTo.cc ?? [])];
-    const ccAddresses = allRecipients
-      .filter(addr => {
-        const a = addr.toLowerCase();
-        return !a.includes(myEmail) && a !== (replyTo.from ?? '').toLowerCase();
-      })
-      .join(', ');
-    composeCc = ccAddresses;
-    showComposeCcBcc = ccAddresses.length > 0;
-    composeReplyAll = true;
-    composeMode = 'replyAll';
-  }
-
-  function openComposeForward(forwardFrom: Message) {
-    openCompose();
-    composeMode = 'forward';
-    const accountIdentities = identities.filter(i => i.account_id === forwardFrom.account_id);
-    composeIdentityId = (accountIdentities.find(i => i.is_default) ?? accountIdentities[0] ?? identities[0])?.identity_id ?? '';
-    composeSubject = /^fwd:/i.test(forwardFrom.subject ?? '')
-      ? (forwardFrom.subject ?? '')
-      : `Fwd: ${forwardFrom.subject || ''}`;
-    composeBody = forwardQuote(forwardFrom);
-    composeInReplyTo = null;
-    composeReferences = null;
-    reconcileComposeSigning(composeIdentityId, composeSignOptedOut, composeTrustedKeys, composeStoredSigningFingerprints);
-  }
-
-  function getRecipientToken(value: string): string {
-    const parts = value.split(',');
-    return parts[parts.length - 1].trim();
-  }
-
-  async function fetchRecipientSuggestions(token: string) {
-    if (token.length < 2) { recipientSuggestions = []; return; }
-    const q = token.toLowerCase();
-    const contactMatches = contactSuggestions
-      .filter(c => c.email.toLowerCase().includes(q) || c.name.toLowerCase().includes(q))
-      .slice(0, 5)
-      .map(c => c.name ? `${c.name} <${c.email}>` : c.email);
-    const contactEmailSet = new Set(
-      contactSuggestions
-        .filter(c => c.email.toLowerCase().includes(q) || c.name.toLowerCase().includes(q))
-        .map(c => c.email.toLowerCase())
-    );
-    try {
-      const res = await fetch(`/api/email/suggest-addrs?q=${encodeURIComponent(token)}`);
-      if (res.ok) {
-        const data = await res.json();
-        const apiOnly = (data.addrs as string[]).filter(a => !contactEmailSet.has(a.toLowerCase()));
-        recipientSuggestions = [...contactMatches, ...apiOnly].slice(0, 7);
-      } else {
-        recipientSuggestions = contactMatches;
-      }
-    } catch { recipientSuggestions = contactMatches; }
-  }
-
-  function onRecipientInput(field: 'to' | 'cc' | 'bcc', value: string) {
-    loadContactSuggestions();
-    recipientActiveField = field;
-    recipientSuggestionIdx = -1;
-    const token = getRecipientToken(value);
-    if (recipientSuggestTimer) clearTimeout(recipientSuggestTimer);
-    recipientSuggestTimer = setTimeout(() => fetchRecipientSuggestions(token), 200);
-  }
-
-  function applyRecipientSuggestion(addr: string) {
-    const getCurrent = () => recipientActiveField === 'to' ? composeTo : recipientActiveField === 'cc' ? composeCc : composeBcc;
-    const setCurrent = (v: string) => { if (recipientActiveField === 'to') composeTo = v; else if (recipientActiveField === 'cc') composeCc = v; else composeBcc = v; };
-    const current = getCurrent();
-    const lastComma = current.lastIndexOf(',');
-    const prefix = lastComma >= 0 ? current.slice(0, lastComma + 1) + ' ' : '';
-    setCurrent(prefix + addr + ', ');
-    recipientSuggestions = [];
-    recipientSuggestionIdx = -1;
-  }
-
-  function onRecipientKeydown(e: KeyboardEvent) {
-    if (!recipientSuggestions.length) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      recipientSuggestionIdx = Math.min(recipientSuggestionIdx + 1, recipientSuggestions.length - 1);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      recipientSuggestionIdx = Math.max(recipientSuggestionIdx - 1, -1);
-    } else if (e.key === 'Enter' && recipientSuggestionIdx >= 0) {
-      e.preventDefault();
-      applyRecipientSuggestion(recipientSuggestions[recipientSuggestionIdx]);
-    } else if (e.key === 'Tab') {
-      if (recipientSuggestionIdx >= 0) {
-        e.preventDefault();
-        applyRecipientSuggestion(recipientSuggestions[recipientSuggestionIdx]);
-      } else if (recipientSuggestions.length === 1) {
-        e.preventDefault();
-        applyRecipientSuggestion(recipientSuggestions[0]);
-      }
-    } else if (e.key === 'Escape') {
-      recipientSuggestions = [];
-      recipientSuggestionIdx = -1;
-    }
-  }
-
-  function onRecipientBlur() {
-    setTimeout(() => {
-      recipientSuggestions = [];
-      recipientSuggestionIdx = -1;
-      recipientActiveField = null;
-    }, 150);
-  }
-
-  async function sendEmail() {
-    composeSending = true;
-    composeError = '';
-    try {
-      let r: Response;
-      if (composeEncrypt || composeSign) {
-        const identity = identities.find(item => item.identity_id === composeIdentityId);
-        if (!identity) throw new Error(tl('pgp_composeIdentityMissing'));
-        const to = parseEnvelopeAddresses(composeTo);
-        const cc = parseEnvelopeAddresses(composeCc);
-        const bcc = parseEnvelopeAddresses(composeBcc);
-        const allRecipients = [...to, ...cc, ...bcc];
-        if (allRecipients.length === 0) throw new Error(tl('pgp_composeNoRecipients'));
-
-        let signingKey = composeSign ? signingKeyForIdentity(composeIdentityId) : null;
-        if (composeSign && !signingKey && composeCanSign) {
-          await pgpUnlock(false);
-          signingKey = signingKeyForIdentity(composeIdentityId);
-        }
-        if (composeSign && !signingKey) throw new Error(tl('pgp_composeUnlockSigningKey'));
-
-        let encryptionKeys: openpgp.PublicKey[] = [];
-        if (composeEncrypt) {
-          const selection = composeEncryptionSelection(
-            composeIdentityId,
-            composeTo,
-            composeCc,
-            composeBcc,
-            await trustedPublicKeys(),
-          );
-          if (selection.missing.length > 0) throw new Error(tl('pgp_composeMissingKeys', { emails: selection.missing.join(', ') }));
-          encryptionKeys = selection.keys;
-        }
-        const rawMime = await buildProtectedMime({
-          identity,
-          to,
-          cc,
-          subject: composeSubject,
-          body: composeBody,
-          inReplyTo: composeInReplyTo,
-          references: composeReferences,
-          attachments: composeAttachments,
-          encrypt: composeEncrypt,
-          sign: composeSign,
-          encryptionKeys,
-          signingKey,
-        });
-        const fd = new FormData();
-        fd.append('identity_id', composeIdentityId);
-        fd.append('envelope_to', JSON.stringify(to));
-        fd.append('envelope_cc', JSON.stringify(cc));
-        fd.append('envelope_bcc', JSON.stringify(bcc));
-        fd.append('raw_mime', new Blob([rawMime], { type: 'message/rfc822' }), 'message.eml');
-        r = await fetch('/api/email/send-raw', { method: 'POST', body: fd });
-      } else {
-        const fd = new FormData();
-        fd.append('identity_id', composeIdentityId);
-        fd.append('to', composeTo);
-        fd.append('cc', composeCc);
-        fd.append('bcc', composeBcc);
-        fd.append('subject', composeSubject);
-        fd.append('body', composeBody);
-        if (composeInReplyTo) fd.append('in_reply_to', composeInReplyTo);
-        if (composeReferences) fd.append('references', composeReferences);
-        for (const file of composeAttachments) {
-          fd.append('attachment', file, file.name);
-        }
-        r = await fetch('/api/email/send', { method: 'POST', body: fd });
-      }
-      if (!r.ok) {
-        const text = await r.text();
-        composeError = text || tl('mail_sendError');
-      } else {
-        composeDialog?.close();
-      }
-    } catch (error) {
-      composeError = error instanceof Error ? error.message : tl('mail_sendError');
-    }
-    composeSending = false;
-  }
-
-  function openFilePicker() {
-    filePickerOpen = true;
-    composeFileInput.click();
-  }
-
-  function addAttachments(files: FileList | null) {
-    filePickerOpen = false;
-    if (!files) return;
-    composeAttachments = [...composeAttachments, ...Array.from(files)];
-    composeFileInput.value = '';
-  }
-
-  function removeAttachment(index: number) {
-    composeAttachments = composeAttachments.filter((_, i) => i !== index);
-  }
-
-  function formatFileSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-
-  // ── Virtual folders ──────────────────────────────────────────────────────
-
-  function openFolderCreate() {
-    editingFolder = null;
-    folderName = '';
-    folderSelectedMailboxes = new Set();
-    folderOnlyFlagged = false;
-    folderOnlyAttachments = false;
-    folderDialog?.showModal();
-  }
-
-  function openFolderEdit(folder: VirtualFolder) {
-    editingFolder = folder;
-    folderName = folder.display_name;
-    folderOnlyFlagged = folder.only_flagged ?? false;
-    folderOnlyAttachments = folder.only_attachments ?? false;
-    // A single rule with both fields null means "all mailboxes" — show nothing checked
-    const isMatchAll = folder.rules.length === 1 &&
-      folder.rules[0].account_id === null &&
-      folder.rules[0].mailbox_pattern === null;
-    folderSelectedMailboxes = isMatchAll
-      ? new Set()
-      : new Set(folder.rules.map(r => `${r.account_id ?? ''}::${r.mailbox_pattern ?? ''}`));
-    folderDialog?.showModal();
-  }
-
-  async function saveVirtualFolder() {
-    folderSaving = true;
-    try {
-      const rules = folderSelectedMailboxes.size === 0
-        ? [{ account_id: null, mailbox_pattern: null }]
-        : [...folderSelectedMailboxes].map(key => {
-            const sep = key.indexOf('::');
-            return {
-              account_id: key.slice(0, sep) || null,
-              mailbox_pattern: key.slice(sep + 2) || null,
-            };
-          });
-      const body = JSON.stringify({
-        display_name: folderName || tl('mail_folderNamePlaceholder'),
-        rules,
-        only_flagged: folderOnlyFlagged,
-        only_attachments: folderOnlyAttachments,
-      });
-      if (editingFolder) {
-        await fetch(`/api/email/folder?folder_id=${encodeURIComponent(editingFolder.folder_id)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-        });
-      } else {
-        await fetch('/api/email/folder', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-        });
-      }
-      editingFolder = null;
-      folderName = '';
-      folderSelectedMailboxes = new Set();
-      folderDialog?.close();
-      await loadVirtualFolders();
-    } catch {}
-    folderSaving = false;
-  }
-
-  async function deleteFolder(folder: VirtualFolder) {
-    await fetch(`/api/email/folder?folder_id=${encodeURIComponent(folder.folder_id)}`, { method: 'DELETE' });
-    if (selectedFolderId === folder.folder_id) {
-      clearMarkedSelection();
-      selectedFolderId = null;
-      messages = [];
-    }
-    await loadVirtualFolders();
   }
 
   // ── SSE ──────────────────────────────────────────────────────────────────
@@ -2763,87 +1782,6 @@
     };
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
-
-  function formatDate(ts: number | null): string {
-    if (!ts) return '';
-    const d = new Date(ts * 1000);
-    const now = new Date();
-    if (d.toDateString() === now.toDateString()) {
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-    const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-    if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
-    return d.toLocaleDateString([], opts);
-  }
-
-  function formatMessageDateTime(ts: number | null): string {
-    return ts ? new Date(ts * 1000).toLocaleString() : '';
-  }
-
-  function cleanQuotedBody(message: Message): string {
-    return (message.body_text ?? '').replace(/\r\n?/g, '\n').trim();
-  }
-
-  function quoteHeaderLines(message: Message, includeSubject = false): string[] {
-    const lines: string[] = [];
-    const date = formatMessageDateTime(message.sent_at);
-    if (date) lines.push(`Date: ${date}`);
-    if (message.from) lines.push(`From: ${message.from}`);
-    if (message.to.length > 0) lines.push(`To: ${message.to.join(', ')}`);
-    if (message.cc.length > 0) lines.push(`Cc: ${message.cc.join(', ')}`);
-    if (includeSubject) lines.push(`Subject: ${message.subject || tl('mail_noSubject')}`);
-    return lines;
-  }
-
-  function replyQuote(message: Message): string {
-    const header = quoteHeaderLines(message, false);
-    const quotedLines = [...header, '', cleanQuotedBody(message)]
-      .join('\n')
-      .split('\n')
-      .map(line => line ? `> ${line}` : '>')
-      .join('\n');
-    return `\n\n${quotedLines}`;
-  }
-
-  function forwardQuote(message: Message): string {
-    const lines = [
-      '',
-      '',
-      '--- Forwarded message ---',
-      ...quoteHeaderLines(message, true),
-      '',
-      cleanQuotedBody(message),
-    ];
-    return lines.join('\n').replace(/\n+$/, '');
-  }
-
-  // Tags that convey something plain text cannot (links, images, tables, lists,
-  // headings, formatting). Structural wrappers (html/head/body/div/p/span/br/font)
-  // are excluded so "basically plain text" HTML is treated as plain text.
-  const MEANINGFUL_HTML =
-    /<(a\s[^>]*href|img|table|thead|tbody|tr|td|th|ul|ol|li|h[1-6]|blockquote|hr|b|strong|i|em|u|s|strike|code|pre|mark)\b/i;
-
-  function htmlAddsValue(html: string | null): boolean {
-    return !!html && MEANINGFUL_HTML.test(html);
-  }
-
-  type BodySegment = { text: string } | { href: string; text: string };
-
-  function linkifySegments(text: string): BodySegment[] {
-    const re = /(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g;
-    const out: BodySegment[] = [];
-    let last = 0;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) {
-      if (m.index > last) out.push({ text: text.slice(last, m.index) });
-      out.push({ href: m[0], text: m[0] });
-      last = m.index + m[0].length;
-    }
-    if (last < text.length) out.push({ text: text.slice(last) });
-    return out;
-  }
-
   // ── Resize ───────────────────────────────────────────────────────────────
 
   function startResize(which: 'sidebar' | 'list', e: MouseEvent) {
@@ -2903,39 +1841,6 @@
       moveSubmenuOpen = false;
       window.removeEventListener('click', handleWindowClick);
     }
-  }
-
-  function humanSize(bytes: number): string {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  }
-
-  function senderName(from: string | null): string {
-    if (!from) return '';
-    const match = from.match(/^(.+?)\s*<[^>]+>/);
-    return match ? match[1].trim() : from;
-  }
-
-  type FolderKind = 'inbox' | 'sent' | 'drafts' | 'trash' | 'junk' | 'archive' | 'folder';
-
-  function folderKind(name: string): FolderKind {
-    const leaf = (name.split(/[\/.]/).pop() || name).toLowerCase().trim();
-    if (leaf === 'inbox') return 'inbox';
-    if (leaf.includes('sent')) return 'sent';
-    if (leaf.includes('draft')) return 'drafts';
-    if (leaf.includes('trash') || leaf.includes('deleted') || leaf.includes('bin')) return 'trash';
-    if (leaf.includes('junk') || leaf.includes('spam')) return 'junk';
-    if (leaf.includes('archive')) return 'archive';
-    return 'folder';
-  }
-
-  const FOLDER_PRIORITY: Record<FolderKind, number> = {
-    inbox: 0, drafts: 1, sent: 2, junk: 3, archive: 4, trash: 5, folder: 6,
-  };
-
-  function folderSortKey(name: string): [number, string] {
-    return [FOLDER_PRIORITY[folderKind(name)], name.toLowerCase()];
   }
 
   $: sidebarAccountSections = accounts.map(account => {
@@ -3107,8 +2012,8 @@
               {#if folderUnread > 0}
                 <span class="unread-badge">{folderUnread > 999 ? '999+' : folderUnread}</span>
               {/if}
-              <button class="icon-btn" on:click|stopPropagation={() => { sidebarOpen = false; openFolderEdit(folder); }} title={tl('mail_editVirtualFolder')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
-              <button class="icon-btn delete-btn" on:click|stopPropagation={() => { sidebarOpen = false; deleteFolder(folder); }} title={tl('mail_removeAttachment')}>×</button>
+              <button class="icon-btn" on:click|stopPropagation={() => { sidebarOpen = false; folderDialog?.openEdit(folder); }} title={tl('mail_editVirtualFolder')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+              <button class="icon-btn delete-btn" on:click|stopPropagation={() => { sidebarOpen = false; folderDialog?.deleteFolder(folder); }} title={tl('mail_removeAttachment')}>×</button>
             </div>
           {/each}
         </div>
@@ -3133,8 +2038,8 @@
             {#if section.unread_count > 0}
               <span class="unread-badge account-unread-badge">{section.unread_count > 999 ? '999+' : section.unread_count}</span>
             {/if}
-            <button class="icon-btn" on:click={() => { sidebarOpen = false; openManageIdentities(acc.account_id); }} title={tl('mail_identities')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg></button>
-            <button class="icon-btn" on:click={() => { sidebarOpen = false; openEditAccount(acc); }} title={tl('mail_editAccountHeading')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+            <button class="icon-btn" on:click={() => { sidebarOpen = false; accountDialog?.openIdentities(acc.account_id); }} title={tl('mail_identities')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg></button>
+            <button class="icon-btn" on:click={() => { sidebarOpen = false; accountDialog?.openEdit(acc); }} title={tl('mail_editAccountHeading')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
             <button class="icon-btn delete-btn" on:click={() => { sidebarOpen = false; removeAccount(acc); }} title={tl('mail_removeAttachment')}>×</button>
           </div>
           {#each section.mailboxes as item}
@@ -3165,8 +2070,8 @@
 
       <!-- Add account / folder buttons -->
       <div class="sidebar-actions sidebar-add">
-        <button class="link-btn" on:click={() => { sidebarOpen = false; openAddAccount(); }}>+ {tl('mail_addAccount')}</button>
-        <button class="link-btn" on:click={() => { sidebarOpen = false; openFolderCreate(); }}>+ {tl('mail_addVirtualFolder')}</button>
+        <button class="link-btn" on:click={() => { sidebarOpen = false; accountDialog?.openAdd(); }}>+ {tl('mail_addAccount')}</button>
+        <button class="link-btn" on:click={() => { sidebarOpen = false; folderDialog?.openCreate(); }}>+ {tl('mail_addVirtualFolder')}</button>
       </div>
     </aside>
 
@@ -3524,18 +2429,18 @@
                 aria-label={selectedMessage.is_flagged ? tl('mail_unflag') : tl('mail_flag')}
                 title={selectedMessage.is_flagged ? tl('mail_unflag') : tl('mail_flag')}
               >★</button>
-              <button class="inline-action-btn" on:click={() => openCompose(selectedMessage!)} aria-label={tl('mail_reply')} title={tl('mail_reply')}>
+              <button class="inline-action-btn" on:click={() => composeDialog?.open({ mode: 'reply', replyTo: selectedMessage! })} aria-label={tl('mail_reply')} title={tl('mail_reply')}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
               </button>
               <div class="actions-wrapper" bind:this={actionsEl}>
                 <button class="actions-toggle" on:click={toggleActions} aria-label={tl('mail_messageActions')}>{#if usesDetailOverlay}⋮{:else}{tl('mail_actions')} <span class="actions-caret">▾</span>{/if}</button>
                 {#if actionsOpen}
                   <div class="actions-menu" role="menu">
-                  <button role="menuitem" on:click={() => { actionsOpen = false; openComposeReplyAll(selectedMessage!); }}>
+                  <button role="menuitem" on:click={() => { actionsOpen = false; composeDialog?.open({ mode: 'replyAll', replyTo: selectedMessage! }); }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="8 14 3 9 8 4"/><polyline points="14 14 9 9 14 4"/><path d="M21 20v-7a4 4 0 0 0-4-4H3"/></svg>
                     {tl('mail_replyAll')}
                   </button>
-                  <button role="menuitem" on:click={() => { actionsOpen = false; openComposeForward(selectedMessage!); }}>
+                  <button role="menuitem" on:click={() => { actionsOpen = false; composeDialog?.open({ mode: 'forward', replyTo: selectedMessage! }); }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg>
                     {tl('mail_forward')}
                   </button>
@@ -3856,168 +2761,15 @@
 </dialog>
 
 {#if !standalone}
-<!-- ── Identity management dialog ────────────────────────────────────────── -->
-<dialog
-  bind:this={identityDialog}
-  on:click={(e) => { if (e.target === e.currentTarget) identityDialog?.close(); }}
-  on:cancel={(e) => { e.preventDefault(); identityDialog?.close(); }}
->
-  <article>
-    <header>
-      <h3>{tl('mail_identities')}</h3>
-      <div class="header-actions">
-        <button class="close-btn" aria-label={tl('mail_close')} on:click={() => identityDialog?.close()}></button>
-      </div>
-    </header>
-    <div class="identity-list">
-      {#each identities.filter(i => i.account_id === identityAccountId) as id}
-        <div class="identity-row">
-          <div class="identity-info">
-            <span class="identity-name">{id.name}</span>
-            <span class="identity-email">&lt;{id.email}&gt;</span>
-            {#if id.is_default}<span class="identity-default-badge">{tl('mail_identityDefault')}</span>{/if}
-          </div>
-          <div class="identity-actions">
-            {#if !id.is_default}
-              <button class="icon-btn" disabled={identityMode !== 'idle'} on:click={() => setDefaultIdentity(id)} title={tl('mail_identitySetDefault')}>★</button>
-            {/if}
-            <button class="icon-btn" disabled={identityMode !== 'idle'} on:click={() => openEditIdentity(id)} title={tl('mail_update')}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-            </button>
-            {#if !id.is_default}
-              <button class="icon-btn delete-btn" disabled={identityMode !== 'idle'} on:click={() => deleteIdentity(id)} title={tl('mail_removeAttachment')}>×</button>
-            {/if}
-          </div>
-        </div>
-      {/each}
-    </div>
-    {#if identityMode === 'idle'}
-      <button class="link-btn identity-add-btn" on:click={() => { identityMode = 'add'; identityForm = emptyIdentityForm(); identityForm.account_id = identityAccountId; }}>+ {tl('mail_addIdentity')}</button>
-    {:else}
-      <form on:submit|preventDefault={saveIdentity} class="identity-form">
-        <label>
-          {tl('mail_name')}
-          <input bind:value={identityForm.name} placeholder={tl('mail_namePlaceholder')} required />
-        </label>
-        <label>
-          {tl('mail_emailAddress')}
-          <input type="email" bind:value={identityForm.email} placeholder={tl('mail_aliasPlaceholder')} required />
-        </label>
-        {#if identityError}
-          <p class="error">{identityError}</p>
-        {/if}
-        <footer>
-          <button type="button" class="secondary outline" on:click={cancelIdentityForm}>{tl('mail_cancel')}</button>
-          <button type="submit" class="primary" disabled={identitySaving}>
-            {identitySaving ? tl('mail_saving') : (identityMode === 'edit' ? tl('mail_update') : tl('mail_add'))}
-          </button>
-        </footer>
-      </form>
-    {/if}
-  </article>
-</dialog>
-
-<!-- ── Account form dialog ───────────────────────────────────────────────── -->
-<dialog
+<MailAccountDialog
   bind:this={accountDialog}
-  on:click={(e) => { if (e.target === e.currentTarget) accountDialog?.close(); }}
-  on:cancel={(e) => { e.preventDefault(); accountDialog?.close(); }}
->
-  <article>
-    <header>
-      <h3>
-        {accountForm.account_id ? tl('mail_editAccountHeading') : tl('mail_addAccountHeading')}
-        {#if accountForm.account_id}
-          <a class="header-icon-link" href={`/api/email/export?account_id=${accountForm.account_id}`} download title={tl('mail_exportAccount')}><svg width="1.2rem" height="1.2rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a>
-        {/if}
-      </h3>
-      <div class="header-actions">
-        <button class="close-btn" aria-label={tl('mail_close')} on:click={() => accountDialog?.close()}></button>
-      </div>
-    </header>
-
-    {#if accountStep === 'basic'}
-      <!-- Step 1: name + email only -->
-      <form on:submit|preventDefault={continueSetup}>
-        <label>
-          {tl('mail_yourName')}
-          <input bind:value={accountForm.sender_name} placeholder={tl('mail_namePlaceholder')} required />
-        </label>
-        <label>
-          {tl('mail_emailAddress')}
-          <input type="email" bind:value={accountForm.username} placeholder={tl('mail_emailPlaceholder')} required />
-        </label>
-        {#if autodiscovering}
-          <p class="hint">{tl('mail_detectingSettings')}</p>
-        {/if}
-        {#if autodiscoverError}
-          <p class="error">{autodiscoverError}</p>
-        {/if}
-        <footer>
-          <button type="button" class="secondary outline" on:click={() => accountDialog?.close()}>{tl('mail_cancel')}</button>
-          <button type="submit" class="primary" disabled={autodiscovering}>{tl('mail_continue')}</button>
-        </footer>
-      </form>
-    {:else}
-      <!-- Step 2: password + advanced -->
-      <form on:submit|preventDefault={saveAccount}>
-        {#if autodiscoverResult?.provider_name}
-          <p class="hint">{tl('mail_settingsDetected', { provider: autodiscoverResult.provider_name })}</p>
-        {:else if !accountForm.account_id}
-          <p class="hint">{tl('mail_enterServerDetails')}</p>
-        {/if}
-        <label>
-          {tl('mail_password')}
-          <input type="password" bind:value={accountForm.password} placeholder={accountForm.account_id ? tl('mail_passwordPlaceholderKeep') : ''} autocomplete="current-password" />
-        </label>
-        <details bind:open={showAdvanced}>
-          <summary>{tl('mail_advancedSettings')}</summary>
-          <label>
-            {tl('mail_displayName')}
-            <input bind:value={accountForm.display_name} placeholder={tl('mail_displayNamePlaceholder')} />
-          </label>
-          <label>
-            {tl('mail_usernameEmail')}
-            <input bind:value={accountForm.username} placeholder={tl('mail_emailPlaceholder')} />
-          </label>
-          <label>
-            {tl('mail_imapHost')}
-            <input bind:value={accountForm.host} placeholder={tl('mail_imapHostPlaceholder')} required />
-          </label>
-          <label>
-            {tl('mail_imapPort')}
-            <input type="number" bind:value={accountForm.port} required />
-          </label>
-          <label class="checkbox-label">
-            <input type="checkbox" bind:checked={accountForm.use_tls} /> {tl('mail_useTls')}
-          </label>
-          <label>
-            {tl('mail_smtpHost')}
-            <input bind:value={accountForm.smtp_host} placeholder={tl('mail_smtpHostPlaceholder')} />
-          </label>
-          <label>
-            {tl('mail_smtpPort')}
-            <input type="number" bind:value={accountForm.smtp_port} />
-          </label>
-        </details>
-        {#if accountError}
-          <p class="error">{accountError}</p>
-        {/if}
-        <footer>
-          {#if !accountForm.account_id}
-            <button type="button" class="secondary outline" on:click={() => { accountStep = 'basic'; accountError = ''; }}>{tl('mail_back')}</button>
-          {:else}
-            <button type="button" class="secondary outline" on:click={() => accountDialog?.close()}>{tl('mail_cancel')}</button>
-          {/if}
-          <button type="submit" class="primary" disabled={accountSaving}>
-            {accountSaving ? tl('mail_testingConnection') : tl('mail_save')}
-          </button>
-        </footer>
-      </form>
-    {/if}
-  </article>
-</dialog>
+  {identities}
+  {accounts}
+  onAccountsChanged={async () => { await loadAccounts(); await loadIdentities(); for (const acc of accounts) await loadMailboxes(acc.account_id); }}
+  onIdentitiesChanged={loadIdentities}
+/>
 {/if}
+
 
 <!-- ── Image origins trigger button ───────────────────────────────────────── -->
 {#if !standalone}
@@ -4102,235 +2854,32 @@
   </article>
 </dialog>
 
-<!-- ── Compose dialog ─────────────────────────────────────────────────────── -->
-<dialog
-  bind:this={composeDialog}
-  class="compose-dialog"
-  on:click={(e) => { if (e.target === e.currentTarget) composeDialog?.close(); }}
-  on:cancel={(e) => { e.preventDefault(); if (filePickerOpen) { filePickerOpen = false; } else { composeDialog?.close(); } }}
->
-  <article>
-    <header class="compose-header">
-      <span class="compose-title">{composeMode === 'forward' ? tl('mail_forward') : composeMode === 'replyAll' ? tl('mail_replyAll') : composeMode === 'reply' ? tl('mail_reply') : tl('mail_newMessage')}</span>
-      <button class="close-btn" aria-label={tl('mail_close')} on:click={() => composeDialog?.close()}></button>
-    </header>
-    <form on:submit|preventDefault={sendEmail} class="compose-form">
-      {#if identities.length > 1}
-        <div class="compose-row">
-          <span class="compose-label">{tl('mail_composeFrom')}</span>
-          <SelectDropdown
-            options={identities.map(id => ({ value: id.identity_id, label: id.name, secondary: `<${id.email}>` }))}
-            bind:value={composeIdentityId}
-          />
-        </div>
-      {/if}
-      <div class="compose-row">
-        <span class="compose-label">{tl('mail_composeTo')}</span>
-        <div class="compose-input-wrap">
-          <input class="compose-input" bind:value={composeTo} placeholder={tl('mail_composeToPlaceholder')}
-            on:input={(e) => onRecipientInput('to', e.currentTarget.value)}
-            on:keydown={onRecipientKeydown}
-            on:blur={onRecipientBlur}
-          />
-          {#if recipientActiveField === 'to' && recipientSuggestions.length > 0}
-            <ul class="addr-suggestions" role="listbox">
-              {#each recipientSuggestions as addr, i}
-                <li role="option" aria-selected={i === recipientSuggestionIdx}>
-                  <button type="button" class:active={i === recipientSuggestionIdx}
-                    on:mousedown={(e) => { e.preventDefault(); applyRecipientSuggestion(addr); }}
-                  >{addr}</button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </div>
-        <div class="compose-security-controls">
-          <button
-            type="button"
-            class="compose-security-toggle"
-            class:active={composeEncrypt}
-            disabled={!composeCanEncrypt}
-            title={tl('pgp_composeEncrypt')}
-            aria-label={tl('pgp_composeEncrypt')}
-            aria-pressed={composeEncrypt}
-            on:click={toggleComposeEncrypt}
-          >
-            <UiIcon name="lock" size={16} />
-          </button>
-          <button
-            type="button"
-            class="compose-security-toggle"
-            class:active={composeSign}
-            disabled={!composeCanSign || pgpUnlocking}
-            title={tl('pgp_composeSign')}
-            aria-label={tl('pgp_composeSign')}
-            aria-pressed={composeSign}
-            on:click={toggleComposeSign}
-          >
-            <UiIcon name="signature" size={17} />
-          </button>
-        </div>
-        {#if !showComposeCcBcc}
-          <button type="button" class="ccbcc-toggle" on:click={() => { showComposeCcBcc = true; }}>{tl('mail_composeCcBcc')}</button>
-        {/if}
-      </div>
-      {#if showComposeCcBcc}
-        <div class="compose-row">
-          <span class="compose-label">{tl('mail_composeCc')}</span>
-          <div class="compose-input-wrap">
-            <input class="compose-input" bind:value={composeCc} placeholder={tl('mail_composeCcPlaceholder')}
-              on:input={(e) => onRecipientInput('cc', e.currentTarget.value)}
-              on:keydown={onRecipientKeydown}
-              on:blur={onRecipientBlur}
-            />
-            {#if recipientActiveField === 'cc' && recipientSuggestions.length > 0}
-              <ul class="addr-suggestions" role="listbox">
-                {#each recipientSuggestions as addr, i}
-                  <li role="option" aria-selected={i === recipientSuggestionIdx}>
-                    <button type="button" class:active={i === recipientSuggestionIdx}
-                      on:mousedown={(e) => { e.preventDefault(); applyRecipientSuggestion(addr); }}
-                    >{addr}</button>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-          </div>
-        </div>
-        <div class="compose-row">
-          <span class="compose-label">{tl('mail_composeBcc')}</span>
-          <div class="compose-input-wrap">
-            <input class="compose-input" bind:value={composeBcc} placeholder={tl('mail_composeBccPlaceholder')}
-              on:input={(e) => onRecipientInput('bcc', e.currentTarget.value)}
-              on:keydown={onRecipientKeydown}
-              on:blur={onRecipientBlur}
-            />
-            {#if recipientActiveField === 'bcc' && recipientSuggestions.length > 0}
-              <ul class="addr-suggestions" role="listbox">
-                {#each recipientSuggestions as addr, i}
-                  <li role="option" aria-selected={i === recipientSuggestionIdx}>
-                    <button type="button" class:active={i === recipientSuggestionIdx}
-                      on:mousedown={(e) => { e.preventDefault(); applyRecipientSuggestion(addr); }}
-                    >{addr}</button>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-          </div>
-        </div>
-      {/if}
-      <div class="compose-row">
-        <span class="compose-label">{tl('mail_composeSubject')}</span>
-        <input class="compose-input" bind:value={composeSubject} />
-      </div>
-      <div class="compose-body-row">
-        <textarea bind:value={composeBody} rows={10}></textarea>
-      </div>
-      {#if composeAttachments.length > 0}
-        <ul class="compose-attachments">
-          {#each composeAttachments as file, i}
-            <li class="compose-attachment-chip">
-              <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
-              <span class="attachment-name" title={file.name}>{file.name}</span>
-              <span class="attachment-size">{formatFileSize(file.size)}</span>
-              <button type="button" class="attachment-remove" aria-label={tl('mail_removeAttachment')} on:click={() => removeAttachment(i)}>✕</button>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-      {#if composeError}
-        <p class="error compose-error">{composeError}</p>
-      {/if}
-      <input
-        bind:this={composeFileInput}
-        type="file"
-        multiple
-        style="display:none"
-        on:change={(e) => addAttachments(e.currentTarget.files)}
-      />
-      <footer class="compose-footer">
-        <button type="button" class="compose-attach-btn" aria-label={tl('mail_attachFiles')} on:click={openFilePicker}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-          {tl('mail_attach')}
-        </button>
-        <div class="compose-footer-right">
-          <button type="button" class="secondary outline" on:click={() => composeDialog?.close()}>{tl('mail_discard')}</button>
-          <button type="submit" class="primary" disabled={composeSending}>
-            {composeSending ? tl('mail_sending') : tl('mail_send')}
-          </button>
-        </div>
-      </footer>
-    </form>
-  </article>
-</dialog>
-
 {#if !standalone}
+<!-- ── Compose dialog ─────────────────────────────────────────────────────── -->
+<MailComposeDialog
+  bind:this={composeDialog}
+  {identities}
+  {contactSuggestions}
+  onEnsureContactSuggestions={loadContactSuggestions}
+/>
+
 <!-- ── Virtual folder form ─────────────────────────────────────────────────── -->
-<dialog
+<MailFolderDialog
   bind:this={folderDialog}
-  on:click={(e) => { if (e.target === e.currentTarget) folderDialog?.close(); }}
-  on:cancel={(e) => { e.preventDefault(); folderDialog?.close(); }}
->
-  <article>
-    <header>
-      <h3>{editingFolder ? tl('mail_editVirtualFolder') : tl('mail_createVirtualFolder')}</h3>
-      <div class="header-actions">
-        <button class="close-btn" aria-label={tl('mail_close')} on:click={() => folderDialog?.close()}></button>
-      </div>
-    </header>
-    <form on:submit|preventDefault={saveVirtualFolder}>
-      <label>
-        {tl('mail_name')}
-        <input bind:value={folderName} placeholder={tl('mail_folderNamePlaceholder')} />
-      </label>
-      <p class="folder-mailbox-label">{tl('mail_mailboxesToInclude')}</p>
-      <div class="folder-mailbox-list">
-        {#each accounts as acc}
-          {#if (mailboxesByAccount[acc.account_id] || []).filter(mb => mb.subscribed).length > 0}
-            <div class="folder-account-group">
-              <h4>{acc.display_name}</h4>
-              {#each (mailboxesByAccount[acc.account_id] || []).filter(mb => mb.subscribed) as mb}
-                {@const key = `${acc.account_id}::${mb.name}`}
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={folderSelectedMailboxes.has(key)}
-                    on:change={() => {
-                      if (folderSelectedMailboxes.has(key)) folderSelectedMailboxes.delete(key);
-                      else folderSelectedMailboxes.add(key);
-                      folderSelectedMailboxes = folderSelectedMailboxes;
-                    }}
-                  />
-                  {FOLDER_NAMES[folderKind(mb.name)] || mb.name}
-                </label>
-              {/each}
-            </div>
-          {/if}
-        {/each}
-        {#if accounts.length === 0}
-          <p class="muted">{tl('mail_noEmailAccounts')}</p>
-        {/if}
-      </div>
-      <p class="folder-hint">{tl('mail_allMailboxesHint')}</p>
-      <div class="folder-filters">
-        <label>
-          <input type="checkbox" bind:checked={folderOnlyFlagged} />
-          {tl('mail_onlyFlagged')}
-        </label>
-        <label>
-          <input type="checkbox" bind:checked={folderOnlyAttachments} />
-          {tl('mail_onlyWithAttachments')}
-        </label>
-      </div>
-      <footer>
-        <button type="button" class="secondary outline" on:click={() => folderDialog?.close()}>{tl('mail_cancel')}</button>
-        <button type="submit" class="primary" disabled={folderSaving}>{editingFolder ? tl('mail_save') : tl('mail_create')}</button>
-      </footer>
-    </form>
-  </article>
-</dialog>
+  {accounts}
+  {mailboxesByAccount}
+  onSaved={loadVirtualFolders}
+  onDeleted={(folderId) => {
+    if (selectedFolderId === folderId) {
+      clearMarkedSelection();
+      selectedFolderId = null;
+      messages = [];
+    }
+  }}
+/>
 
 <!-- ── FAB ────────────────────────────────────────────────────────────────── -->
-<button class="fab" on:click={() => openCompose()} aria-label={tl('mail_newMessage')}>
+<button class="fab" on:click={() => composeDialog?.open()} aria-label={tl('mail_newMessage')}>
   <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
   </svg>
@@ -5760,285 +4309,6 @@
     color: var(--pico-muted-color, #888);
     font-size: 0.9rem;
   }
-
-  .compose-dialog {
-    max-width: 44rem;
-    width: 95vw;
-    max-height: 90dvh;
-    padding: 0;
-    overflow: hidden;
-  }
-
-  .compose-dialog article {
-    padding: 0;
-    margin: 0;
-    overflow: hidden;
-  }
-
-  .compose-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.6rem 1rem;
-    margin: 0 !important;
-    border-bottom: 1px solid var(--pico-muted-border-color);
-    background: var(--pico-card-sectioning-background-color);
-  }
-
-  .compose-title {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: var(--pico-color);
-  }
-
-  .compose-form {
-    display: flex;
-    flex-direction: column;
-    font-size: 0.9rem;
-    color: var(--pico-color);
-  }
-
-  .compose-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0 1rem;
-    border-bottom: 1px solid var(--pico-muted-border-color);
-  }
-
-  .compose-label {
-    font-size: 0.8rem;
-    color: var(--pico-muted-color);
-    width: 3.5rem;
-    flex-shrink: 0;
-    text-align: right;
-  }
-
-  .compose-input-wrap {
-    position: relative;
-    flex: 1;
-    min-width: 0;
-    display: flex;
-  }
-
-  .compose-input {
-    flex: 1;
-    min-width: 0;
-    border: none !important;
-    outline: none !important;
-    box-shadow: none !important;
-    background: transparent !important;
-    padding: 0.45rem 0 !important;
-    margin: 0 !important;
-    font-size: 0.9rem;
-    color: inherit;
-  }
-
-  .addr-suggestions {
-    position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
-    margin: 0.125rem 0 0; padding: 0.25rem; list-style: none;
-    background: var(--pico-background-color);
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    box-shadow: 0 0.25rem 0.75rem rgba(0,0,0,0.15);
-  }
-  .addr-suggestions li { list-style: none; padding: 0; margin: 0; }
-  .addr-suggestions button {
-    width: 100%; text-align: left; border: none; background: none; margin: 0;
-    padding: 0.375rem 0.75rem; cursor: pointer; font-size: 0.875rem;
-    border-radius: calc(var(--pico-border-radius, 0.25rem) - 0.125rem);
-    color: var(--pico-color); transition: background 0.1s;
-  }
-  .addr-suggestions button:hover,
-  .addr-suggestions button.active {
-    background: var(--pico-primary-background);
-    color: var(--pico-primary-inverse);
-  }
-
-  .compose-input:focus {
-    border: none !important;
-    box-shadow: none !important;
-  }
-
-  .ccbcc-toggle {
-    font-size: 0.75rem;
-    color: var(--pico-muted-color);
-    background: none;
-    border: none;
-    padding: 0.2rem 0.4rem;
-    cursor: pointer;
-    flex-shrink: 0;
-    margin: 0;
-    line-height: 1;
-  }
-
-  .ccbcc-toggle:hover {
-    color: var(--pico-color);
-    background: var(--pico-secondary-background);
-    border-radius: 0.25rem;
-  }
-
-  .compose-security-controls {
-    display: flex;
-    align-items: center;
-    gap: 0.15rem;
-    flex-shrink: 0;
-  }
-
-  .compose-security-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.7rem;
-    height: 1.7rem;
-    padding: 0;
-    margin: 0;
-    border: none;
-    border-radius: 0.3rem;
-    background: transparent;
-    color: var(--pico-muted-color);
-  }
-
-  .compose-security-toggle:hover:not(:disabled) {
-    color: var(--pico-color);
-    background: var(--pico-secondary-background);
-  }
-
-  .compose-security-toggle.active {
-    color: var(--pico-primary);
-    background: color-mix(in srgb, var(--pico-primary) 15%, transparent);
-  }
-
-  .compose-security-toggle:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  .compose-body-row {
-    padding: 0.25rem 1rem 0;
-  }
-
-  .compose-body-row textarea {
-    width: 100%;
-    box-sizing: border-box;
-    border: none !important;
-    outline: none !important;
-    box-shadow: none !important;
-    background: transparent !important;
-    resize: vertical;
-    padding: 0.5rem 0 !important;
-    margin: 0 !important;
-    font-size: 0.9rem;
-    color: var(--pico-color);
-  }
-
-  .compose-body-row textarea:focus {
-    border: none !important;
-    box-shadow: none !important;
-  }
-
-  .compose-error {
-    margin: 0.25rem 1rem;
-    font-size: 0.85rem;
-  }
-
-  .compose-attachments {
-    list-style: none;
-    margin: 0;
-    padding: 0.4rem 1rem;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    border-top: 1px solid var(--pico-muted-border-color);
-  }
-
-  .compose-attachment-chip {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    background: var(--pico-card-sectioning-background-color);
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: 1rem;
-    padding: 0.15rem 0.5rem 0.15rem 0.4rem;
-    font-size: 0.78rem;
-    max-width: 18rem;
-  }
-
-  .attachment-icon {
-    font-size: 0.8rem;
-    line-height: 1;
-  }
-
-  .attachment-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 10rem;
-  }
-
-  .attachment-size {
-    color: var(--pico-muted-color);
-    flex-shrink: 0;
-  }
-
-  .attachment-remove {
-    background: none;
-    border: none;
-    padding: 0 0.1rem;
-    margin: 0;
-    cursor: pointer;
-    color: var(--pico-muted-color);
-    font-size: 0.7rem;
-    line-height: 1;
-    flex-shrink: 0;
-  }
-
-  .attachment-remove:hover {
-    color: var(--pico-color);
-  }
-
-  .compose-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding: 0.6rem 1rem;
-    border-top: 1px solid var(--pico-muted-border-color);
-    background: var(--pico-card-sectioning-background-color);
-    margin: 0;
-  }
-
-  .compose-footer-right {
-    display: flex;
-    gap: 0.5rem;
-  }
-
-  .compose-footer button {
-    margin: 0;
-    padding: 0.4rem 1rem;
-    font-size: 0.85rem;
-  }
-
-  .compose-attach-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    background: none;
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    padding: 0.35rem 0.7rem !important;
-    font-size: 0.8rem;
-    color: var(--pico-muted-color);
-    cursor: pointer;
-  }
-
-  .compose-attach-btn:hover {
-    color: var(--pico-color);
-    border-color: var(--pico-color);
-    background: none;
-  }
-
-  /* FAB */
   .fab {
     position: fixed;
     bottom: 2rem;
