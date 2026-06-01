@@ -5,6 +5,7 @@
   import EventDetail from './EventDetail.svelte';
   import EventFormDialog from './EventFormDialog.svelte';
   import type { EventJson, CalendarJson, CalDavAccountJson } from '../types/calendar.ts';
+  import { apiFetch } from '../lib/api.ts';
 
   let locale = 'en';
   $: tl = makeTl(locale);
@@ -31,12 +32,12 @@
     await initI18n();
     locale = getLocale();
     try {
-      const res = await fetch('/api/calendars');
+      const res = await apiFetch('/api/calendars');
       if (res.ok) {
         calendars = await res.json();
         selectedHrefs = new Set(calendars.filter(c => c.is_active).map(calendarKey));
       }
-      const accountRes = await fetch('/api/caldav/accounts');
+      const accountRes = await apiFetch('/api/caldav/accounts');
       if (accountRes.ok) accounts = (await accountRes.json()).accounts || [];
     } catch {}
     calendarsLoaded = true;
@@ -89,7 +90,7 @@
         for (const href of selectedHrefs) params.append('cal', href);
       }
 
-      const res = await fetch(`/api/search?${params}`);
+      const res = await apiFetch(`/api/search?${params}`);
       if (!res.ok) {
         errorMsg = tl('search_error');
       } else {

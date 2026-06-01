@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { makeTl } from '../../lib/i18n.ts';
+  import { apiFetch } from '../../lib/api.ts';
   import type { AddressbookJson, ContactJson, TypedEntry, AddressEntry } from '../../types/calendar.ts';
 
   export let tl: ReturnType<typeof makeTl>;
@@ -72,7 +73,7 @@
     const phones = formPhones.filter(p => p.value.trim());
     const addresses = formAddresses.filter(a => a.street.trim() || a.city.trim() || a.country.trim());
     try {
-      const res = await fetch('/api/contact', {
+      const res = await apiFetch('/api/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getLocale, makeTl } from '../../lib/i18n.ts';
+  import { apiFetch } from '../../lib/api.ts';
   import SelectDropdown from '../SelectDropdown.svelte';
   import UiIcon from '../UiIcon.svelte';
   import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey, validateVault, eraseBytes } from '../../lib/pgp/vault.ts';
@@ -333,7 +334,7 @@
         .map(c => c.email.toLowerCase())
     );
     try {
-      const res = await fetch(`/api/email/suggest-addrs?q=${encodeURIComponent(token)}`);
+      const res = await apiFetch(`/api/email/suggest-addrs?q=${encodeURIComponent(token)}`);
       if (res.ok) {
         const data = await res.json();
         const apiOnly = (data.addrs as string[]).filter(a => !contactEmailSet.has(a.toLowerCase()));
@@ -475,7 +476,7 @@
         fd.append('envelope_cc', JSON.stringify(cc));
         fd.append('envelope_bcc', JSON.stringify(bcc));
         fd.append('raw_mime', new Blob([rawMime], { type: 'message/rfc822' }), 'message.eml');
-        r = await fetch('/api/email/send-raw', { method: 'POST', body: fd });
+        r = await apiFetch('/api/email/send-raw', { method: 'POST', body: fd });
       } else {
         const fd = new FormData();
         fd.append('identity_id', composeIdentityId);
@@ -489,7 +490,7 @@
         for (const file of composeAttachments) {
           fd.append('attachment', file, file.name);
         }
-        r = await fetch('/api/email/send', { method: 'POST', body: fd });
+        r = await apiFetch('/api/email/send', { method: 'POST', body: fd });
       }
       if (!r.ok) {
         const text = await r.text();

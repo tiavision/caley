@@ -1,5 +1,6 @@
 <script lang="ts">
   import { makeTl } from '../lib/i18n.ts';
+  import { apiFetch } from '../lib/api.ts';
   import type { CalendarJson, CalDavAccountJson } from '../types/calendar.ts';
 
   export let calendars: CalendarJson[] = [];
@@ -77,7 +78,7 @@
     try {
       const fd = new FormData();
       fd.append('file', file);
-      const resp = await fetch('/api/import/preview', { method: 'POST', body: fd });
+      const resp = await apiFetch('/api/import/preview', { method: 'POST', body: fd });
       if (!resp.ok) { error = await resp.text(); return; }
       previewEvents = await resp.json();
     } catch {
@@ -101,7 +102,7 @@
       if (isNewCal) {
         const calName = newCalName.trim();
         if (!calName) { error = tl('cal_importNewCalendarName'); importing = false; return; }
-        const resp = await fetch('/api/calendar', {
+        const resp = await apiFetch('/api/calendar', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({ account_id: targetAccountId, name: calName }).toString(),
@@ -117,7 +118,7 @@
       fd.append('file', file);
       fd.append('account_id', targetAccountId);
       fd.append('calendar_href', targetHref);
-      const resp = await fetch('/api/import', { method: 'POST', body: fd });
+      const resp = await apiFetch('/api/import', { method: 'POST', body: fd });
       if (!resp.ok) { error = await resp.text(); return; }
       const result: { imported: number; errors: number } = await resp.json();
       successMsg = tl('cal_importSuccess', { n: result.imported });

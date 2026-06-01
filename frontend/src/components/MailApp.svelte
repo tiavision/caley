@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { getUser } from '../lib/user.ts';
+  import { apiFetch } from '../lib/api.ts';
   import { getLocale, makeTl } from '../lib/i18n.ts';
   import { type NewMailNotification, showNewMailNotification } from '../lib/mail-notifications.ts';
   import SelectDropdown from './SelectDropdown.svelte';
@@ -149,7 +150,7 @@
 
   async function fetchRawMessage(msg: Message): Promise<Uint8Array> {
     const url = `/api/email/raw?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
-    const res = await fetch(url);
+    const res = await apiFetch(url);
     if (!res.ok) throw new Error('raw message fetch failed');
     return new Uint8Array(await res.arrayBuffer());
   }
@@ -187,7 +188,7 @@
           // Decrypted attachment data is already available in memory.
         } else {
           const url = `/api/email/attachment?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}&filename=${encodeURIComponent(candidate.filename)}`;
-          const response = await fetch(url);
+          const response = await apiFetch(url);
           if (!response.ok) continue;
           bytes = new Uint8Array(await response.arrayBuffer());
         }
@@ -291,7 +292,7 @@
       let bytes = decryptedData;
       if (!bytes) {
         const url = `/api/email/attachment?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}&filename=${encodeURIComponent(attachment.filename)}`;
-        const res = await fetch(url);
+        const res = await apiFetch(url);
         if (!res.ok) throw new Error('attachment fetch failed');
         bytes = new Uint8Array(await res.arrayBuffer());
       }
@@ -324,7 +325,7 @@
       let bytes = decryptedData;
       if (!bytes) {
         const url = `/api/email/attachment?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}&filename=${encodeURIComponent(attachment.filename)}`;
-        const res = await fetch(url);
+        const res = await apiFetch(url);
         if (!res.ok) throw new Error('attachment fetch failed');
         bytes = new Uint8Array(await res.arrayBuffer());
       }
@@ -705,7 +706,7 @@
 
   async function loadAccounts() {
     try {
-      const r = await fetch('/api/email/accounts');
+      const r = await apiFetch('/api/email/accounts');
       if (r.ok) {
         const data = await r.json();
         accounts = data.accounts || [];
@@ -716,8 +717,8 @@
   async function loadCalendarData() {
     try {
       const [calendarRes, accountRes] = await Promise.all([
-        fetch('/api/calendars'),
-        fetch('/api/caldav/accounts'),
+        apiFetch('/api/calendars'),
+        apiFetch('/api/caldav/accounts'),
       ]);
       if (calendarRes.ok) calendars = await calendarRes.json();
       if (accountRes.ok) calendarAccounts = (await accountRes.json()).accounts || [];
@@ -726,7 +727,7 @@
 
   async function loadIdentities() {
     try {
-      const r = await fetch('/api/email/identities');
+      const r = await apiFetch('/api/email/identities');
       if (r.ok) {
         const data = await r.json();
         identities = data.identities || [];
@@ -736,7 +737,7 @@
 
   async function loadMailboxes(accountId: string) {
     try {
-      const r = await fetch(`/api/email/mailboxes?account_id=${encodeURIComponent(accountId)}`);
+      const r = await apiFetch(`/api/email/mailboxes?account_id=${encodeURIComponent(accountId)}`);
       if (r.ok) {
         const data = await r.json();
         mailboxesByAccount = { ...mailboxesByAccount, [accountId]: data.mailboxes || [] };
@@ -746,7 +747,7 @@
 
   async function loadVirtualFolders() {
     try {
-      const r = await fetch('/api/email/folders');
+      const r = await apiFetch('/api/email/folders');
       if (r.ok) {
         const data = await r.json();
         virtualFolders = data.folders || [];
@@ -756,7 +757,7 @@
 
   async function loadUnreadCounts() {
     try {
-      const r = await fetch('/api/email/unread-counts');
+      const r = await apiFetch('/api/email/unread-counts');
       if (r.ok) {
         const data = await r.json();
         mailboxUnreadCounts = data.mailboxes || {};
@@ -797,7 +798,7 @@
 
   async function loadImageOrigins() {
     try {
-      const r = await fetch('/api/email/image-origins');
+      const r = await apiFetch('/api/email/image-origins');
       if (r.ok) {
         const data = await r.json();
         imageOrigins = data.origins || [];
@@ -807,7 +808,7 @@
 
   async function allowOrigin(origin: string) {
     try {
-      await fetch('/api/email/image-origins', {
+      await apiFetch('/api/email/image-origins', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ origin }),
@@ -819,14 +820,14 @@
 
   async function revokeOrigin(origin: string) {
     try {
-      await fetch(`/api/email/image-origins?origin=${encodeURIComponent(origin)}`, { method: 'DELETE' });
+      await apiFetch(`/api/email/image-origins?origin=${encodeURIComponent(origin)}`, { method: 'DELETE' });
       imageOrigins = imageOrigins.filter(o => o !== origin);
     } catch {}
   }
 
   async function loadBlacklistOrigins() {
     try {
-      const r = await fetch('/api/email/image-blacklist');
+      const r = await apiFetch('/api/email/image-blacklist');
       if (r.ok) {
         const data = await r.json();
         blacklistOrigins = data.origins || [];
@@ -836,7 +837,7 @@
 
   async function blockOriginSilently(origin: string) {
     try {
-      await fetch('/api/email/image-blacklist', {
+      await apiFetch('/api/email/image-blacklist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ origin }),
@@ -847,7 +848,7 @@
 
   async function unblockOrigin(origin: string) {
     try {
-      await fetch(`/api/email/image-blacklist?origin=${encodeURIComponent(origin)}`, { method: 'DELETE' });
+      await apiFetch(`/api/email/image-blacklist?origin=${encodeURIComponent(origin)}`, { method: 'DELETE' });
       blacklistOrigins = blacklistOrigins.filter(o => o !== origin);
     } catch {}
   }
@@ -894,7 +895,7 @@
       queuedReaderNavigation = null;
       await moveCursor(step, true);
     }
-    fetch(
+    apiFetch(
       `/api/email/sync?account_id=${encodeURIComponent(accountId)}&mailbox=${encodeURIComponent(mailbox)}`,
       { method: 'POST' },
     );
@@ -981,7 +982,7 @@
   async function loadContactSuggestions() {
     if (contactsLoaded) return;
     try {
-      const r = await fetch('/api/contacts');
+      const r = await apiFetch('/api/contacts');
       if (r.ok) {
         const data = await r.json();
         const seen = new Set<string>();
@@ -1004,7 +1005,7 @@
   async function fetchAddrSuggestions(q: string) {
     if (!q.trim()) { addrDbSuggestions = []; return; }
     try {
-      const r = await fetch(`/api/email/suggest-addrs?q=${encodeURIComponent(q)}`);
+      const r = await apiFetch(`/api/email/suggest-addrs?q=${encodeURIComponent(q)}`);
       if (r.ok) {
         const data = await r.json();
         addrDbSuggestions = data.addrs || [];
@@ -1091,7 +1092,7 @@
       } else {
         return;
       }
-      const r = await fetch(base + params);
+      const r = await apiFetch(base + params);
       if (r.ok) {
         const data = await r.json();
         messages = data.messages || [];
@@ -1115,7 +1116,7 @@
     if (filterDateTo) filterParams += `&date_to=${encodeURIComponent(filterDateTo)}`;
     messagesLoading = true;
     try {
-      const r = await fetch(`/api/email/search?q=${encodeURIComponent(q)}${scope}${filterParams}&limit=${pageSize + 1}${params}`);
+      const r = await apiFetch(`/api/email/search?q=${encodeURIComponent(q)}${scope}${filterParams}&limit=${pageSize + 1}${params}`);
       if (r.ok) {
         const data = await r.json();
         const msgs: Message[] = data.messages || [];
@@ -1250,7 +1251,7 @@
     let loaded = false;
     try {
       const url = `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
-      const r = await fetch(url);
+      const r = await apiFetch(url);
       if (r.ok) {
         loaded = true;
         const full = await r.json() as Message;
@@ -1319,7 +1320,7 @@
   async function loadThread(msg: Message, request: number) {
     try {
       const url = `/api/email/thread?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
-      const response = await fetch(url);
+      const response = await apiFetch(url);
       if (!response.ok || request !== threadRequest) return;
       const data = await response.json();
       if (request === threadRequest) threadMessages = data.messages || [];
@@ -1358,7 +1359,7 @@
 
   async function setFlag(msg: Message, flag: string, set: boolean): Promise<boolean> {
     try {
-      const response = await fetch('/api/email/message/flags', {
+      const response = await apiFetch('/api/email/message/flags', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1439,7 +1440,7 @@
   async function deleteMessage(msg: Message) {
     const inTrash = folderKind(msg.mailbox) === 'trash';
     if (inTrash && !confirm(tl('mail_deleteMessageConfirm'))) return;
-    await fetch(
+    await apiFetch(
       `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`,
       { method: 'DELETE' }
     );
@@ -1447,7 +1448,7 @@
   }
 
   async function moveMessage(msg: Message, destMailbox: string) {
-    await fetch('/api/email/message/move', {
+    await apiFetch('/api/email/message/move', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ account_id: msg.account_id, mailbox: msg.mailbox, uid: msg.uid, dest_mailbox: destMailbox }),
@@ -1487,7 +1488,7 @@
 
   async function requestMoveMessage(msg: Message, destMailbox: string): Promise<boolean> {
     try {
-      const response = await fetch('/api/email/message/move', {
+      const response = await apiFetch('/api/email/message/move', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ account_id: msg.account_id, mailbox: msg.mailbox, uid: msg.uid, dest_mailbox: destMailbox }),
@@ -1520,7 +1521,7 @@
     const failed = new Set<string>();
     for (const msg of selectedMessages) {
       try {
-        const response = await fetch(
+        const response = await apiFetch(
           `/api/email/message?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`,
           { method: 'DELETE' },
         );
@@ -1691,7 +1692,7 @@
 
   async function removeAccount(acc: Account) {
     if (!confirm(tl('mail_removeAccountConfirm', { name: acc.display_name }))) return;
-    await fetch(`/api/email/account?account_id=${encodeURIComponent(acc.account_id)}`, { method: 'DELETE' });
+    await apiFetch(`/api/email/account?account_id=${encodeURIComponent(acc.account_id)}`, { method: 'DELETE' });
     await loadAccounts();
     mailboxesByAccount = Object.fromEntries(
       Object.entries(mailboxesByAccount).filter(([id]) => id !== acc.account_id)

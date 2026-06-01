@@ -3,6 +3,7 @@
   import { makeTl } from '../lib/i18n.ts';
   import type { PartStat, AlarmFields, AttendeeFields, RecurrenceInfo, EventJson, CalendarJson, ContactJson, CalDavAccountJson } from '../types/calendar.ts';
   import { fmtDate } from '../lib/date.ts';
+  import { apiFetch } from '../lib/api.ts';
   import RecurrenceBuilder from './RecurrenceBuilder.svelte';
 
   export let calendars: CalendarJson[] = [];
@@ -186,7 +187,7 @@
       p.append('attendee_partstat', a.partstat);
     }
     try {
-      const res = await fetch('/api/event', {
+      const res = await apiFetch('/api/event', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: p.toString(),
@@ -210,7 +211,7 @@
     if (formScope === 'this_instance' && fOriginalDtstart)
       url += `&scope=this_instance&original_dtstart=${encodeURIComponent(fOriginalDtstart)}&tz=${encodeURIComponent(fTz)}`;
     try {
-      const res = await fetch(url, { method: 'DELETE' });
+      const res = await apiFetch(url, { method: 'DELETE' });
       if (res.ok) { formDialogEl?.close(); ondeleted?.(); }
       else { formError = (await res.text()) || tl('event_error'); }
     } catch { formError = tl('event_error'); }
@@ -372,7 +373,7 @@
   async function loadContacts() {
     if (contactsLoaded) return;
     try {
-      const res = await fetch('/api/contacts');
+      const res = await apiFetch('/api/contacts');
       if (res.ok) {
         const data = await res.json();
         allContacts = data.contacts ?? [];

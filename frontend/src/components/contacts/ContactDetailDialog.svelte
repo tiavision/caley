@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { makeTl } from '../../lib/i18n.ts';
+  import { apiFetch } from '../../lib/api.ts';
   import type { AddressbookJson, ContactJson, AddressEntry } from '../../types/calendar.ts';
   import ShareMenu from '../ShareMenu.svelte';
 
@@ -61,7 +62,7 @@
     if (!confirm(tl('contacts_deleteConfirm'))) return;
     close();
     try {
-      await fetch('/api/contact', {
+      await apiFetch('/api/contact', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ account_id: c.account_id, uid: c.uid, addressbook_href: c.addressbook_href }),

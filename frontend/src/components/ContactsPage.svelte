@@ -2,6 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { initI18n, getLocale, makeTl } from '../lib/i18n.ts';
   import { getUser } from '../lib/user.ts';
+  import { apiFetch } from '../lib/api.ts';
   import type { ContactJson, AddressbookJson, ContactsResponse, TypedEntry, AddressEntry } from '../types/calendar.ts';
   import ShareMenu from './ShareMenu.svelte';
   import ContactDetailDialog from './contacts/ContactDetailDialog.svelte';
@@ -41,7 +42,7 @@
     loading = true;
     errorMsg = '';
     try {
-      const res = await fetch('/api/contacts');
+      const res = await apiFetch('/api/contacts');
       if (!res.ok) { errorMsg = 'Failed to load contacts.'; return; }
       const data: ContactsResponse = await res.json();
       addressbooks = data.addressbooks;

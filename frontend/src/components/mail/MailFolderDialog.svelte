@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getLocale, makeTl } from '../../lib/i18n.ts';
+  import { apiFetch } from '../../lib/api.ts';
   import { folderKind, FOLDER_PRIORITY } from './mailUtils.ts';
   import type { Account, Mailbox, VirtualFolder } from './MailTypes.ts';
 
@@ -70,13 +71,13 @@
         only_attachments: folderOnlyAttachments,
       });
       if (editingFolder) {
-        await fetch(`/api/email/folder?folder_id=${encodeURIComponent(editingFolder.folder_id)}`, {
+        await apiFetch(`/api/email/folder?folder_id=${encodeURIComponent(editingFolder.folder_id)}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body,
         });
       } else {
-        await fetch('/api/email/folder', {
+        await apiFetch('/api/email/folder', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body,
@@ -92,7 +93,7 @@
   }
 
   export async function deleteFolder(folder: VirtualFolder) {
-    await fetch(`/api/email/folder?folder_id=${encodeURIComponent(folder.folder_id)}`, { method: 'DELETE' });
+    await apiFetch(`/api/email/folder?folder_id=${encodeURIComponent(folder.folder_id)}`, { method: 'DELETE' });
     onDeleted(folder.folder_id);
     await onSaved();
   }

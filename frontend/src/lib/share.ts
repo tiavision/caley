@@ -1,4 +1,5 @@
 import type { EventJson, ContactJson } from '../types/calendar.ts';
+import { apiFetch } from './api.ts';
 
 export async function fetchEventICS(event: EventJson): Promise<string> {
   const params = new URLSearchParams({
@@ -6,7 +7,7 @@ export async function fetchEventICS(event: EventJson): Promise<string> {
     calendar_href: event.calendar_href,
     uid: event.uid,
   });
-  const res = await fetch(`/api/event/ics?${params}`);
+  const res = await apiFetch(`/api/event/ics?${params}`);
   if (!res.ok) throw new Error('fetch failed');
   return res.text();
 }
@@ -17,7 +18,7 @@ export async function fetchContactVCF(contact: ContactJson): Promise<string> {
     addressbook_href: contact.addressbook_href,
     uid: contact.uid,
   });
-  const res = await fetch(`/api/contact/vcf?${params}`);
+  const res = await apiFetch(`/api/contact/vcf?${params}`);
   if (!res.ok) throw new Error('fetch failed');
   return res.text();
 }

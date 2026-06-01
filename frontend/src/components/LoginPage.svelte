@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { initI18n, getLocale, setLocale, makeTl } from '../lib/i18n.ts';
   import { markAuthReturnPending, redirectToReturnUrl } from '../lib/return-url.ts';
+  import { apiFetch } from '../lib/api.ts';
   import { getUser } from '../lib/user.ts';
 
   let locale = 'en';
@@ -36,7 +37,7 @@
     caldavBaseUrl = localStorage.getItem('caldav_base_url') || '';
 
     try {
-      const res = await fetch('/api/auth/config');
+      const res = await apiFetch('/api/auth/config');
       if (res.ok) {
         const cfg = await res.json();
         oidcEnabled = !!cfg.oidc_enabled;

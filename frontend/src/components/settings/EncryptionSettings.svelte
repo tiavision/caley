@@ -54,6 +54,7 @@
     type StoredPublicKey,
   } from '../../lib/pgp/public-keys.ts';
   import { openVault, addKey, removeKey, getWrappingKey, getKeys, lock, isUnlocked } from '../../lib/pgp/session.ts';
+  import { apiFetch } from '../../lib/api.ts';
   import * as openpgp from 'openpgp';
 
   // ── Encryption tab state ──────────────────────────────────────────────────
@@ -697,7 +698,7 @@
   async function uploadPublicKey(key: openpgp.PrivateKey, fingerprint: string) {
     const pubKeyArmored = extractPublicKey(key);
     const email = getPrimaryEmail(key);
-    await fetch('/api/pgp/key', {
+    await apiFetch('/api/pgp/key', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fingerprint, email, armored: pubKeyArmored, is_own: true, source: 'imported' }),

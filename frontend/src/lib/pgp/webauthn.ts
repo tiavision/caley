@@ -3,6 +3,7 @@
 // to the server.
 
 import { b64uEncode, b64uDecode } from './kek.ts';
+import { apiFetch } from '../api.ts';
 
 // Convert a WebAuthn credential for JSON serialisation (base64url-encode binary fields).
 function credentialToJson(cred: PublicKeyCredential): unknown {
@@ -108,7 +109,7 @@ export async function enroll(deviceLabel: string): Promise<EnrollResult> {
   const prfSaltB64 = b64uEncode(prfSalt);
 
   // --- Register ---
-  const startRes = await fetch('/api/webauthn/register/start', { method: 'POST' });
+  const startRes = await apiFetch('/api/webauthn/register/start', { method: 'POST' });
   if (!startRes.ok) throw new Error('register/start failed: ' + await startRes.text());
   const startJson = await startRes.json() as Record<string, unknown>;
 
@@ -118,7 +119,7 @@ export async function enroll(deviceLabel: string): Promise<EnrollResult> {
   const registrationCredential = credential as PublicKeyCredential;
   const creationPrfOutput = getPrfOutput(registrationCredential);
 
-  const finishRes = await fetch('/api/webauthn/register/finish', {
+  const finishRes = await apiFetch('/api/webauthn/register/finish', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ credential: credentialToJson(registrationCredential), device_label: deviceLabel, has_prf: false }),
@@ -132,7 +133,7 @@ export async function enroll(deviceLabel: string): Promise<EnrollResult> {
 
   // Some authenticators expose PRF support at creation but evaluate it only
   // during authentication.
-  const authStartRes = await fetch('/api/webauthn/authenticate/start', {
+  const authStartRes = await apiFetch('/api/webauthn/authenticate/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prf_salt: prfSaltB64, credential_id: cred_id }),
@@ -147,7 +148,7 @@ export async function enroll(deviceLabel: string): Promise<EnrollResult> {
   const prfOutput = getPrfOutput(authCred as PublicKeyCredential);
   if (!prfOutput) throw new Error('prf_not_supported');
 
-  const authFinishRes = await fetch('/api/webauthn/authenticate/finish', {
+  const authFinishRes = await apiFetch('/api/webauthn/authenticate/finish', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(credentialToJson(authCred as PublicKeyCredential)),
@@ -166,13 +167,13 @@ export interface CredentialInfo {
 }
 
 export async function listCredentials(): Promise<CredentialInfo[]> {
-  const res = await fetch('/api/webauthn/credentials');
+  const res = await apiFetch('/api/webauthn/credentials');
   if (!res.ok) throw new Error('list credentials failed: ' + await res.text());
   return res.json() as Promise<CredentialInfo[]>;
 }
 
 export async function deleteCredential(credId: string): Promise<void> {
-  const res = await fetch('/api/webauthn/credential', {
+  const res = await apiFetch('/api/webauthn/credential', {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cred_id: credId }),
@@ -186,7 +187,7 @@ export async function deleteCredential(credId: string): Promise<void> {
  * prfSalt is a fresh random value (will be stored in the new vault).
  */
 export async function resumeEnroll(prfSaltB64: string): Promise<EnrollResult> {
-  const authStartRes = await fetch('/api/webauthn/authenticate/start', {
+  const authStartRes = await apiFetch('/api/webauthn/authenticate/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prf_salt: prfSaltB64 }),
@@ -204,7 +205,7 @@ export async function resumeEnroll(prfSaltB64: string): Promise<EnrollResult> {
 
   if (!prfOutput) throw new Error('prf_not_supported');
 
-  const finishRes = await fetch('/api/webauthn/authenticate/finish', {
+  const finishRes = await apiFetch('/api/webauthn/authenticate/finish', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(credentialToJson(authCred as PublicKeyCredential)),
@@ -224,7 +225,7 @@ export interface UnlockResult {
  * Returns the raw PRF bytes; the caller derives the KEK and decrypts the vault.
  */
 export async function unlock(prfSaltB64: string, credentialId?: string): Promise<UnlockResult> {
-  const authStartRes = await fetch('/api/webauthn/authenticate/start', {
+  const authStartRes = await apiFetch('/api/webauthn/authenticate/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prf_salt: prfSaltB64, credential_id: credentialId }),
@@ -241,7 +242,7 @@ export async function unlock(prfSaltB64: string, credentialId?: string): Promise
   const prfOutput = (prf?.results as Record<string, unknown>)?.first as ArrayBuffer | undefined;
   if (!prfOutput) throw new Error('prf_not_supported');
 
-  const finishRes = await fetch('/api/webauthn/authenticate/finish', {
+  const finishRes = await apiFetch('/api/webauthn/authenticate/finish', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(credentialToJson(authCred as PublicKeyCredential)),

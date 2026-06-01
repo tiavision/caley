@@ -1,5 +1,6 @@
 import * as openpgp from 'openpgp';
 import { getFingerprint, getPrimaryEmail } from './keyring.ts';
+import { apiFetch } from '../api.ts';
 
 export interface StoredPublicKey {
   fingerprint: string;
@@ -23,13 +24,13 @@ export function describePublicKey(key: openpgp.PublicKey): Pick<StoredPublicKey,
 }
 
 export async function listPublicKeys(): Promise<StoredPublicKey[]> {
-  const res = await fetch('/api/pgp/keys');
+  const res = await apiFetch('/api/pgp/keys');
   if (!res.ok) throw new Error('list public keys failed');
   return res.json() as Promise<StoredPublicKey[]>;
 }
 
 export async function listPublicKeysForEmail(email: string): Promise<StoredPublicKey[]> {
-  const res = await fetch(`/api/pgp/keys?email=${encodeURIComponent(email)}`);
+  const res = await apiFetch(`/api/pgp/keys?email=${encodeURIComponent(email)}`);
   if (!res.ok) throw new Error('list public keys failed');
   return res.json() as Promise<StoredPublicKey[]>;
 }
@@ -59,7 +60,7 @@ export async function savePublicKey(
     source,
     trust: 'trusted',
   };
-  const res = await fetch('/api/pgp/key', {
+  const res = await apiFetch('/api/pgp/key', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(record),
@@ -69,7 +70,7 @@ export async function savePublicKey(
 }
 
 export async function deletePublicKey(fingerprint: string): Promise<void> {
-  const res = await fetch('/api/pgp/key', {
+  const res = await apiFetch('/api/pgp/key', {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fingerprint }),

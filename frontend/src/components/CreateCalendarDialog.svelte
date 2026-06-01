@@ -1,5 +1,6 @@
 <script lang="ts">
   import { makeTl } from '../lib/i18n.ts';
+  import { apiFetch } from '../lib/api.ts';
   import type { CalendarJson, CalDavAccountJson } from '../types/calendar.ts';
 
   export let locale: string = 'en';
@@ -35,7 +36,7 @@
       const params = new URLSearchParams({ name: trimmed });
       params.set('account_id', accountId);
       if (useColor && color) params.set('color', color);
-      const resp = await fetch('/api/calendar', {
+      const resp = await apiFetch('/api/calendar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: params.toString(),

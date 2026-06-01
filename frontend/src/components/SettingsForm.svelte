@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { initI18n, getLocale, setLocale, makeTl } from '../lib/i18n.ts';
   import { clearReturnUrl } from '../lib/return-url.ts';
+  import { apiFetch } from '../lib/api.ts';
   import { getUser } from '../lib/user.ts';
   import EventColorDot from './EventColorDot.svelte';
   import CreateCalendarDialog from './CreateCalendarDialog.svelte';
@@ -43,9 +44,9 @@
   async function fetchCalendars() {
     calendarsLoading = true;
     try {
-      const res = await fetch('/api/calendars');
+      const res = await apiFetch('/api/calendars');
       if (res.ok) calendars = await res.json();
-      const accountRes = await fetch('/api/caldav/accounts');
+      const accountRes = await apiFetch('/api/caldav/accounts');
       if (accountRes.ok) caldavAccounts = (await accountRes.json()).accounts || [];
     } catch {}
     calendarsLoading = false;
@@ -57,7 +58,7 @@
       ...acc,
       calendars: acc.calendars.map(c => c.href === href ? { ...c, is_active: active } : c),
     } : acc);
-    await fetch('/api/calendar/toggle', {
+    await apiFetch('/api/calendar/toggle', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: `account_id=${encodeURIComponent(accountId)}&href=${encodeURIComponent(href)}&active=${active}`,
@@ -127,7 +128,7 @@
     params.append('caldav_password', caldavPassword);
 
     try {
-      const res = await fetch('/api/caldav/account', {
+      const res = await apiFetch('/api/caldav/account', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: params.toString(),
@@ -148,7 +149,7 @@
   async function onDeleteCalDavAccount(account: CalDavAccountJson) {
     if (!confirm(`Remove account "${account.display_name}"?`)) return;
     try {
-      const res = await fetch(`/api/caldav/account?account_id=${encodeURIComponent(account.account_id)}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/caldav/account?account_id=${encodeURIComponent(account.account_id)}`, { method: 'DELETE' });
       if (res.ok) await fetchCalendars();
     } catch {}
   }
@@ -157,7 +158,7 @@
     if (!confirm(tl('settings_deleteAccountConfirm'))) return;
     deleting = true;
     try {
-      const res = await fetch('/api/account', { method: 'DELETE' });
+      const res = await apiFetch('/api/account', { method: 'DELETE' });
       if (res.ok) {
         const data = await res.json();
         clearReturnUrl();

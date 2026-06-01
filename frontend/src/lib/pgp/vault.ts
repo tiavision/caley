@@ -3,6 +3,7 @@
 
 import type * as openpgp from 'openpgp';
 import { aesDecrypt, aesEncrypt, b64uDecode, b64uEncode, deriveKek, deriveSharedKek, importAesKey, randomBytes } from './kek.ts';
+import { apiFetch } from '../api.ts';
 import { getFingerprint, importPrivateKey } from './keyring.ts';
 
 export interface EncryptedBlob {
@@ -138,7 +139,7 @@ function localDevices(vault: VaultData): DeviceRecord[] {
 }
 
 async function jsonRequest(path: string, init?: RequestInit): Promise<Response> {
-  const response = await fetch(path, init);
+  const response = await apiFetch(path, init);
   if (!response.ok && response.status !== 204) {
     throw new Error(`${path} failed: ${await response.text()}`);
   }

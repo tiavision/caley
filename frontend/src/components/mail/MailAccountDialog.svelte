@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getLocale, makeTl } from '../../lib/i18n.ts';
+  import { apiFetch } from '../../lib/api.ts';
   import type { Account, Identity } from './MailTypes.ts';
 
   export let identities: Identity[] = [];
@@ -104,7 +105,7 @@
     autodiscovering = true;
     autodiscoverError = '';
     try {
-      const r = await fetch(`/api/email/autodiscover?email=${encodeURIComponent(accountForm.username)}`);
+      const r = await apiFetch(`/api/email/autodiscover?email=${encodeURIComponent(accountForm.username)}`);
       if (r.ok) {
         const data = await r.json();
         if (data.found) {
@@ -146,7 +147,7 @@
     accountSaving = true;
     accountError = '';
     try {
-      const r = await fetch('/api/email/account', {
+      const r = await apiFetch('/api/email/account', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -199,7 +200,7 @@
     identitySaving = true;
     identityError = '';
     try {
-      const r = await fetch('/api/email/identity', {
+      const r = await apiFetch('/api/email/identity', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -225,7 +226,7 @@
   }
 
   async function setDefaultIdentity(id: Identity) {
-    await fetch('/api/email/identity', {
+    await apiFetch('/api/email/identity', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -241,7 +242,7 @@
 
   async function deleteIdentity(id: Identity) {
     if (!confirm(tl('mail_removeIdentityConfirm', { name: id.name, email: id.email }))) return;
-    await fetch(`/api/email/identity?identity_id=${encodeURIComponent(id.identity_id)}`, { method: 'DELETE' });
+    await apiFetch(`/api/email/identity?identity_id=${encodeURIComponent(id.identity_id)}`, { method: 'DELETE' });
     await onIdentitiesChanged();
   }
 </script>

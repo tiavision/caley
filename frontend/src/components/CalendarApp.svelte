@@ -7,6 +7,7 @@
   import EventDetail from './EventDetail.svelte';
   import type { EventJson, DayEventsJson, CalendarJson, MonthGridJson, CalDavAccountJson } from '../types/calendar.ts';
   import { getMonday, fmtDate, fmtYM } from '../lib/date.ts';
+  import { apiFetch } from '../lib/api.ts';
   import MonthView from './MonthView.svelte';
   import DayEventsDialog from './DayEventsDialog.svelte';
 
@@ -52,9 +53,9 @@
   // ── Data fetching ──────────────────────────────────────────────────────────
   async function fetchCalendars() {
     try {
-      const res = await fetch('/api/calendars');
+      const res = await apiFetch('/api/calendars');
       if (res.ok) calendars = await res.json();
-      const accountRes = await fetch('/api/caldav/accounts');
+      const accountRes = await apiFetch('/api/caldav/accounts');
       if (accountRes.ok) accounts = (await accountRes.json()).accounts || [];
     } catch {}
   }
@@ -65,7 +66,7 @@
       const start = fmtDate(selectedWeekStart);
       const endDate = new Date(selectedWeekStart); endDate.setDate(endDate.getDate() + 6);
       const end = fmtDate(endDate);
-      const res = await fetch(`/api/events?start=${start}&end=${end}`);
+      const res = await apiFetch(`/api/events?start=${start}&end=${end}`);
       if (res.ok) {
         days = await res.json();
         await tick();
@@ -82,7 +83,7 @@
     try {
       const start = monthGrid.days[0].date_str;
       const end = monthGrid.days[monthGrid.days.length - 1].date_str;
-      const res = await fetch(`/api/events?start=${start}&end=${end}`);
+      const res = await apiFetch(`/api/events?start=${start}&end=${end}`);
       if (res.ok) monthViewDays = await res.json();
     } catch {}
     eventsLoading = false;
@@ -91,7 +92,7 @@
   async function fetchMonthGrid(month?: string) {
     try {
       const m = month || gridMonth;
-      const res = await fetch(`/api/calendar?month=${m}`);
+      const res = await apiFetch(`/api/calendar?month=${m}`);
       if (res.ok) {
         monthGrid = await res.json();
         if (viewMode === 'month') await fetchMonthViewEvents();
@@ -183,7 +184,7 @@
 
   async function fetchPickerGrid(month: string) {
     try {
-      const res = await fetch(`/api/calendar?month=${month}`);
+      const res = await apiFetch(`/api/calendar?month=${month}`);
       if (res.ok) pickerGrid = await res.json();
     } catch {}
   }
