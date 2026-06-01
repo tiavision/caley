@@ -9,6 +9,9 @@
   import MailComposeDialog from './mail/MailComposeDialog.svelte';
   import MailAccountDialog from './mail/MailAccountDialog.svelte';
   import MailFolderDialog from './mail/MailFolderDialog.svelte';
+  import MailSidebar from './mail/MailSidebar.svelte';
+  import FolderIcon from './mail/FolderIcon.svelte';
+  import MailMessageList from './mail/MailMessageList.svelte';
   import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey, validateVault, eraseBytes } from '../lib/pgp/vault.ts';
   import { unlock } from '../lib/pgp/webauthn.ts';
   import { decryptMessage, verifySignedMessage, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
@@ -98,7 +101,6 @@
   let bulkMoveOpen = false;
 
   let sseSource: EventSource | null = null;
-
 
   let displayName = '';
 
@@ -1939,28 +1941,6 @@
   $: silentEmailOrigins = emailOrigins.filter(o => blacklistOrigins.includes(o));
 </script>
 
-{#snippet folderIcon(kind: string)}
-  <span class="folder-icon">
-    {#if kind === 'inbox'}
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
-    {:else if kind === 'sent'}
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-    {:else if kind === 'drafts'}
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-    {:else if kind === 'trash'}
-      <UiIcon name="trash" size={15} />
-    {:else if kind === 'junk'}
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-    {:else if kind === 'archive'}
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-    {:else if kind === 'virtual'}
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-    {:else}
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-    {/if}
-  </span>
-{/snippet}
-
 {#snippet threadBranch(nodes: ThreadTreeNode[])}
   {#each nodes as branch}
     {@const node = branch.message}
@@ -1987,364 +1967,105 @@
   <div class="mail-layout" class:standalone style="grid-template-columns: {layoutColumns}">
     {#if !standalone}
     <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
-    {#if isPhone && sidebarOpen}
-      <button type="button" class="sidebar-backdrop" aria-label={tl('mail_aria_folders')} on:click={() => (sidebarOpen = false)}></button>
-    {/if}
-    <aside class="mail-sidebar" class:open={isPhone && sidebarOpen}>
-      <!-- Virtual folders -->
-      {#if virtualFolders.length > 0}
-        <div class="sidebar-section">
-          <div class="sidebar-section-header">
-            <span>{tl('mail_virtualFolders')}</span>
-          </div>
-          {#each virtualFolders as folder}
-            {@const folderUnread = folderUnreadCounts[folder.folder_id] ?? 0}
-            <div
-              class="sidebar-item"
-              class:active={selectedFolderId === folder.folder_id}
-              role="button"
-              tabindex="0"
-              on:click={() => selectVirtualFolder(folder.folder_id)}
-              on:keydown={e => e.key === 'Enter' && selectVirtualFolder(folder.folder_id)}
-            >
-              {@render folderIcon('virtual')}
-              <span class="folder-name">{folder.display_name}</span>
-              {#if folderUnread > 0}
-                <span class="unread-badge">{folderUnread > 999 ? '999+' : folderUnread}</span>
-              {/if}
-              <button class="icon-btn" on:click|stopPropagation={() => { sidebarOpen = false; folderDialog?.openEdit(folder); }} title={tl('mail_editVirtualFolder')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
-              <button class="icon-btn delete-btn" on:click|stopPropagation={() => { sidebarOpen = false; folderDialog?.deleteFolder(folder); }} title={tl('mail_removeAttachment')}>×</button>
-            </div>
-          {/each}
-        </div>
-      {/if}
-
-      <!-- Accounts + mailboxes -->
-      {#each sidebarAccountSections as section}
-        {@const acc = section.account}
-        <div class="sidebar-section">
-          <div class="sidebar-section-header">
-            <button
-              class="icon-btn account-collapse-btn"
-              class:collapsed={section.collapsed}
-              on:click={() => toggleAccountCollapsed(acc.account_id)}
-              title={section.collapsed ? tl('mail_expandAccount') : tl('mail_collapseAccount')}
-              aria-label={section.collapsed ? tl('mail_expandAccount') : tl('mail_collapseAccount')}
-              aria-expanded={!section.collapsed}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-            </button>
-            <span class="account-name" title={acc.username}>{acc.display_name}</span>
-            {#if section.unread_count > 0}
-              <span class="unread-badge account-unread-badge">{section.unread_count > 999 ? '999+' : section.unread_count}</span>
-            {/if}
-            <button class="icon-btn" on:click={() => { sidebarOpen = false; accountDialog?.openIdentities(acc.account_id); }} title={tl('mail_identities')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg></button>
-            <button class="icon-btn" on:click={() => { sidebarOpen = false; accountDialog?.openEdit(acc); }} title={tl('mail_editAccountHeading')}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
-            <button class="icon-btn delete-btn" on:click={() => { sidebarOpen = false; removeAccount(acc); }} title={tl('mail_removeAttachment')}>×</button>
-          </div>
-          {#each section.mailboxes as item}
-            {@const mb = item.mailbox}
-            {@const syncKey = `${acc.account_id}|${mb.name}`}
-            {@const isSyncing = syncingMailboxes.has(syncKey)}
-            <button
-              class="sidebar-item"
-              class:active={selectedAccountId === acc.account_id && selectedMailbox === mb.name}
-              class:drag-target={draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name}
-              class:drag-over={dragOverMailbox === `${acc.account_id}|${mb.name}`}
-              on:click={() => selectMailbox(acc.account_id, mb.name)}
-              on:dragover={(e) => { if (draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name) { e.preventDefault(); dragOverMailbox = `${acc.account_id}|${mb.name}`; } }}
-              on:dragleave={() => { if (dragOverMailbox === `${acc.account_id}|${mb.name}`) dragOverMailbox = null; }}
-              on:drop={() => { if (draggedMessage?.account_id === acc.account_id && draggedMessage?.mailbox !== mb.name) { moveMessage(draggedMessage, mb.name); } draggedMessage = null; dragOverMailbox = null; }}
-            >
-              {@render folderIcon(folderKind(mb.name))}
-              <span class="folder-name">{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
-              {#if isSyncing}
-                <span class="sync-spinner" aria-label="Syncing"></span>
-              {:else if item.unread_count > 0}
-                <span class="unread-badge">{item.unread_count > 999 ? '999+' : item.unread_count}</span>
-              {/if}
-            </button>
-          {/each}
-        </div>
-      {/each}
-
-      <!-- Add account / folder buttons -->
-      <div class="sidebar-actions sidebar-add">
-        <button class="link-btn" on:click={() => { sidebarOpen = false; accountDialog?.openAdd(); }}>+ {tl('mail_addAccount')}</button>
-        <button class="link-btn" on:click={() => { sidebarOpen = false; folderDialog?.openCreate(); }}>+ {tl('mail_addVirtualFolder')}</button>
-      </div>
-    </aside>
-
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_no_noninteractive_tabindex -->
-    <div
-      class="resize-handle"
-      role="separator"
-      tabindex="0"
-      aria-orientation="vertical"
-      aria-label={tl('mail_resizeFolders')}
-      aria-valuemin="140"
-      aria-valuemax="400"
-      aria-valuenow={sidebarWidth}
-      on:mousedown={(e) => startResize('sidebar', e)}
-      on:keydown={(e) => resizeWithKeyboard('sidebar', e)}
-    ></div>
+    <MailSidebar
+      {tl}
+      {isPhone}
+      bind:sidebarOpen
+      {virtualFolders}
+      {selectedFolderId}
+      {folderUnreadCounts}
+      {sidebarAccountSections}
+      {selectedAccountId}
+      {selectedMailbox}
+      {syncingMailboxes}
+      {FOLDER_NAMES}
+      {sidebarWidth}
+      bind:draggedMessage
+      bind:dragOverMailbox
+      onSelectVirtualFolder={selectVirtualFolder}
+      onSelectMailbox={selectMailbox}
+      onToggleCollapsed={toggleAccountCollapsed}
+      onRemoveAccount={removeAccount}
+      onMoveMessage={moveMessage}
+      onStartResize={startResize}
+      onResizeWithKeyboard={resizeWithKeyboard}
+      onEditFolder={(f) => folderDialog?.openEdit(f)}
+      onDeleteFolder={(f) => folderDialog?.deleteFolder(f)}
+      onOpenAddAccount={() => accountDialog?.openAdd()}
+      onOpenEditAccount={(acc) => accountDialog?.openEdit(acc)}
+      onOpenIdentities={(id) => accountDialog?.openIdentities(id)}
+      onOpenCreateFolder={() => folderDialog?.openCreate()}
+    />
 
     <!-- ── Message list ────────────────────────────────────────────────────── -->
-    <section class="message-list">
-      <div class="message-list-header">
-        <div class="list-header-row">
-          <button class="folder-toggle" on:click={() => (sidebarOpen = true)} aria-label={tl('mail_aria_folders')}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          </button>
-          {#if selectedFolderId}
-            <h2>{virtualFolders.find(f => f.folder_id === selectedFolderId)?.display_name || tl('mail_aria_folders')}</h2>
-          {:else if selectedMailbox}
-            <h2>{FOLDER_NAMES[folderKind(selectedMailbox)] || selectedMailbox}</h2>
-          {:else}
-            <h2>{tl('nav_mail')}</h2>
-          {/if}
-        </div>
-        {#if selectedFolderId || selectedMailbox}
-          <div class="search-row">
-            <input
-              class="search-input"
-              type="search"
-              placeholder={tl('mail_searchPlaceholder')}
-              bind:value={searchQuery}
-              on:input={onSearchInput}
-            />
-            <div class="search-filter-wrap" bind:this={addrFilterEl}>
-              <button
-                class="filter-icon-btn"
-                class:active={filterAddrActive}
-                title={tl('mail_filterBySender')}
-                on:click|stopPropagation={toggleAddrFilter}
-                aria-pressed={filterAddrActive}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-              </button>
-              {#if filterAddrOpen}
-                <div class="filter-popover" role="dialog" aria-label={tl('mail_filterBySender')} bind:this={addrPopoverEl} style={addrPopoverStyle}>
-                  <input
-                    class="filter-popover-input"
-                    type="search"
-                    placeholder={tl('mail_filterAddrPlaceholder')}
-                    bind:value={addrFilterInput}
-                    on:input={onAddrInput}
-                  />
-                  {#if filterAddrs.length > 0}
-                    <div class="filter-chips">
-                      {#each filterAddrs as addr}
-                        <span class="filter-chip">
-                          {addr}
-                          <button class="chip-remove" on:click={() => { filterAddrs = filterAddrs.filter(a => a !== addr); runSearch(); }}>×</button>
-                        </span>
-                      {/each}
-                    </div>
-                    <button class="filter-clear-btn" on:click={() => { filterAddrs = []; runSearch(); }}>
-                      {tl('mail_filterClearAddrs')}
-                    </button>
-                  {/if}
-                  <div class="filter-suggestions">
-                    {#each contactSuggestions.filter(c =>
-                      !addrFilterInput ||
-                      c.email.toLowerCase().includes(addrFilterInput.toLowerCase()) ||
-                      c.name.toLowerCase().includes(addrFilterInput.toLowerCase())
-                    ).slice(0, 12) as s}
-                      <label class="filter-suggestion-row">
-                        <input
-                          type="checkbox"
-                          checked={filterAddrs.includes(s.email)}
-                          on:change={(e) => {
-                            if ((e.target as HTMLInputElement).checked) {
-                              if (!filterAddrs.includes(s.email)) filterAddrs = [...filterAddrs, s.email];
-                            } else {
-                              filterAddrs = filterAddrs.filter(a => a !== s.email);
-                            }
-                            runSearch();
-                          }}
-                        />
-                        <span class="suggestion-name">{s.name || s.email}</span>
-                        {#if s.name}<span class="suggestion-email">{s.email}</span>{/if}
-                      </label>
-                    {/each}
-                    {#each addrDbSuggestions.filter(addr =>
-                      !contactSuggestions.some(c => c.email.toLowerCase() === addr) &&
-                      !filterAddrs.includes(addr)
-                    ) as addr}
-                      <label class="filter-suggestion-row">
-                        <input
-                          type="checkbox"
-                          checked={filterAddrs.includes(addr)}
-                          on:change={(e) => {
-                            if ((e.target as HTMLInputElement).checked) {
-                              if (!filterAddrs.includes(addr)) filterAddrs = [...filterAddrs, addr];
-                            } else {
-                              filterAddrs = filterAddrs.filter(a => a !== addr);
-                            }
-                            runSearch();
-                          }}
-                        />
-                        <span class="suggestion-name">{addr}</span>
-                      </label>
-                    {/each}
-                    {#if addrFilterInput
-                      && !contactSuggestions.some(c => c.email.toLowerCase() === addrFilterInput.toLowerCase())
-                      && !addrDbSuggestions.includes(addrFilterInput.toLowerCase())}
-                      <button class="filter-add-custom" on:click={() => {
-                        const v = addrFilterInput.trim();
-                        if (v && !filterAddrs.includes(v)) { filterAddrs = [...filterAddrs, v]; runSearch(); }
-                        addrFilterInput = '';
-                      }}>
-                        + {tl('mail_filterAddAddr')}: {addrFilterInput}
-                      </button>
-                    {/if}
-                  </div>
-                </div>
-              {/if}
-            </div>
-            <div class="search-filter-wrap" bind:this={dateFilterEl}>
-              <button
-                class="filter-icon-btn"
-                class:active={filterDateActive}
-                title={tl('mail_filterByDate')}
-                on:click|stopPropagation={toggleDateFilter}
-                aria-pressed={filterDateActive}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-              </button>
-              {#if filterDateOpen}
-                <div class="filter-popover filter-popover-date" role="dialog" aria-label={tl('mail_filterByDate')} bind:this={datePopoverEl} style={datePopoverStyle}>
-                  <label class="filter-date-label">
-                    {tl('mail_filterDateFrom')}
-                    <input type="date" bind:value={filterDateFrom} on:change={runSearch} />
-                  </label>
-                  <label class="filter-date-label">
-                    {tl('mail_filterDateTo')}
-                    <input type="date" bind:value={filterDateTo} on:change={runSearch} />
-                  </label>
-                  {#if filterDateActive}
-                    <button class="filter-clear-btn" on:click={() => { filterDateFrom = ''; filterDateTo = ''; runSearch(); }}>
-                      {tl('mail_filterClearDate')}
-                    </button>
-                  {/if}
-                </div>
-              {/if}
-            </div>
-          </div>
-        {/if}
-        {#if searching && !messagesLoading}
-          <span class="count">{messages.length === 1 ? tl('mail_result1') : tl('mail_resultsN', { n: messages.length })}</span>
-        {/if}
-      </div>
-
-      <div class="message-list-scroll" bind:this={listScrollEl}>
-        {#if messagesLoading}
-          <div class="loading">{tl('mail_loading')}</div>
-        {:else if messages.length === 0}
-          <div class="empty">
-            {#if searching}
-              {searchQuery.trim() ? tl('mail_noResults', { q: searchQuery }) : tl('mail_noResultsFiltered')}
-            {:else if accounts.length === 0}
-              {tl('mail_noAccounts')}
-            {:else if !selectedAccountId && !selectedFolderId}
-              {tl('mail_selectMailbox')}
-            {:else}
-              {tl('mail_noMessages')}
-            {/if}
-          </div>
-        {:else}
-          {#each messages as msg}
-            <button
-              class="message-row"
-              class:unread={!msg.is_read}
-              class:selected={sameMessage(listCursor, msg)}
-              class:marked={markedMessageKeys.has(messageKey(msg))}
-              class:opened={selectedMessages.length === 0 && sameMessage(selectedMessage, msg)}
-              aria-pressed={markedMessageKeys.has(messageKey(msg))}
-              use:registerMessageRow={msg}
-              tabindex={sameMessage(listCursor, msg) || (!listCursor && messages[0] === msg) ? 0 : -1}
-              on:focus={() => (listCursor = msg)}
-              on:click={(e) => handleMessageRowClick(e, msg)}
-              draggable="true"
-              on:dragstart={(e) => { draggedMessage = msg; if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'; }}
-              on:dragend={() => { draggedMessage = null; dragOverMailbox = null; }}
-            >
-              <div class="message-row-top">
-                <span class="from">
-                  {#if !msg.is_read}<span class="unread-dot" aria-label="Unread"></span>{/if}{senderName(msg.from) || tl('mail_unknownSender')}
-                </span>
-                <span class="date">{formatDate(msg.sent_at)}</span>
-              </div>
-              <div class="message-row-subject-line">
-                <span class="message-row-subject">{msg.subject || tl('mail_noSubject')}</span>
-                <span class="message-row-icons">
-                  {#if msg.is_flagged}<span class="flag-star" title={tl('mail_flaggedTitle')}>⭐</span>{/if}
-                  {#if msg.has_attachments && !msg.is_encrypted}<span class="attach-icon" title={tl('mail_hasAttachments')}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 10.56a4.94 4.94 0 0 1-7-7l9.19-10.56a3.33 3.33 0 0 1 4.7 4.7l-9.2 10.56a1.67 1.67 0 0 1-2.35-2.35l9.2-10.56"/></svg></span>{/if}
-                </span>
-              </div>
-            </button>
-          {/each}
-        {/if}
-      </div>
-
-      {#if searching ? messages.length > 0 : totalMessages > 0}
-        <nav class="pagination-bar">
-          <div class="page-btn-group">
-            <button class="page-btn" on:click={firstPage} disabled={!hasPrev} aria-label={tl('mail_firstPageAria')} title={tl('mail_firstPageAria')}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="6" x2="5" y2="18"/><polyline points="15 18 9 12 15 6"/></svg>
-            </button>
-            <button class="page-btn" on:click={prevPage} disabled={!hasPrev} aria-label={tl('mail_prevPageAria')} title={tl('mail_prevPage')}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
-            </button>
-          </div>
-          {#if !searching && pageInputActive}
-            <input
-              bind:this={pageInputEl}
-              bind:value={pageInputValue}
-              class="page-input"
-              type="text"
-              inputmode="numeric"
-              size="3"
-              aria-label={tl('mail_jumpToPageAria')}
-              on:keydown={(e) => { if (e.key === 'Enter') confirmPageInput(); if (e.key === 'Escape') cancelPageInput(); }}
-              on:blur={confirmPageInput}
-            />
-            <span class="page-status-of">/ {totalPages}</span>
-          {:else if !searching}
-            <button class="page-status page-status-btn" on:click={activatePageInput} title={tl('mail_jumpToPageAria')}>
-              {tl('mail_pageStatus', { start: pageStart, end: pageEnd, total: totalMessages })}
-            </button>
-          {:else}
-            <span class="page-status">{currentPage}</span>
-          {/if}
-          <div class="page-btn-group">
-            <button class="page-btn" on:click={nextPage} disabled={!hasNext} aria-label={tl('mail_nextPageAria')} title={tl('mail_nextPage')}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
-            </button>
-            {#if !searching}
-              <button class="page-btn" on:click={lastPage} disabled={!hasNext} aria-label={tl('mail_lastPageAria')} title={tl('mail_lastPageAria')}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/><line x1="19" y1="6" x2="19" y2="18"/></svg>
-              </button>
-            {/if}
-          </div>
-        </nav>
-      {/if}
-    </section>
-
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_no_noninteractive_tabindex -->
-    <div
-      class="resize-handle detail-resize-handle"
-      role="separator"
-      tabindex="0"
-      aria-orientation="vertical"
-      aria-label={tl('mail_resizeMessages')}
-      aria-valuemin="180"
-      aria-valuemax="600"
-      aria-valuenow={listWidth}
-      on:mousedown={(e) => startResize('list', e)}
-      on:keydown={(e) => resizeWithKeyboard('list', e)}
-    ></div>
+    <MailMessageList
+      {tl}
+      {standalone}
+      {isPhone}
+      bind:sidebarOpen
+      {selectedFolderId}
+      {selectedMailbox}
+      {selectedAccountId}
+      {virtualFolders}
+      {FOLDER_NAMES}
+      {accounts}
+      {messages}
+      {totalMessages}
+      {currentPage}
+      {messagesLoading}
+      {searching}
+      bind:searchQuery
+      {selectedMessage}
+      bind:listCursor
+      {markedMessageKeys}
+      {selectedMessages}
+      {filterAddrActive}
+      {filterDateActive}
+      bind:filterAddrOpen
+      bind:filterDateOpen
+      bind:filterAddrs
+      bind:filterDateFrom
+      bind:filterDateTo
+      bind:addrFilterInput
+      {contactSuggestions}
+      {addrDbSuggestions}
+      bind:addrFilterEl
+      bind:addrPopoverEl
+      {addrPopoverStyle}
+      bind:dateFilterEl
+      bind:datePopoverEl
+      {datePopoverStyle}
+      bind:draggedMessage
+      bind:dragOverMailbox
+      {hasPrev}
+      {hasNext}
+      {pageStart}
+      {pageEnd}
+      {totalPages}
+      bind:pageInputActive
+      bind:pageInputValue
+      {listWidth}
+      bind:listScrollEl
+      bind:pageInputEl
+      onSearchInput={onSearchInput}
+      onToggleAddrFilter={toggleAddrFilter}
+      onToggleDateFilter={toggleDateFilter}
+      onAddrInput={onAddrInput}
+      onRunSearch={runSearch}
+      onMessageRowClick={handleMessageRowClick}
+      {registerMessageRow}
+      onFirstPage={firstPage}
+      onPrevPage={prevPage}
+      onNextPage={nextPage}
+      onLastPage={lastPage}
+      onActivatePageInput={activatePageInput}
+      onConfirmPageInput={confirmPageInput}
+      onCancelPageInput={cancelPageInput}
+      onStartResize={startResize}
+      onResizeWithKeyboard={resizeWithKeyboard}
+      onDragStart={(msg, e) => { draggedMessage = msg; if (e.dataTransfer) e.dataTransfer.effectAllowed = "move"; }}
+      onDragEnd={() => { draggedMessage = null; dragOverMailbox = null; }}
+    />
     {/if}
 
     <!-- ── Message detail ────────────────────────────────────────────────────── -->
@@ -2387,7 +2108,7 @@
             </button>
             {#if canBulkArchive}
               <button class="bulk-section-start" on:click={() => applyBulkMove(msg => archiveMailboxFor(msg))} disabled={bulkActionBusy}>
-                {@render folderIcon('archive')}
+                <FolderIcon kind="archive" />
                 {tl('mail_archive')}
               </button>
             {/if}
@@ -2407,7 +2128,7 @@
             <div class="bulk-destinations" aria-label={tl('mail_moveToFolder')}>
               {#each bulkMoveDestinations as mailbox}
                 <button on:click={() => applyBulkMove(() => mailbox.name)} disabled={bulkActionBusy}>
-                  {@render folderIcon(folderKind(mailbox.name))}
+                  <FolderIcon kind={folderKind(mailbox.name)} />
                   <span>{FOLDER_NAMES[folderKind(mailbox.name)] || mailbox.name}</span>
                 </button>
               {/each}
@@ -2461,7 +2182,7 @@
                   <div class="menu-separator"></div>
                   {#if archiveMailboxFor(selectedMessage)}
                     <button role="menuitem" on:click={() => { actionsOpen = false; archiveMessage(selectedMessage!); }}>
-                      {@render folderIcon('archive')}
+                      <FolderIcon kind="archive" />
                       {tl('mail_archive')}
                     </button>
                   {/if}
@@ -2474,7 +2195,7 @@
                     <div class="move-submenu" role="menu">
                       {#each (mailboxesByAccount[selectedMessage.account_id] || []).filter(mb => mb.subscribed && mb.name !== selectedMessage.mailbox) as mb}
                         <button role="menuitem" on:click={() => { actionsOpen = false; moveSubmenuOpen = false; moveMessage(selectedMessage!, mb.name); }}>
-                          {@render folderIcon(folderKind(mb.name))}
+                          <FolderIcon kind={folderKind(mb.name)} />
                           <span>{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
                         </button>
                       {/each}
@@ -2770,7 +2491,6 @@
 />
 {/if}
 
-
 <!-- ── Image origins trigger button ───────────────────────────────────────── -->
 {#if !standalone}
 <button
@@ -2948,39 +2668,6 @@
     overflow: hidden;
   }
 
-  .sidebar-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.2);
-    z-index: 60;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-  }
-
-  .folder-toggle {
-    display: none;
-    background: none;
-    border: none;
-    padding: 0.2rem;
-    cursor: pointer;
-    color: inherit;
-    flex-shrink: 0;
-  }
-
-  .list-header-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .list-header-row h2 {
-    margin: 0;
-    font-size: 1rem;
-    font-weight: 600;
-    flex: 1;
-  }
-
   .mail-layout {
     display: grid;
     overflow: hidden;
@@ -3012,75 +2699,9 @@
   }
 
   /* Sidebar */
-  .mail-sidebar {
-    background: var(--pico-card-background-color, #f4f4f4);
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
-  }
 
-  .sidebar-section {
-    margin-bottom: 0.25rem;
-  }
-
-  .sidebar-section-header {
-    display: flex;
-    align-items: center;
-    padding: 0.4rem 0.75rem;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    color: var(--pico-muted-color, #666);
-    gap: 0.25rem;
-  }
-
-  .account-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .account-collapse-btn {
-    opacity: 0.65;
-    transition: transform 0.12s, opacity 0.12s;
-  }
-
-  .account-collapse-btn.collapsed {
-    transform: rotate(-90deg);
-  }
-
-  .account-collapse-btn:hover,
   .account-collapse-btn:focus-visible {
     opacity: 1;
-  }
-
-  .account-unread-badge {
-    margin-right: 0.15rem;
-  }
-
-  .sidebar-item {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    width: 100%;
-    padding: 0.3rem 0.75rem 0.3rem 1.25rem;
-    border: none;
-    background: none;
-    cursor: pointer;
-    text-align: left;
-    font-size: 0.85rem;
-    color: inherit;
-    border-radius: 0;
-  }
-
-  .sidebar-item:hover {
-    background: var(--pico-muted-border-color, #e0e0e0);
-  }
-
-  .sidebar-item.active {
-    background: var(--pico-primary-background, #e6f2fb);
-    font-weight: 500;
   }
 
   .folder-name {
@@ -3117,17 +2738,6 @@
     color: var(--pico-del-color, #c0392b);
   }
 
-  .sidebar-actions {
-    padding: 0.75rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .sidebar-add {
-    margin-top: auto;
-  }
-
   .link-btn {
     background: none;
     border: none;
@@ -3139,209 +2749,10 @@
   }
 
   /* Message list */
-  .message-list {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    min-height: 0;
-    margin: 0;
-    position: relative;
-    z-index: 2;
-  }
-
-  .message-list-scroll {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-  }
-
-  .message-list-header {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
-    flex-shrink: 0;
-    position: relative;
-  }
-
-  .search-input {
-    width: 100%;
-    margin: 0;
-    padding: 0.35rem 0.6rem;
-    font-size: 0.85rem;
-    height: auto;
-    border: 1px solid var(--pico-muted-border-color, #ddd);
-    border-radius: var(--pico-border-radius, 4px);
-    background: var(--pico-form-element-background-color, transparent);
-  }
-
-  .search-row {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    width: 100%;
-  }
-
-  .search-row .search-input {
-    flex: 1;
-    min-width: 0;
-    width: auto;
-  }
-
-  .search-filter-wrap {
-    flex-shrink: 0;
-  }
-
-  .filter-icon-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    background: none;
-    border: 1px solid transparent;
-    border-radius: var(--pico-border-radius, 4px);
-    cursor: pointer;
-    color: var(--pico-muted-color, #888);
-    transition: color 0.15s, border-color 0.15s;
-    flex-shrink: 0;
-  }
-
-  .filter-icon-btn:hover {
-    color: var(--pico-color, inherit);
-    border-color: var(--pico-muted-border-color, #ddd);
-  }
-
-  .filter-icon-btn.active {
-    color: var(--pico-primary, #1565c0);
-    border-color: var(--pico-primary, #1565c0);
-  }
-
-  .filter-popover {
-    position: absolute;
-    top: calc(100% + 4px);
-    right: 0;
-    z-index: 100;
-    background: var(--pico-background-color, #fff);
-    border: 1px solid var(--pico-muted-border-color, #ddd);
-    border-radius: var(--pico-border-radius, 6px);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-    padding: 0.5rem;
-    min-width: 300px;
-    max-width: 380px;
-    overflow-x: hidden;
-  }
-
-  .filter-popover-date {
-    min-width: 180px;
-    max-width: 220px;
-  }
-
-  .filter-popover-input {
-    width: 100%;
-    margin: 0 0 0.4rem;
-    padding: 0.3rem 0.5rem;
-    font-size: 0.82rem;
-    border: 1px solid var(--pico-muted-border-color, #ddd);
-    border-radius: var(--pico-border-radius, 4px);
-    background: var(--pico-form-element-background-color, transparent);
-    box-sizing: border-box;
-  }
-
-  .filter-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-    margin-bottom: 0.4rem;
-  }
-
-  .filter-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.2rem;
-    padding: 0.1rem 0.35rem;
-    border-radius: 999px;
-    background: var(--pico-primary-background, #e3f0fb);
-    color: var(--pico-primary, #1565c0);
-    font-size: 0.75rem;
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .chip-remove {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0;
-    line-height: 1;
-    font-size: 0.9rem;
-    color: inherit;
-    opacity: 0.6;
-    flex-shrink: 0;
-  }
-
-  .chip-remove:hover {
-    opacity: 1;
-  }
 
   .filter-suggestions {
     max-height: 300px;
     overflow-y: auto;
-  }
-
-  .filter-suggestion-row {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.25rem 0.3rem;
-    border-radius: var(--pico-border-radius, 4px);
-    cursor: pointer;
-    font-size: 0.82rem;
-    margin: 0;
-  }
-
-  .filter-suggestion-row:hover {
-    background: var(--pico-muted-border-color, #f5f5f5);
-  }
-
-  .suggestion-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .suggestion-email {
-    color: var(--pico-muted-color, #888);
-    font-size: 0.75rem;
-    flex-shrink: 0;
-    max-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .filter-add-custom {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 0.25rem 0.3rem;
-    font-size: 0.82rem;
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--pico-primary, #1565c0);
-    border-radius: var(--pico-border-radius, 4px);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .filter-add-custom:hover {
-    background: var(--pico-muted-border-color, #f5f5f5);
   }
 
   .filter-date-label {
@@ -3359,111 +2770,6 @@
     height: auto;
   }
 
-  .filter-clear-btn {
-    font-size: 0.78rem;
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--pico-muted-color, #888);
-    padding: 0;
-    text-decoration: underline;
-  }
-
-  .count {
-    font-size: 0.75rem;
-    color: var(--pico-muted-color, #888);
-  }
-
-  .message-row {
-    display: block;
-    width: 100%;
-    padding: 0.6rem 1rem 0.6rem 1rem;
-    border: none;
-    border-left: 3px solid transparent;
-    border-bottom: 1px solid var(--pico-muted-border-color, #eee);
-    background: none;
-    cursor: pointer;
-    text-align: left;
-    color: inherit;
-  }
-
-  .message-row:hover {
-    background: var(--pico-muted-border-color, #f5f5f5);
-  }
-
-  .message-row.selected {
-    background: var(--pico-primary-background, #e6f2fb);
-  }
-
-  .message-row.marked {
-    background: color-mix(in srgb, var(--pico-primary, #0172ad) 18%, transparent);
-    box-shadow: inset 3px 0 0 var(--pico-primary, #0172ad);
-  }
-
-  .message-row.marked.selected {
-    background: color-mix(in srgb, var(--pico-primary, #0172ad) 24%, transparent);
-  }
-
-  .message-row.opened:not(.selected) {
-    box-shadow: inset 3px 0 0 var(--pico-primary, #0172ad);
-  }
-
-  .message-row.unread {
-    border-left-color: var(--pico-primary, #0172ad);
-  }
-
-  .message-row.unread .from,
-  .message-row.unread .message-row-subject {
-    font-weight: 600;
-  }
-
-  .unread-dot {
-    display: inline-block;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--pico-primary, #0172ad);
-    margin-right: 5px;
-    vertical-align: middle;
-    flex-shrink: 0;
-  }
-
-  .message-row-top {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 0.15rem;
-  }
-
-  .from {
-    font-size: 0.85rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 70%;
-  }
-
-  .date {
-    font-size: 0.75rem;
-    color: var(--pico-muted-color, #888);
-    flex-shrink: 0;
-  }
-
-  .message-row-subject-line {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-  }
-
-  .message-row-subject {
-    flex: 1;
-    min-width: 0;
-    font-size: 0.82rem;
-    color: var(--pico-secondary, #444);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   .message-row-icons {
     display: flex;
     align-items: center;
@@ -3471,92 +2777,6 @@
     flex-shrink: 0;
     font-size: 0.75rem;
     line-height: 1;
-  }
-
-  .flag-star {
-    font-size: 0.75rem;
-  }
-
-  .attach-icon {
-    display: inline-flex;
-    align-items: center;
-  }
-
-  .pagination-bar {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.5rem 1rem;
-    border-top: 1px solid var(--pico-muted-border-color, #ddd);
-    flex-shrink: 0;
-  }
-
-  .page-btn-group {
-    display: flex;
-    align-items: center;
-    gap: 0;
-  }
-
-  .page-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.2rem;
-    border: none;
-    background: none;
-    cursor: pointer;
-    color: var(--pico-muted-color, #bbb);
-    font-size: 0.85rem;
-    padding: 0.15rem 0.3rem;
-    line-height: 1;
-    transition: color 0.15s;
-  }
-
-  .page-btn:hover:not(:disabled) {
-    color: var(--pico-color, #333);
-  }
-
-  .page-btn:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-
-  .page-status {
-    font-size: 0.8rem;
-    color: var(--pico-muted-color, #888);
-    white-space: nowrap;
-  }
-
-  .page-status-btn {
-    cursor: pointer;
-    background: none;
-    border: none;
-    border-radius: 3px;
-    padding: 0.1rem 0.2rem;
-    font-size: 0.8rem;
-    color: var(--pico-muted-color, #888);
-    white-space: nowrap;
-    line-height: 1;
-  }
-
-  .page-status-btn:hover {
-    background: color-mix(in srgb, currentColor 10%, transparent);
-  }
-
-  .page-input {
-    width: 2.8rem;
-    text-align: center;
-    font-size: 0.8rem;
-    padding: 0.1rem 0.2rem;
-    border: 1px solid var(--pico-muted-border-color, #ddd);
-    border-radius: 3px;
-    background: var(--pico-background-color);
-    color: var(--pico-color);
-    margin: 0;
-  }
-
-  .page-status-of {
-    font-size: 0.8rem;
-    color: var(--pico-muted-color, #888);
   }
 
   /* Message detail */
@@ -3879,15 +3099,6 @@
   .move-submenu button {
     padding-left: 1.4rem !important;
     font-size: 0.82rem !important;
-  }
-
-  .sidebar-item.drag-target {
-    outline: 1px dashed var(--pico-primary, #2563eb);
-  }
-
-  .sidebar-item.drag-over {
-    background: var(--pico-primary-background, #eff6ff);
-    outline: 1px solid var(--pico-primary, #2563eb);
   }
 
   .detail-meta {
@@ -4435,17 +3646,9 @@
       flex: none;
     }
 
-    .detail-resize-handle {
-      display: none;
-    }
-
     .mail-layout {
       display: grid;
       flex: 1;
-      min-height: 0;
-    }
-
-    .message-list {
       min-height: 0;
     }
 
@@ -4558,24 +3761,6 @@
       display: flex;
     }
 
-    .sidebar-backdrop {
-      position: absolute;
-    }
-
-    .mail-sidebar {
-      position: absolute;
-      top: 0;
-      left: 0;
-      bottom: 0;
-      width: 280px;
-      max-width: 80vw;
-      z-index: 61;
-      transform: translateX(-100%);
-      transition: transform 0.25s ease;
-      box-shadow: 0 0 1.5rem rgba(0, 0, 0, 0.25);
-      border-right: 1px solid var(--pico-muted-border-color, #ddd);
-    }
-
     .mail-sidebar.open {
       transform: translateX(0);
     }
@@ -4584,14 +3769,6 @@
       display: none;
     }
 
-    .message-list {
-      flex: 1;
-    }
-
-    .folder-toggle {
-      display: flex;
-      align-items: center;
-    }
   }
 
   @media (min-width: 1024px) {
@@ -4599,17 +3776,6 @@
       flex: 1;
       min-height: 0;
     }
-  }
-
-  .sync-spinner {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border: 1.5px solid var(--pico-muted-border-color, #ccc);
-    border-top-color: var(--pico-primary, #0172ad);
-    border-radius: 50%;
-    flex-shrink: 0;
-    animation: spin 0.7s linear infinite;
   }
 
   @keyframes spin { to { transform: rotate(360deg); } }
