@@ -3099,6 +3099,8 @@
     flex-wrap: wrap;
     gap: 0.4rem;
     margin-top: 0.4rem;
+    max-height: 10rem;
+    overflow-y: auto;
   }
 
   .attachment-chip-dl {
