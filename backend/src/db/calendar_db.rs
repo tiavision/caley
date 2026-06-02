@@ -1,7 +1,5 @@
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Row, SqlitePool};
 use std::collections::HashSet;
-use std::path::Path;
 use uuid::Uuid;
 
 use crate::caldav::unescape_ical_text;
@@ -10,12 +8,12 @@ use crate::search::SearchMode;
 #[allow(unused_imports)]
 use chrono::Utc;
 
-pub use sqlx::SqlitePool as Db;
+fn encrypt_field(value: &str, key: &[u8; 32]) -> anyhow::Result<String> {
+    crate::crypto::encrypt(value, key)
+}
 
-pub struct UserSettings {
-    pub caldav_base_url: String,
-    pub caldav_username: String,
-    pub caldav_password: String,
+fn decrypt_field(value: &str, key: &[u8; 32]) -> anyhow::Result<String> {
+    crate::crypto::decrypt(value, key)
 }
 
 #[derive(sqlx::FromRow)]
@@ -35,40 +33,7 @@ pub struct CalDavAccount {
     pub sort_order: i64,
 }
 
-fn encrypt_field(value: &str, key: &[u8; 32]) -> anyhow::Result<String> {
-    crate::crypto::encrypt(value, key)
-}
-
-fn decrypt_field(value: &str, key: &[u8; 32]) -> anyhow::Result<String> {
-    crate::crypto::decrypt(value, key)
-}
-
-pub async fn init_db(path: &str) -> anyhow::Result<SqlitePool> {
-    if let Some(parent) = Path::new(path).parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
-        }
-    }
-
-    let options = SqliteConnectOptions::new()
-        .filename(path)
-        .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal)
-        // NORMAL is durable under WAL and avoids an fsync on every commit, which
-        // otherwise lets a write-heavy email sync starve concurrent calendar syncs.
-        .synchronous(SqliteSynchronous::Normal)
-        .busy_timeout(std::time::Duration::from_secs(30))
-        .pragma("foreign_keys", "ON");
-
-    let pool = SqlitePoolOptions::new()
-        .max_connections(5)
-        .connect_with(options)
-        .await?;
-
-    sqlx::migrate!("./migrations").run(&pool).await?;
-
-    Ok(pool)
-}
+// ── Calendar deactivation ─────────────────────────────────────────────────────
 
 pub async fn get_deactivated_calendars(
     pool: &SqlitePool,
@@ -130,24 +95,7 @@ pub async fn activate_calendar(
     Ok(())
 }
 
-/// Ensure a user-identity row exists. Called on every successful login so that
-/// `user_settings` (referenced by the cache/contacts/email tables) is present
-/// even before any CalDAV account is configured.
-pub async fn ensure_user(
-    pool: &SqlitePool,
-    user_id: &str,
-    display_name: Option<&str>,
-) -> anyhow::Result<()> {
-    sqlx::query(
-        "INSERT INTO user_settings (user_id, display_name) VALUES (?, ?)
-         ON CONFLICT(user_id) DO NOTHING",
-    )
-    .bind(user_id)
-    .bind(display_name)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
+// ── CalDAV accounts ───────────────────────────────────────────────────────────
 
 pub async fn list_caldav_accounts(
     pool: &SqlitePool,
@@ -207,30 +155,12 @@ pub async fn get_caldav_account(
     .transpose()
 }
 
-/// Return the user's first CalDAV account for compatibility with local login and
-/// legacy code paths. New calendar/contact code should use account-specific APIs.
-pub async fn get_settings(
-    pool: &SqlitePool,
-    user_id: &str,
-    key: &[u8; 32],
-) -> anyhow::Result<Option<UserSettings>> {
-    Ok(list_caldav_accounts(pool, user_id, key)
-        .await?
-        .into_iter()
-        .next()
-        .map(|a| UserSettings {
-            caldav_base_url: a.caldav_base_url,
-            caldav_username: a.caldav_username,
-            caldav_password: a.caldav_password,
-        }))
-}
-
 pub async fn upsert_caldav_account(
     pool: &SqlitePool,
     user_id: &str,
     account_id: Option<&str>,
     display_name: Option<&str>,
-    settings: &UserSettings,
+    settings: &super::UserSettings,
     key: &[u8; 32],
 ) -> anyhow::Result<String> {
     let account_id = account_id
@@ -314,43 +244,7 @@ pub async fn get_caldav_account_password(
     }
 }
 
-pub async fn upsert_settings(
-    pool: &SqlitePool,
-    user_id: &str,
-    settings: &UserSettings,
-    key: &[u8; 32],
-) -> anyhow::Result<()> {
-    let account_id = format!("{user_id}:default");
-    upsert_caldav_account(pool, user_id, Some(&account_id), None, settings, key).await?;
-    Ok(())
-}
-
-pub async fn clear_user_cache(pool: &SqlitePool, user_id: &str) -> anyhow::Result<()> {
-    let mut tx = pool.begin().await?;
-    sqlx::query(
-        "DELETE FROM cached_calendars
-         WHERE account_id IN (SELECT account_id FROM caldav_accounts WHERE user_id = ?)",
-    )
-    .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query(
-        "DELETE FROM cached_events
-         WHERE account_id IN (SELECT account_id FROM caldav_accounts WHERE user_id = ?)",
-    )
-    .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query(
-        "DELETE FROM push_subscriptions
-         WHERE account_id IN (SELECT account_id FROM caldav_accounts WHERE user_id = ?)",
-    )
-    .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
-    Ok(())
-}
+// ── Push subscriptions ────────────────────────────────────────────────────────
 
 pub async fn upsert_push_subscription(
     pool: &SqlitePool,
@@ -813,8 +707,7 @@ pub struct SyncApplyResult {
     pub deleted: Vec<EventRef>,
 }
 
-/// Apply incremental sync results atomically: upsert changed events, delete removed
-/// events, and update the sync token — all in a single transaction.
+/// Apply incremental sync results atomically.
 pub async fn apply_incremental_sync(
     pool: &SqlitePool,
     account_id: &str,
@@ -928,8 +821,7 @@ pub async fn apply_incremental_sync(
     })
 }
 
-/// Replace all cached events for a calendar atomically: clear, insert all, update
-/// sync state — all in a single transaction.
+/// Replace all cached events for a calendar atomically.
 pub async fn replace_calendar_events(
     pool: &SqlitePool,
     account_id: &str,
@@ -1012,512 +904,7 @@ pub async fn replace_calendar_events(
     Ok(())
 }
 
-pub async fn delete_user(pool: &SqlitePool, user_id: &str) -> anyhow::Result<()> {
-    // ON DELETE CASCADE propagates to all child tables (caldav_accounts,
-    // cached_events, imap_accounts → cached_messages, virtual_folders →
-    // virtual_folder_rules, etc.).
-    sqlx::query("DELETE FROM user_settings WHERE user_id = ?")
-        .bind(user_id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-// ── Addressbook cache ─────────────────────────────────────────────────────────
-
-#[derive(sqlx::FromRow)]
-pub struct CachedAddressbook {
-    pub account_id: String,
-    pub href: String,
-    pub name: String,
-}
-
-pub async fn upsert_cached_addressbook(
-    pool: &SqlitePool,
-    account_id: &str,
-    href: &str,
-    name: &str,
-) -> anyhow::Result<()> {
-    let now = chrono::Utc::now().timestamp();
-    sqlx::query(
-        "INSERT INTO cached_addressbooks (account_id, href, name, last_synced)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(account_id, href) DO UPDATE SET
-            name = excluded.name,
-            last_synced = excluded.last_synced",
-    )
-    .bind(account_id)
-    .bind(href)
-    .bind(name)
-    .bind(now)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-pub async fn get_cached_addressbooks(
-    pool: &SqlitePool,
-    user_id: &str,
-) -> anyhow::Result<Vec<CachedAddressbook>> {
-    let books = sqlx::query_as::<_, CachedAddressbook>(
-        "SELECT a.account_id, a.href, a.name
-         FROM cached_addressbooks a
-         JOIN caldav_accounts ca ON ca.account_id = a.account_id
-         WHERE ca.user_id = ?
-         ORDER BY ca.sort_order, a.name",
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
-    Ok(books)
-}
-
-pub async fn get_addressbook_sync_state(
-    pool: &SqlitePool,
-    account_id: &str,
-    href: &str,
-) -> anyhow::Result<(Option<String>, Option<String>)> {
-    let row = sqlx::query(
-        "SELECT ctag, sync_token FROM cached_addressbooks WHERE account_id = ? AND href = ?",
-    )
-    .bind(account_id)
-    .bind(href)
-    .fetch_optional(pool)
-    .await?;
-    match row {
-        Some(r) => Ok((r.get(0), r.get(1))),
-        None => Ok((None, None)),
-    }
-}
-
-pub async fn remove_stale_addressbooks(
-    pool: &SqlitePool,
-    account_id: &str,
-    fresh_hrefs: &HashSet<String>,
-) -> anyhow::Result<()> {
-    let mut tx = pool.begin().await?;
-    if !fresh_hrefs.is_empty() {
-        let placeholders = fresh_hrefs
-            .iter()
-            .map(|_| "?")
-            .collect::<Vec<_>>()
-            .join(",");
-
-        let sql = format!(
-            "DELETE FROM contact_push_subscriptions WHERE account_id = ? AND addressbook_href NOT IN ({placeholders})"
-        );
-        let mut q = sqlx::query(&sql).bind(account_id);
-        for h in fresh_hrefs {
-            q = q.bind(h.as_str());
-        }
-        q.execute(&mut *tx).await?;
-
-        let sql = format!(
-            "DELETE FROM cached_contacts WHERE account_id = ? AND addressbook_href NOT IN ({placeholders})"
-        );
-        let mut q = sqlx::query(&sql).bind(account_id);
-        for h in fresh_hrefs {
-            q = q.bind(h.as_str());
-        }
-        q.execute(&mut *tx).await?;
-
-        let sql = format!(
-            "DELETE FROM cached_addressbooks WHERE account_id = ? AND href NOT IN ({placeholders})"
-        );
-        let mut q = sqlx::query(&sql).bind(account_id);
-        for h in fresh_hrefs {
-            q = q.bind(h.as_str());
-        }
-        q.execute(&mut *tx).await?;
-    } else {
-        sqlx::query("DELETE FROM contact_push_subscriptions WHERE account_id = ?")
-            .bind(account_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM cached_contacts WHERE account_id = ?")
-            .bind(account_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM cached_addressbooks WHERE account_id = ?")
-            .bind(account_id)
-            .execute(&mut *tx)
-            .await?;
-    }
-    tx.commit().await?;
-    Ok(())
-}
-
-// ── Contact cache ─────────────────────────────────────────────────────────────
-
-#[derive(sqlx::FromRow)]
-pub struct CachedContact {
-    pub account_id: String,
-    pub uid: String,
-    pub addressbook_href: String,
-    pub href: Option<String>,
-    #[allow(dead_code)]
-    pub etag: String,
-    pub raw_vcard: String,
-    pub fn_name: String,
-    pub emails: String,    // JSON array of TypedEntry
-    pub phones: String,    // JSON array of TypedEntry
-    pub addresses: String, // JSON array of AddressEntry
-    pub org: String,
-    pub photo: Option<String>,
-}
-
-pub async fn upsert_contact(
-    pool: &SqlitePool,
-    account_id: &str,
-    addressbook_href: &str,
-    uid: &str,
-    etag: &str,
-    href: &str,
-    raw_vcard: &str,
-    fn_name: &str,
-    emails_json: &str,
-    phones_json: &str,
-    addresses_json: &str,
-    org: &str,
-    photo: Option<&str>,
-) -> anyhow::Result<()> {
-    sqlx::query(
-        "INSERT INTO cached_contacts
-             (account_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(account_id, addressbook_href, uid) DO UPDATE SET
-             etag = excluded.etag,
-             href = excluded.href,
-             raw_vcard = excluded.raw_vcard,
-             fn_name = excluded.fn_name,
-             emails = excluded.emails,
-             phones = excluded.phones,
-             addresses = excluded.addresses,
-             org = excluded.org,
-             photo = excluded.photo",
-    )
-    .bind(account_id)
-    .bind(addressbook_href)
-    .bind(uid)
-    .bind(etag)
-    .bind(href)
-    .bind(raw_vcard)
-    .bind(fn_name)
-    .bind(emails_json)
-    .bind(phones_json)
-    .bind(addresses_json)
-    .bind(org)
-    .bind(photo)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-pub async fn get_contacts(pool: &SqlitePool, user_id: &str) -> anyhow::Result<Vec<CachedContact>> {
-    let contacts = sqlx::query_as::<_, CachedContact>(
-        "SELECT c.account_id, c.uid, c.addressbook_href, c.href, c.etag, c.raw_vcard, c.fn_name, c.emails, c.phones, c.addresses, c.org, c.photo
-         FROM cached_contacts c
-         JOIN caldav_accounts ca ON ca.account_id = c.account_id
-         WHERE ca.user_id = ?
-         ORDER BY fn_name COLLATE NOCASE ASC",
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
-    Ok(contacts)
-}
-
-pub async fn get_contact(
-    pool: &SqlitePool,
-    account_id: &str,
-    addressbook_href: &str,
-    uid: &str,
-) -> anyhow::Result<Option<CachedContact>> {
-    let contact = sqlx::query_as::<_, CachedContact>(
-        "SELECT account_id, uid, addressbook_href, href, etag, raw_vcard, fn_name, emails, phones, addresses, org, photo
-         FROM cached_contacts
-         WHERE account_id = ? AND addressbook_href = ? AND uid = ?",
-    )
-    .bind(account_id)
-    .bind(addressbook_href)
-    .bind(uid)
-    .fetch_optional(pool)
-    .await?;
-    Ok(contact)
-}
-
-pub async fn delete_contact_from_cache(
-    pool: &SqlitePool,
-    account_id: &str,
-    addressbook_href: &str,
-    uid: &str,
-) -> anyhow::Result<()> {
-    sqlx::query(
-        "DELETE FROM cached_contacts WHERE account_id = ? AND addressbook_href = ? AND uid = ?",
-    )
-    .bind(account_id)
-    .bind(addressbook_href)
-    .bind(uid)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-pub struct ContactRef {
-    pub account_id: String,
-    pub uid: String,
-    pub addressbook_href: String,
-}
-
-pub struct ContactSyncApplyResult {
-    pub changed: Vec<ContactRef>,
-    pub deleted: Vec<ContactRef>,
-}
-
-pub async fn apply_incremental_contact_sync(
-    pool: &SqlitePool,
-    account_id: &str,
-    addressbook_href: &str,
-    changed: Vec<(String, String, String)>, // (href, etag, raw_vcard)
-    deleted: Vec<String>,
-    new_token: &str,
-    stored_ctag: Option<&str>,
-) -> anyhow::Result<ContactSyncApplyResult> {
-    use crate::carddav::parse_vcard;
-    let mut tx = pool.begin().await?;
-
-    let mut changed_result: Vec<ContactRef> = Vec::new();
-    for (href, etag, raw_vcard) in changed {
-        let fields = parse_vcard(&raw_vcard);
-        if fields.uid.is_empty() {
-            continue;
-        }
-        let emails_json =
-            serde_json::to_string(&fields.emails).unwrap_or_else(|_| "[]".to_string());
-        let phones_json =
-            serde_json::to_string(&fields.phones).unwrap_or_else(|_| "[]".to_string());
-        let addresses_json =
-            serde_json::to_string(&fields.addresses).unwrap_or_else(|_| "[]".to_string());
-        sqlx::query(
-            "INSERT INTO cached_contacts
-                 (account_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(account_id, addressbook_href, uid) DO UPDATE SET
-                 etag = excluded.etag,
-                 href = excluded.href,
-                 raw_vcard = excluded.raw_vcard,
-                 fn_name = excluded.fn_name,
-                 emails = excluded.emails,
-                 phones = excluded.phones,
-                 addresses = excluded.addresses,
-                 org = excluded.org,
-                 photo = excluded.photo",
-        )
-        .bind(account_id)
-        .bind(addressbook_href)
-        .bind(&fields.uid)
-        .bind(&etag)
-        .bind(&href)
-        .bind(&raw_vcard)
-        .bind(&fields.fn_name)
-        .bind(&emails_json)
-        .bind(&phones_json)
-        .bind(&addresses_json)
-        .bind(&fields.org)
-        .bind(fields.photo.as_deref())
-        .execute(&mut *tx)
-        .await?;
-        changed_result.push(ContactRef {
-            account_id: account_id.to_string(),
-            uid: fields.uid,
-            addressbook_href: addressbook_href.to_string(),
-        });
-    }
-
-    let mut deleted_result: Vec<ContactRef> = Vec::new();
-    for href in deleted {
-        let uid: Option<String> = sqlx::query_scalar(
-            "SELECT uid FROM cached_contacts WHERE account_id = ? AND addressbook_href = ? AND href = ?",
-        )
-        .bind(account_id)
-        .bind(addressbook_href)
-        .bind(&href)
-        .fetch_optional(&mut *tx)
-        .await?;
-        if let Some(uid) = uid {
-            deleted_result.push(ContactRef {
-                account_id: account_id.to_string(),
-                uid: uid.clone(),
-                addressbook_href: addressbook_href.to_string(),
-            });
-            sqlx::query(
-                "DELETE FROM cached_contacts WHERE account_id = ? AND addressbook_href = ? AND uid = ?",
-            )
-            .bind(account_id)
-            .bind(addressbook_href)
-            .bind(&uid)
-            .execute(&mut *tx)
-            .await?;
-        } else {
-            sqlx::query(
-                "DELETE FROM cached_contacts WHERE account_id = ? AND addressbook_href = ? AND href = ?",
-            )
-            .bind(account_id)
-            .bind(addressbook_href)
-            .bind(&href)
-            .execute(&mut *tx)
-            .await?;
-        }
-    }
-
-    sqlx::query(
-        "UPDATE cached_addressbooks SET ctag = ?, sync_token = ? WHERE account_id = ? AND href = ?",
-    )
-    .bind(stored_ctag)
-    .bind(new_token)
-    .bind(account_id)
-    .bind(addressbook_href)
-    .execute(&mut *tx)
-    .await?;
-
-    tx.commit().await?;
-    Ok(ContactSyncApplyResult {
-        changed: changed_result,
-        deleted: deleted_result,
-    })
-}
-
-pub async fn replace_addressbook_contacts(
-    pool: &SqlitePool,
-    account_id: &str,
-    addressbook_href: &str,
-    all_raw: Vec<(String, String, String)>,
-    new_ctag: Option<&str>,
-    new_token: Option<&str>,
-) -> anyhow::Result<()> {
-    use crate::carddav::parse_vcard;
-    let mut tx = pool.begin().await?;
-
-    sqlx::query("DELETE FROM cached_contacts WHERE account_id = ? AND addressbook_href = ?")
-        .bind(account_id)
-        .bind(addressbook_href)
-        .execute(&mut *tx)
-        .await?;
-
-    for (href, etag, raw_vcard) in all_raw {
-        let fields = parse_vcard(&raw_vcard);
-        if fields.uid.is_empty() {
-            continue;
-        }
-        let emails_json =
-            serde_json::to_string(&fields.emails).unwrap_or_else(|_| "[]".to_string());
-        let phones_json =
-            serde_json::to_string(&fields.phones).unwrap_or_else(|_| "[]".to_string());
-        let addresses_json =
-            serde_json::to_string(&fields.addresses).unwrap_or_else(|_| "[]".to_string());
-        sqlx::query(
-            "INSERT INTO cached_contacts
-                 (account_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(account_id, addressbook_href, uid) DO UPDATE SET
-                 etag = excluded.etag,
-                 href = excluded.href,
-                 raw_vcard = excluded.raw_vcard,
-                 fn_name = excluded.fn_name,
-                 emails = excluded.emails,
-                 phones = excluded.phones,
-                 addresses = excluded.addresses,
-                 org = excluded.org,
-                 photo = excluded.photo",
-        )
-        .bind(account_id)
-        .bind(addressbook_href)
-        .bind(&fields.uid)
-        .bind(&etag)
-        .bind(&href)
-        .bind(&raw_vcard)
-        .bind(&fields.fn_name)
-        .bind(&emails_json)
-        .bind(&phones_json)
-        .bind(&addresses_json)
-        .bind(&fields.org)
-        .bind(fields.photo.as_deref())
-        .execute(&mut *tx)
-        .await?;
-    }
-
-    sqlx::query(
-        "UPDATE cached_addressbooks SET ctag = ?, sync_token = ? WHERE account_id = ? AND href = ?",
-    )
-    .bind(new_ctag)
-    .bind(new_token)
-    .bind(account_id)
-    .bind(addressbook_href)
-    .execute(&mut *tx)
-    .await?;
-
-    tx.commit().await?;
-    Ok(())
-}
-
-// ── Contact push subscriptions ────────────────────────────────────────────────
-
-pub async fn upsert_contact_push_subscription(
-    pool: &SqlitePool,
-    account_id: &str,
-    addressbook_href: &str,
-    webhook_token: &str,
-    transport: &str,
-    expires_at: i64,
-) -> anyhow::Result<()> {
-    sqlx::query(
-        "INSERT INTO contact_push_subscriptions (account_id, addressbook_href, webhook_token, transport, expires_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(account_id, addressbook_href) DO UPDATE SET
-             webhook_token = excluded.webhook_token,
-             transport = excluded.transport,
-             expires_at = excluded.expires_at",
-    )
-    .bind(account_id)
-    .bind(addressbook_href)
-    .bind(webhook_token)
-    .bind(transport)
-    .bind(expires_at)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-pub async fn get_contact_push_subscription(
-    pool: &SqlitePool,
-    account_id: &str,
-    addressbook_href: &str,
-) -> anyhow::Result<Option<(String, i64)>> {
-    let row = sqlx::query(
-        "SELECT webhook_token, expires_at FROM contact_push_subscriptions WHERE account_id = ? AND addressbook_href = ?",
-    )
-    .bind(account_id)
-    .bind(addressbook_href)
-    .fetch_optional(pool)
-    .await?;
-    Ok(row.map(|r| (r.get(0), r.get(1))))
-}
-
-pub async fn get_user_and_addressbook_from_push_token(
-    pool: &SqlitePool,
-    token: &str,
-) -> anyhow::Result<Option<(String, String, String)>> {
-    let row = sqlx::query(
-        "SELECT ca.user_id, p.account_id, p.addressbook_href
-         FROM contact_push_subscriptions p
-         JOIN caldav_accounts ca ON ca.account_id = p.account_id
-         WHERE p.webhook_token = ?",
-    )
-    .bind(token)
-    .fetch_optional(pool)
-    .await?;
-    Ok(row.map(|r| (r.get(0), r.get(1), r.get(2))))
-}
+// ── Event queries ─────────────────────────────────────────────────────────────
 
 /// Returns (account_id, calendar_href, raw_ical) tuples for events in the date range or recurring.
 pub async fn get_raw_events(
@@ -1615,9 +1002,10 @@ pub async fn get_recurring_raw_events(
     Ok(rows.iter().map(|r| (r.get(0), r.get(1), r.get(2))).collect())
 }
 
+// ── FTS schema ────────────────────────────────────────────────────────────────
+
 /// Check whether the active search mode matches the stored one and rebuild the FTS
-/// index if they differ. Recreates the FTS table when switching to/from trigram
-/// (different tokenizer), otherwise just re-indexes the `_idx` columns.
+/// index if they differ.
 pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::Result<()> {
     let stored: Option<String> =
         sqlx::query_scalar("SELECT value FROM app_config WHERE key = 'search_mode'")
@@ -1635,7 +1023,6 @@ pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::
     let new_is_trigram = mode_str == "trigram";
 
     if old_is_trigram != new_is_trigram {
-        // Tokenizer changes require a full table recreation.
         let tokenizer = mode.fts_tokenizer();
         sqlx::query("DROP TRIGGER IF EXISTS events_fts_ai")
             .execute(pool)
@@ -1744,7 +1131,6 @@ pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::
         .await?;
     }
 
-    // Re-compute all _idx columns with the new mode.
     let rows = sqlx::query("SELECT rowid, summary, description, location FROM cached_events")
         .fetch_all(pool)
         .await?;
@@ -1815,200 +1201,5 @@ pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::
     .await?;
 
     println!("[search] FTS rebuild complete.");
-    Ok(())
-}
-
-// ── WebAuthn credentials ──────────────────────────────────────────────────────
-
-pub struct WebAuthnCredRow {
-    pub cred_id: String,
-    pub passkey: String,
-    pub device_label: Option<String>,
-    pub has_prf: bool,
-}
-
-pub async fn store_webauthn_credential(
-    pool: &Db,
-    cred_id: &str,
-    user_id: &str,
-    passkey_json: &str,
-    device_label: Option<&str>,
-    has_prf: bool,
-) -> anyhow::Result<()> {
-    let now = chrono::Utc::now().timestamp();
-    sqlx::query(
-        "INSERT INTO webauthn_credentials(cred_id, user_id, passkey, device_label, has_prf, created_at, last_seen)
-         VALUES(?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(cred_id) DO UPDATE SET passkey = excluded.passkey, last_seen = excluded.last_seen",
-    )
-    .bind(cred_id)
-    .bind(user_id)
-    .bind(passkey_json)
-    .bind(device_label)
-    .bind(has_prf as i64)
-    .bind(now)
-    .bind(now)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-pub async fn get_webauthn_credentials(
-    pool: &Db,
-    user_id: &str,
-) -> anyhow::Result<Vec<WebAuthnCredRow>> {
-    let rows = sqlx::query(
-        "SELECT cred_id, passkey, device_label, has_prf FROM webauthn_credentials WHERE user_id = ? ORDER BY created_at",
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
-    Ok(rows
-        .iter()
-        .map(|r| WebAuthnCredRow {
-            cred_id: r.get(0),
-            passkey: r.get(1),
-            device_label: r.get(2),
-            has_prf: r.get::<i64, _>(3) != 0,
-        })
-        .collect())
-}
-
-pub async fn get_webauthn_cred_ids(pool: &Db, user_id: &str) -> anyhow::Result<Vec<String>> {
-    let rows = sqlx::query_scalar::<_, String>(
-        "SELECT cred_id FROM webauthn_credentials WHERE user_id = ?",
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
-    Ok(rows)
-}
-
-pub async fn update_webauthn_credential(
-    pool: &Db,
-    cred_id: &str,
-    passkey_json: &str,
-    sign_count: u32,
-    last_seen: i64,
-) -> anyhow::Result<()> {
-    sqlx::query(
-        "UPDATE webauthn_credentials SET passkey = ?, sign_count = ?, last_seen = ? WHERE cred_id = ?",
-    )
-    .bind(passkey_json)
-    .bind(sign_count as i64)
-    .bind(last_seen)
-    .bind(cred_id)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-pub async fn delete_webauthn_credential(
-    pool: &Db,
-    cred_id: &str,
-    user_id: &str,
-) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM webauthn_credentials WHERE cred_id = ? AND user_id = ?")
-        .bind(cred_id)
-        .bind(user_id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-// ── PGP public keys ───────────────────────────────────────────────────────────
-
-pub struct PgpPublicKeyRow {
-    pub fingerprint: String,
-    pub email: String,
-    pub armored: String,
-    pub is_own: bool,
-    pub source: String,
-    pub trust: String,
-}
-
-pub async fn get_pgp_public_keys(
-    pool: &Db,
-    user_id: &str,
-    email: Option<&str>,
-) -> anyhow::Result<Vec<PgpPublicKeyRow>> {
-    let rows = if let Some(email) = email {
-        sqlx::query(
-            "SELECT fingerprint, email, armored, is_own, source, trust
-             FROM pgp_public_keys
-             WHERE user_id = ? AND lower(email) = lower(?)
-             ORDER BY is_own DESC, email, fingerprint",
-        )
-        .bind(user_id)
-        .bind(email)
-        .fetch_all(pool)
-        .await?
-    } else {
-        sqlx::query(
-            "SELECT fingerprint, email, armored, is_own, source, trust
-             FROM pgp_public_keys WHERE user_id = ? ORDER BY is_own DESC, email, fingerprint",
-        )
-        .bind(user_id)
-        .fetch_all(pool)
-        .await?
-    };
-
-    Ok(rows
-        .into_iter()
-        .map(|r| PgpPublicKeyRow {
-            fingerprint: r.get(0),
-            email: r.get(1),
-            armored: r.get(2),
-            is_own: r.get::<i64, _>(3) != 0,
-            source: r.get(4),
-            trust: r.get(5),
-        })
-        .collect())
-}
-
-pub async fn upsert_pgp_public_key(
-    pool: &Db,
-    user_id: &str,
-    fingerprint: &str,
-    email: &str,
-    armored: &str,
-    is_own: bool,
-    source: &str,
-    trust: &str,
-) -> anyhow::Result<()> {
-    let now = chrono::Utc::now().timestamp();
-    sqlx::query(
-        "INSERT INTO pgp_public_keys(user_id, fingerprint, email, armored, is_own, source, trust, created_at)
-         VALUES(?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(user_id, fingerprint) DO UPDATE SET
-            armored = excluded.armored,
-            email = excluded.email,
-            is_own = MAX(pgp_public_keys.is_own, excluded.is_own),
-            source = excluded.source,
-            trust = excluded.trust",
-    )
-    .bind(user_id)
-    .bind(fingerprint)
-    .bind(email)
-    .bind(armored)
-    .bind(is_own as i64)
-    .bind(source)
-    .bind(trust)
-    .bind(now)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-pub async fn delete_pgp_public_key(
-    pool: &Db,
-    user_id: &str,
-    fingerprint: &str,
-) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM pgp_public_keys WHERE user_id = ? AND fingerprint = ?")
-        .bind(user_id)
-        .bind(fingerprint)
-        .execute(pool)
-        .await?;
     Ok(())
 }
