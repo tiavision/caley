@@ -5,7 +5,7 @@
   import UiIcon from '../UiIcon.svelte';
   import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey, validateVault, eraseBytes } from '../../lib/pgp/vault.ts';
   import { unlock } from '../../lib/pgp/webauthn.ts';
-  import { getKeys } from '../../lib/pgp/session.ts';
+  import { getKeys, isUnlocked } from '../../lib/pgp/session.ts';
   import { parsePublicKey, listPublicKeys, type StoredPublicKey } from '../../lib/pgp/public-keys.ts';
   import { buildProtectedMime, parseEnvelopeAddresses } from '../../lib/pgp/compose.ts';
   import { formatMessageDateTime, keyHasEmail } from './mailUtils.ts';
@@ -75,12 +75,9 @@
     keys: { record: StoredPublicKey; key: openpgp.PublicKey }[],
     fingerprints: Set<string>,
   ): boolean {
-    const identity = identities.find(item => item.identity_id === identityId);
-    if (!identity) return false;
-    return keys.some(({ record, key }) =>
-      record.is_own
-      && fingerprints.has(record.fingerprint.toUpperCase())
-      && keyHasEmail(key, identity.email)
+    if (!identities.find(item => item.identity_id === identityId)) return false;
+    return keys.some(({ record }) =>
+      record.is_own && fingerprints.has(record.fingerprint.toUpperCase())
     );
   }
 
@@ -442,7 +439,7 @@
           await unlockVaultForSigning();
           signingKey = signingKeyForIdentity(composeIdentityId);
         }
-        if (composeSign && !signingKey) throw new Error(tl('pgp_composeUnlockSigningKey'));
+        if (composeSign && !signingKey) throw new Error(isUnlocked() ? tl('pgp_composeNoSigningKey') : tl('pgp_composeUnlockSigningKey'));
 
         let encryptionKeys: openpgp.PublicKey[] = [];
         if (composeEncrypt) {

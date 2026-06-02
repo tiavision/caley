@@ -451,6 +451,7 @@
   "pgp_composeIdentityMissing": "Wähle eine Absenderidentität aus.",
   "pgp_composeNoRecipients": "Füge mindestens einen Empfänger hinzu.",
   "pgp_composeUnlockSigningKey": "Entsperre den Tresor mit dem Signaturschlüssel für diese Identität.",
+  "pgp_composeNoSigningKey": "Kein PGP-Schlüssel für diese Identität's E-Mail-Adresse gefunden. Füge diese Adresse als Identität in deinem Schlüssel in den Einstellungen hinzu.",
   "pgp_composeMissingKeys": "Fehlende Verschlüsselungsschlüssel für: {emails}",
   "pgp_sourceAutocrypt": "Aus Autocrypt gelernt (bei erster Verwendung vertraut)",
   "pgp_sourceSignedAttachment": "Aus verifizierter signierter E-Mail gelernt",

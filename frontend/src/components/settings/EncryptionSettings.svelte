@@ -185,6 +185,11 @@
       pgpManifest = await validateVault(pgpVault, key, device.cred_id);
       const keys = await decryptPrivateKeys(key, pgpVault.keys);
       openVault(key, keys);
+      for (const [fp, privateKey] of keys) {
+        await uploadPublicKey(privateKey, fp);
+      }
+      pgpPublicKeys = await listPublicKeys().catch(() => pgpPublicKeys);
+      await cacheOwnPublicKeys();
       rememberLocalDevice(device.cred_id);
       refreshUnlockState();
       return key;
