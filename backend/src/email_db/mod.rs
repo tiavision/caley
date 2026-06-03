@@ -7,19 +7,19 @@ pub(crate) mod folders_db;
 pub(crate) mod messages_db;
 
 pub use folders_db::{
-    create_virtual_folder, delete_virtual_folder, list_virtual_folders, update_virtual_folder,
-    add_image_blacklist, add_image_origin, get_image_blacklist, get_image_whitelist,
-    is_origin_whitelisted, remove_image_blacklist, remove_image_origin,
+    add_image_blacklist, add_image_origin, create_virtual_folder, delete_virtual_folder,
+    get_image_blacklist, get_image_whitelist, is_origin_whitelisted, list_virtual_folders,
+    remove_image_blacklist, remove_image_origin, update_virtual_folder,
 };
 pub use messages_db::{
     AttachmentRow, MessageHeader, MessageRow, PageCursor, PageDirection, SearchFilters,
     delete_attachments_by_uids, delete_attachments_for_mailbox, delete_attachments_for_message,
-    delete_message, delete_messages_by_uids, find_trash_mailbox,
-    get_attachment_by_cid, get_attachment_by_filename, get_cached_uids,
-    get_cached_uids_missing_body, get_message, insert_attachment, list_attachments,
-    list_messages, list_messages_virtual, list_thread_messages, replace_message_addresses,
-    search_messages, search_messages_mailbox, search_messages_virtual, suggest_addrs,
-    update_message_body, update_message_flags, upsert_message_header,
+    delete_message, delete_messages_by_uids, find_trash_mailbox, get_attachment_by_cid,
+    get_attachment_by_filename, get_cached_message_flags, get_cached_uids,
+    get_cached_uids_missing_body, get_message, insert_attachment, list_attachments, list_messages,
+    list_messages_virtual, list_thread_messages, replace_message_addresses, search_messages,
+    search_messages_mailbox, search_messages_virtual, suggest_addrs, update_message_body,
+    update_message_flags, upsert_message_header,
 };
 
 // ── Account ──────────────────────────────────────────────────────────────────

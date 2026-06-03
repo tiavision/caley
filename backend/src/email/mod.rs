@@ -17,15 +17,15 @@ pub(crate) mod messages;
 pub(crate) mod send;
 
 pub use attachments::{
-    proxy_image, download_attachment, export_account, navigate,
-    list_image_origins, add_image_origin, remove_image_origin,
-    list_image_blacklist, add_image_blacklist_origin, remove_image_blacklist_origin,
+    add_image_blacklist_origin, add_image_origin, download_attachment, export_account,
+    list_image_blacklist, list_image_origins, navigate, proxy_image, remove_image_blacklist_origin,
+    remove_image_origin,
 };
 pub use messages::{
-    list_messages, get_message, get_thread, update_flags, delete_message, move_message,
-    search, suggest_addrs,
+    delete_message, get_message, get_thread, list_messages, move_message, search, suggest_addrs,
+    update_flags,
 };
-pub use send::{send_email, send_raw_email, autodiscover_handler};
+pub use send::{autodiscover_handler, send_email, send_raw_email};
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
 

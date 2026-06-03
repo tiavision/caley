@@ -28,8 +28,8 @@ use axum::routing::{delete, get, patch, post, put};
 use clap::Parser;
 use dotenvy::dotenv;
 use oidc::{AppState, OidcProvider, UserIdClaim};
-use openidconnect::{ClientId, ClientSecret, IssuerUrl, ProviderMetadataWithLogout, RedirectUrl};
 use openidconnect::core::CoreClient;
+use openidconnect::{ClientId, ClientSecret, IssuerUrl, ProviderMetadataWithLogout, RedirectUrl};
 use search::SearchMode;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -175,18 +175,19 @@ async fn main() -> anyhow::Result<()> {
         let provider_meta = ProviderMetadataWithLogout::discover_async(issuer, &http_client)
             .await
             .map_err(|e| anyhow::anyhow!("OIDC discovery failed: {e}"))?;
-        let end_session_endpoint =
-            provider_meta.additional_metadata().end_session_endpoint.clone();
-        let client =
-            CoreClient::from_provider_metadata(
-                provider_meta,
-                ClientId::new(args.oidc_client_id.clone().unwrap()),
-                Some(ClientSecret::new(args.oidc_client_secret.clone().unwrap())),
-            )
-            .set_redirect_uri(RedirectUrl::new(format!(
-                "{}/auth/oidc",
-                args.app_base_url
-            ))?);
+        let end_session_endpoint = provider_meta
+            .additional_metadata()
+            .end_session_endpoint
+            .clone();
+        let client = CoreClient::from_provider_metadata(
+            provider_meta,
+            ClientId::new(args.oidc_client_id.clone().unwrap()),
+            Some(ClientSecret::new(args.oidc_client_secret.clone().unwrap())),
+        )
+        .set_redirect_uri(RedirectUrl::new(format!(
+            "{}/auth/oidc",
+            args.app_base_url
+        ))?);
         Some(Arc::new(OidcProvider {
             client,
             end_session_endpoint,
@@ -257,7 +258,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/caldav/accounts", get(settings::list_caldav_accounts))
         .route("/api/caldav/account", post(settings::save_caldav_account))
         .route("/api/caldav/account", put(settings::save_caldav_account))
-        .route("/api/caldav/account", delete(settings::delete_caldav_account))
+        .route(
+            "/api/caldav/account",
+            delete(settings::delete_caldav_account),
+        )
         .route("/api/event", post(calendar::save_event))
         .route("/api/event", delete(calendar::delete_event))
         .route("/api/event/ics", get(calendar::get_event_ics))
@@ -353,7 +357,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/logout", get(oidc::logout_handler))
         .with_state(state.clone())
         .fallback_service(ServeDir::new(&static_dir))
-        .layer(oidc::RequireAuthLayer { oidc_enabled: use_oidc });
+        .layer(oidc::RequireAuthLayer {
+            oidc_enabled: use_oidc,
+        });
 
     if use_oidc {
         println!("Auth: CalDAV login + OIDC enabled");

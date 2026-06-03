@@ -94,7 +94,11 @@ pub async fn handle_login(
         }
         if let Err(e) = session.cycle_id().await {
             eprintln!("Session error: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Session error"}))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Session error"})),
+            )
+                .into_response();
         }
         let _ = session.insert("user_id", demo_user_id).await;
         let _ = session.insert("display_name", "Demo User").await;

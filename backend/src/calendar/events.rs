@@ -5,6 +5,10 @@ use axum::{
 };
 use url::form_urlencoded;
 
+use super::{
+    CalendarJson, build_event_json, extract_vevent, parse_alarm_from_fields, parse_event_form,
+    parse_form_field, require_account_client,
+};
 use crate::caldav::{
     Alarm, Attendee, CalDavClient, PartStat, RecurrenceInfo, add_exdate, add_recurrence_override,
     generate_ical_event, generate_new_uid, update_vcalendar_event,
@@ -12,10 +16,6 @@ use crate::caldav::{
 use crate::db;
 use crate::oidc::{AppState, CurrentUser};
 use crate::sync::SyncTrigger;
-use super::{
-    CalendarJson, build_event_json, extract_vevent, parse_alarm_from_fields, parse_event_form,
-    parse_form_field, require_account_client,
-};
 
 pub async fn save_event(
     State(state): State<AppState>,
@@ -163,7 +163,8 @@ pub async fn save_event(
                 Ok(s) => s,
                 Err(e) => {
                     eprintln!("Failed to fetch event for override: {e}");
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read event").into_response();
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read event")
+                        .into_response();
                 }
             }
         };
@@ -335,7 +336,9 @@ pub async fn save_event(
         match client.put_event(&calendar_href, &uid, &ical).await {
             Ok(_) => {
                 if let Some(ref orig) = original_calendar_href {
-                    let moved_account = original_account_id.as_deref().is_some_and(|id| id != account_id);
+                    let moved_account = original_account_id
+                        .as_deref()
+                        .is_some_and(|id| id != account_id);
                     if (!orig.is_empty()) && (*orig != calendar_href || moved_account) {
                         let delete_client = original_client.as_ref().unwrap_or(&client);
                         if let Err(e) = delete_client.delete_event(orig, &uid).await {
@@ -540,7 +543,9 @@ pub(super) async fn optimistic_upsert(
         CalDavClient::events_from_raw_ical(raw_ical, wide_start, wide_end)
             .into_iter()
             .next()
-            .and_then(|ev| serde_json::to_string(&build_event_json(&ev, account_id, color, calendar_href)).ok())
+            .and_then(|ev| {
+                serde_json::to_string(&build_event_json(&ev, account_id, color, calendar_href)).ok()
+            })
     } else {
         None
     };

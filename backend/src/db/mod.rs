@@ -1,5 +1,5 @@
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use std::path::Path;
 
 pub use sqlx::SqlitePool as Db;
@@ -10,29 +10,26 @@ pub(crate) mod pgp_db;
 pub(crate) mod webauthn_db;
 
 pub use calendar_db::{
-    CalDavAccount, CachedCalendar,
-    activate_calendar, apply_incremental_sync, deactivate_calendar,
-    delete_caldav_account, delete_calendar_cache, delete_cached_event, delete_event_by_href,
-    ensure_fts_schema, get_cached_calendars, get_calendar_sync_state, get_caldav_account,
-    get_caldav_account_password, get_deactivated_calendars, get_event_dates_for_month,
+    CachedCalendar, CalDavAccount, activate_calendar, apply_incremental_sync, deactivate_calendar,
+    delete_cached_event, delete_caldav_account, delete_calendar_cache, delete_event_by_href,
+    ensure_fts_schema, get_cached_calendars, get_caldav_account, get_caldav_account_password,
+    get_calendar_sync_state, get_deactivated_calendars, get_event_dates_for_month,
     get_push_subscription, get_raw_events, get_recurring_raw_events,
-    get_user_and_calendar_from_push_token, get_user_id_for_caldav_account,
-    list_caldav_accounts, remove_stale_calendars, replace_calendar_events,
-    upsert_cached_calendar, upsert_cached_event_raw, upsert_caldav_account,
-    upsert_push_subscription,
+    get_user_and_calendar_from_push_token, get_user_id_for_caldav_account, list_caldav_accounts,
+    remove_stale_calendars, replace_calendar_events, upsert_cached_calendar,
+    upsert_cached_event_raw, upsert_caldav_account, upsert_push_subscription,
 };
 pub use contact_db::{
-    CachedAddressbook, CachedContact,
-    apply_incremental_contact_sync, delete_contact_from_cache,
-    get_addressbook_sync_state, get_cached_addressbooks, get_contact, get_contacts,
-    get_contact_push_subscription, get_user_and_addressbook_from_push_token,
-    remove_stale_addressbooks, replace_addressbook_contacts,
-    upsert_cached_addressbook, upsert_contact, upsert_contact_push_subscription,
+    CachedAddressbook, CachedContact, apply_incremental_contact_sync, delete_contact_from_cache,
+    get_addressbook_sync_state, get_cached_addressbooks, get_contact,
+    get_contact_push_subscription, get_contacts, get_user_and_addressbook_from_push_token,
+    remove_stale_addressbooks, replace_addressbook_contacts, upsert_cached_addressbook,
+    upsert_contact, upsert_contact_push_subscription,
 };
 pub use pgp_db::{delete_pgp_public_key, get_pgp_public_keys, upsert_pgp_public_key};
 pub use webauthn_db::{
-    delete_webauthn_credential, get_webauthn_cred_ids,
-    get_webauthn_credentials, store_webauthn_credential, update_webauthn_credential,
+    delete_webauthn_credential, get_webauthn_cred_ids, get_webauthn_credentials,
+    store_webauthn_credential, update_webauthn_credential,
 };
 
 pub struct UserSettings {
@@ -124,22 +121,22 @@ pub async fn clear_user_cache(pool: &SqlitePool, user_id: &str) -> anyhow::Resul
          WHERE account_id IN (SELECT account_id FROM caldav_accounts WHERE user_id = ?)",
     )
     .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+    .execute(&mut *tx)
+    .await?;
     sqlx::query(
         "DELETE FROM cached_events
          WHERE account_id IN (SELECT account_id FROM caldav_accounts WHERE user_id = ?)",
     )
     .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+    .execute(&mut *tx)
+    .await?;
     sqlx::query(
         "DELETE FROM push_subscriptions
          WHERE account_id IN (SELECT account_id FROM caldav_accounts WHERE user_id = ?)",
     )
     .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(())
 }

@@ -15,10 +15,8 @@ pub use generation::{
     split_vcalendar_into_events, update_vcalendar_event,
 };
 pub use parsing::preview_events_from_raw_ical;
+pub(crate) use parsing::{extract_ctag_and_token, extract_hrefs, resolve_url, unescape_ical_text};
 pub use types::{Alarm, Attendee, Calendar, Event, PartStat, RecurrenceInfo, SyncResult};
-pub(crate) use parsing::{
-    extract_ctag_and_token, extract_hrefs, resolve_url, unescape_ical_text,
-};
 
 #[derive(Clone)]
 pub struct CalDavClient {
@@ -163,11 +161,9 @@ impl CalDavClient {
 </propfind>"#;
 
                 let home_xml = self.propfind(&principal_url, "0", home_body).await?;
-                let hrefs = parsing::extract_hrefs(&home_xml, "calendar-home-set")
-                    .with_context(|| {
-                        format!(
-                            "calendar-home-set not found in response from {principal_url}"
-                        )
+                let hrefs =
+                    parsing::extract_hrefs(&home_xml, "calendar-home-set").with_context(|| {
+                        format!("calendar-home-set not found in response from {principal_url}")
                     })?;
                 Ok(hrefs
                     .into_iter()
@@ -183,8 +179,8 @@ impl CalDavClient {
 </propfind>"#;
 
                 let home_xml = self.propfind(start_url, "0", home_body).await?;
-                let hrefs = parsing::extract_hrefs(&home_xml, "calendar-home-set")
-                    .with_context(|| {
+                let hrefs =
+                    parsing::extract_hrefs(&home_xml, "calendar-home-set").with_context(|| {
                         format!("calendar-home-set not found in response from {start_url}")
                     })?;
                 Ok(hrefs
@@ -406,7 +402,11 @@ impl CalDavClient {
     }
 
     /// Expand raw iCalendar text into `Event` structs for a date range.
-    pub fn events_from_raw_ical(raw_ical: &str, start: chrono::NaiveDate, end: chrono::NaiveDate) -> Vec<Event> {
+    pub fn events_from_raw_ical(
+        raw_ical: &str,
+        start: chrono::NaiveDate,
+        end: chrono::NaiveDate,
+    ) -> Vec<Event> {
         parsing::parse_and_expand_events(raw_ical, start, end)
     }
 

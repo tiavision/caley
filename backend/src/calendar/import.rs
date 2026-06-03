@@ -38,8 +38,10 @@ async fn read_ics_multipart(mut multipart: Multipart) -> Result<String, Response
             match field.text().await {
                 Ok(text) => ics_content = Some(text),
                 Err(e) => {
-                    return Err((StatusCode::BAD_REQUEST, format!("Failed to read file: {e}"))
-                        .into_response());
+                    return Err(
+                        (StatusCode::BAD_REQUEST, format!("Failed to read file: {e}"))
+                            .into_response(),
+                    );
                 }
             }
         }
@@ -81,7 +83,11 @@ pub async fn preview_ics_import(
         .collect();
 
     if previews.is_empty() {
-        return (StatusCode::BAD_REQUEST, "No importable events found in ICS file").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            "No importable events found in ICS file",
+        )
+            .into_response();
     }
 
     Json(previews).into_response()
@@ -232,8 +238,15 @@ pub async fn search_events(
         sql.push_str(" AND e.dtstart <= ?");
     }
     if !cal_keys.is_empty() {
-        let placeholders = cal_keys.iter().map(|_| "(?, ?)").collect::<Vec<_>>().join(", ");
-        sql.push_str(&format!(" AND (e.account_id, e.calendar_href) IN ({})", placeholders));
+        let placeholders = cal_keys
+            .iter()
+            .map(|_| "(?, ?)")
+            .collect::<Vec<_>>()
+            .join(", ");
+        sql.push_str(&format!(
+            " AND (e.account_id, e.calendar_href) IN ({})",
+            placeholders
+        ));
     }
     sql.push_str(" ORDER BY e.dtstart DESC LIMIT 100");
 
@@ -263,7 +276,12 @@ pub async fn search_events(
                         .into_iter()
                         .next()
                     {
-                        results.push(build_event_json(&event, &account_id, color_str, &calendar_href));
+                        results.push(build_event_json(
+                            &event,
+                            &account_id,
+                            color_str,
+                            &calendar_href,
+                        ));
                     }
                 }
             }

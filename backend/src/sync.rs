@@ -20,9 +20,15 @@ pub enum SyncTrigger {
     Full,
     Incremental,
     /// Sync only the single calendar at the given href (used by the push webhook).
-    Calendar { account_id: String, href: String },
+    Calendar {
+        account_id: String,
+        href: String,
+    },
     /// Sync only the single addressbook at the given href (used by the push webhook).
-    Addressbook { account_id: String, href: String },
+    Addressbook {
+        account_id: String,
+        href: String,
+    },
 }
 
 pub struct SyncManager {
@@ -137,8 +143,14 @@ impl SyncManager {
 
     /// Sync a single calendar by href — used by the push webhook so we don't
     /// trigger ctag-fallback full-fetches on calendars that haven't changed.
-    async fn sync_single_calendar(&self, user_id: &str, account_id: &str, calendar_href: &str) -> anyhow::Result<()> {
-        let account = db::get_caldav_account(&self.db, user_id, account_id, &self.encryption_key).await?;
+    async fn sync_single_calendar(
+        &self,
+        user_id: &str,
+        account_id: &str,
+        calendar_href: &str,
+    ) -> anyhow::Result<()> {
+        let account =
+            db::get_caldav_account(&self.db, user_id, account_id, &self.encryption_key).await?;
         let Some(account) = account else {
             return Ok(());
         };
@@ -147,7 +159,8 @@ impl SyncManager {
             account.caldav_username,
             account.caldav_password,
         )?;
-        self.sync_calendar(&client, user_id, account_id, calendar_href).await
+        self.sync_calendar(&client, user_id, account_id, calendar_href)
+            .await
     }
 
     async fn sync_user(&self, user_id: &str, _full: bool) -> anyhow::Result<()> {
@@ -167,113 +180,133 @@ impl SyncManager {
                 account.caldav_password,
             )?;
 
-        // Rediscover the calendar list from CalDAV on every sync — a single PROPFIND,
-        // so the cost is low. This ensures new calendars added on the server are picked
-        // up within one sync interval and get push subscriptions registered.
-        let calendars: Vec<db::CachedCalendar> = match client.calendars().await {
-            Ok(fresh) if !fresh.is_empty() => {
-                let fresh_hrefs: HashSet<String> = fresh.iter().map(|c| c.href.clone()).collect();
-                let old_cached = db::get_cached_calendars(&self.db, user_id)
-                    .await?
-                    .into_iter()
-                    .filter(|c| c.account_id == account_id)
-                    .collect::<Vec<_>>();
-                let old_hrefs: HashSet<String> =
-                    old_cached.iter().map(|c| c.href.clone()).collect();
-                for cal in &fresh {
-                    db::upsert_cached_calendar(
+            // Rediscover the calendar list from CalDAV on every sync — a single PROPFIND,
+            // so the cost is low. This ensures new calendars added on the server are picked
+            // up within one sync interval and get push subscriptions registered.
+            let calendars: Vec<db::CachedCalendar> = match client.calendars().await {
+                Ok(fresh) if !fresh.is_empty() => {
+                    let fresh_hrefs: HashSet<String> =
+                        fresh.iter().map(|c| c.href.clone()).collect();
+                    let old_cached = db::get_cached_calendars(&self.db, user_id)
+                        .await?
+                        .into_iter()
+                        .filter(|c| c.account_id == account_id)
+                        .collect::<Vec<_>>();
+                    let old_hrefs: HashSet<String> =
+                        old_cached.iter().map(|c| c.href.clone()).collect();
+                    for cal in &fresh {
+                        db::upsert_cached_calendar(
+                            &self.db,
+                            &account_id,
+                            &cal.href,
+                            &cal.name,
+                            cal.color.as_deref(),
+                        )
+                        .await?;
+                    }
+                    db::remove_stale_calendars(
                         &self.db,
                         &account_id,
-                        &cal.href,
-                        &cal.name,
-                        cal.color.as_deref(),
-                    )
-                    .await?;
-                }
-                db::remove_stale_calendars(&self.db, &account_id, &fresh_hrefs, &self.encryption_key)
-                    .await?;
-                if fresh_hrefs != old_hrefs {
-                    self.broadcaster.send(user_id, SseMessage::CalendarsChanged);
-                }
-                fresh
-                    .into_iter()
-                    .map(|c| db::CachedCalendar {
-                        href: c.href,
-                        name: c.name,
-                        color: c.color,
-                        account_id: account_id.clone(),
-                    })
-                    .collect()
-            }
-            Ok(_) => {
-                eprintln!("[sync] calendars() returned empty for {user_id}, falling back to cache");
-                db::get_cached_calendars(&self.db, user_id)
-                    .await?
-                    .into_iter()
-                    .filter(|c| c.account_id == account_id)
-                    .collect()
-            }
-            Err(e) => {
-                eprintln!("[sync] calendars() failed for {user_id}: {e}");
-                db::get_cached_calendars(&self.db, user_id)
-                    .await?
-                    .into_iter()
-                    .filter(|c| c.account_id == account_id)
-                    .collect()
-            }
-        };
-
-        for cal in &calendars {
-            if let Err(e) = self.sync_calendar(&client, user_id, &account_id, &cal.href).await {
-                let err_str = e.to_string();
-                if err_str.contains("404") {
-                    eprintln!(
-                        "[sync] calendar {} returned 404, removing from cache",
-                        cal.href
-                    );
-                    if let Err(remove_err) = db::delete_calendar_cache(
-                        &self.db,
-                        &account_id,
-                        &cal.href,
+                        &fresh_hrefs,
                         &self.encryption_key,
                     )
+                    .await?;
+                    if fresh_hrefs != old_hrefs {
+                        self.broadcaster.send(user_id, SseMessage::CalendarsChanged);
+                    }
+                    fresh
+                        .into_iter()
+                        .map(|c| db::CachedCalendar {
+                            href: c.href,
+                            name: c.name,
+                            color: c.color,
+                            account_id: account_id.clone(),
+                        })
+                        .collect()
+                }
+                Ok(_) => {
+                    eprintln!(
+                        "[sync] calendars() returned empty for {user_id}, falling back to cache"
+                    );
+                    db::get_cached_calendars(&self.db, user_id)
+                        .await?
+                        .into_iter()
+                        .filter(|c| c.account_id == account_id)
+                        .collect()
+                }
+                Err(e) => {
+                    eprintln!("[sync] calendars() failed for {user_id}: {e}");
+                    db::get_cached_calendars(&self.db, user_id)
+                        .await?
+                        .into_iter()
+                        .filter(|c| c.account_id == account_id)
+                        .collect()
+                }
+            };
+
+            for cal in &calendars {
+                if let Err(e) = self
+                    .sync_calendar(&client, user_id, &account_id, &cal.href)
                     .await
-                    {
+                {
+                    let err_str = e.to_string();
+                    if err_str.contains("404") {
                         eprintln!(
-                            "[sync] failed to remove stale calendar {}: {remove_err}",
+                            "[sync] calendar {} returned 404, removing from cache",
                             cal.href
                         );
+                        if let Err(remove_err) = db::delete_calendar_cache(
+                            &self.db,
+                            &account_id,
+                            &cal.href,
+                            &self.encryption_key,
+                        )
+                        .await
+                        {
+                            eprintln!(
+                                "[sync] failed to remove stale calendar {}: {remove_err}",
+                                cal.href
+                            );
+                        }
+                        self.broadcaster.send(user_id, SseMessage::CalendarsChanged);
+                    } else {
+                        eprintln!("[sync] calendar {} failed: {e}", cal.href);
                     }
-                    self.broadcaster.send(user_id, SseMessage::CalendarsChanged);
-                } else {
-                    eprintln!("[sync] calendar {} failed: {e}", cal.href);
                 }
             }
-        }
 
-        // Sync contacts alongside calendars
-        if let Err(e) = self.sync_contacts(&client, user_id, &account_id).await {
-            eprintln!("[sync] contact sync failed for {user_id}: {e}");
-        }
+            // Sync contacts alongside calendars
+            if let Err(e) = self.sync_contacts(&client, user_id, &account_id).await {
+                eprintln!("[sync] contact sync failed for {user_id}: {e}");
+            }
         }
 
         Ok(())
     }
 
-    async fn sync_contacts(&self, client: &CalDavClient, user_id: &str, account_id: &str) -> anyhow::Result<()> {
+    async fn sync_contacts(
+        &self,
+        client: &CalDavClient,
+        user_id: &str,
+        account_id: &str,
+    ) -> anyhow::Result<()> {
         // Rediscover addressbooks on every sync — ensures new ones are picked up within
         // one sync interval and get push subscriptions registered.
-        let addressbooks: Vec<db::CachedAddressbook> = match carddav::discover_addressbooks(client).await {
+        let addressbooks: Vec<db::CachedAddressbook> = match carddav::discover_addressbooks(client)
+            .await
+        {
             Ok(fresh) if !fresh.is_empty() => {
                 let fresh_hrefs: HashSet<String> = fresh.iter().map(|a| a.href.clone()).collect();
                 for ab in &fresh {
                     if let Err(e) =
-                        db::upsert_cached_addressbook(&self.db, account_id, &ab.href, &ab.name).await
+                        db::upsert_cached_addressbook(&self.db, account_id, &ab.href, &ab.name)
+                            .await
                     {
                         eprintln!("[sync] upsert_cached_addressbook error: {e}");
                     }
                 }
-                if let Err(e) = db::remove_stale_addressbooks(&self.db, account_id, &fresh_hrefs).await
+                if let Err(e) =
+                    db::remove_stale_addressbooks(&self.db, account_id, &fresh_hrefs).await
                 {
                     eprintln!("[sync] remove_stale_addressbooks error: {e}");
                 }
@@ -307,7 +340,10 @@ impl SyncManager {
         };
 
         for ab in &addressbooks {
-            if let Err(e) = self.sync_addressbook(client, user_id, account_id, &ab.href).await {
+            if let Err(e) = self
+                .sync_addressbook(client, user_id, account_id, &ab.href)
+                .await
+            {
                 eprintln!("[sync] addressbook {} failed: {e}", ab.href);
             }
         }
@@ -320,7 +356,8 @@ impl SyncManager {
         account_id: &str,
         addressbook_href: &str,
     ) -> anyhow::Result<()> {
-        let account = db::get_caldav_account(&self.db, user_id, account_id, &self.encryption_key).await?;
+        let account =
+            db::get_caldav_account(&self.db, user_id, account_id, &self.encryption_key).await?;
         let Some(account) = account else {
             return Ok(());
         };
@@ -462,14 +499,14 @@ impl SyncManager {
             }
         }
 
-        let (p256dh, auth) = match derive_push_keys(&self.encryption_key, account_id, addressbook_href)
-        {
-            Some(keys) => keys,
-            None => {
-                eprintln!("[push] contact key derivation failed for {addressbook_href}");
-                return;
-            }
-        };
+        let (p256dh, auth) =
+            match derive_push_keys(&self.encryption_key, account_id, addressbook_href) {
+                Some(keys) => keys,
+                None => {
+                    eprintln!("[push] contact key derivation failed for {addressbook_href}");
+                    return;
+                }
+            };
 
         let token = Uuid::new_v4().to_string();
         let callback_url = format!(
@@ -599,7 +636,12 @@ impl SyncManager {
         Ok(())
     }
 
-    async fn try_subscribe_push(&self, client: &CalDavClient, account_id: &str, calendar_href: &str) {
+    async fn try_subscribe_push(
+        &self,
+        client: &CalDavClient,
+        account_id: &str,
+        calendar_href: &str,
+    ) {
         let now = chrono::Utc::now().timestamp();
         let renew_threshold = now + self.sync_interval.as_secs() as i64 * 2;
 
@@ -613,7 +655,8 @@ impl SyncManager {
             }
         }
 
-        let (p256dh, auth) = match derive_push_keys(&self.encryption_key, account_id, calendar_href) {
+        let (p256dh, auth) = match derive_push_keys(&self.encryption_key, account_id, calendar_href)
+        {
             Some(keys) => keys,
             None => {
                 eprintln!("[push] key derivation failed for {calendar_href}");

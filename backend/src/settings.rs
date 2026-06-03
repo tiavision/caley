@@ -39,15 +39,19 @@ fn account_label(account: &CalDavAccount) -> String {
 }
 
 pub async fn list_caldav_accounts(State(state): State<AppState>, user: CurrentUser) -> Response {
-    let accounts =
-        match crate::db::list_caldav_accounts(&state.db, &user.user_id, &state.encryption_key).await
-        {
-            Ok(a) => a,
-            Err(e) => {
-                eprintln!("Database error listing CalDAV accounts: {e}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
-            }
-        };
+    let accounts = match crate::db::list_caldav_accounts(
+        &state.db,
+        &user.user_id,
+        &state.encryption_key,
+    )
+    .await
+    {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("Database error listing CalDAV accounts: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+        }
+    };
     let calendars = crate::db::get_cached_calendars(&state.db, &user.user_id)
         .await
         .unwrap_or_default();
@@ -57,10 +61,13 @@ pub async fn list_caldav_accounts(State(state): State<AppState>, user: CurrentUs
 
     let mut result = Vec::new();
     for account in accounts {
-        let deactivated =
-            crate::db::get_deactivated_calendars(&state.db, &account.account_id, &state.encryption_key)
-                .await
-                .unwrap_or_default();
+        let deactivated = crate::db::get_deactivated_calendars(
+            &state.db,
+            &account.account_id,
+            &state.encryption_key,
+        )
+        .await
+        .unwrap_or_default();
         let account_calendars: Vec<_> = calendars
             .iter()
             .filter(|c| c.account_id == account.account_id)
@@ -233,7 +240,11 @@ pub async fn delete_caldav_account(
         Ok(false) => (StatusCode::NOT_FOUND, "Account not found").into_response(),
         Err(e) => {
             eprintln!("Database error deleting CalDAV account: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete account").into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete account",
+            )
+                .into_response()
         }
     }
 }

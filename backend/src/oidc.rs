@@ -9,12 +9,12 @@ use axum::{
 };
 use clap::ValueEnum;
 use futures_util::future::BoxFuture;
+use openidconnect::core::{CoreAuthenticationFlow, CoreClient};
 use openidconnect::{
     AuthorizationCode, CsrfToken, EndSessionUrl, EndpointMaybeSet, EndpointNotSet, EndpointSet,
     LogoutRequest, Nonce, PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl, Scope,
     TokenResponse,
 };
-use openidconnect::core::{CoreAuthenticationFlow, CoreClient};
 use serde_json::json;
 use std::{
     collections::HashMap,
@@ -152,11 +152,7 @@ pub async fn logout_handler(State(state): State<AppState>, session: Session) -> 
         .ok()
         .flatten()
         .unwrap_or(false);
-    let id_token_hint = session
-        .get::<String>("id_token_hint")
-        .await
-        .ok()
-        .flatten();
+    let id_token_hint = session.get::<String>("id_token_hint").await.ok().flatten();
     session.flush().await.ok();
 
     if is_oidc && state.do_oidc_logout {
@@ -201,11 +197,10 @@ pub async fn oidc_handler(
 
     if let Some(code) = params.get("code").cloned() {
         // Callback leg.
-        let csrf_token: CsrfToken =
-            match session.get("oidc_csrf").await.ok().flatten() {
-                Some(t) => t,
-                None => return Redirect::to("/").into_response(),
-            };
+        let csrf_token: CsrfToken = match session.get("oidc_csrf").await.ok().flatten() {
+            Some(t) => t,
+            None => return Redirect::to("/").into_response(),
+        };
         let nonce: Nonce = match session.get("oidc_nonce").await.ok().flatten() {
             Some(n) => n,
             None => return Redirect::to("/").into_response(),
@@ -233,14 +228,13 @@ pub async fn oidc_handler(
                 return Redirect::to("/").into_response();
             }
         };
-        let token_response =
-            match code_req.request_async(&provider.http_client).await {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("OIDC token request failed: {e}");
-                    return Redirect::to("/").into_response();
-                }
-            };
+        let token_response = match code_req.request_async(&provider.http_client).await {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("OIDC token request failed: {e}");
+                return Redirect::to("/").into_response();
+            }
+        };
 
         let id_token = match token_response.id_token() {
             Some(t) => t,
@@ -270,9 +264,7 @@ pub async fn oidc_handler(
             .or_else(|| claims.preferred_username().map(|u| u.as_str().to_owned()))
             .or_else(|| Some(claims.subject().as_str().to_owned()));
 
-        if let Err(e) =
-            db::ensure_user(&state.db, &user_id, display_name.as_deref()).await
-        {
+        if let Err(e) = db::ensure_user(&state.db, &user_id, display_name.as_deref()).await {
             eprintln!("ensure_user failed for OIDC user {user_id}: {e}");
         }
 
@@ -315,7 +307,10 @@ pub async fn oidc_handler(
 
     session.insert("oidc_csrf", &csrf_token).await.ok();
     session.insert("oidc_nonce", &nonce).await.ok();
-    session.insert("oidc_pkce_verifier", &pkce_verifier).await.ok();
+    session
+        .insert("oidc_pkce_verifier", &pkce_verifier)
+        .await
+        .ok();
 
     Redirect::to(auth_url.as_str()).into_response()
 }

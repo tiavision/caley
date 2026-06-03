@@ -660,7 +660,9 @@ pub async fn remove_image_blacklist_origin(
 
 #[cfg(test)]
 mod tests {
-    use super::{AllowedImage, attachment_disposition, can_preview_attachment, detect_allowed_image};
+    use super::{
+        AllowedImage, attachment_disposition, can_preview_attachment, detect_allowed_image,
+    };
 
     #[test]
     fn previewable_attachment_types_are_allowlisted_case_insensitively() {

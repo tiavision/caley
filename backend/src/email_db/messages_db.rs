@@ -1,4 +1,6 @@
 use anyhow::Result;
+use std::collections::HashMap;
+
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 // ── Message types ─────────────────────────────────────────────────────────────
@@ -201,6 +203,23 @@ pub async fn update_message_flags(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+pub async fn get_cached_message_flags(
+    pool: &SqlitePool,
+    account_id: &str,
+    mailbox: &str,
+) -> Result<HashMap<u32, Option<String>>> {
+    let rows =
+        sqlx::query("SELECT uid, flags FROM cached_messages WHERE account_id = ? AND mailbox = ?")
+            .bind(account_id)
+            .bind(mailbox)
+            .fetch_all(pool)
+            .await?;
+    Ok(rows
+        .iter()
+        .map(|r| (r.get::<i64, _>(0) as u32, r.get(1)))
+        .collect())
 }
 
 pub async fn update_message_body<'e, E>(
@@ -1097,7 +1116,8 @@ mod tests {
                 account_id TEXT NOT NULL, mailbox TEXT NOT NULL, uid INTEGER NOT NULL,
                 message_id TEXT, thread_id TEXT, from_addr TEXT, to_addrs TEXT, cc_addrs TEXT,
                 subject TEXT, sent_at INTEGER, flags TEXT, has_attachments INTEGER NOT NULL DEFAULT 0,
-                body_text TEXT, rowid_override INTEGER, is_encrypted INTEGER NOT NULL DEFAULT 0,
+                body_text TEXT, rowid_override INTEGER, is_unread INTEGER NOT NULL DEFAULT 1,
+                is_encrypted INTEGER NOT NULL DEFAULT 0,
                 is_signed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (account_id, mailbox, uid)
             )",
         )
@@ -1149,5 +1169,31 @@ mod tests {
             .filter_map(|m| m.message_id.as_deref())
             .collect();
         assert_eq!(ids, vec!["root", "reply", "leaf"]);
+    }
+
+    #[tokio::test]
+    async fn update_message_flags_keeps_unread_index_in_sync() {
+        let pool = thread_pool().await;
+        insert_thread_message(&pool, "account", "INBOX", 1, "msg", None, 1).await;
+
+        update_message_flags(&pool, "account", "INBOX", 1, r#"["\\Seen"]"#)
+            .await
+            .unwrap();
+        let is_unread: i64 =
+            sqlx::query_scalar("SELECT is_unread FROM cached_messages WHERE uid = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(is_unread, 0);
+
+        update_message_flags(&pool, "account", "INBOX", 1, r#"[]"#)
+            .await
+            .unwrap();
+        let is_unread: i64 =
+            sqlx::query_scalar("SELECT is_unread FROM cached_messages WHERE uid = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(is_unread, 1);
     }
 }

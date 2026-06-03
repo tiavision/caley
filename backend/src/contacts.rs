@@ -80,7 +80,8 @@ async fn require_account_client(
     if state.demo_mode {
         return Ok(crate::caldav::CalDavClient::demo());
     }
-    match db::get_caldav_account(&state.db, &user.user_id, account_id, &state.encryption_key).await {
+    match db::get_caldav_account(&state.db, &user.user_id, account_id, &state.encryption_key).await
+    {
         Ok(Some(account)) => crate::caldav::CalDavClient::new(
             account.caldav_base_url,
             account.caldav_username,
@@ -88,7 +89,11 @@ async fn require_account_client(
         )
         .map_err(|e| {
             eprintln!("CalDAV client error: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "CalDAV configuration error").into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "CalDAV configuration error",
+            )
+                .into_response()
         }),
         Ok(None) => Err((StatusCode::NOT_FOUND, "CalDAV account not found").into_response()),
         Err(e) => {
@@ -399,7 +404,8 @@ pub async fn get_contact_vcf(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     }
-    let contact = match db::get_contact(&state.db, &q.account_id, &q.addressbook_href, &q.uid).await {
+    let contact = match db::get_contact(&state.db, &q.account_id, &q.addressbook_href, &q.uid).await
+    {
         Ok(Some(c)) => c,
         _ => return StatusCode::NOT_FOUND.into_response(),
     };

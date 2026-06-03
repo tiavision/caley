@@ -36,13 +36,11 @@ pub async fn seed(pool: &SqlitePool, encryption_key: &[u8; 32]) -> anyhow::Resul
 }
 
 async fn seed_user(pool: &SqlitePool) -> anyhow::Result<()> {
-    sqlx::query(
-        "INSERT OR IGNORE INTO user_settings (user_id, display_name) VALUES (?, ?)",
-    )
-    .bind(DEMO_USER_ID)
-    .bind("Demo User")
-    .execute(pool)
-    .await?;
+    sqlx::query("INSERT OR IGNORE INTO user_settings (user_id, display_name) VALUES (?, ?)")
+        .bind(DEMO_USER_ID)
+        .bind("Demo User")
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

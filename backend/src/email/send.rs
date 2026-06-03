@@ -334,7 +334,10 @@ pub async fn send_raw_email(
     }
 
     if state.demo_mode {
-        eprintln!("[demo] send_raw_email suppressed for identity {}", identity.email);
+        eprintln!(
+            "[demo] send_raw_email suppressed for identity {}",
+            identity.email
+        );
         return StatusCode::OK.into_response();
     }
 

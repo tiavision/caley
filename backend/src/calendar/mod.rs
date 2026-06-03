@@ -204,7 +204,8 @@ pub(super) async fn require_account_client(
     if state.demo_mode {
         return Ok(CalDavClient::demo());
     }
-    match db::get_caldav_account(&state.db, &user.user_id, account_id, &state.encryption_key).await {
+    match db::get_caldav_account(&state.db, &user.user_id, account_id, &state.encryption_key).await
+    {
         Ok(Some(account)) => CalDavClient::new(
             account.caldav_base_url,
             account.caldav_username,
@@ -212,7 +213,11 @@ pub(super) async fn require_account_client(
         )
         .map_err(|e| {
             eprintln!("CalDAV client error: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "CalDAV configuration error").into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "CalDAV configuration error",
+            )
+                .into_response()
         }),
         Ok(None) => Err((StatusCode::NOT_FOUND, "CalDAV account not found").into_response()),
         Err(e) => {
@@ -325,7 +330,12 @@ pub async fn list_events(
         .unwrap_or_default();
     let color_map: HashMap<String, String> = calendars
         .iter()
-        .map(|c| (format!("{}\0{}", c.account_id, c.href), c.color.clone().unwrap_or_default()))
+        .map(|c| {
+            (
+                format!("{}\0{}", c.account_id, c.href),
+                c.color.clone().unwrap_or_default(),
+            )
+        })
         .collect();
 
     let mut active_hrefs: Vec<(String, String)> = Vec::new();
@@ -342,14 +352,9 @@ pub async fn list_events(
     let start_str = start.format("%Y-%m-%d").to_string();
     let end_str = end.format("%Y-%m-%d").to_string();
 
-    let raw_pairs = db::get_raw_events(
-        &state.db,
-        &active_hrefs,
-        &start_str,
-        &end_str,
-    )
-    .await
-    .unwrap_or_default();
+    let raw_pairs = db::get_raw_events(&state.db, &active_hrefs, &start_str, &end_str)
+        .await
+        .unwrap_or_default();
 
     let mut all_events: Vec<(NaiveDate, EventJson)> = Vec::new();
     for (account_id, calendar_href, raw_ical) in raw_pairs {
@@ -432,7 +437,12 @@ pub async fn list_calendar(
         .unwrap_or_default();
     let color_map: HashMap<String, String> = calendars
         .iter()
-        .map(|c| (format!("{}\0{}", c.account_id, c.href), c.color.clone().unwrap_or_default()))
+        .map(|c| {
+            (
+                format!("{}\0{}", c.account_id, c.href),
+                c.color.clone().unwrap_or_default(),
+            )
+        })
         .collect();
 
     let mut active_hrefs: Vec<(String, String)> = Vec::new();
@@ -451,14 +461,10 @@ pub async fn list_calendar(
 
     let mut colors_map: HashMap<NaiveDate, Vec<String>> = HashMap::new();
 
-    let non_recurring = db::get_event_dates_for_month(
-        &state.db,
-        &active_hrefs,
-        &month_start_str,
-        &month_end_str,
-    )
-    .await
-    .unwrap_or_default();
+    let non_recurring =
+        db::get_event_dates_for_month(&state.db, &active_hrefs, &month_start_str, &month_end_str)
+            .await
+            .unwrap_or_default();
     for (account_id, calendar_href, dtstart_str) in non_recurring {
         if let Ok(date) = NaiveDate::parse_from_str(&dtstart_str, "%Y-%m-%d") {
             let color = color_map

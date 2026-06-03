@@ -69,6 +69,47 @@ pub async fn fetch_all_uids(session: &mut ImapSession) -> Result<Vec<u32>> {
     Ok(v)
 }
 
+fn flag_name(flag: async_imap::types::Flag<'_>) -> String {
+    match flag {
+        async_imap::types::Flag::Seen => "\\Seen".to_owned(),
+        async_imap::types::Flag::Answered => "\\Answered".to_owned(),
+        async_imap::types::Flag::Flagged => "\\Flagged".to_owned(),
+        async_imap::types::Flag::Deleted => "\\Deleted".to_owned(),
+        async_imap::types::Flag::Draft => "\\Draft".to_owned(),
+        async_imap::types::Flag::Recent => "\\Recent".to_owned(),
+        async_imap::types::Flag::Custom(c) => c.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn fetch_flags(fetch: &async_imap::types::Fetch) -> Vec<String> {
+    fetch
+        .flags()
+        .map(flag_name)
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Fetches only IMAP flags for a list of UIDs in the currently-selected mailbox.
+pub async fn fetch_message_flags(
+    session: &mut ImapSession,
+    uids: &[u32],
+) -> Result<Vec<(u32, Vec<String>)>> {
+    if uids.is_empty() {
+        return Ok(vec![]);
+    }
+    let uid_set = uids_to_set(uids);
+    let mut stream = session.uid_fetch(&uid_set, "(FLAGS)").await?;
+    let mut out = Vec::new();
+    while let Some(item) = stream.next().await {
+        let fetch = item?;
+        if let Some(uid) = fetch.uid {
+            out.push((uid, fetch_flags(&fetch)));
+        }
+    }
+    Ok(out)
+}
+
 /// Fetches headers for a list of UIDs. Returns parsed MessageHeaders.
 pub async fn fetch_headers(session: &mut ImapSession, uids: &[u32]) -> Result<Vec<MessageHeader>> {
     if uids.is_empty() {
@@ -86,20 +127,7 @@ pub async fn fetch_headers(session: &mut ImapSession, uids: &[u32]) -> Result<Ve
             None => continue,
         };
 
-        let flags = fetch
-            .flags()
-            .map(|f| match f {
-                async_imap::types::Flag::Seen => "\\Seen".to_owned(),
-                async_imap::types::Flag::Answered => "\\Answered".to_owned(),
-                async_imap::types::Flag::Flagged => "\\Flagged".to_owned(),
-                async_imap::types::Flag::Deleted => "\\Deleted".to_owned(),
-                async_imap::types::Flag::Draft => "\\Draft".to_owned(),
-                async_imap::types::Flag::Recent => "\\Recent".to_owned(),
-                async_imap::types::Flag::Custom(c) => c.to_string(),
-                _ => String::new(),
-            })
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>();
+        let flags = fetch_flags(&fetch);
         let flags_json = serde_json::to_string(&flags).unwrap_or_default();
 
         let (

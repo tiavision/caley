@@ -596,11 +596,7 @@ pub(super) fn parse_and_expand_events(
     expand_events(parse_raw_events(raw_ical), start, end)
 }
 
-fn expand_events(
-    raw_events: Vec<RawIcalEvent>,
-    start: NaiveDate,
-    end: NaiveDate,
-) -> Vec<Event> {
+fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate) -> Vec<Event> {
     use std::collections::HashMap;
 
     let mut groups: HashMap<String, Vec<RawIcalEvent>> = HashMap::new();

@@ -824,21 +824,17 @@ pub fn update_vcalendar_event(
 
         let is_target = if !found_target {
             match &rid_date_prefix {
-                None => {
-                    !block
-                        .lines()
-                        .any(|l| l.starts_with("RECURRENCE-ID:") || l.starts_with("RECURRENCE-ID;"))
-                }
-                Some(rid_prefix) => {
-                    block.lines().any(|l| {
-                        if !l.starts_with("RECURRENCE-ID:") && !l.starts_with("RECURRENCE-ID;") {
-                            return false;
-                        }
-                        l.rsplit(':').next().map_or(false, |val| {
-                            val.chars().take(8).collect::<String>() == *rid_prefix
-                        })
+                None => !block
+                    .lines()
+                    .any(|l| l.starts_with("RECURRENCE-ID:") || l.starts_with("RECURRENCE-ID;")),
+                Some(rid_prefix) => block.lines().any(|l| {
+                    if !l.starts_with("RECURRENCE-ID:") && !l.starts_with("RECURRENCE-ID;") {
+                        return false;
+                    }
+                    l.rsplit(':').next().map_or(false, |val| {
+                        val.chars().take(8).collect::<String>() == *rid_prefix
                     })
-                }
+                }),
             }
         } else {
             false

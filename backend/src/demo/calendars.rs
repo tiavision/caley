@@ -47,7 +47,7 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "Daily team standup — share blockers and progress.",
             location: "Video call",
             dtstart_expr: "strftime('%Y%m%dT090000', datetime('now','weekday 1'))",
-            dtend_expr:   "strftime('%Y%m%dT093000', datetime('now','weekday 1'))",
+            dtend_expr: "strftime('%Y%m%dT093000', datetime('now','weekday 1'))",
             is_all_day: false,
             is_recurring: true,
             rrule: Some("RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR"),
@@ -59,7 +59,7 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "Biweekly sprint review with stakeholders.",
             location: "Conference Room B",
             dtstart_expr: "strftime('%Y%m%dT140000', datetime('now','+5 days'))",
-            dtend_expr:   "strftime('%Y%m%dT160000', datetime('now','+5 days'))",
+            dtend_expr: "strftime('%Y%m%dT160000', datetime('now','+5 days'))",
             is_all_day: false,
             is_recurring: false,
             rrule: None,
@@ -71,7 +71,7 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "Weekly check-in.",
             location: "",
             dtstart_expr: "strftime('%Y%m%dT110000', datetime('now','weekday 2'))",
-            dtend_expr:   "strftime('%Y%m%dT113000', datetime('now','weekday 2'))",
+            dtend_expr: "strftime('%Y%m%dT113000', datetime('now','weekday 2'))",
             is_all_day: false,
             is_recurring: true,
             rrule: Some("RRULE:FREQ=WEEKLY;BYDAY=TU"),
@@ -83,7 +83,7 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "Final Q3 numbers due to finance.",
             location: "",
             dtstart_expr: "strftime('%Y%m%d', datetime('now','+12 days'))",
-            dtend_expr:   "strftime('%Y%m%d', datetime('now','+13 days'))",
+            dtend_expr: "strftime('%Y%m%d', datetime('now','+13 days'))",
             is_all_day: true,
             is_recurring: false,
             rrule: None,
@@ -95,7 +95,7 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "Annual developers conference — keynote and networking.",
             location: "Convention Centre, Main Hall",
             dtstart_expr: "strftime('%Y%m%dT090000', datetime('now','+20 days'))",
-            dtend_expr:   "strftime('%Y%m%dT180000', datetime('now','+20 days'))",
+            dtend_expr: "strftime('%Y%m%dT180000', datetime('now','+20 days'))",
             is_all_day: false,
             is_recurring: false,
             rrule: None,
@@ -107,7 +107,7 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "Monthly team lunch out.",
             location: "The Garden Bistro, 12 Maple Street",
             dtstart_expr: "strftime('%Y%m%dT120000', datetime('now','+3 days'))",
-            dtend_expr:   "strftime('%Y%m%dT133000', datetime('now','+3 days'))",
+            dtend_expr: "strftime('%Y%m%dT133000', datetime('now','+3 days'))",
             is_all_day: false,
             is_recurring: false,
             rrule: None,
@@ -119,12 +119,11 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "Prepare slides and talking points for Thursday board meeting.",
             location: "",
             dtstart_expr: "strftime('%Y%m%dT150000', datetime('now','+8 days'))",
-            dtend_expr:   "strftime('%Y%m%dT170000', datetime('now','+8 days'))",
+            dtend_expr: "strftime('%Y%m%dT170000', datetime('now','+8 days'))",
             is_all_day: false,
             is_recurring: false,
             rrule: None,
         },
-
         // ── Personal ──────────────────────────────────────────────────────────
         EventSeed {
             uid: "demo-dentist",
@@ -133,7 +132,7 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "Annual check-up at Dr. Reed's office.",
             location: "Reed Dental, 45 Oak Ave",
             dtstart_expr: "strftime('%Y%m%dT093000', datetime('now','+7 days'))",
-            dtend_expr:   "strftime('%Y%m%dT103000', datetime('now','+7 days'))",
+            dtend_expr: "strftime('%Y%m%dT103000', datetime('now','+7 days'))",
             is_all_day: false,
             is_recurring: false,
             rrule: None,
@@ -145,7 +144,7 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "Morning flow yoga.",
             location: "Sunrise Yoga Studio",
             dtstart_expr: "strftime('%Y%m%dT073000', datetime('now','weekday 3'))",
-            dtend_expr:   "strftime('%Y%m%dT083000', datetime('now','weekday 3'))",
+            dtend_expr: "strftime('%Y%m%dT083000', datetime('now','weekday 3'))",
             is_all_day: false,
             is_recurring: true,
             rrule: Some("RRULE:FREQ=WEEKLY;BYDAY=WE,SA"),
@@ -157,7 +156,7 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "Vacation in Porto. Flight TK 422.",
             location: "Porto, Portugal",
             dtstart_expr: "strftime('%Y%m%d', datetime('now','+30 days'))",
-            dtend_expr:   "strftime('%Y%m%d', datetime('now','+38 days'))",
+            dtend_expr: "strftime('%Y%m%d', datetime('now','+38 days'))",
             is_all_day: true,
             is_recurring: false,
             rrule: None,
@@ -169,7 +168,7 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "",
             location: "",
             dtstart_expr: "strftime('%Y%m%d', datetime('now','+14 days'))",
-            dtend_expr:   "strftime('%Y%m%d', datetime('now','+15 days'))",
+            dtend_expr: "strftime('%Y%m%d', datetime('now','+15 days'))",
             is_all_day: true,
             is_recurring: false,
             rrule: None,
@@ -181,7 +180,7 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "Upper body day.",
             location: "City Fitness",
             dtstart_expr: "strftime('%Y%m%dT063000', datetime('now','+1 days'))",
-            dtend_expr:   "strftime('%Y%m%dT073000', datetime('now','+1 days'))",
+            dtend_expr: "strftime('%Y%m%dT073000', datetime('now','+1 days'))",
             is_all_day: false,
             is_recurring: true,
             rrule: Some("RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR"),
@@ -193,12 +192,11 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "Birthday dinner for Jo.",
             location: "Trattoria Bella, 8 Vine Lane",
             dtstart_expr: "strftime('%Y%m%dT193000', datetime('now','+2 days'))",
-            dtend_expr:   "strftime('%Y%m%dT220000', datetime('now','+2 days'))",
+            dtend_expr: "strftime('%Y%m%dT220000', datetime('now','+2 days'))",
             is_all_day: false,
             is_recurring: false,
             rrule: None,
         },
-
         // ── Family ────────────────────────────────────────────────────────────
         EventSeed {
             uid: "demo-soccer",
@@ -207,7 +205,7 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "",
             location: "Riverside Park, Field 3",
             dtstart_expr: "strftime('%Y%m%dT163000', datetime('now','weekday 6'))",
-            dtend_expr:   "strftime('%Y%m%dT173000', datetime('now','weekday 6'))",
+            dtend_expr: "strftime('%Y%m%dT173000', datetime('now','weekday 6'))",
             is_all_day: false,
             is_recurring: true,
             rrule: Some("RRULE:FREQ=WEEKLY;BYDAY=SA"),
@@ -219,7 +217,7 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "Check pantry list before going.",
             location: "SuperFresh Market",
             dtstart_expr: "strftime('%Y%m%dT100000', datetime('now','weekday 0'))",
-            dtend_expr:   "strftime('%Y%m%dT110000', datetime('now','weekday 0'))",
+            dtend_expr: "strftime('%Y%m%dT110000', datetime('now','weekday 0'))",
             is_all_day: false,
             is_recurring: true,
             rrule: Some("RRULE:FREQ=WEEKLY;BYDAY=SU"),
@@ -231,7 +229,7 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
             description: "Year 4 music performance.",
             location: "Lincoln Primary School, Main Hall",
             dtstart_expr: "strftime('%Y%m%dT183000', datetime('now','+10 days'))",
-            dtend_expr:   "strftime('%Y%m%dT200000', datetime('now','+10 days'))",
+            dtend_expr: "strftime('%Y%m%dT200000', datetime('now','+10 days'))",
             is_all_day: false,
             is_recurring: false,
             rrule: None,
@@ -283,7 +281,11 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(DEMO_CALDAV_ACCOUNT)
         .bind(e.calendar_href)
         .bind(e.uid)
-        .bind(format!("{}/{}.ics", e.calendar_href.trim_end_matches('/'), e.uid))
+        .bind(format!(
+            "{}/{}.ics",
+            e.calendar_href.trim_end_matches('/'),
+            e.uid
+        ))
         .bind(&raw_ical)
         .bind(e.summary)
         .bind(&dtstart_date)
@@ -304,7 +306,12 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
 fn ical_dt_to_date(s: &str) -> String {
     let date_part = s.split('T').next().unwrap_or(s).trim();
     if date_part.len() >= 8 {
-        format!("{}-{}-{}", &date_part[..4], &date_part[4..6], &date_part[6..8])
+        format!(
+            "{}-{}-{}",
+            &date_part[..4],
+            &date_part[4..6],
+            &date_part[6..8]
+        )
     } else {
         date_part.to_string()
     }

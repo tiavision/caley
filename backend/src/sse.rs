@@ -19,7 +19,11 @@ pub enum SseMessage {
     /// Calendar list changed — client should re-fetch /api/calendars
     CalendarsChanged,
     /// A single event was deleted
-    EventRemoved { account_id: String, uid: String, calendar_href: String },
+    EventRemoved {
+        account_id: String,
+        uid: String,
+        calendar_href: String,
+    },
     /// A single event was created or updated
     EventUpdated {
         account_id: String,
@@ -239,9 +243,13 @@ pub async fn push_webhook(
             eprintln!(
                 "[push] webhook matched user {user_id} calendar {calendar_href}, triggering targeted sync"
             );
-            state
-                .sync_manager
-                .trigger(&user_id, SyncTrigger::Calendar { account_id, href: calendar_href });
+            state.sync_manager.trigger(
+                &user_id,
+                SyncTrigger::Calendar {
+                    account_id,
+                    href: calendar_href,
+                },
+            );
             return axum::http::StatusCode::CREATED.into_response();
         }
         Ok(None) => {}
@@ -254,9 +262,13 @@ pub async fn push_webhook(
             eprintln!(
                 "[push] webhook matched user {user_id} addressbook {addressbook_href}, triggering contact sync"
             );
-            state
-                .sync_manager
-                .trigger(&user_id, SyncTrigger::Addressbook { account_id, href: addressbook_href });
+            state.sync_manager.trigger(
+                &user_id,
+                SyncTrigger::Addressbook {
+                    account_id,
+                    href: addressbook_href,
+                },
+            );
             axum::http::StatusCode::CREATED.into_response()
         }
         _ => {

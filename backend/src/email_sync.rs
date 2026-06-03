@@ -459,6 +459,36 @@ impl EmailSyncManager {
             }
         }
 
+        let surviving_cached_uids: Vec<u32> =
+            server_uids.intersection(&cached_uids).copied().collect();
+        if !surviving_cached_uids.is_empty() {
+            let cached_flags =
+                email_db::get_cached_message_flags(&self.db, account_id, mailbox).await?;
+            for chunk in surviving_cached_uids.chunks(200) {
+                let remote_flags = imap_client::fetch_message_flags(session, chunk).await?;
+                for (uid, flags) in remote_flags {
+                    let flags = normalize_flags(flags);
+                    let cached = cached_flags.get(&uid).and_then(|f| f.as_deref());
+                    if flags_match(cached, &flags) {
+                        continue;
+                    }
+
+                    let flags_json = serde_json::to_string(&flags)?;
+                    email_db::update_message_flags(&self.db, account_id, mailbox, uid, &flags_json)
+                        .await?;
+                    self.broadcaster.send(
+                        user_id,
+                        SseMessage::EmailUpdated {
+                            account_id: account_id.to_owned(),
+                            uid,
+                            mailbox: mailbox.to_owned(),
+                            flags,
+                        },
+                    );
+                }
+            }
+        }
+
         // New on server — fetch headers
         let new_uids: Vec<u32> = server_uids.difference(&cached_uids).copied().collect();
         if !new_uids.is_empty() {
@@ -647,6 +677,21 @@ struct PreparedAttachment {
     content_id: Option<String>,
 }
 
+fn normalize_flags(mut flags: Vec<String>) -> Vec<String> {
+    flags.retain(|f| !f.is_empty());
+    flags.sort();
+    flags.dedup();
+    flags
+}
+
+fn flags_match(cached_json: Option<&str>, remote_flags: &[String]) -> bool {
+    let cached_flags = cached_json
+        .and_then(|json| serde_json::from_str::<Vec<String>>(json).ok())
+        .map(normalize_flags)
+        .unwrap_or_default();
+    cached_flags == remote_flags
+}
+
 fn sha2_hex(input: String) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
@@ -666,4 +711,21 @@ pub fn eml_path(
         .join(account_id)
         .join(sha2_hex(mailbox.to_owned()))
         .join(format!("{uid}.eml.zst"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flag_comparison_ignores_order_and_duplicates() {
+        let remote = normalize_flags(vec![
+            "\\Flagged".to_owned(),
+            "\\Seen".to_owned(),
+            "\\Seen".to_owned(),
+        ]);
+
+        assert!(flags_match(Some(r#"["\\Seen","\\Flagged"]"#), &remote));
+        assert!(!flags_match(Some(r#"["\\Seen"]"#), &remote));
+    }
 }

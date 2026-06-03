@@ -353,12 +353,13 @@ pub async fn get_calendar_sync_state(
     account_id: &str,
     href: &str,
 ) -> anyhow::Result<(Option<String>, Option<String>)> {
-    let row =
-        sqlx::query("SELECT ctag, sync_token FROM cached_calendars WHERE account_id = ? AND href = ?")
-            .bind(account_id)
-            .bind(href)
-            .fetch_optional(pool)
-            .await?;
+    let row = sqlx::query(
+        "SELECT ctag, sync_token FROM cached_calendars WHERE account_id = ? AND href = ?",
+    )
+    .bind(account_id)
+    .bind(href)
+    .fetch_optional(pool)
+    .await?;
     match row {
         Some(r) => Ok((r.get(0), r.get(1))),
         None => Ok((None, None)),
@@ -672,12 +673,14 @@ pub async fn delete_event_by_href(
     calendar_href: &str,
     event_href: &str,
 ) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM cached_events WHERE account_id = ? AND calendar_href = ? AND href = ?")
-        .bind(account_id)
-        .bind(calendar_href)
-        .bind(event_href)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "DELETE FROM cached_events WHERE account_id = ? AND calendar_href = ? AND href = ?",
+    )
+    .bind(account_id)
+    .bind(calendar_href)
+    .bind(event_href)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -928,14 +931,18 @@ pub async fn get_raw_events(
          AND (is_recurring = 1 OR (dtstart <= ? AND dtend >= ?))
          AND (account_id, calendar_href) IN ({})",
         placeholders
-    ).replacen("WHERE\n         AND", "WHERE", 1);
+    )
+    .replacen("WHERE\n         AND", "WHERE", 1);
 
     let mut q = sqlx::query(&sql).bind(end).bind(start);
     for (account_id, href) in calendar_keys {
         q = q.bind(account_id.as_str()).bind(href.as_str());
     }
     let rows = q.fetch_all(pool).await?;
-    Ok(rows.iter().map(|r| (r.get(0), r.get(1), r.get(2))).collect())
+    Ok(rows
+        .iter()
+        .map(|r| (r.get(0), r.get(1), r.get(2)))
+        .collect())
 }
 
 /// Returns (account_id, calendar_href, dtstart_date) for non-recurring events in the month range.
@@ -963,14 +970,15 @@ pub async fn get_event_dates_for_month(
         placeholders
     );
 
-    let mut q = sqlx::query(&sql)
-        .bind(month_start)
-        .bind(month_end);
+    let mut q = sqlx::query(&sql).bind(month_start).bind(month_end);
     for (account_id, href) in calendar_keys {
         q = q.bind(account_id.as_str()).bind(href.as_str());
     }
     let rows = q.fetch_all(pool).await?;
-    Ok(rows.iter().map(|r| (r.get(0), r.get(1), r.get(2))).collect())
+    Ok(rows
+        .iter()
+        .map(|r| (r.get(0), r.get(1), r.get(2)))
+        .collect())
 }
 
 /// Returns (account_id, calendar_href, raw_ical) for all recurring events in the given calendars.
@@ -999,7 +1007,10 @@ pub async fn get_recurring_raw_events(
         q = q.bind(account_id.as_str()).bind(href.as_str());
     }
     let rows = q.fetch_all(pool).await?;
-    Ok(rows.iter().map(|r| (r.get(0), r.get(1), r.get(2))).collect())
+    Ok(rows
+        .iter()
+        .map(|r| (r.get(0), r.get(1), r.get(2)))
+        .collect())
 }
 
 // ── FTS schema ────────────────────────────────────────────────────────────────
