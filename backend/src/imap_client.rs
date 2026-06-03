@@ -539,8 +539,6 @@ fn parse_body_bytes(bytes: &[u8]) -> Result<(String, Option<String>, bool, Vec<A
         }
     };
 
-    let has_attachments = msg.attachments().count() > 0;
-
     let body_html = msg.body_html(0).map(|h| h.as_ref().to_owned());
 
     let body_text = if let Some(text) = msg.body_text(0) {
@@ -552,18 +550,27 @@ fn parse_body_bytes(bytes: &[u8]) -> Result<(String, Option<String>, bool, Vec<A
     };
 
     let attachments = extract_attachments(&msg);
+    let has_attachments = !attachments.is_empty();
 
     Ok((body_text, body_html, has_attachments, attachments))
 }
 
 fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
     use mail_parser::MimeHeaders;
+    use std::collections::HashSet;
+
     let mut attachments = Vec::new();
+    let mut used_filenames = HashSet::new();
     for (idx, part) in msg.parts.iter().enumerate() {
         let is_attachment = part
             .content_disposition()
             .map_or(false, |cd| cd.ctype().to_ascii_lowercase() == "attachment");
         let has_filename = part.attachment_name().is_some();
+        let content_type = part
+            .content_type()
+            .map(|ct| format!("{}/{}", ct.ctype(), ct.subtype().unwrap_or("octet-stream")))
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+        let is_calendar = is_calendar_content_type(&content_type);
         let is_inline_image = part
             .content_disposition()
             .map_or(false, |cd| cd.ctype().to_ascii_lowercase() == "inline")
@@ -571,11 +578,18 @@ fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
                 .content_type()
                 .map_or(false, |ct| ct.ctype().starts_with("image/"));
 
-        if !is_attachment && !has_filename && !is_inline_image {
+        if !is_attachment && !has_filename && !is_inline_image && !is_calendar {
             continue;
         }
 
         let filename = part.attachment_name().map(|s| s.to_owned()).or_else(|| {
+            if is_calendar {
+                return Some(unique_fallback_filename(
+                    &mut used_filenames,
+                    "noname",
+                    "ics",
+                ));
+            }
             part.content_id().map(|cid| {
                 let safe = cid
                     .trim_start_matches('<')
@@ -585,10 +599,9 @@ fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
             })
         });
 
-        let content_type = part
-            .content_type()
-            .map(|ct| format!("{}/{}", ct.ctype(), ct.subtype().unwrap_or("octet-stream")))
-            .unwrap_or_else(|| "application/octet-stream".to_string());
+        if let Some(filename) = filename.as_deref() {
+            used_filenames.insert(filename.to_owned());
+        }
 
         let content_id = part
             .content_id()
@@ -611,6 +624,38 @@ fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
         });
     }
     attachments
+}
+
+fn is_calendar_content_type(content_type: &str) -> bool {
+    matches!(
+        content_type
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "text/calendar" | "application/ics" | "application/icalendar"
+    )
+}
+
+fn unique_fallback_filename(
+    used_filenames: &mut std::collections::HashSet<String>,
+    stem: &str,
+    extension: &str,
+) -> String {
+    let first = format!("{stem}.{extension}");
+    if used_filenames.insert(first.clone()) {
+        return first;
+    }
+
+    for n in 2.. {
+        let candidate = format!("{stem}-{n}.{extension}");
+        if used_filenames.insert(candidate.clone()) {
+            return candidate;
+        }
+    }
+    unreachable!("unbounded filename suffix search must return")
 }
 
 fn strip_tags(html: &str) -> String {
@@ -863,5 +908,52 @@ mod tests {
         let raw = b"Message-ID: <child@example.test>\r\nReferences: <root@example.test> <parent@example.test>\r\n\r\nbody";
         let (_, parent, ..) = parse_header_bytes(raw);
         assert_eq!(parent.as_deref(), Some("parent@example.test"));
+    }
+
+    #[test]
+    fn extracts_unnamed_calendar_part_as_ics_attachment() {
+        let raw = b"Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello\r\n--b\r\nContent-Type: text/calendar; method=REQUEST; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nBEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n--b--\r\n";
+
+        let (_, _, has_attachments, attachments) = parse_body_bytes(raw).unwrap();
+
+        assert!(has_attachments);
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].filename.as_deref(), Some("noname.ics"));
+        assert_eq!(attachments[0].content_type, "text/calendar");
+    }
+
+    #[test]
+    fn keeps_named_calendar_attachment_filename() {
+        let raw = b"Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello\r\n--b\r\nContent-Type: text/calendar; name=\"invite.ics\"\r\nContent-Disposition: attachment; filename=\"invite.ics\"\r\n\r\nBEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n--b--\r\n";
+
+        let (_, _, has_attachments, attachments) = parse_body_bytes(raw).unwrap();
+
+        assert!(has_attachments);
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].filename.as_deref(), Some("invite.ics"));
+    }
+
+    #[test]
+    fn gives_multiple_unnamed_calendar_parts_unique_filenames() {
+        let raw = b"Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello\r\n--b\r\nContent-Type: text/calendar\r\n\r\nBEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n--b\r\nContent-Type: application/ics\r\n\r\nBEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n--b--\r\n";
+
+        let (_, _, has_attachments, attachments) = parse_body_bytes(raw).unwrap();
+
+        assert!(has_attachments);
+        let filenames: Vec<_> = attachments
+            .iter()
+            .filter_map(|att| att.filename.as_deref())
+            .collect();
+        assert_eq!(filenames, vec!["noname.ics", "noname-2.ics"]);
+    }
+
+    #[test]
+    fn does_not_expose_plain_text_body_as_attachment() {
+        let raw = b"Content-Type: text/plain; charset=utf-8\r\n\r\nHello\r\n";
+
+        let (_, _, has_attachments, attachments) = parse_body_bytes(raw).unwrap();
+
+        assert!(!has_attachments);
+        assert!(attachments.is_empty());
     }
 }
