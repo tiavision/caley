@@ -22,6 +22,10 @@ fn extract_part_bytes(eml_bytes: &[u8], part_index: usize) -> Option<Vec<u8>> {
     use mail_parser::MessageParser;
     let msg = MessageParser::default().parse(eml_bytes)?;
     let part = msg.parts.get(part_index)?;
+    part_to_bytes(part)
+}
+
+fn part_to_bytes(part: &mail_parser::MessagePart<'_>) -> Option<Vec<u8>> {
     let bytes = match &part.body {
         mail_parser::PartType::Binary(b) => b.as_ref().to_vec(),
         mail_parser::PartType::InlineBinary(b) => b.as_ref().to_vec(),
@@ -30,6 +34,60 @@ fn extract_part_bytes(eml_bytes: &[u8], part_index: usize) -> Option<Vec<u8>> {
         _ => return None,
     };
     Some(bytes)
+}
+
+/// Scan all MIME parts in the EML for one whose Content-ID matches `cid`
+/// (with or without surrounding angle brackets).  Returns the decoded bytes
+/// when found.  Used as a fallback when the attachment DB row is missing.
+fn find_bytes_by_cid(eml_bytes: &[u8], cid: &str) -> Option<Vec<u8>> {
+    use mail_parser::{MimeHeaders, MessageParser};
+    let msg = MessageParser::default().parse(eml_bytes)?;
+    for part in &msg.parts {
+        if let Some(part_cid) = part.content_id() {
+            let bare = part_cid
+                .trim_start_matches('<')
+                .trim_end_matches('>');
+            if bare == cid || part_cid == cid {
+                return part_to_bytes(part);
+            }
+        }
+    }
+    None
+}
+
+/// Fetches the raw bytes and content-type for each CID in `cids`, reading from
+/// the cached EML file of the specified message.  Returns `(cid, content_type, bytes)`
+/// triples; CIDs that cannot be resolved are silently skipped.
+pub async fn fetch_inline_parts_for_cids(
+    db: &sqlx::SqlitePool,
+    data_dir: &std::path::Path,
+    account_id: &str,
+    mailbox: &str,
+    uid: u32,
+    cids: &[String],
+) -> Vec<(String, String, Vec<u8>)> {
+    let compressed = match tokio::fs::read(eml_path(data_dir, account_id, mailbox, uid)).await {
+        Ok(b) => b,
+        Err(_) => return vec![],
+    };
+    let eml = match decompress_eml(&compressed) {
+        Ok(b) => b,
+        Err(_) => return vec![],
+    };
+    let mut parts = Vec::new();
+    for cid in cids {
+        let att = match email_db::get_attachment_by_cid(db, account_id, mailbox, uid, cid).await {
+            Ok(Some(a)) => a,
+            _ => continue,
+        };
+        let bytes = match extract_part_bytes(&eml, att.part_index as usize) {
+            Some(b) => b,
+            None => continue,
+        };
+        let ct = att.content_type.unwrap_or_else(|| "image/jpeg".to_owned());
+        parts.push((cid.clone(), ct, bytes));
+    }
+    parts
 }
 
 // ── Image proxy ───────────────────────────────────────────────────────────────
@@ -91,20 +149,32 @@ pub async fn proxy_image(
             Ok(Some(_)) => {}
             _ => return transparent_pixel(),
         }
-        let att =
-            match email_db::get_attachment_by_cid(&state.db, account_id, mailbox, uid, cid).await {
-                Ok(Some(a)) => a,
-                _ => return transparent_pixel(),
+        let eml_raw =
+            match tokio::fs::read(eml_path(&state.data_dir, account_id, mailbox, uid)).await {
+                Ok(b) => b,
+                Err(_) => return transparent_pixel(),
             };
+        let eml = decompress_eml(&eml_raw).unwrap_or_default();
 
-        let eml = match tokio::fs::read(eml_path(&state.data_dir, account_id, mailbox, uid)).await {
-            Ok(b) => b,
-            Err(_) => return transparent_pixel(),
-        };
-        let eml = decompress_eml(&eml).unwrap_or_default();
-        let bytes = match extract_part_bytes(&eml, att.part_index as usize) {
-            Some(b) => b,
-            None => return transparent_pixel(),
+        // Try the indexed path first (fast); fall back to scanning all MIME
+        // parts by Content-ID for messages cached before the index was built.
+        let bytes = match email_db::get_attachment_by_cid(
+            &state.db,
+            account_id,
+            mailbox,
+            uid,
+            cid,
+        )
+        .await
+        {
+            Ok(Some(att)) => match extract_part_bytes(&eml, att.part_index as usize) {
+                Some(b) => b,
+                None => return transparent_pixel(),
+            },
+            _ => match find_bytes_by_cid(&eml, cid) {
+                Some(b) => b,
+                None => return transparent_pixel(),
+            },
         };
 
         // Sniff bytes before serving inline attachments. Declared MIME type is

@@ -1678,7 +1678,7 @@
       composeDialog?.open({ mode: 'replyAll', replyTo: msg });
     } else if (!e.shiftKey && e.key === 'f') {
       e.preventDefault();
-      composeDialog?.open({ mode: 'forward', replyTo: msg });
+      void openForward(msg);
     } else if (!e.shiftKey && e.key === 'e' && archiveMailboxFor(msg)) {
       e.preventDefault();
       archiveMessage(msg);
@@ -1692,6 +1692,30 @@
       e.preventDefault();
       void setFlag(msg, '\\Seen', false);
     }
+  }
+
+  async function openForward(msg: Message) {
+    const attachments: File[] = [];
+    // CIDs actually referenced in the HTML body are handled as inline images by the backend.
+    // Only skip those; other attachments (even if they carry a Content-ID) must be forwarded normally.
+    const inlineImageCids = new Set<string>();
+    if (msg.body_html) {
+      for (const m of msg.body_html.matchAll(/\bcid:([^"'\s>)]+)/gi)) {
+        inlineImageCids.add(m[1]);
+      }
+    }
+    for (const att of msg.attachments) {
+      if (att.content_id && inlineImageCids.has(att.content_id)) continue;
+      try {
+        const url = `/api/email/attachment?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}&filename=${encodeURIComponent(att.filename)}`;
+        const res = await apiFetch(url);
+        if (res.ok) {
+          const bytes = await res.arrayBuffer();
+          attachments.push(new File([bytes], att.filename, { type: att.content_type || 'application/octet-stream' }));
+        }
+      } catch { /* skip attachment on error */ }
+    }
+    composeDialog?.open({ mode: 'forward', replyTo: msg, attachments });
   }
 
   function openPopout(msg: Message) {
@@ -2177,7 +2201,7 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="8 14 3 9 8 4"/><polyline points="14 14 9 9 14 4"/><path d="M21 20v-7a4 4 0 0 0-4-4H3"/></svg>
                     {tl('mail_replyAll')}
                   </button>
-                  <button role="menuitem" on:click={() => { actionsOpen = false; composeDialog?.open({ mode: 'forward', replyTo: selectedMessage! }); }}>
+                  <button role="menuitem" on:click={() => { actionsOpen = false; void openForward(selectedMessage!); }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg>
                     {tl('mail_forward')}
                   </button>

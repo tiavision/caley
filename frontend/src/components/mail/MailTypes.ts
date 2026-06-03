@@ -50,6 +50,7 @@ export interface Attachment {
   filename: string;
   content_type: string;
   size: number;
+  content_id: string | null;
 }
 
 export interface Message {

@@ -9,6 +9,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::email::attachments as email_attachments;
 use crate::email_autodiscover;
 use crate::email_db;
 use crate::email_sync::EmailSyncTrigger;
@@ -31,6 +32,10 @@ pub async fn send_email(
     let mut body = String::new();
     let mut in_reply_to: Option<String> = None;
     let mut references: Option<String> = None;
+    let mut forward_html: Option<String> = None;
+    let mut forward_account_id: Option<String> = None;
+    let mut forward_mailbox: Option<String> = None;
+    let mut forward_uid: Option<u32> = None;
     let mut attachments: Vec<(String, String, Vec<u8>)> = vec![];
 
     loop {
@@ -62,6 +67,10 @@ pub async fn send_email(
                         "body" => body = text,
                         "in_reply_to" if !text.is_empty() => in_reply_to = Some(text),
                         "references" if !text.is_empty() => references = Some(text),
+                        "forward_html" if !text.is_empty() => forward_html = Some(text),
+                        "forward_account_id" if !text.is_empty() => forward_account_id = Some(text),
+                        "forward_mailbox" if !text.is_empty() => forward_mailbox = Some(text),
+                        "forward_uid" if !text.is_empty() => forward_uid = text.parse().ok(),
                         _ => {}
                     }
                 }
@@ -147,6 +156,17 @@ pub async fn send_email(
     let smtp_host = account.smtp_host.as_deref().unwrap_or(&account.host);
     let smtp_port = account.smtp_port.unwrap_or(587) as u16;
 
+    let inline_parts = match (&forward_html, &forward_account_id, &forward_mailbox, forward_uid) {
+        (Some(html), Some(acc), Some(mb), Some(uid)) => {
+            let cids = extract_cids_from_html(html);
+            email_attachments::fetch_inline_parts_for_cids(
+                &state.db, &state.data_dir, acc, mb, uid, &cids,
+            )
+            .await
+        }
+        _ => vec![],
+    };
+
     let raw_message = match imap_client::send_email(
         smtp_host,
         smtp_port,
@@ -161,6 +181,8 @@ pub async fn send_email(
         in_reply_to.as_deref(),
         references.as_deref(),
         attachments,
+        forward_html.as_deref(),
+        inline_parts,
     )
     .await
     {
@@ -380,6 +402,23 @@ pub async fn send_raw_email(
     }
 
     StatusCode::OK.into_response()
+}
+
+fn extract_cids_from_html(html: &str) -> Vec<String> {
+    let mut cids = Vec::new();
+    let mut s = html;
+    while let Some(pos) = s.find("cid:") {
+        s = &s[pos + 4..];
+        let end = s
+            .find(|c: char| matches!(c, '"' | '\'' | ' ' | '>' | ')'))
+            .unwrap_or(s.len());
+        let cid = s[..end].trim();
+        if !cid.is_empty() && !cids.contains(&cid.to_owned()) {
+            cids.push(cid.to_owned());
+        }
+        s = &s[end..];
+    }
+    cids
 }
 
 fn raw_address_emails(address: &mail_parser::Address<'_>) -> Vec<String> {

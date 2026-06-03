@@ -668,6 +668,7 @@ pub(super) fn message_to_json_with_attachments(
                 "filename": a.filename,
                 "content_type": a.content_type,
                 "size": a.size,
+                "content_id": a.content_id,
             })
         })
         .collect();

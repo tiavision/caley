@@ -44,6 +44,8 @@
   let composeStoredSigningFingerprints = new Set<string>();
   let composeKeysLoading = false;
   let composeKeysRequest = 0;
+  let composeForwardHtml: string | null = null;
+  let composeForwardRef: { account_id: string; mailbox: string; uid: number } | null = null;
   let composeFileInput: HTMLInputElement;
   let filePickerOpen = false;
   let recipientSuggestions: string[] = [];
@@ -222,6 +224,32 @@
     return lines.join('\n').replace(/\n+$/, '');
   }
 
+  function buildForwardHtml(msg: Message): string | null {
+    if (!msg.body_html) return null;
+    // Strip outer html/head/body document wrappers if present
+    let bodyContent = msg.body_html;
+    const bodyMatch = bodyContent.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    if (bodyMatch) {
+      bodyContent = bodyMatch[1];
+    } else {
+      bodyContent = bodyContent
+        .replace(/^[\s\S]*?<html[^>]*>/i, '')
+        .replace(/<\/html>\s*$/i, '')
+        .replace(/^[\s\S]*?<\/head>/i, '')
+        .trim();
+    }
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const headerLines: string[] = [];
+    if (msg.from) headerLines.push(`From: ${esc(msg.from)}`);
+    const date = formatMessageDateTime(msg.sent_at);
+    if (date) headerLines.push(`Date: ${esc(date)}`);
+    if (msg.to.length > 0) headerLines.push(`To: ${esc(msg.to.join(', '))}`);
+    if (msg.cc.length > 0) headerLines.push(`Cc: ${esc(msg.cc.join(', '))}`);
+    headerLines.push(`Subject: ${esc(msg.subject || '')}`);
+    const headerHtml = headerLines.map(l => `<div>${l}</div>`).join('');
+    return `<br><div style="border-left:2px solid #ccc;padding-left:8px;margin:8px 0"><div>---------- Forwarded message ---------</div>${headerHtml}<br>${bodyContent}</div>`;
+  }
+
   // ── Public open/close interface ────────────────────────────────────────────
 
   export function open(options: {
@@ -250,6 +278,8 @@
       composeBody = replyQuote(replyTo);
       composeInReplyTo = replyTo.message_id;
       composeReferences = replyTo.message_id;
+      composeForwardHtml = null;
+      composeForwardRef = null;
       const accountIdentities = identities.filter(i => i.account_id === replyTo.account_id);
       const toAddresses = (replyTo.to ?? []).map(a => a.toLowerCase());
       const matched = accountIdentities.find(i => toAddresses.some(a => a.includes(i.email.toLowerCase())));
@@ -263,6 +293,8 @@
       composeBody = replyQuote(replyTo);
       composeInReplyTo = replyTo.message_id;
       composeReferences = replyTo.message_id;
+      composeForwardHtml = null;
+      composeForwardRef = null;
       const accountIdentities = identities.filter(i => i.account_id === replyTo.account_id);
       const toAddresses = (replyTo.to ?? []).map(a => a.toLowerCase());
       const matched = accountIdentities.find(i => toAddresses.some(a => a.includes(i.email.toLowerCase())));
@@ -285,11 +317,16 @@
       composeMode = 'forward';
       composeTo = '';
       const accountIdentities = identities.filter(i => i.account_id === forwardFrom.account_id);
-      composeIdentityId = (accountIdentities.find(i => i.is_default) ?? accountIdentities[0] ?? identities[0])?.identity_id ?? '';
+      const toAddresses = (forwardFrom.to ?? []).map(a => a.toLowerCase());
+      const matched = accountIdentities.find(i => toAddresses.some(a => a.includes(i.email.toLowerCase())));
+      const defaultIdentity = accountIdentities.find(i => i.is_default);
+      composeIdentityId = (matched ?? defaultIdentity ?? identities[0])?.identity_id ?? '';
       composeSubject = /^fwd:/i.test(forwardFrom.subject ?? '')
         ? (forwardFrom.subject ?? '')
         : `Fwd: ${forwardFrom.subject || ''}`;
       composeBody = forwardQuote(forwardFrom);
+      composeForwardHtml = buildForwardHtml(forwardFrom);
+      composeForwardRef = { account_id: forwardFrom.account_id, mailbox: forwardFrom.mailbox, uid: forwardFrom.uid };
       composeInReplyTo = null;
       composeReferences = null;
     } else {
@@ -297,6 +334,8 @@
       composeTo = '';
       composeSubject = options.subject ?? '';
       composeBody = '';
+      composeForwardHtml = null;
+      composeForwardRef = null;
       composeInReplyTo = null;
       composeReferences = null;
       composeIdentityId = (identities.find(i => i.is_default) ?? identities[0])?.identity_id ?? '';
@@ -484,6 +523,12 @@
         fd.append('body', composeBody);
         if (composeInReplyTo) fd.append('in_reply_to', composeInReplyTo);
         if (composeReferences) fd.append('references', composeReferences);
+        if (composeForwardHtml) fd.append('forward_html', composeForwardHtml);
+        if (composeForwardRef) {
+          fd.append('forward_account_id', composeForwardRef.account_id);
+          fd.append('forward_mailbox', composeForwardRef.mailbox);
+          fd.append('forward_uid', String(composeForwardRef.uid));
+        }
         for (const file of composeAttachments) {
           fd.append('attachment', file, file.name);
         }

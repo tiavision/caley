@@ -599,12 +599,16 @@ fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
             .map(|ct| format!("{}/{}", ct.ctype(), ct.subtype().unwrap_or("octet-stream")))
             .unwrap_or_else(|| "application/octet-stream".to_string());
         let is_calendar = is_calendar_content_type(&content_type);
+        // Treat as inline image if: explicitly Content-Disposition: inline + image/*,
+        // OR has a Content-ID + image/* (multipart/related parts built by lettre omit
+        // Content-Disposition but still need to be findable by CID for proxy-image).
         let is_inline_image = part
-            .content_disposition()
-            .map_or(false, |cd| cd.ctype().to_ascii_lowercase() == "inline")
-            && part
-                .content_type()
-                .map_or(false, |ct| ct.ctype().starts_with("image/"));
+            .content_type()
+            .map_or(false, |ct| ct.ctype().starts_with("image/"))
+            && (part
+                .content_disposition()
+                .map_or(false, |cd| cd.ctype().to_ascii_lowercase() == "inline")
+                || part.content_id().is_some());
 
         if !is_attachment && !has_filename && !is_inline_image && !is_calendar {
             continue;
@@ -786,6 +790,43 @@ fn uids_to_set(uids: &[u32]) -> String {
     parts.join(",")
 }
 
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+fn plain_to_html(plain: &str, forward_html: &str) -> String {
+    // Only convert the user's intro (text before the forward separator) to HTML.
+    // The separator "--- Forwarded message ---" is inserted by the frontend's
+    // forwardQuote(); if absent, treat the whole body as intro.
+    let intro = match plain.find("--- Forwarded message ---") {
+        Some(idx) => plain[..idx].trim_end_matches('\n'),
+        None => plain,
+    };
+    let intro_html: String = intro
+        .split('\n')
+        .map(|line| {
+            let escaped = html_escape(line);
+            if escaped.is_empty() {
+                "<br>".to_string()
+            } else {
+                format!("{escaped}<br>")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("<div>{intro_html}</div>{forward_html}")
+}
+
 /// Send an email via SMTP.
 pub async fn send_email(
     smtp_host: &str,
@@ -801,10 +842,12 @@ pub async fn send_email(
     in_reply_to: Option<&str>,
     references: Option<&str>,
     attachments: Vec<(String, String, Vec<u8>)>,
+    forward_html: Option<&str>,
+    inline_parts: Vec<(String, String, Vec<u8>)>,
 ) -> Result<Vec<u8>> {
     use lettre::{
         AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
-        message::{Attachment, MultiPart, SinglePart, header::ContentType},
+        message::{Attachment, MultiPart, SinglePart, header::{ContentId, ContentType}},
         transport::smtp::authentication::Credentials,
     };
 
@@ -842,7 +885,48 @@ pub async fn send_email(
         .header(ContentType::TEXT_PLAIN)
         .body(body.to_owned());
 
-    let email = if attachments.is_empty() {
+    let email = if let Some(fwd_html) = forward_html {
+        let html_body = plain_to_html(body, fwd_html);
+        let html_part = SinglePart::builder()
+            .header(ContentType::TEXT_HTML)
+            .body(html_body);
+
+        // When there are inline images, wrap HTML + images in multipart/related.
+        let html_with_related = if inline_parts.is_empty() {
+            MultiPart::alternative()
+                .singlepart(text_part)
+                .singlepart(html_part)
+        } else {
+            let mut related = MultiPart::related().singlepart(html_part);
+            for (cid, ct_str, bytes) in inline_parts {
+                let ct = ct_str
+                    .parse::<ContentType>()
+                    .unwrap_or_else(|_| "application/octet-stream".parse().unwrap());
+                related = related.singlepart(
+                    SinglePart::builder()
+                        .header(ct)
+                        .header(ContentId::from(format!("<{cid}>")))
+                        .body(bytes),
+                );
+            }
+            MultiPart::alternative()
+                .singlepart(text_part)
+                .multipart(related)
+        };
+
+        if attachments.is_empty() {
+            builder.multipart(html_with_related)
+        } else {
+            let mut mixed = MultiPart::mixed().multipart(html_with_related);
+            for (filename, content_type_str, bytes) in attachments {
+                let ct = content_type_str
+                    .parse::<ContentType>()
+                    .unwrap_or_else(|_| "application/octet-stream".parse().unwrap());
+                mixed = mixed.singlepart(Attachment::new(filename).body(bytes, ct));
+            }
+            builder.multipart(mixed)
+        }
+    } else if attachments.is_empty() {
         builder.singlepart(text_part)
     } else {
         let mut mp = MultiPart::mixed().singlepart(text_part);
