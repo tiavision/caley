@@ -13,6 +13,7 @@
   import MailSidebar from './mail/MailSidebar.svelte';
   import FolderIcon from './mail/FolderIcon.svelte';
   import MailMessageList from './mail/MailMessageList.svelte';
+  import MailHtmlFrame from './mail/MailHtmlFrame.svelte';
   import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey, validateVault, eraseBytes } from '../lib/pgp/vault.ts';
   import { unlock } from '../lib/pgp/webauthn.ts';
   import { decryptMessage, verifySignedMessage, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
@@ -2471,15 +2472,13 @@
                 </div>
               {/if}
               {#key iframeKey}
-                <iframe
-                  bind:this={iframeEl}
+                <MailHtmlFrame
+                  bind:element={iframeEl}
                   on:load={fitIframeToContent}
                   scrolling={usesDetailOverlay ? 'no' : undefined}
-                  sandbox="allow-popups allow-same-origin allow-popups-to-escape-sandbox"
                   srcdoc={renderedHtml}
                   title={tl('nav_mail')}
-                  class="html-body"
-                ></iframe>
+                />
               {/key}
             {:else if selectedMessage.body_text !== null}
               <pre class="body-text">{#each bodyTextSegments as seg}{#if 'href' in seg}<a href={seg.href} target="_blank" rel="noopener noreferrer">{seg.text}</a>{:else}{seg.text}{/if}{/each}</pre>
@@ -3296,6 +3295,11 @@
     min-height: 0;
   }
 
+  :global(.mail-html-frame) {
+    flex: 1;
+    min-height: 0;
+  }
+
   .origins-trigger {
     position: fixed;
     bottom: 2.75rem;
@@ -3456,7 +3460,8 @@
       overflow-y: visible;
     }
 
-    .html-body {
+    .html-body,
+    :global(.mail-html-frame) {
       flex: none;
     }
 

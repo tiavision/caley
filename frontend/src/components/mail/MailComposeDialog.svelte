@@ -8,6 +8,8 @@
   import { getKeys, isUnlocked } from '../../lib/pgp/session.ts';
   import { parsePublicKey, listPublicKeys, type StoredPublicKey } from '../../lib/pgp/public-keys.ts';
   import { buildProtectedMime, parseEnvelopeAddresses } from '../../lib/pgp/compose.ts';
+  import { prepareEmailHtml } from '../../lib/mail-html.ts';
+  import MailHtmlFrame from './MailHtmlFrame.svelte';
   import { formatMessageDateTime, keyHasEmail } from './mailUtils.ts';
   import type { Identity, Message } from './MailTypes.ts';
   import type * as openpgp from 'openpgp';
@@ -46,6 +48,7 @@
   let composeKeysRequest = 0;
   let composeForwardHtml: string | null = null;
   let composeForwardRef: { account_id: string; mailbox: string; uid: number } | null = null;
+  let composeForwardQuoteText: string | null = null;
   let composeFileInput: HTMLInputElement;
   let filePickerOpen = false;
   let recipientSuggestions: string[] = [];
@@ -280,6 +283,7 @@
       composeReferences = replyTo.message_id;
       composeForwardHtml = null;
       composeForwardRef = null;
+      composeForwardQuoteText = null;
       const accountIdentities = identities.filter(i => i.account_id === replyTo.account_id);
       const toAddresses = (replyTo.to ?? []).map(a => a.toLowerCase());
       const matched = accountIdentities.find(i => toAddresses.some(a => a.includes(i.email.toLowerCase())));
@@ -295,6 +299,7 @@
       composeReferences = replyTo.message_id;
       composeForwardHtml = null;
       composeForwardRef = null;
+      composeForwardQuoteText = null;
       const accountIdentities = identities.filter(i => i.account_id === replyTo.account_id);
       const toAddresses = (replyTo.to ?? []).map(a => a.toLowerCase());
       const matched = accountIdentities.find(i => toAddresses.some(a => a.includes(i.email.toLowerCase())));
@@ -324,8 +329,16 @@
       composeSubject = /^fwd:/i.test(forwardFrom.subject ?? '')
         ? (forwardFrom.subject ?? '')
         : `Fwd: ${forwardFrom.subject || ''}`;
-      composeBody = forwardQuote(forwardFrom);
-      composeForwardHtml = buildForwardHtml(forwardFrom);
+      const fwdHtml = buildForwardHtml(forwardFrom);
+      if (fwdHtml) {
+        composeBody = '';
+        composeForwardHtml = fwdHtml;
+        composeForwardQuoteText = forwardQuote(forwardFrom);
+      } else {
+        composeBody = forwardQuote(forwardFrom);
+        composeForwardHtml = null;
+        composeForwardQuoteText = null;
+      }
       composeForwardRef = { account_id: forwardFrom.account_id, mailbox: forwardFrom.mailbox, uid: forwardFrom.uid };
       composeInReplyTo = null;
       composeReferences = null;
@@ -336,6 +349,7 @@
       composeBody = '';
       composeForwardHtml = null;
       composeForwardRef = null;
+      composeForwardQuoteText = null;
       composeInReplyTo = null;
       composeReferences = null;
       composeIdentityId = (identities.find(i => i.is_default) ?? identities[0])?.identity_id ?? '';
@@ -517,8 +531,17 @@
         to,
         cc,
         subject: composeSubject,
-        body: composeBody,
-        bodyHtml: composeForwardHtml ?? undefined,
+        body: composeForwardQuoteText !== null ? composeBody + composeForwardQuoteText : composeBody,
+        bodyHtml: (() => {
+          if (!composeForwardHtml) return undefined;
+          if (!composeBody.trim()) return composeForwardHtml;
+          const introHtml = composeBody
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\r?\n/g, '<br>');
+          return `<div>${introHtml}</div>${composeForwardHtml}`;
+        })(),
         inlineImages,
         inReplyTo: composeInReplyTo,
         references: composeReferences,
@@ -693,8 +716,21 @@
         <input class="compose-input" bind:value={composeSubject} />
       </div>
       <div class="compose-body-row">
-        <textarea bind:value={composeBody} rows={10}></textarea>
+        <textarea bind:value={composeBody} rows={composeForwardHtml ? 4 : 10}></textarea>
       </div>
+      {#if composeForwardHtml && composeForwardRef}
+        <div class="compose-forward-preview">
+          <MailHtmlFrame
+            srcdoc={prepareEmailHtml(composeForwardHtml, {
+              accountId: composeForwardRef.account_id,
+              mailbox: composeForwardRef.mailbox,
+              uid: composeForwardRef.uid,
+            })}
+            title="Forwarded message"
+            style="height:240px"
+          />
+        </div>
+      {/if}
       {#if composeAttachments.length > 0}
         <ul class="compose-attachments">
           {#each composeAttachments as file, i}
@@ -908,6 +944,12 @@
   .compose-body-row textarea:focus {
     border: none !important;
     box-shadow: none !important;
+  }
+
+  .compose-forward-preview {
+    margin: 0 1rem 0.5rem;
+    border-top: 1px solid var(--pico-muted-border-color);
+    padding-top: 0.25rem;
   }
 
   .compose-error {
