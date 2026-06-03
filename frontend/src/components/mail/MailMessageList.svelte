@@ -126,13 +126,15 @@
                 {#if filterAddrs.length > 0}
                   <div class="filter-chips">
                     {#each filterAddrs as addr}
-                      <span class="filter-chip">
-                        {addr}
+                      {@const chipLabel = contactSuggestions.find(c => c.email === addr)?.name || addr}
+                      <span class="filter-chip" title={addr}>
+                        <span class="chip-label">{chipLabel}</span>
                         <button class="chip-remove" on:click={() => { filterAddrs = filterAddrs.filter(a => a !== addr); onRunSearch(); }}>×</button>
                       </span>
                     {/each}
                   </div>
                   <button class="filter-clear-btn" on:click={() => { filterAddrs = []; onRunSearch(); }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                     {tl('mail_filterClearAddrs')}
                   </button>
                 {/if}
@@ -155,8 +157,10 @@
                           onRunSearch();
                         }}
                       />
-                      <span class="suggestion-name">{s.name || s.email}</span>
-                      {#if s.name}<span class="suggestion-email">{s.email}</span>{/if}
+                      <span class="suggestion-info">
+                        {#if s.name}<span class="suggestion-name">{s.name}</span>{/if}
+                        <span class="suggestion-email">{s.email}</span>
+                      </span>
                     </label>
                   {/each}
                   {#each addrDbSuggestions.filter(addr =>
@@ -176,7 +180,9 @@
                           onRunSearch();
                         }}
                       />
-                      <span class="suggestion-name">{addr}</span>
+                      <span class="suggestion-info">
+                        <span class="suggestion-email">{addr}</span>
+                      </span>
                     </label>
                   {/each}
                   {#if addrFilterInput
@@ -461,88 +467,115 @@
   .filter-popover {
     position: fixed;
     z-index: 200;
+    box-sizing: border-box;
     background: var(--pico-card-background-color, white);
     border: 1px solid var(--pico-muted-border-color, #ddd);
     border-radius: var(--pico-border-radius, 4px);
     box-shadow: 0 4px 16px rgba(0,0,0,0.12);
     padding: 0.75rem;
-    min-width: 240px;
-    max-width: 320px;
-    max-height: 340px;
-    overflow-y: auto;
+    width: 320px;
+    max-width: calc(100vw - 16px);
+    max-height: 400px;
+    overflow: hidden auto;
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: 0.5rem;
   }
 
   .filter-popover-input {
-    margin-bottom: 0.25rem;
+    margin-bottom: 0;
     font-size: 0.85rem;
   }
 
   .filter-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.3rem;
-    margin-bottom: 0.25rem;
+    gap: 0.35rem;
   }
 
   .filter-chip {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 0.2rem;
-    background: var(--pico-primary-background, #e6f2fb);
-    color: var(--pico-primary, #0172ad);
+    gap: 0.3rem;
+    background: var(--pico-primary);
+    color: var(--pico-primary-inverse, #fff);
     border-radius: 1rem;
-    padding: 0.1rem 0.5rem;
-    font-size: 0.78rem;
+    padding: 0.3rem 0.45rem 0.3rem 0.7rem;
+    font-size: 0.8rem;
+    line-height: 1.2;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1 1 0;
   }
 
   .chip-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: none;
     border: none;
     cursor: pointer;
     padding: 0;
-    font-size: 0.7rem;
+    width: 1.1rem;
+    height: 1.1rem;
+    min-height: 0;
+    font-size: 0.85rem;
     color: inherit;
-    opacity: 0.6;
+    opacity: 0.75;
     line-height: 1;
     margin: 0;
-    width: auto;
+    flex-shrink: 0;
   }
 
   .chip-remove:hover { opacity: 1; }
 
   .filter-clear-btn {
-    background: none;
-    border: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: var(--pico-muted-background-color, rgba(0,0,0,0.05));
+    border: 1px solid var(--pico-muted-border-color, #ccc);
+    border-radius: 4px;
     cursor: pointer;
-    font-size: 0.78rem;
+    font-size: 0.75rem;
+    line-height: 1.4;
     color: var(--pico-muted-color);
-    padding: 0.1rem 0;
-    text-align: left;
+    padding: 0.35rem 0.75rem !important;
     margin: 0;
     width: auto;
+    align-self: flex-start;
+    transition: background 0.12s, border-color 0.12s;
   }
 
-  .filter-clear-btn:hover { color: var(--pico-color); }
+  .filter-clear-btn:hover {
+    background: color-mix(in srgb, var(--pico-muted-border-color, #ccc) 30%, transparent);
+    border-color: var(--pico-color, #333);
+  }
 
   .filter-suggestions {
     display: flex;
     flex-direction: column;
-    gap: 0;
-    overflow-y: auto;
+    gap: 2px;
   }
 
   .filter-suggestion-row {
     display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.25rem 0.25rem;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.22rem 0.4rem;
     margin: 0;
-    font-size: 0.85rem;
     cursor: pointer;
-    border-radius: 3px;
+    border-radius: 4px;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .filter-suggestion-row:hover {
@@ -550,15 +583,30 @@
   }
 
   .filter-suggestion-row input[type="checkbox"] {
-    margin: 0;
+    margin: 0.2rem 0 0;
     flex-shrink: 0;
   }
 
-  .suggestion-name { font-weight: 500; }
+  .suggestion-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+    flex: 1 1 0;
+  }
+
+  .suggestion-name {
+    font-size: 0.85rem;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .suggestion-email {
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     color: var(--pico-muted-color);
-    margin-left: auto;
+    word-break: break-all;
   }
 
   .filter-add-custom {
