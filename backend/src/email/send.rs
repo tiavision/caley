@@ -106,10 +106,28 @@ pub async fn send_raw_email(
         }
     };
 
+    let smtp_from = match normalize_envelope_address(&identity.email) {
+        Ok(Some(address)) => address,
+        Ok(None) | Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                "selected identity address requires SMTPUTF8",
+            )
+                .into_response();
+        }
+    };
+
     let parsed = match mail_parser::MessageParser::default().parse(&raw_mime) {
         Some(parsed) => parsed,
         None => return (StatusCode::BAD_REQUEST, "invalid raw mime").into_response(),
     };
+    if !raw_mime.is_ascii() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "raw MIME contains non-ASCII bytes; use MIME transfer encoding",
+        )
+            .into_response();
+    }
     if parsed.bcc().is_some() {
         return (
             StatusCode::BAD_REQUEST,
@@ -118,7 +136,14 @@ pub async fn send_raw_email(
             .into_response();
     }
     let from_addresses = parsed.from().map(raw_address_emails).unwrap_or_default();
-    if from_addresses.len() != 1 || !from_addresses[0].eq_ignore_ascii_case(&identity.email) {
+    let normalized_from = from_addresses
+        .first()
+        .and_then(|address| normalize_envelope_address(address).ok().flatten());
+    if from_addresses.len() != 1
+        || !normalized_from
+            .as_deref()
+            .is_some_and(|from| from.eq_ignore_ascii_case(&smtp_from))
+    {
         return (
             StatusCode::BAD_REQUEST,
             "From does not match selected identity",
@@ -127,19 +152,32 @@ pub async fn send_raw_email(
     }
 
     let mut seen = HashSet::new();
-    let recipients: Vec<String> = envelope_to
+    let mut recipients = Vec::new();
+    for address in envelope_to
         .into_iter()
         .chain(envelope_cc)
         .chain(envelope_bcc)
-        .filter_map(|address| {
-            let trimmed = address.trim();
-            if trimmed.is_empty() {
-                return None;
+    {
+        let Some(normalized) = (match normalize_envelope_address(&address) {
+            Ok(address) => address,
+            Err(NormalizeAddressError::SmtpUtf8Required) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    "recipient address requires SMTPUTF8",
+                )
+                    .into_response();
             }
-            let lower = trimmed.to_ascii_lowercase();
-            seen.insert(lower).then(|| trimmed.to_owned())
-        })
-        .collect();
+            Err(NormalizeAddressError::Invalid) => {
+                return (StatusCode::BAD_REQUEST, "invalid recipient address").into_response();
+            }
+        }) else {
+            continue;
+        };
+        let lower = normalized.to_ascii_lowercase();
+        if seen.insert(lower) {
+            recipients.push(normalized);
+        }
+    }
     if recipients.is_empty() {
         return (StatusCode::BAD_REQUEST, "no recipients").into_response();
     }
@@ -168,7 +206,7 @@ pub async fn send_raw_email(
         smtp_port,
         &account.username,
         &account.password,
-        &identity.email,
+        &smtp_from,
         &recipients,
         &raw_mime,
     )
@@ -202,6 +240,46 @@ pub async fn send_raw_email(
     StatusCode::OK.into_response()
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum NormalizeAddressError {
+    Invalid,
+    SmtpUtf8Required,
+}
+
+fn normalize_envelope_address(value: &str) -> Result<Option<String>, NormalizeAddressError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let address = trimmed
+        .find('<')
+        .and_then(|start| {
+            trimmed[start + 1..]
+                .find('>')
+                .map(|end| &trimmed[start + 1..start + 1 + end])
+        })
+        .unwrap_or(trimmed)
+        .trim();
+    let (local, domain) = address
+        .rsplit_once('@')
+        .ok_or(NormalizeAddressError::Invalid)?;
+    if local.is_empty() || domain.is_empty() {
+        return Err(NormalizeAddressError::Invalid);
+    }
+    if !local.is_ascii() {
+        return Err(NormalizeAddressError::SmtpUtf8Required);
+    }
+    let ascii_domain = idna::domain_to_ascii(domain).map_err(|_| NormalizeAddressError::Invalid)?;
+    if ascii_domain.is_empty() || !ascii_domain.is_ascii() {
+        return Err(NormalizeAddressError::Invalid);
+    }
+    let normalized = format!("{local}@{ascii_domain}");
+    normalized
+        .parse::<lettre::Address>()
+        .map_err(|_| NormalizeAddressError::Invalid)?;
+    Ok(Some(normalized))
+}
+
 fn raw_address_emails(address: &mail_parser::Address<'_>) -> Vec<String> {
     let email = |addr: &mail_parser::Addr<'_>| {
         addr.address
@@ -215,6 +293,51 @@ fn raw_address_emails(address: &mail_parser::Address<'_>) -> Vec<String> {
             .iter()
             .flat_map(|group| group.addresses.iter().filter_map(email))
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_ascii_address() {
+        assert_eq!(
+            normalize_envelope_address("User@example.com"),
+            Ok(Some("User@example.com".to_owned()))
+        );
+    }
+
+    #[test]
+    fn normalize_idn_domain_to_punycode() {
+        assert_eq!(
+            normalize_envelope_address("user@bücher.example"),
+            Ok(Some("user@xn--bcher-kva.example".to_owned()))
+        );
+    }
+
+    #[test]
+    fn normalize_address_with_display_name() {
+        assert_eq!(
+            normalize_envelope_address("Example User <user@example.com>"),
+            Ok(Some("user@example.com".to_owned()))
+        );
+    }
+
+    #[test]
+    fn reject_non_ascii_local_part() {
+        assert_eq!(
+            normalize_envelope_address("müller@example.com"),
+            Err(NormalizeAddressError::SmtpUtf8Required)
+        );
+    }
+
+    #[test]
+    fn reject_invalid_address() {
+        assert_eq!(
+            normalize_envelope_address("not an address"),
+            Err(NormalizeAddressError::Invalid)
+        );
     }
 }
 

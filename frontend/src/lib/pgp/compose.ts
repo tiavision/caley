@@ -28,6 +28,42 @@ function safeHeader(value: string): string {
   return value.replace(/[\r\n]+/g, ' ').trim();
 }
 
+function asciiHeader(value: string): string {
+  return safeHeader(value).replace(/[^\x20-\x7e]/g, '');
+}
+
+function hasNonAscii(value: string): boolean {
+  return /[^\x00-\x7f]/.test(value);
+}
+
+function encodedWord(value: string): string {
+  const safe = safeHeader(value);
+  if (!safe) return '';
+  if (!hasNonAscii(safe)) return safe;
+  return `=?UTF-8?B?${base64Lines(encoder.encode(safe)).replace(/\r\n/g, '')}?=`;
+}
+
+function domainToAscii(domain: string): string {
+  if (!hasNonAscii(domain)) return domain;
+  try {
+    return new URL(`http://${domain}`).hostname;
+  } catch {
+    return domain.replace(/[^\x21-\x7e]/g, '');
+  }
+}
+
+function asciiAddrSpec(value: string): string | null {
+  const trimmed = safeHeader(value);
+  const match = /<([^<>]+)>/.exec(trimmed);
+  const address = (match?.[1] ?? trimmed).trim();
+  const at = address.lastIndexOf('@');
+  if (at <= 0 || at === address.length - 1) return null;
+  const local = address.slice(0, at);
+  const domain = domainToAscii(address.slice(at + 1));
+  if (!local || !domain || hasNonAscii(local) || hasNonAscii(domain)) return null;
+  return `${local}@${domain}`;
+}
+
 function boundary(label: string): string {
   return `----caley-${label}-${crypto.randomUUID().replace(/-/g, '')}`;
 }
@@ -41,9 +77,56 @@ function base64Lines(bytes: Uint8Array): string {
 }
 
 function mailbox(identity: ComposeIdentity): string {
-  const email = safeHeader(identity.email);
-  const name = safeHeader(identity.name).replace(/(["\\])/g, '\\$1');
-  return name ? `"${name}" <${email}>` : email;
+  const email = asciiAddrSpec(identity.email) ?? asciiHeader(identity.email);
+  const name = encodedWord(identity.name);
+  return name ? `${name} <${email}>` : email;
+}
+
+function addressListHeader(addresses: string[]): string {
+  const normalized = addresses
+    .map(address => asciiAddrSpec(address))
+    .filter((address): address is string => Boolean(address));
+  return normalized.length > 0 ? normalized.join(', ') : 'undisclosed-recipients:;';
+}
+
+function quotedPrintable(value: string): string {
+  const bytes = encoder.encode(value.replace(/\r?\n/g, '\r\n'));
+  const lines: string[] = [];
+  let line = '';
+
+  const push = (chunk: string) => {
+    if (line.length + chunk.length > 75) {
+      lines.push(`${line}=`);
+      line = '';
+    }
+    line += chunk;
+  };
+
+  for (let i = 0; i < bytes.length; i += 1) {
+    const byte = bytes[i];
+    if (byte === 13 && bytes[i + 1] === 10) {
+      lines.push(line);
+      line = '';
+      i += 1;
+      continue;
+    }
+
+    const next = bytes[i + 1];
+    const isLineEnd = next === 13 || next === undefined;
+    if ((byte >= 33 && byte <= 60) || (byte >= 62 && byte <= 126) || ((byte === 9 || byte === 32) && !isLineEnd)) {
+      push(String.fromCharCode(byte));
+    } else {
+      push(`=${byte.toString(16).toUpperCase().padStart(2, '0')}`);
+    }
+  }
+  lines.push(line);
+  return lines.join('\r\n');
+}
+
+function parameterValue(name: string, value: string): string {
+  const safe = safeHeader(value).replace(/"/g, '');
+  if (!hasNonAscii(safe)) return `${name}="${safe}"`;
+  return `${name}*=UTF-8''${encodeURIComponent(safe).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)}`;
 }
 
 export function parseEnvelopeAddresses(value: string): string[] {
@@ -61,13 +144,13 @@ function messageHeaders(message: ProtectedComposeMessage): string {
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: <${crypto.randomUUID()}@caley.local>`,
     `From: ${mailbox(message.identity)}`,
-    `To: ${message.to.map(safeHeader).join(', ')}`,
-    ...(message.cc.length ? [`Cc: ${message.cc.map(safeHeader).join(', ')}`] : []),
-    `Subject: ${safeHeader(message.subject)}`,
+    `To: ${addressListHeader(message.to)}`,
+    ...(message.cc.length ? [`Cc: ${addressListHeader(message.cc)}`] : []),
+    `Subject: ${encodedWord(message.subject)}`,
     'MIME-Version: 1.0',
   ];
-  if (message.inReplyTo) headers.push(`In-Reply-To: ${safeHeader(message.inReplyTo)}`);
-  if (message.references) headers.push(`References: ${safeHeader(message.references)}`);
+  if (message.inReplyTo) headers.push(`In-Reply-To: ${asciiHeader(message.inReplyTo)}`);
+  if (message.references) headers.push(`References: ${asciiHeader(message.references)}`);
   return `${headers.join('\r\n')}\r\n`;
 }
 
@@ -82,8 +165,8 @@ async function innerEntity(message: ProtectedComposeMessage): Promise<string> {
   }
 
   const textPart =
-    `Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n` +
-    `${message.body.replace(/\r?\n/g, '\r\n')}\r\n`;
+    `Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n` +
+    `${quotedPrintable(message.body)}\r\n`;
 
   let bodyPart: string;
   if (message.bodyHtml) {
@@ -93,17 +176,17 @@ async function innerEntity(message: ProtectedComposeMessage): Promise<string> {
       const relBoundary = boundary('related');
       htmlPart =
         `Content-Type: multipart/related; boundary="${relBoundary}"\r\n\r\n` +
-        `--${relBoundary}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${htmlBody}\r\n`;
+      `--${relBoundary}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n${quotedPrintable(htmlBody)}\r\n`;
       for (const img of message.inlineImages) {
-        const ct = safeHeader(img.contentType || 'image/jpeg');
-        const cid = safeHeader(img.cid);
+        const ct = asciiHeader(img.contentType || 'image/jpeg');
+        const cid = asciiHeader(img.cid);
         htmlPart +=
           `--${relBoundary}\r\nContent-Type: ${ct}\r\nContent-Transfer-Encoding: base64\r\n` +
           `Content-ID: <${cid}>\r\nContent-Disposition: inline\r\n\r\n${base64Lines(img.bytes)}\r\n`;
       }
       htmlPart += `--${relBoundary}--\r\n`;
     } else {
-      htmlPart = `Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${htmlBody}\r\n`;
+      htmlPart = `Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n${quotedPrintable(htmlBody)}\r\n`;
     }
     const altBoundary = boundary('alternative');
     bodyPart =
@@ -123,11 +206,12 @@ async function innerEntity(message: ProtectedComposeMessage): Promise<string> {
   let entity = `Content-Type: multipart/mixed; boundary="${mixedBoundary}"\r\n\r\n`;
   entity += `--${mixedBoundary}\r\n${bodyPart}`;
   for (const attachment of attachments) {
-    const filename = safeHeader(attachment.name).replace(/"/g, '');
+    const filename = parameterValue('name', attachment.name);
+    const dispositionFilename = parameterValue('filename', attachment.name);
     const contentType = safeHeader(attachment.type || 'application/octet-stream');
     const content = new Uint8Array(await attachment.arrayBuffer());
-    entity += `--${mixedBoundary}\r\nContent-Type: ${contentType}; name="${filename}"\r\n`;
-    entity += `Content-Disposition: attachment; filename="${filename}"\r\nContent-Transfer-Encoding: base64\r\n\r\n`;
+    entity += `--${mixedBoundary}\r\nContent-Type: ${contentType}; ${filename}\r\n`;
+    entity += `Content-Disposition: attachment; ${dispositionFilename}\r\nContent-Transfer-Encoding: base64\r\n\r\n`;
     entity += `${base64Lines(content)}\r\n`;
   }
   entity += `--${mixedBoundary}--\r\n`;
