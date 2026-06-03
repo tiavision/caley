@@ -222,6 +222,7 @@
   "mail_noResultsFiltered": "No results for current filters.",
   "mail_filterBySender": "Filter by sender/recipient",
   "mail_filterByDate": "Filter by date",
+  "mail_filterUnread": "Unread only",
   "mail_filterAddrPlaceholder": "Search contacts…",
   "mail_filterAddAddr": "Add address",
   "mail_filterDateFrom": "From",

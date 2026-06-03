@@ -499,6 +499,7 @@ pub struct SearchQuery {
     pub addrs: Option<String>,
     pub date_from: Option<String>,
     pub date_to: Option<String>,
+    pub unread_only: Option<bool>,
     pub cursor_sent_at: Option<i64>,
     pub cursor_rowid: Option<i64>,
     pub direction: Option<String>,
@@ -546,6 +547,7 @@ pub async fn search(
         addrs,
         date_from: parse_date_start(q.date_from.as_deref()),
         date_to: parse_date_end(q.date_to.as_deref()),
+        unread_only: q.unread_only.unwrap_or(false),
     };
 
     if raw_q.is_empty() && filters.is_empty() {
@@ -716,7 +718,7 @@ pub(super) fn thread_message_to_json(m: &email_db::MessageRow) -> serde_json::Va
 
 #[cfg(test)]
 mod tests {
-    use super::{dedupe_thread_messages};
+    use super::dedupe_thread_messages;
     use crate::email_db::MessageRow;
 
     fn thread_row(mailbox: &str, uid: i64, message_id: &str, sent_at: i64) -> MessageRow {

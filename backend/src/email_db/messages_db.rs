@@ -70,11 +70,15 @@ pub struct SearchFilters {
     pub addrs: Vec<String>,
     pub date_from: Option<i64>,
     pub date_to: Option<i64>,
+    pub unread_only: bool,
 }
 
 impl SearchFilters {
     pub fn is_empty(&self) -> bool {
-        self.addrs.is_empty() && self.date_from.is_none() && self.date_to.is_none()
+        self.addrs.is_empty()
+            && self.date_from.is_none()
+            && self.date_to.is_none()
+            && !self.unread_only
     }
 }
 
@@ -836,6 +840,9 @@ fn row_to_message_full(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
 // ── Search ────────────────────────────────────────────────────────────────────
 
 fn push_filter_clauses(qb: &mut QueryBuilder<Sqlite>, filters: &SearchFilters) {
+    if filters.unread_only {
+        qb.push(" AND m.is_unread = 1");
+    }
     if !filters.addrs.is_empty() {
         qb.push(
             " AND EXISTS (SELECT 1 FROM message_addresses ma
@@ -897,14 +904,14 @@ pub async fn search_messages(
             if let Some(ref c) = cursor {
                 push_keyset_forward(&mut qb, c);
             }
-            qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC, m.rowid DESC LIMIT ")
+            qb.push(" ORDER BY m.sent_at DESC, m.rowid DESC LIMIT ")
                 .push_bind(limit);
         }
         PageDirection::Backward | PageDirection::Last => {
             if let Some(ref c) = cursor {
                 push_keyset_backward(&mut qb, c);
             }
-            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ")
+            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ")
                 .push_bind(limit);
         }
     }
@@ -961,14 +968,14 @@ pub async fn search_messages_mailbox(
             if let Some(ref c) = cursor {
                 push_keyset_forward(&mut qb, c);
             }
-            qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC, m.rowid DESC LIMIT ")
+            qb.push(" ORDER BY m.sent_at DESC, m.rowid DESC LIMIT ")
                 .push_bind(limit);
         }
         PageDirection::Backward | PageDirection::Last => {
             if let Some(ref c) = cursor {
                 push_keyset_backward(&mut qb, c);
             }
-            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ")
+            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ")
                 .push_bind(limit);
         }
     }
@@ -1038,14 +1045,14 @@ pub async fn search_messages_virtual(
             if let Some(ref c) = cursor {
                 push_keyset_forward(&mut qb, c);
             }
-            qb.push(" ORDER BY COALESCE(m.sent_at, 0) DESC, m.rowid DESC LIMIT ")
+            qb.push(" ORDER BY m.sent_at DESC, m.rowid DESC LIMIT ")
                 .push_bind(limit);
         }
         PageDirection::Backward | PageDirection::Last => {
             if let Some(ref c) = cursor {
                 push_keyset_backward(&mut qb, c);
             }
-            qb.push(" ORDER BY COALESCE(m.sent_at, 0) ASC, m.rowid ASC LIMIT ")
+            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ")
                 .push_bind(limit);
         }
     }

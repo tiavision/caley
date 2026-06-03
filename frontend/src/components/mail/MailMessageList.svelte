@@ -32,6 +32,7 @@
   // ── Filter state ──────────────────────────────────────────────────────────
   export let filterAddrActive: boolean = false;
   export let filterDateActive: boolean = false;
+  export let filterUnreadOnly: boolean = false;
   export let filterAddrOpen: boolean = false;
   export let filterDateOpen: boolean = false;
   export let filterAddrs: string[] = [];
@@ -69,6 +70,7 @@
   export let onSearchInput: () => void = () => {};
   export let onToggleAddrFilter: () => void = () => {};
   export let onToggleDateFilter: () => void = () => {};
+  export let onToggleUnreadFilter: () => void = () => {};
   export let onAddrInput: () => void = () => {};
   export let onRunSearch: () => void = () => {};
   export let onMessageRowClick: (e: MouseEvent, msg: Message) => void = () => {};
@@ -100,6 +102,138 @@
       {:else}
         <h2>{tl('nav_mail')}</h2>
       {/if}
+      {#if selectedFolderId || selectedMailbox}
+        <div class="header-filter-actions">
+          <div class="search-filter-wrap" bind:this={addrFilterEl}>
+            <button
+              class="filter-icon-btn"
+              class:active={filterAddrActive}
+              title={tl('mail_filterBySender')}
+              on:click|stopPropagation={onToggleAddrFilter}
+              aria-pressed={filterAddrActive}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+            </button>
+            {#if filterAddrOpen}
+              <div class="filter-popover" role="dialog" aria-label={tl('mail_filterBySender')} bind:this={addrPopoverEl} style={addrPopoverStyle}>
+                <input
+                  class="filter-popover-input"
+                  type="search"
+                  placeholder={tl('mail_filterAddrPlaceholder')}
+                  bind:value={addrFilterInput}
+                  on:input={onAddrInput}
+                />
+                {#if filterAddrs.length > 0}
+                  <div class="filter-chips">
+                    {#each filterAddrs as addr}
+                      <span class="filter-chip">
+                        {addr}
+                        <button class="chip-remove" on:click={() => { filterAddrs = filterAddrs.filter(a => a !== addr); onRunSearch(); }}>×</button>
+                      </span>
+                    {/each}
+                  </div>
+                  <button class="filter-clear-btn" on:click={() => { filterAddrs = []; onRunSearch(); }}>
+                    {tl('mail_filterClearAddrs')}
+                  </button>
+                {/if}
+                <div class="filter-suggestions">
+                  {#each contactSuggestions.filter(c =>
+                    !addrFilterInput ||
+                    c.email.toLowerCase().includes(addrFilterInput.toLowerCase()) ||
+                    c.name.toLowerCase().includes(addrFilterInput.toLowerCase())
+                  ).slice(0, 12) as s}
+                    <label class="filter-suggestion-row">
+                      <input
+                        type="checkbox"
+                        checked={filterAddrs.includes(s.email)}
+                        on:change={(e) => {
+                          if ((e.target as HTMLInputElement).checked) {
+                            if (!filterAddrs.includes(s.email)) filterAddrs = [...filterAddrs, s.email];
+                          } else {
+                            filterAddrs = filterAddrs.filter(a => a !== s.email);
+                          }
+                          onRunSearch();
+                        }}
+                      />
+                      <span class="suggestion-name">{s.name || s.email}</span>
+                      {#if s.name}<span class="suggestion-email">{s.email}</span>{/if}
+                    </label>
+                  {/each}
+                  {#each addrDbSuggestions.filter(addr =>
+                    !contactSuggestions.some(c => c.email.toLowerCase() === addr) &&
+                    !filterAddrs.includes(addr)
+                  ) as addr}
+                    <label class="filter-suggestion-row">
+                      <input
+                        type="checkbox"
+                        checked={filterAddrs.includes(addr)}
+                        on:change={(e) => {
+                          if ((e.target as HTMLInputElement).checked) {
+                            if (!filterAddrs.includes(addr)) filterAddrs = [...filterAddrs, addr];
+                          } else {
+                            filterAddrs = filterAddrs.filter(a => a !== addr);
+                          }
+                          onRunSearch();
+                        }}
+                      />
+                      <span class="suggestion-name">{addr}</span>
+                    </label>
+                  {/each}
+                  {#if addrFilterInput
+                    && !contactSuggestions.some(c => c.email.toLowerCase() === addrFilterInput.toLowerCase())
+                    && !addrDbSuggestions.includes(addrFilterInput.toLowerCase())}
+                    <button class="filter-add-custom" on:click={() => {
+                      const v = addrFilterInput.trim();
+                      if (v && !filterAddrs.includes(v)) { filterAddrs = [...filterAddrs, v]; onRunSearch(); }
+                      addrFilterInput = '';
+                    }}>
+                      + {tl('mail_filterAddAddr')}: {addrFilterInput}
+                    </button>
+                  {/if}
+                </div>
+              </div>
+            {/if}
+          </div>
+          <div class="search-filter-wrap" bind:this={dateFilterEl}>
+            <button
+              class="filter-icon-btn"
+              class:active={filterDateActive}
+              title={tl('mail_filterByDate')}
+              on:click|stopPropagation={onToggleDateFilter}
+              aria-pressed={filterDateActive}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            </button>
+            {#if filterDateOpen}
+              <div class="filter-popover filter-popover-date" role="dialog" aria-label={tl('mail_filterByDate')} bind:this={datePopoverEl} style={datePopoverStyle}>
+                <label class="filter-date-label">
+                  {tl('mail_filterDateFrom')}
+                  <input type="date" bind:value={filterDateFrom} on:change={onRunSearch} />
+                </label>
+                <label class="filter-date-label">
+                  {tl('mail_filterDateTo')}
+                  <input type="date" bind:value={filterDateTo} on:change={onRunSearch} />
+                </label>
+                {#if filterDateActive}
+                  <button class="filter-clear-btn" on:click={() => { filterDateFrom = ''; filterDateTo = ''; onRunSearch(); }}>
+                    {tl('mail_filterClearDate')}
+                  </button>
+                {/if}
+              </div>
+            {/if}
+          </div>
+          <button
+            class="filter-icon-btn"
+            class:active={filterUnreadOnly}
+            title={tl('mail_filterUnread')}
+            on:click|stopPropagation={onToggleUnreadFilter}
+            aria-label={tl('mail_filterUnread')}
+            aria-pressed={filterUnreadOnly}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9"/></svg>
+          </button>
+        </div>
+      {/if}
     </div>
     {#if selectedFolderId || selectedMailbox}
       <div class="search-row">
@@ -110,124 +244,6 @@
           bind:value={searchQuery}
           on:input={onSearchInput}
         />
-        <div class="search-filter-wrap" bind:this={addrFilterEl}>
-          <button
-            class="filter-icon-btn"
-            class:active={filterAddrActive}
-            title={tl('mail_filterBySender')}
-            on:click|stopPropagation={onToggleAddrFilter}
-            aria-pressed={filterAddrActive}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-          </button>
-          {#if filterAddrOpen}
-            <div class="filter-popover" role="dialog" aria-label={tl('mail_filterBySender')} bind:this={addrPopoverEl} style={addrPopoverStyle}>
-              <input
-                class="filter-popover-input"
-                type="search"
-                placeholder={tl('mail_filterAddrPlaceholder')}
-                bind:value={addrFilterInput}
-                on:input={onAddrInput}
-              />
-              {#if filterAddrs.length > 0}
-                <div class="filter-chips">
-                  {#each filterAddrs as addr}
-                    <span class="filter-chip">
-                      {addr}
-                      <button class="chip-remove" on:click={() => { filterAddrs = filterAddrs.filter(a => a !== addr); onRunSearch(); }}>×</button>
-                    </span>
-                  {/each}
-                </div>
-                <button class="filter-clear-btn" on:click={() => { filterAddrs = []; onRunSearch(); }}>
-                  {tl('mail_filterClearAddrs')}
-                </button>
-              {/if}
-              <div class="filter-suggestions">
-                {#each contactSuggestions.filter(c =>
-                  !addrFilterInput ||
-                  c.email.toLowerCase().includes(addrFilterInput.toLowerCase()) ||
-                  c.name.toLowerCase().includes(addrFilterInput.toLowerCase())
-                ).slice(0, 12) as s}
-                  <label class="filter-suggestion-row">
-                    <input
-                      type="checkbox"
-                      checked={filterAddrs.includes(s.email)}
-                      on:change={(e) => {
-                        if ((e.target as HTMLInputElement).checked) {
-                          if (!filterAddrs.includes(s.email)) filterAddrs = [...filterAddrs, s.email];
-                        } else {
-                          filterAddrs = filterAddrs.filter(a => a !== s.email);
-                        }
-                        onRunSearch();
-                      }}
-                    />
-                    <span class="suggestion-name">{s.name || s.email}</span>
-                    {#if s.name}<span class="suggestion-email">{s.email}</span>{/if}
-                  </label>
-                {/each}
-                {#each addrDbSuggestions.filter(addr =>
-                  !contactSuggestions.some(c => c.email.toLowerCase() === addr) &&
-                  !filterAddrs.includes(addr)
-                ) as addr}
-                  <label class="filter-suggestion-row">
-                    <input
-                      type="checkbox"
-                      checked={filterAddrs.includes(addr)}
-                      on:change={(e) => {
-                        if ((e.target as HTMLInputElement).checked) {
-                          if (!filterAddrs.includes(addr)) filterAddrs = [...filterAddrs, addr];
-                        } else {
-                          filterAddrs = filterAddrs.filter(a => a !== addr);
-                        }
-                        onRunSearch();
-                      }}
-                    />
-                    <span class="suggestion-name">{addr}</span>
-                  </label>
-                {/each}
-                {#if addrFilterInput
-                  && !contactSuggestions.some(c => c.email.toLowerCase() === addrFilterInput.toLowerCase())
-                  && !addrDbSuggestions.includes(addrFilterInput.toLowerCase())}
-                  <button class="filter-add-custom" on:click={() => {
-                    const v = addrFilterInput.trim();
-                    if (v && !filterAddrs.includes(v)) { filterAddrs = [...filterAddrs, v]; onRunSearch(); }
-                    addrFilterInput = '';
-                  }}>
-                    + {tl('mail_filterAddAddr')}: {addrFilterInput}
-                  </button>
-                {/if}
-              </div>
-            </div>
-          {/if}
-        </div>
-        <div class="search-filter-wrap" bind:this={dateFilterEl}>
-          <button
-            class="filter-icon-btn"
-            class:active={filterDateActive}
-            title={tl('mail_filterByDate')}
-            on:click|stopPropagation={onToggleDateFilter}
-            aria-pressed={filterDateActive}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-          </button>
-          {#if filterDateOpen}
-            <div class="filter-popover filter-popover-date" role="dialog" aria-label={tl('mail_filterByDate')} bind:this={datePopoverEl} style={datePopoverStyle}>
-              <label class="filter-date-label">
-                {tl('mail_filterDateFrom')}
-                <input type="date" bind:value={filterDateFrom} on:change={onRunSearch} />
-              </label>
-              <label class="filter-date-label">
-                {tl('mail_filterDateTo')}
-                <input type="date" bind:value={filterDateTo} on:change={onRunSearch} />
-              </label>
-              {#if filterDateActive}
-                <button class="filter-clear-btn" on:click={() => { filterDateFrom = ''; filterDateTo = ''; onRunSearch(); }}>
-                  {tl('mail_filterClearDate')}
-                </button>
-              {/if}
-            </div>
-          {/if}
-        </div>
       </div>
     {/if}
     {#if searching && !messagesLoading}
@@ -365,15 +381,25 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    min-width: 0;
   }
 
   .list-header-row h2 {
     margin: 0;
     font-size: 1rem;
-    flex: 1;
+    line-height: 1.35;
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .header-filter-actions {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-shrink: 0;
   }
 
   .folder-toggle {

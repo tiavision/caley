@@ -72,6 +72,7 @@
   let filterAddrs: string[] = [];
   let filterDateFrom = '';
   let filterDateTo = '';
+  let filterUnreadOnly = false;
   let addrFilterInput = '';
   let contactsLoaded = false;
   let contactSuggestions: { name: string; email: string }[] = [];
@@ -85,7 +86,7 @@
   let datePopoverStyle = '';
   $: filterAddrActive = filterAddrs.length > 0;
   $: filterDateActive = filterDateFrom !== '' || filterDateTo !== '';
-  $: filterActive = filterAddrActive || filterDateActive;
+  $: filterActive = filterAddrActive || filterDateActive || filterUnreadOnly;
 
   let selectedMessage: Message | null = null;
   let listCursor: Message | null = null;
@@ -885,6 +886,7 @@
     filterAddrs = [];
     filterDateFrom = '';
     filterDateTo = '';
+    filterUnreadOnly = false;
     filterAddrOpen = false;
     filterDateOpen = false;
     removeFilterListeners();
@@ -916,6 +918,7 @@
     filterAddrs = [];
     filterDateFrom = '';
     filterDateTo = '';
+    filterUnreadOnly = false;
     filterAddrOpen = false;
     filterDateOpen = false;
     removeFilterListeners();
@@ -935,7 +938,7 @@
   }
 
   function anyFilterActive() {
-    return filterAddrs.length > 0 || filterDateFrom !== '' || filterDateTo !== '';
+    return filterAddrs.length > 0 || filterDateFrom !== '' || filterDateTo !== '' || filterUnreadOnly;
   }
 
   function onSearchInput() {
@@ -972,6 +975,7 @@
     filterAddrs = [];
     filterDateFrom = '';
     filterDateTo = '';
+    filterUnreadOnly = false;
     filterAddrOpen = false;
     filterDateOpen = false;
     removeFilterListeners();
@@ -1066,6 +1070,14 @@
     }
   }
 
+  function toggleUnreadFilter() {
+    filterAddrOpen = false;
+    filterDateOpen = false;
+    removeFilterListeners();
+    filterUnreadOnly = !filterUnreadOnly;
+    runSearch();
+  }
+
   function handleFilterOutsideClick(e: MouseEvent) {
     const target = e.target as Node;
     if (!addrFilterEl?.contains(target) && !dateFilterEl?.contains(target)) {
@@ -1114,6 +1126,7 @@
     if (filterAddrs.length > 0) filterParams += `&addrs=${encodeURIComponent(filterAddrs.join(','))}`;
     if (filterDateFrom) filterParams += `&date_from=${encodeURIComponent(filterDateFrom)}`;
     if (filterDateTo) filterParams += `&date_to=${encodeURIComponent(filterDateTo)}`;
+    if (filterUnreadOnly) filterParams += '&unread_only=true';
     messagesLoading = true;
     try {
       const r = await apiFetch(`/api/email/search?q=${encodeURIComponent(q)}${scope}${filterParams}&limit=${pageSize + 1}${params}`);
@@ -2022,6 +2035,7 @@
       {selectedMessages}
       {filterAddrActive}
       {filterDateActive}
+      {filterUnreadOnly}
       bind:filterAddrOpen
       bind:filterDateOpen
       bind:filterAddrs
@@ -2051,6 +2065,7 @@
       onSearchInput={onSearchInput}
       onToggleAddrFilter={toggleAddrFilter}
       onToggleDateFilter={toggleDateFilter}
+      onToggleUnreadFilter={toggleUnreadFilter}
       onAddrInput={onAddrInput}
       onRunSearch={runSearch}
       onMessageRowClick={handleMessageRowClick}

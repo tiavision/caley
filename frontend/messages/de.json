@@ -222,6 +222,7 @@
   "mail_noResultsFiltered": "Keine Ergebnisse für aktuelle Filter.",
   "mail_filterBySender": "Nach Absender/Empfänger filtern",
   "mail_filterByDate": "Nach Datum filtern",
+  "mail_filterUnread": "Nur ungelesene",
   "mail_filterAddrPlaceholder": "Kontakte suchen…",
   "mail_filterAddAddr": "Adresse hinzufügen",
   "mail_filterDateFrom": "Von",
