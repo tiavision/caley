@@ -463,77 +463,79 @@
     composeSending = true;
     composeError = '';
     try {
-      let r: Response;
-      if (composeEncrypt || composeSign) {
-        const identity = identities.find(item => item.identity_id === composeIdentityId);
-        if (!identity) throw new Error(tl('pgp_composeIdentityMissing'));
-        const to = parseEnvelopeAddresses(composeTo);
-        const cc = parseEnvelopeAddresses(composeCc);
-        const bcc = parseEnvelopeAddresses(composeBcc);
+      const identity = identities.find(item => item.identity_id === composeIdentityId);
+      if (!identity) throw new Error(tl('pgp_composeIdentityMissing'));
+      const to = parseEnvelopeAddresses(composeTo);
+      const cc = parseEnvelopeAddresses(composeCc);
+      const bcc = parseEnvelopeAddresses(composeBcc);
+
+      let signingKey = composeSign ? signingKeyForIdentity(composeIdentityId) : null;
+      if (composeSign && !signingKey && composeCanSign) {
+        await unlockVaultForSigning();
+        signingKey = signingKeyForIdentity(composeIdentityId);
+      }
+      if (composeSign && !signingKey) throw new Error(isUnlocked() ? tl('pgp_composeNoSigningKey') : tl('pgp_composeUnlockSigningKey'));
+
+      let encryptionKeys: openpgp.PublicKey[] = [];
+      if (composeEncrypt) {
         const allRecipients = [...to, ...cc, ...bcc];
         if (allRecipients.length === 0) throw new Error(tl('pgp_composeNoRecipients'));
-
-        let signingKey = composeSign ? signingKeyForIdentity(composeIdentityId) : null;
-        if (composeSign && !signingKey && composeCanSign) {
-          await unlockVaultForSigning();
-          signingKey = signingKeyForIdentity(composeIdentityId);
-        }
-        if (composeSign && !signingKey) throw new Error(isUnlocked() ? tl('pgp_composeNoSigningKey') : tl('pgp_composeUnlockSigningKey'));
-
-        let encryptionKeys: openpgp.PublicKey[] = [];
-        if (composeEncrypt) {
-          const selection = composeEncryptionSelection(
-            composeIdentityId,
-            composeTo,
-            composeCc,
-            composeBcc,
-            await trustedPublicKeys(),
-          );
-          if (selection.missing.length > 0) throw new Error(tl('pgp_composeMissingKeys', { emails: selection.missing.join(', ') }));
-          encryptionKeys = selection.keys;
-        }
-        const rawMime = await buildProtectedMime({
-          identity,
-          to,
-          cc,
-          subject: composeSubject,
-          body: composeBody,
-          inReplyTo: composeInReplyTo,
-          references: composeReferences,
-          attachments: composeAttachments,
-          encrypt: composeEncrypt,
-          sign: composeSign,
-          encryptionKeys,
-          signingKey,
-        });
-        const fd = new FormData();
-        fd.append('identity_id', composeIdentityId);
-        fd.append('envelope_to', JSON.stringify(to));
-        fd.append('envelope_cc', JSON.stringify(cc));
-        fd.append('envelope_bcc', JSON.stringify(bcc));
-        fd.append('raw_mime', new Blob([rawMime], { type: 'message/rfc822' }), 'message.eml');
-        r = await apiFetch('/api/email/send-raw', { method: 'POST', body: fd });
-      } else {
-        const fd = new FormData();
-        fd.append('identity_id', composeIdentityId);
-        fd.append('to', composeTo);
-        fd.append('cc', composeCc);
-        fd.append('bcc', composeBcc);
-        fd.append('subject', composeSubject);
-        fd.append('body', composeBody);
-        if (composeInReplyTo) fd.append('in_reply_to', composeInReplyTo);
-        if (composeReferences) fd.append('references', composeReferences);
-        if (composeForwardHtml) fd.append('forward_html', composeForwardHtml);
-        if (composeForwardRef) {
-          fd.append('forward_account_id', composeForwardRef.account_id);
-          fd.append('forward_mailbox', composeForwardRef.mailbox);
-          fd.append('forward_uid', String(composeForwardRef.uid));
-        }
-        for (const file of composeAttachments) {
-          fd.append('attachment', file, file.name);
-        }
-        r = await apiFetch('/api/email/send', { method: 'POST', body: fd });
+        const selection = composeEncryptionSelection(
+          composeIdentityId,
+          composeTo,
+          composeCc,
+          composeBcc,
+          await trustedPublicKeys(),
+        );
+        if (selection.missing.length > 0) throw new Error(tl('pgp_composeMissingKeys', { emails: selection.missing.join(', ') }));
+        encryptionKeys = selection.keys;
       }
+
+      // Fetch inline images referenced in the forward HTML so they can be embedded in the MIME.
+      const inlineImages: Array<{ cid: string; contentType: string; bytes: Uint8Array }> = [];
+      if (composeForwardHtml && composeForwardRef) {
+        const cids = [...new Set(
+          [...composeForwardHtml.matchAll(/\bcid:([^"'\s>)]+)/gi)].map(m => m[1])
+        )];
+        for (const cid of cids) {
+          try {
+            const url = `/api/email/proxy-image?account_id=${encodeURIComponent(composeForwardRef.account_id)}&mailbox=${encodeURIComponent(composeForwardRef.mailbox)}&uid=${composeForwardRef.uid}&cid=${encodeURIComponent(cid)}`;
+            const res = await apiFetch(url);
+            if (res.ok) {
+              inlineImages.push({
+                cid,
+                contentType: res.headers.get('content-type') ?? 'image/jpeg',
+                bytes: new Uint8Array(await res.arrayBuffer()),
+              });
+            }
+          } catch { /* skip on error */ }
+        }
+      }
+
+      const rawMime = await buildProtectedMime({
+        identity,
+        to,
+        cc,
+        subject: composeSubject,
+        body: composeBody,
+        bodyHtml: composeForwardHtml ?? undefined,
+        inlineImages,
+        inReplyTo: composeInReplyTo,
+        references: composeReferences,
+        attachments: composeAttachments,
+        encrypt: composeEncrypt,
+        sign: composeSign,
+        encryptionKeys,
+        signingKey,
+      });
+
+      const fd = new FormData();
+      fd.append('identity_id', composeIdentityId);
+      fd.append('envelope_to', JSON.stringify(to));
+      fd.append('envelope_cc', JSON.stringify(cc));
+      fd.append('envelope_bcc', JSON.stringify(bcc));
+      fd.append('raw_mime', new Blob([rawMime], { type: 'message/rfc822' }), 'message.eml');
+      const r = await apiFetch('/api/email/send-raw', { method: 'POST', body: fd });
       if (!r.ok) {
         const text = await r.text();
         composeError = text || tl('mail_sendError');

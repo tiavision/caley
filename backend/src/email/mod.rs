@@ -25,7 +25,7 @@ pub use messages::{
     delete_message, get_message, get_thread, list_messages, move_message, search, suggest_addrs,
     update_flags,
 };
-pub use send::{autodiscover_handler, send_email, send_raw_email};
+pub use send::{autodiscover_handler, send_raw_email};
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
 

@@ -11,6 +11,8 @@ export interface ProtectedComposeMessage {
   cc: string[];
   subject: string;
   body: string;
+  bodyHtml?: string;
+  inlineImages?: Array<{ cid: string; contentType: string; bytes: Uint8Array }>;
   inReplyTo: string | null;
   references: string | null;
   attachments: File[];
@@ -78,22 +80,57 @@ async function innerEntity(message: ProtectedComposeMessage): Promise<string> {
       { type: 'application/pgp-keys' },
     ));
   }
-  if (attachments.length === 0) {
-    return `Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${message.body.replace(/\r?\n/g, '\r\n')}\r\n`;
+
+  const textPart =
+    `Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n` +
+    `${message.body.replace(/\r?\n/g, '\r\n')}\r\n`;
+
+  let bodyPart: string;
+  if (message.bodyHtml) {
+    const htmlBody = message.bodyHtml.replace(/\r?\n/g, '\r\n');
+    let htmlPart: string;
+    if (message.inlineImages && message.inlineImages.length > 0) {
+      const relBoundary = boundary('related');
+      htmlPart =
+        `Content-Type: multipart/related; boundary="${relBoundary}"\r\n\r\n` +
+        `--${relBoundary}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${htmlBody}\r\n`;
+      for (const img of message.inlineImages) {
+        const ct = safeHeader(img.contentType || 'image/jpeg');
+        const cid = safeHeader(img.cid);
+        htmlPart +=
+          `--${relBoundary}\r\nContent-Type: ${ct}\r\nContent-Transfer-Encoding: base64\r\n` +
+          `Content-ID: <${cid}>\r\nContent-Disposition: inline\r\n\r\n${base64Lines(img.bytes)}\r\n`;
+      }
+      htmlPart += `--${relBoundary}--\r\n`;
+    } else {
+      htmlPart = `Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${htmlBody}\r\n`;
+    }
+    const altBoundary = boundary('alternative');
+    bodyPart =
+      `Content-Type: multipart/alternative; boundary="${altBoundary}"\r\n\r\n` +
+      `--${altBoundary}\r\n${textPart}` +
+      `--${altBoundary}\r\n${htmlPart}` +
+      `--${altBoundary}--\r\n`;
+  } else {
+    bodyPart = textPart;
   }
 
-  const partBoundary = boundary('mixed');
-  let entity = `Content-Type: multipart/mixed; boundary="${partBoundary}"\r\n\r\n`;
-  entity += `--${partBoundary}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${message.body.replace(/\r?\n/g, '\r\n')}\r\n`;
+  if (attachments.length === 0) {
+    return bodyPart;
+  }
+
+  const mixedBoundary = boundary('mixed');
+  let entity = `Content-Type: multipart/mixed; boundary="${mixedBoundary}"\r\n\r\n`;
+  entity += `--${mixedBoundary}\r\n${bodyPart}`;
   for (const attachment of attachments) {
     const filename = safeHeader(attachment.name).replace(/"/g, '');
     const contentType = safeHeader(attachment.type || 'application/octet-stream');
     const content = new Uint8Array(await attachment.arrayBuffer());
-    entity += `--${partBoundary}\r\nContent-Type: ${contentType}; name="${filename}"\r\n`;
+    entity += `--${mixedBoundary}\r\nContent-Type: ${contentType}; name="${filename}"\r\n`;
     entity += `Content-Disposition: attachment; filename="${filename}"\r\nContent-Transfer-Encoding: base64\r\n\r\n`;
     entity += `${base64Lines(content)}\r\n`;
   }
-  entity += `--${partBoundary}--\r\n`;
+  entity += `--${mixedBoundary}--\r\n`;
   return entity;
 }
 
@@ -118,7 +155,10 @@ export async function buildProtectedMime(message: ProtectedComposeMessage): Prom
     return encoder.encode(headers + body);
   }
 
-  if (!message.sign || !message.signingKey) throw new Error('protected MIME needs sign or encrypt');
+  if (!message.sign || !message.signingKey) {
+    // Plain message: return headers + inner entity directly.
+    return encoder.encode(headers + inner);
+  }
   const signedMessage = await openpgp.createMessage({ binary: encoder.encode(inner) });
   const signature = await openpgp.sign({
     message: signedMessage,

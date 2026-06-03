@@ -55,41 +55,6 @@ fn find_bytes_by_cid(eml_bytes: &[u8], cid: &str) -> Option<Vec<u8>> {
     None
 }
 
-/// Fetches the raw bytes and content-type for each CID in `cids`, reading from
-/// the cached EML file of the specified message.  Returns `(cid, content_type, bytes)`
-/// triples; CIDs that cannot be resolved are silently skipped.
-pub async fn fetch_inline_parts_for_cids(
-    db: &sqlx::SqlitePool,
-    data_dir: &std::path::Path,
-    account_id: &str,
-    mailbox: &str,
-    uid: u32,
-    cids: &[String],
-) -> Vec<(String, String, Vec<u8>)> {
-    let compressed = match tokio::fs::read(eml_path(data_dir, account_id, mailbox, uid)).await {
-        Ok(b) => b,
-        Err(_) => return vec![],
-    };
-    let eml = match decompress_eml(&compressed) {
-        Ok(b) => b,
-        Err(_) => return vec![],
-    };
-    let mut parts = Vec::new();
-    for cid in cids {
-        let att = match email_db::get_attachment_by_cid(db, account_id, mailbox, uid, cid).await {
-            Ok(Some(a)) => a,
-            _ => continue,
-        };
-        let bytes = match extract_part_bytes(&eml, att.part_index as usize) {
-            Some(b) => b,
-            None => continue,
-        };
-        let ct = att.content_type.unwrap_or_else(|| "image/jpeg".to_owned());
-        parts.push((cid.clone(), ct, bytes));
-    }
-    parts
-}
-
 // ── Image proxy ───────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
