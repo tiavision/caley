@@ -92,7 +92,7 @@ jobs:
               "tag_name": tag,
               "target_commitish": "main",
               "name": tag,
-              "body": f"Container image:\n\n`{image}`",
+              "body": f"**Container image**:\n\n`{image}`",
               "draft": False,
               "prerelease": prerelease,
           }))
