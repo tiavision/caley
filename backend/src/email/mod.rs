@@ -76,6 +76,7 @@ pub async fn save_account(
     user: CurrentUser,
     Json(body): Json<AccountBody>,
 ) -> impl IntoResponse {
+    let is_new = body.account_id.is_none();
     let account_id = body
         .account_id
         .unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -123,6 +124,24 @@ pub async fn save_account(
     {
         eprintln!("[email] save_account error: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+    }
+
+    if is_new {
+        if let Some(name) = body.sender_name.filter(|n| !n.is_empty()) {
+            if let Err(e) = email_db::upsert_identity(
+                &state.db,
+                &Uuid::new_v4().to_string(),
+                &account_id,
+                &user.user_id,
+                &name,
+                &body.username,
+                true,
+            )
+            .await
+            {
+                eprintln!("[email] save_account: failed to create default identity: {e}");
+            }
+        }
     }
 
     state
