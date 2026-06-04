@@ -69,6 +69,28 @@ pub async fn fetch_all_uids(session: &mut ImapSession) -> Result<Vec<u32>> {
     Ok(v)
 }
 
+/// Returns true when the selected mailbox advertises save-date storage.
+pub async fn selected_mailbox_supports_savedate(session: &mut ImapSession) -> Result<bool> {
+    if !session.capabilities().await?.has_str("SAVEDATE") {
+        return Ok(false);
+    }
+    let all_uids = session.uid_search("ALL").await?;
+    if all_uids.is_empty() {
+        return Ok(true);
+    }
+    Ok(!session.uid_search("SAVEDATESUPPORTED").await?.is_empty())
+}
+
+/// Finds UIDs whose RFC 8514 save date is before the given IMAP date.
+pub async fn search_saved_before(session: &mut ImapSession, imap_date: &str) -> Result<Vec<u32>> {
+    let uid_set = session
+        .uid_search(format!("SAVEDBEFORE {imap_date}"))
+        .await?;
+    let mut v: Vec<u32> = uid_set.into_iter().collect();
+    v.sort_unstable();
+    Ok(v)
+}
+
 fn flag_name(flag: async_imap::types::Flag<'_>) -> String {
     match flag {
         async_imap::types::Flag::Seen => "\\Seen".to_owned(),
@@ -273,6 +295,33 @@ pub async fn delete_on_server(session: &mut ImapSession, uid: u32) -> Result<()>
     let uidplus = session.capabilities().await?.has_str("UIDPLUS");
     if uidplus {
         let mut stream = Box::pin(session.uid_expunge(&uid_str).await?);
+        while let Some(r) = stream.next().await {
+            let _ = r;
+        }
+    } else {
+        let mut stream = Box::pin(session.expunge().await?);
+        while let Some(r) = stream.next().await {
+            let _ = r;
+        }
+    }
+    Ok(())
+}
+
+/// Stores the \Deleted flag for a UID set and expunges it on the server.
+pub async fn delete_on_server_batch(session: &mut ImapSession, uids: &[u32]) -> Result<()> {
+    if uids.is_empty() {
+        return Ok(());
+    }
+    let uid_set = uids_to_set(uids);
+    {
+        let mut stream = session.uid_store(&uid_set, "+FLAGS (\\Deleted)").await?;
+        while let Some(r) = stream.next().await {
+            let _ = r;
+        }
+    }
+    let uidplus = session.capabilities().await?.has_str("UIDPLUS");
+    if uidplus {
+        let mut stream = Box::pin(session.uid_expunge(&uid_set).await?);
         while let Some(r) = stream.next().await {
             let _ = r;
         }

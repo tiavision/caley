@@ -328,6 +328,24 @@ pub async fn get_cached_uids(
     Ok(rows.iter().map(|r| r.get::<i64, _>(0) as u32).collect())
 }
 
+pub async fn get_cached_uids_sent_before(
+    pool: &SqlitePool,
+    account_id: &str,
+    mailbox: &str,
+    cutoff_ts: i64,
+) -> Result<Vec<u32>> {
+    let rows = sqlx::query(
+        "SELECT uid FROM cached_messages
+         WHERE account_id = ? AND mailbox = ? AND sent_at IS NOT NULL AND sent_at < ?",
+    )
+    .bind(account_id)
+    .bind(mailbox)
+    .bind(cutoff_ts)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(|r| r.get::<i64, _>(0) as u32).collect())
+}
+
 pub async fn get_cached_uids_missing_body(
     pool: &SqlitePool,
     account_id: &str,

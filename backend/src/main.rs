@@ -291,6 +291,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/email/message/flags", patch(email::update_flags))
         .route("/api/email/message/move", post(email::move_message))
         .route("/api/email/message", delete(email::delete_message))
+        .route("/api/email/trash/empty", post(email::empty_trash))
         .route(
             "/api/email/send-raw",
             post(email::send_raw_email)

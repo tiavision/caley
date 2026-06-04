@@ -371,6 +371,7 @@
   let composeDialog: MailComposeDialog;
   let folderDialog: MailFolderDialog;
   let threadDialog: HTMLDialogElement;
+  let emptyTrashDialog: HTMLDialogElement;
   let importDialog: ImportDialog;
   let sidebarOpen = false;
 
@@ -459,6 +460,10 @@
   let actionsOpen = false;
   let moveSubmenuOpen = false;
   let metaExpanded = false;
+  let emptyTrashChoice: '7' | '30' | '90' | 'custom' = '30';
+  let emptyTrashCustomDays = '30';
+  let emptyTrashBusy = false;
+  let emptyTrashError = '';
 
   // Drag & drop state
   let draggedMessage: Message | null = null;
@@ -1482,6 +1487,56 @@
     await removeVisibleMessage(msg);
   }
 
+  function openEmptyTrashDialog() {
+    if (!showEmptyTrash) return;
+    emptyTrashChoice = '30';
+    emptyTrashCustomDays = '30';
+    emptyTrashError = '';
+    emptyTrashBusy = false;
+    emptyTrashDialog?.showModal();
+  }
+
+  function closeEmptyTrashDialog() {
+    if (emptyTrashBusy) return;
+    emptyTrashDialog?.close();
+  }
+
+  async function confirmEmptyTrash() {
+    if (!selectedAccountId || !selectedMailbox || !emptyTrashDaysValid) return;
+    emptyTrashBusy = true;
+    emptyTrashError = '';
+    const accountId = selectedAccountId;
+    const mailbox = selectedMailbox;
+    try {
+      const response = await apiFetch('/api/email/trash/empty', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: accountId, mailbox, days: emptyTrashDays }),
+      });
+      if (!response.ok) {
+        let error = '';
+        try {
+          error = (await response.json()).error || '';
+        } catch {}
+        emptyTrashError = error === 'savedate_unsupported'
+          ? tl('mail_emptyTrashUnsupported')
+          : tl('mail_emptyTrashError');
+        return;
+      }
+      if (selectedMessage?.account_id === accountId && selectedMessage.mailbox === mailbox) {
+        clearOpenMessage();
+      }
+      clearMarkedSelection();
+      await loadMessages();
+      await loadUnreadCounts();
+      emptyTrashDialog?.close();
+    } catch {
+      emptyTrashError = tl('mail_emptyTrashError');
+    } finally {
+      emptyTrashBusy = false;
+    }
+  }
+
   async function moveMessage(msg: Message, destMailbox: string) {
     await apiFetch('/api/email/message/move', {
       method: 'POST',
@@ -1929,6 +1984,9 @@
   }
 
   $: isSentFolder = !!(selectedMailbox && /sent/i.test(selectedMailbox));
+  $: showEmptyTrash = !!selectedAccountId && !!selectedMailbox && !selectedFolderId && folderKind(selectedMailbox) === 'trash';
+  $: emptyTrashDays = emptyTrashChoice === 'custom' ? Number(emptyTrashCustomDays) : Number(emptyTrashChoice);
+  $: emptyTrashDaysValid = Number.isInteger(emptyTrashDays) && emptyTrashDays > 0 && emptyTrashDays <= 3650;
   $: selectedMessages = messages.filter(msg => markedMessageKeys.has(messageKey(msg)));
   $: bulkAccountId = selectedMessages.length > 0 &&
       selectedMessages.every(msg => msg.account_id === selectedMessages[0].account_id)
@@ -2062,6 +2120,7 @@
       {messagesLoading}
       {searching}
       bind:searchQuery
+      {showEmptyTrash}
       {selectedMessage}
       bind:listCursor
       {markedMessageKeys}
@@ -2114,6 +2173,7 @@
       onResizeWithKeyboard={resizeWithKeyboard}
       onDragStart={(msg, e) => { draggedMessage = msg; if (e.dataTransfer) e.dataTransfer.effectAllowed = "move"; }}
       onDragEnd={() => { draggedMessage = null; dragOverMailbox = null; }}
+      onEmptyTrash={openEmptyTrashDialog}
     />
     {/if}
 
@@ -2508,6 +2568,63 @@
   {locale}
   onimported={() => { void loadCalendarData(); }}
 />
+
+<!-- ── Empty trash dialog ─────────────────────────────────────────────────── -->
+<dialog
+  bind:this={emptyTrashDialog}
+  class="empty-trash-dialog"
+  on:click={(e) => { if (e.target === e.currentTarget) closeEmptyTrashDialog(); }}
+  on:cancel={(e) => { if (emptyTrashBusy) e.preventDefault(); }}
+>
+  <article>
+    <header>
+      <h3>{tl('mail_emptyTrash')}</h3>
+      <button class="close-btn" aria-label={tl('mail_close')} on:click={closeEmptyTrashDialog} disabled={emptyTrashBusy}></button>
+    </header>
+    <div class="empty-trash-body">
+      <p>{tl('mail_emptyTrashPrompt')}</p>
+      <div class="empty-trash-options" role="radiogroup" aria-label={tl('mail_emptyTrashOlderThan')}>
+        <label>
+          <input type="radio" bind:group={emptyTrashChoice} value="7" disabled={emptyTrashBusy} />
+          <span>{tl('mail_emptyTrash7')}</span>
+        </label>
+        <label>
+          <input type="radio" bind:group={emptyTrashChoice} value="30" disabled={emptyTrashBusy} />
+          <span>{tl('mail_emptyTrash30')}</span>
+        </label>
+        <label>
+          <input type="radio" bind:group={emptyTrashChoice} value="90" disabled={emptyTrashBusy} />
+          <span>{tl('mail_emptyTrash90')}</span>
+        </label>
+        <label class="empty-trash-custom">
+          <input type="radio" bind:group={emptyTrashChoice} value="custom" disabled={emptyTrashBusy} />
+          <span>{tl('mail_emptyTrashCustom')}</span>
+          <input
+            type="number"
+            min="1"
+            max="3650"
+            step="1"
+            bind:value={emptyTrashCustomDays}
+            disabled={emptyTrashBusy || emptyTrashChoice !== 'custom'}
+            aria-label={tl('mail_emptyTrashCustomDays')}
+          />
+        </label>
+      </div>
+      {#if emptyTrashChoice === 'custom' && !emptyTrashDaysValid}
+        <p class="empty-trash-error">{tl('mail_emptyTrashInvalidDays')}</p>
+      {:else if emptyTrashError}
+        <p class="empty-trash-error">{emptyTrashError}</p>
+      {/if}
+    </div>
+    <footer>
+      <button class="secondary" on:click={closeEmptyTrashDialog} disabled={emptyTrashBusy}>{tl('mail_cancel')}</button>
+      <button class="empty-trash-confirm" on:click={confirmEmptyTrash} disabled={emptyTrashBusy || !emptyTrashDaysValid}>
+        <UiIcon name="trash" size={15} strokeWidth={2.2} />
+        {emptyTrashBusy ? tl('mail_emptyTrashDeleting') : tl('mail_emptyTrashConfirm')}
+      </button>
+    </footer>
+  </article>
+</dialog>
 
 <!-- ── Conversation threads dialog ───────────────────────────────────────── -->
 <dialog
@@ -3335,6 +3452,93 @@
   .origins-dialog {
     width: 480px;
     max-width: 95vw;
+  }
+
+  .empty-trash-dialog {
+    width: 420px;
+    max-width: 95vw;
+  }
+
+  .empty-trash-dialog article {
+    margin: 0;
+  }
+
+  .empty-trash-dialog header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--pico-muted-border-color, #eee);
+  }
+
+  .empty-trash-dialog header h3 {
+    margin: 0;
+    font-size: 1rem;
+  }
+
+  .empty-trash-body {
+    padding: 1rem;
+  }
+
+  .empty-trash-body p {
+    margin: 0 0 0.75rem;
+    font-size: 0.9rem;
+    color: var(--pico-muted-color, #666);
+  }
+
+  .empty-trash-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .empty-trash-options label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid var(--pico-muted-border-color, #ddd);
+    border-radius: var(--pico-border-radius, 4px);
+    font-size: 0.9rem;
+  }
+
+  .empty-trash-options input[type="radio"] {
+    margin: 0;
+  }
+
+  .empty-trash-custom input[type="number"] {
+    width: 5.5rem;
+    margin: 0 0 0 auto;
+    height: 2rem;
+    padding: 0.25rem 0.45rem;
+    font-size: 0.85rem;
+  }
+
+  .empty-trash-error {
+    margin: 0.75rem 0 0 !important;
+    color: var(--pico-del-color, #c0392b) !important;
+  }
+
+  .empty-trash-dialog footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--pico-muted-border-color, #eee);
+  }
+
+  .empty-trash-dialog footer button {
+    margin: 0;
+  }
+
+  .empty-trash-confirm {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: var(--pico-del-color, #c0392b);
+    border-color: var(--pico-del-color, #c0392b);
+    color: #fff;
   }
 
   .origins-dialog article {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { makeTl } from '../../lib/i18n.ts';
+  import UiIcon from '../UiIcon.svelte';
   import { sameMessage, messageKey, senderName, formatDate, folderKind } from './mailUtils.ts';
   import type { Account, Message, VirtualFolder } from './MailTypes.ts';
 
@@ -22,6 +23,7 @@
   export let messagesLoading: boolean = false;
   export let searching: boolean = false;
   export let searchQuery: string = '';
+  export let showEmptyTrash: boolean = false;
 
   // ── Selection state ───────────────────────────────────────────────────────
   export let selectedMessage: Message | null = null;
@@ -86,6 +88,7 @@
   export let onResizeWithKeyboard: (which: 'list', e: KeyboardEvent) => void = () => {};
   export let onDragStart: (msg: Message, e: DragEvent) => void = () => {};
   export let onDragEnd: () => void = () => {};
+  export let onEmptyTrash: () => void = () => {};
 </script>
 
 <!-- ── Message list ────────────────────────────────────────────────────── -->
@@ -104,6 +107,16 @@
       {/if}
       {#if selectedFolderId || selectedMailbox}
         <div class="header-filter-actions">
+          {#if showEmptyTrash}
+            <button
+              class="empty-trash-btn"
+              title={tl('mail_emptyTrash')}
+              aria-label={tl('mail_emptyTrash')}
+              on:click|stopPropagation={onEmptyTrash}
+            >
+              <UiIcon name="trash" size={15} strokeWidth={2.2} />
+            </button>
+          {/if}
           <div class="search-filter-wrap" bind:this={addrFilterEl}>
             <button
               class="filter-icon-btn"
@@ -404,7 +417,7 @@
   .header-filter-actions {
     display: flex;
     align-items: center;
-    gap: 0;
+    gap: 0.25rem;
     flex-shrink: 0;
   }
 
@@ -462,6 +475,31 @@
     color: var(--pico-primary);
     border-color: var(--pico-primary);
     background: color-mix(in srgb, var(--pico-primary) 10%, transparent);
+  }
+
+  .empty-trash-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    width: 2rem;
+    height: 2rem;
+    margin: 0;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--pico-del-color, #c0392b) 45%, transparent);
+    border-radius: var(--pico-border-radius, 4px);
+    background: color-mix(in srgb, var(--pico-del-color, #c0392b) 8%, transparent);
+    color: var(--pico-del-color, #c0392b);
+    font-size: 0.78rem;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .empty-trash-btn:hover {
+    background: var(--pico-del-color, #c0392b);
+    border-color: var(--pico-del-color, #c0392b);
+    color: #fff;
   }
 
   .filter-popover {

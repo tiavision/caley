@@ -5,6 +5,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json, Response},
 };
+use chrono::{Datelike, Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -346,15 +347,7 @@ pub async fn delete_message(
         }
     };
 
-    let mailbox_leaf = q
-        .mailbox
-        .rsplit(|c| c == '/' || c == '.')
-        .next()
-        .unwrap_or(&q.mailbox)
-        .to_ascii_lowercase();
-    let is_trash = mailbox_leaf.contains("trash")
-        || mailbox_leaf.contains("deleted")
-        || mailbox_leaf.contains("bin");
+    let is_trash = is_trash_mailbox_name(&q.mailbox);
 
     let trash_mailbox = if is_trash {
         None
@@ -409,6 +402,164 @@ pub async fn delete_message(
     );
 
     StatusCode::NO_CONTENT.into_response()
+}
+
+#[derive(Deserialize)]
+pub struct EmptyTrashBody {
+    pub account_id: String,
+    pub mailbox: String,
+    pub days: i64,
+}
+
+pub async fn empty_trash(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<EmptyTrashBody>,
+) -> impl IntoResponse {
+    if body.days <= 0 || body.days > 3650 {
+        return (StatusCode::BAD_REQUEST, "days must be between 1 and 3650").into_response();
+    }
+    if !is_trash_mailbox_name(&body.mailbox) {
+        return (StatusCode::BAD_REQUEST, "mailbox is not trash").into_response();
+    }
+
+    let account = match email_db::get_account(
+        &state.db,
+        &body.account_id,
+        &user.user_id,
+        &state.encryption_key,
+    )
+    .await
+    {
+        Ok(Some(a)) => a,
+        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
+        Err(e) => {
+            eprintln!("[email] empty_trash account lookup: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+    };
+
+    let deleted_uids = if state.demo_mode {
+        let cutoff_ts = Utc::now().timestamp() - body.days * 24 * 60 * 60;
+        match email_db::get_cached_uids_sent_before(
+            &state.db,
+            &body.account_id,
+            &body.mailbox,
+            cutoff_ts,
+        )
+        .await
+        {
+            Ok(uids) => uids,
+            Err(e) => {
+                eprintln!("[email] empty_trash demo cache query: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+            }
+        }
+    } else {
+        let mut session = match imap_client::connect(
+            &account.host,
+            account.port as u16,
+            &account.username,
+            &account.password,
+        )
+        .await
+        {
+            Ok(session) => session,
+            Err(e) => {
+                eprintln!("[email] empty_trash connect: {e}");
+                return (StatusCode::BAD_GATEWAY, "imap connection failed").into_response();
+            }
+        };
+
+        let result = async {
+            imap_client::select_mailbox(&mut session, &body.mailbox).await?;
+            if !imap_client::selected_mailbox_supports_savedate(&mut session).await? {
+                return Ok::<_, anyhow::Error>(None);
+            }
+            let cutoff_date = imap_savedbefore_date(body.days);
+            let uids = imap_client::search_saved_before(&mut session, &cutoff_date).await?;
+            imap_client::delete_on_server_batch(&mut session, &uids).await?;
+            Ok(Some(uids))
+        }
+        .await;
+        let _ = session.logout().await;
+
+        match result {
+            Ok(Some(uids)) => uids,
+            Ok(None) => {
+                return (
+                    StatusCode::PRECONDITION_FAILED,
+                    Json(json!({ "error": "savedate_unsupported" })),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                eprintln!("[email] empty_trash imap: {e}");
+                return (StatusCode::BAD_GATEWAY, "imap delete failed").into_response();
+            }
+        }
+    };
+
+    if let Err(e) =
+        delete_cached_messages_and_files(&state, &body.account_id, &body.mailbox, &deleted_uids)
+            .await
+    {
+        eprintln!("[email] empty_trash cache cleanup: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+    }
+
+    state.sse_broadcaster.send(
+        &user.user_id,
+        SseMessage::EmailsRefetch {
+            account_id: body.account_id,
+            mailbox: body.mailbox,
+        },
+    );
+
+    Json(json!({ "deleted": deleted_uids.len() })).into_response()
+}
+
+fn is_trash_mailbox_name(mailbox: &str) -> bool {
+    let mailbox_leaf = mailbox
+        .rsplit(|c| c == '/' || c == '.')
+        .next()
+        .unwrap_or(mailbox)
+        .to_ascii_lowercase();
+    mailbox_leaf.contains("trash")
+        || mailbox_leaf.contains("deleted")
+        || mailbox_leaf.contains("bin")
+}
+
+fn imap_savedbefore_date(days: i64) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let cutoff = Utc::now().date_naive() - Duration::days(days);
+    format!(
+        "{}-{}-{}",
+        cutoff.day(),
+        MONTHS[cutoff.month0() as usize],
+        cutoff.year()
+    )
+}
+
+async fn delete_cached_messages_and_files(
+    state: &AppState,
+    account_id: &str,
+    mailbox: &str,
+    uids: &[u32],
+) -> anyhow::Result<()> {
+    if uids.is_empty() {
+        return Ok(());
+    }
+    for uid in uids {
+        let _ = tokio::fs::remove_file(eml_path(&state.data_dir, account_id, mailbox, *uid)).await;
+    }
+    for chunk in uids.chunks(500) {
+        email_db::delete_attachments_by_uids(&state.db, account_id, mailbox, chunk).await?;
+        email_db::delete_messages_by_uids(&state.db, account_id, mailbox, chunk).await?;
+    }
+    Ok(())
 }
 
 // ── Move ──────────────────────────────────────────────────────────────────────
