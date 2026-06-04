@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import * as openpgp from 'openpgp';
 import { buildProtectedMime, type ProtectedComposeMessage } from './compose';
 import { verifySignedMessage } from './keyring';
+import { autocryptKeys } from './autocrypt';
 
 // Uses real openpgp crypto (no mock) to guard the PGP/MIME signing pipeline:
 // the signed octets must match exactly what other clients verify, and our
@@ -40,6 +41,21 @@ describe('PGP/MIME sign + verify', () => {
     const mime = await buildProtectedMime(baseMessage(privateKey));
 
     expect(await verifySignedMessage(mime, [publicKey])).toContain('verified');
+  });
+
+  it('advertises the key via Autocrypt header, not an attachment (K-9 #6511)', async () => {
+    const { privateKey, publicKey } = await signingKey();
+    const mime = await buildProtectedMime(baseMessage(privateKey));
+    const text = new TextDecoder().decode(mime);
+
+    // The key-attachment is what breaks Thunderbird mobile — it must be gone.
+    expect(text).not.toContain('application/pgp-keys');
+    expect(text).not.toContain('openpgp-key.asc');
+
+    // It must instead ride in an Autocrypt header that round-trips to our key.
+    expect(text).toMatch(/^Autocrypt: addr=/m);
+    const harvested = await autocryptKeys(mime, baseMessage(privateKey).identity.email);
+    expect(harvested.map(k => k.getFingerprint())).toContain(publicKey.getFingerprint());
   });
 
   it('declares a micalg matching the real hash and emits CRLF-only armor', async () => {

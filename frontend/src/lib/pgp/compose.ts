@@ -162,18 +162,28 @@ function messageHeaders(message: ProtectedComposeMessage): string {
   ];
   if (message.inReplyTo) headers.push(`In-Reply-To: ${asciiHeader(message.inReplyTo)}`);
   if (message.references) headers.push(`References: ${asciiHeader(message.references)}`);
+  const autocrypt = autocryptHeader(message);
+  if (autocrypt) headers.push(autocrypt);
   return `${headers.join('\r\n')}\r\n`;
+}
+
+// Advertise the sender's key via an Autocrypt header instead of attaching it to
+// the signed body. K-9 / Thunderbird for Android fails signature verification
+// when a public key is attached to a signed message (thundernest/k-9#6511); the
+// header sits outside the signature, so it avoids that bug while still letting
+// receivers (including caley's own autocryptKeys harvester) import the key.
+function autocryptHeader(message: ProtectedComposeMessage): string | null {
+  if (!message.signingKey) return null;
+  const addr = asciiAddrSpec(message.identity.email);
+  if (!addr) return null;
+  // RFC 5322 folding: continuation lines start with whitespace; Autocrypt
+  // parsers strip the folding before base64-decoding the keydata.
+  const keydata = base64Lines(message.signingKey.toPublic().write()).replace(/\r\n/g, '\r\n ');
+  return `Autocrypt: addr=${addr};\r\n keydata=${keydata}`;
 }
 
 async function innerEntity(message: ProtectedComposeMessage): Promise<string> {
   const attachments = [...message.attachments];
-  if (message.sign && message.signingKey) {
-    attachments.push(new File(
-      [message.signingKey.toPublic().armor()],
-      'openpgp-key.asc',
-      { type: 'application/pgp-keys' },
-    ));
-  }
 
   const textPart =
     `Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n` +
