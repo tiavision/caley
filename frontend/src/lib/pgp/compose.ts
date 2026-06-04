@@ -150,10 +150,10 @@ export function parseEnvelopeAddresses(value: string): string[] {
     .filter(address => address.length > 0);
 }
 
-function messageHeaders(message: ProtectedComposeMessage): string {
+function messageHeaderLines(message: ProtectedComposeMessage, date: string, messageId: string): string[] {
   const headers = [
-    `Date: ${new Date().toUTCString()}`,
-    `Message-ID: <${crypto.randomUUID()}@caley.local>`,
+    `Date: ${date}`,
+    `Message-ID: ${messageId}`,
     `From: ${mailbox(message.identity)}`,
     `To: ${addressListHeader(message.to)}`,
     ...(message.cc.length ? [`Cc: ${addressListHeader(message.cc)}`] : []),
@@ -164,7 +164,20 @@ function messageHeaders(message: ProtectedComposeMessage): string {
   if (message.references) headers.push(`References: ${asciiHeader(message.references)}`);
   const autocrypt = autocryptHeader(message);
   if (autocrypt) headers.push(autocrypt);
+  return headers;
+}
+
+function messageHeaders(headers: string[]): string {
   return `${headers.join('\r\n')}\r\n`;
+}
+
+function protectedHeaders(headers: string[]): string {
+  return headers
+    .filter(header => {
+      const name = header.split(':', 1)[0].toLowerCase();
+      return name !== 'mime-version' && name !== 'autocrypt';
+    })
+    .join('\r\n');
 }
 
 // Advertise the sender's key via an Autocrypt header instead of attaching it to
@@ -182,7 +195,7 @@ function autocryptHeader(message: ProtectedComposeMessage): string | null {
   return `Autocrypt: addr=${addr};\r\n keydata=${keydata}`;
 }
 
-async function innerEntity(message: ProtectedComposeMessage): Promise<string> {
+async function innerEntity(message: ProtectedComposeMessage, signedProtectedHeaders: string | null = null): Promise<string> {
   const attachments = [...message.attachments];
 
   const textPart =
@@ -224,7 +237,9 @@ async function innerEntity(message: ProtectedComposeMessage): Promise<string> {
   }
 
   const mixedBoundary = boundary('mixed');
-  let entity = `Content-Type: multipart/mixed; boundary="${mixedBoundary}"\r\n\r\n`;
+  let entity = signedProtectedHeaders
+    ? `Content-Type: multipart/mixed; boundary="${mixedBoundary}";\r\n protected-headers="v1"\r\n${signedProtectedHeaders}\r\n\r\n`
+    : `Content-Type: multipart/mixed; boundary="${mixedBoundary}"\r\n\r\n`;
   entity += `--${mixedBoundary}\r\n${bodyPart}`;
   for (const attachment of attachments) {
     const filename = parameterValue('name', attachment.name);
@@ -240,8 +255,17 @@ async function innerEntity(message: ProtectedComposeMessage): Promise<string> {
 }
 
 export async function buildProtectedMime(message: ProtectedComposeMessage): Promise<Uint8Array> {
-  const headers = messageHeaders(message);
-  const inner = await innerEntity(message);
+  const headerLines = messageHeaderLines(
+    message,
+    new Date().toUTCString(),
+    `<${crypto.randomUUID()}@caley.local>`,
+  );
+  const headers = messageHeaders(headerLines);
+  const hasAttachments = message.attachments.length > 0;
+  const inner = await innerEntity(
+    message,
+    message.sign && !message.encrypt && hasAttachments ? protectedHeaders(headerLines) : null,
+  );
 
   if (message.encrypt) {
     const pgpMessage = await openpgp.createMessage({ binary: encoder.encode(inner) });
@@ -264,12 +288,13 @@ export async function buildProtectedMime(message: ProtectedComposeMessage): Prom
     // Plain message: return headers + inner entity directly.
     return encoder.encode(headers + inner);
   }
-  // RFC 1521/3156: the CRLF immediately preceding the boundary delimiter belongs
-  // to the delimiter, not to the signed body part. Signing the trailing CRLF makes
-  // the signature cover bytes that no other client includes when verifying, so they
-  // report it invalid. Sign the canonical part content as exact MIME octets; this
-  // keeps multipart/mixed bodies with attachments covered by the detached signature.
-  const signedContent = inner.replace(/\r\n$/, '');
+  // RFC 3156 allows signed material to follow the OpenPGP convention of ending
+  // with CRLF when the signed and transmitted bytes are identical. For nested
+  // multipart/mixed attachment bodies, keep that terminator and add a separate
+  // delimiter CRLF before the outer signature boundary, matching Thunderbird's
+  // secure attachment-bearing PGP/MIME shape. Simpler non-attachment bodies keep
+  // excluding the delimiter CRLF for broad compatibility.
+  const signedContent = hasAttachments ? inner : inner.replace(/\r\n$/, '');
   const signedMessage = await openpgp.createMessage({ binary: encoder.encode(signedContent) });
   const signatureObject = await openpgp.sign({
     message: signedMessage,
@@ -283,10 +308,13 @@ export async function buildProtectedMime(message: ProtectedComposeMessage): Prom
   const micalg = micalgForSignature(signatureObject);
   const signature = signatureObject.armor().replace(/\r?\n/g, '\r\n');
   const signedBoundary = boundary('signed');
+  const signaturePart = hasAttachments
+    ? `Content-Type: application/pgp-signature; name="OpenPGP_signature.asc"\r\nContent-Description: OpenPGP digital signature\r\nContent-Disposition: attachment; filename="OpenPGP_signature"\r\n\r\n${signature}\r\n`
+    : `Content-Type: application/pgp-signature; name="signature.asc"\r\nContent-Disposition: attachment; filename="signature.asc"\r\n\r\n${signature}\r\n`;
   const body =
     `Content-Type: multipart/signed; protocol="application/pgp-signature"; micalg=${micalg}; boundary="${signedBoundary}"\r\n\r\n` +
-    `--${signedBoundary}\r\n${inner}` +
-    `--${signedBoundary}\r\nContent-Type: application/pgp-signature; name="signature.asc"\r\nContent-Disposition: attachment; filename="signature.asc"\r\n\r\n${signature}\r\n` +
+    `--${signedBoundary}\r\n${signedContent}\r\n` +
+    `--${signedBoundary}\r\n${signaturePart}` +
     `--${signedBoundary}--\r\n`;
   return encoder.encode(headers + body);
 }
