@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import * as openpgp from 'openpgp';
 import { buildProtectedMime, type ProtectedComposeMessage } from './compose';
-import { verifySignedMessage } from './keyring';
+import { detectPgpMessage, verifySignedMessage } from './keyring';
 import { autocryptKeys } from './autocrypt';
 
 // Uses real openpgp crypto (no mock) to guard the PGP/MIME signing pipeline:
@@ -95,5 +95,52 @@ describe('PGP/MIME sign + verify', () => {
 
     expect(await verifySignedMessage(new TextEncoder().encode(tampered), [publicKey]))
       .toContain('verification_failed');
+  });
+});
+
+describe('PGP message detection', () => {
+  const enc = new TextEncoder();
+
+  it('detects PGP/MIME signed mail', () => {
+    const raw = enc.encode(
+      'From: tester@example.com\r\nContent-Type: multipart/signed; boundary="s"; protocol="application/pgp-signature"\r\n\r\n' +
+      '--s\r\nContent-Type: text/plain\r\n\r\nHello\r\n' +
+      '--s\r\nContent-Type: application/pgp-signature\r\n\r\n-----BEGIN PGP SIGNATURE-----\r\nx\r\n-----END PGP SIGNATURE-----\r\n--s--\r\n',
+    );
+
+    expect(detectPgpMessage(raw)).toEqual({ isEncrypted: false, isSigned: true });
+  });
+
+  it('detects inline clear-signed mail', () => {
+    const raw = enc.encode('Content-Type: text/plain\r\n\r\n-----BEGIN PGP SIGNED MESSAGE-----\r\nHash: SHA256\r\n\r\nHello');
+
+    expect(detectPgpMessage(raw)).toEqual({ isEncrypted: false, isSigned: true });
+  });
+
+  it('detects PGP/MIME encrypted mail', () => {
+    const raw = enc.encode(
+      'Content-Type: multipart/encrypted; protocol="application/pgp-encrypted"; boundary="e"\r\n\r\n' +
+      '--e\r\nContent-Type: application/pgp-encrypted\r\n\r\nVersion: 1\r\n--e--\r\n',
+    );
+
+    expect(detectPgpMessage(raw)).toEqual({ isEncrypted: true, isSigned: false });
+  });
+
+  it('detects inline encrypted mail', () => {
+    const raw = enc.encode('Content-Type: text/plain\r\n\r\n-----BEGIN PGP MESSAGE-----\r\nx\r\n-----END PGP MESSAGE-----');
+
+    expect(detectPgpMessage(raw)).toEqual({ isEncrypted: true, isSigned: false });
+  });
+
+  it('ignores ordinary mail', () => {
+    const raw = enc.encode('Content-Type: text/plain\r\n\r\nHello');
+
+    expect(detectPgpMessage(raw)).toEqual({ isEncrypted: false, isSigned: false });
+  });
+
+  it('scans beyond the initial header block', () => {
+    const raw = enc.encode(`${'X-Filler: value\r\n'.repeat(400)}\r\n-----BEGIN PGP SIGNED MESSAGE-----\r\nHash: SHA256\r\n\r\nHello`);
+
+    expect(detectPgpMessage(raw)).toEqual({ isEncrypted: false, isSigned: true });
   });
 });

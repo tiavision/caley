@@ -71,7 +71,6 @@ export interface Message {
   is_read: boolean;
   is_flagged: boolean;
   is_encrypted: boolean;
-  is_signed: boolean;
   attachments: Attachment[];
 }
 

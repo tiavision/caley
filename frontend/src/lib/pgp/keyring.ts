@@ -27,6 +27,11 @@ export interface DecryptedAttachment {
   data: Uint8Array;
 }
 
+export interface PgpMessageDetection {
+  isEncrypted: boolean;
+  isSigned: boolean;
+}
+
 function hasArgon2(err: unknown): boolean {
   return err instanceof Error && err.message.toLowerCase().includes('argon2');
 }
@@ -190,6 +195,16 @@ export function parseMimeMessage(rawBytes: Uint8Array): { html: string | null; t
   return parsed ?? { html: null, text: mimeStr, attachments: [] };
 }
 
+export function detectPgpMessage(rawBytes: Uint8Array): PgpMessageDetection {
+  const mime = new TextDecoder('utf-8', { fatal: false }).decode(rawBytes).toLowerCase();
+  return {
+    isEncrypted: (mime.includes('multipart/encrypted') && mime.includes('application/pgp-encrypted')) ||
+      hasAsciiMarker(rawBytes, '-----BEGIN PGP MESSAGE-----'),
+    isSigned: (mime.includes('multipart/signed') && mime.includes('application/pgp-signature')) ||
+      hasAsciiMarker(rawBytes, '-----BEGIN PGP SIGNED MESSAGE-----'),
+  };
+}
+
 /**
  * Verify a PGP/MIME or inline signed message.
  */
@@ -257,6 +272,17 @@ function extractPgpBlock(mime: string): PgpBlock | null {
   const end = mime.indexOf('-----END PGP MESSAGE-----');
   if (begin === -1 || end === -1) return null;
   return { ciphertext: mime.slice(begin, end + '-----END PGP MESSAGE-----'.length) };
+}
+
+function hasAsciiMarker(bytes: Uint8Array, marker: string): boolean {
+  const needle = new TextEncoder().encode(marker);
+  outer: for (let i = 0; i <= bytes.length - needle.length; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (bytes[i + j] !== needle[j]) continue outer;
+    }
+    return true;
+  }
+  return false;
 }
 
 interface SignedBlock {

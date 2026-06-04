@@ -179,19 +179,11 @@ pub struct AttachmentPart {
 }
 
 /// Fetches full raw bodies for a list of UIDs in one IMAP command.
-/// Detect PGP-encrypted or PGP-signed content in raw message bytes.
-/// Returns (is_encrypted, is_signed).
-pub fn detect_pgp(raw: &[u8]) -> (bool, bool) {
-    let hdr_end = raw.len().min(4096);
-    let hdr = String::from_utf8_lossy(&raw[..hdr_end]).to_ascii_lowercase();
-    let is_encrypted = (hdr.contains("multipart/encrypted")
-        && hdr.contains("application/pgp-encrypted"))
-        || raw.windows(27).any(|w| w == b"-----BEGIN PGP MESSAGE-----");
-    let is_signed = (hdr.contains("multipart/signed") && hdr.contains("application/pgp-signature"))
-        || raw
-            .windows(34)
-            .any(|w| w == b"-----BEGIN PGP SIGNED MESSAGE-----");
-    (is_encrypted, is_signed)
+/// Detect PGP-encrypted content in raw message bytes.
+pub fn detect_pgp_encrypted(raw: &[u8]) -> bool {
+    let mime = String::from_utf8_lossy(raw).to_ascii_lowercase();
+    (mime.contains("multipart/encrypted") && mime.contains("application/pgp-encrypted"))
+        || raw.windows(27).any(|w| w == b"-----BEGIN PGP MESSAGE-----")
 }
 
 /// Returns a vec of (uid, raw_bytes, body_text, has_attachments, attachments).
@@ -895,5 +887,33 @@ mod tests {
 
         assert!(!has_attachments);
         assert!(attachments.is_empty());
+    }
+
+    #[test]
+    fn detects_pgp_mime_encrypted_mail() {
+        let raw = b"Content-Type: multipart/encrypted; protocol=\"application/pgp-encrypted\"; boundary=\"e\"\r\n\r\n--e\r\nContent-Type: application/pgp-encrypted\r\n\r\nVersion: 1\r\n--e--\r\n";
+
+        assert!(detect_pgp_encrypted(raw));
+    }
+
+    #[test]
+    fn detects_inline_pgp_encrypted_mail() {
+        let raw = b"Content-Type: text/plain\r\n\r\n-----BEGIN PGP MESSAGE-----\r\nx\r\n-----END PGP MESSAGE-----";
+
+        assert!(detect_pgp_encrypted(raw));
+    }
+
+    #[test]
+    fn does_not_treat_signed_mail_as_encrypted() {
+        let raw = b"Content-Type: multipart/signed; protocol=\"application/pgp-signature\"; boundary=\"s\"\r\n\r\n--s\r\nContent-Type: text/plain\r\n\r\nHello\r\n--s\r\nContent-Type: application/pgp-signature\r\n\r\n-----BEGIN PGP SIGNATURE-----\r\nx\r\n-----END PGP SIGNATURE-----\r\n--s--\r\n";
+
+        assert!(!detect_pgp_encrypted(raw));
+    }
+
+    #[test]
+    fn does_not_treat_ordinary_mail_as_encrypted() {
+        let raw = b"Content-Type: text/plain; charset=utf-8\r\n\r\nHello\r\n";
+
+        assert!(!detect_pgp_encrypted(raw));
     }
 }

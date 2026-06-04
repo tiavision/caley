@@ -16,7 +16,7 @@
   import MailHtmlFrame from './mail/MailHtmlFrame.svelte';
   import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey, validateVault, eraseBytes } from '../lib/pgp/vault.ts';
   import { unlock } from '../lib/pgp/webauthn.ts';
-  import { decryptMessage, verifySignedMessage, parseMimeMessage, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
+  import { decryptMessage, verifySignedMessage, parseMimeMessage, detectPgpMessage, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
   import { parsePublicKey, listPublicKeys, readVerificationKeys, savePublicKey, type StoredPublicKey } from '../lib/pgp/public-keys.ts';
   import { openVault, getKeys, isUnlocked } from '../lib/pgp/session.ts';
   import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
@@ -111,6 +111,10 @@
   let parsedHtml = '';
   let parsedText = '';
   let parsedRawBytes: Uint8Array | null = null;
+  let detectedPgpEncrypted = false;
+  let detectedPgpSigned = false;
+  $: effectiveMessageEncrypted = !!selectedMessage?.is_encrypted || detectedPgpEncrypted;
+  $: effectiveMessageSigned = detectedPgpSigned;
 
   // PGP decryption state (per selected message)
   let pgpDecrypting = false;
@@ -141,6 +145,8 @@
     parsedHtml = '';
     parsedText = '';
     parsedRawBytes = null;
+    detectedPgpEncrypted = false;
+    detectedPgpSigned = false;
     pgpBadges = [];
     pgpDecryptError = '';
     pgpPublicKeyImportError = '';
@@ -218,7 +224,7 @@
         openVault(vaultKey, keys);
         rememberLocalDevice(device.cred_id);
         pgpKeyUnlocked = true;
-        if (decryptSelected && selectedMessage?.is_encrypted) {
+        if (decryptSelected && selectedMessage && effectiveMessageEncrypted) {
           await pgpDecrypt(selectedMessage);
         }
         unlocked = true;
@@ -300,11 +306,11 @@
       const key = await parsePublicKey(armored);
       await savePublicKey(key, 'message_attachment');
       pgpPublicKeyImportSuccess = tl('pgp_publicKeyImported');
-      const attachments = msg.is_encrypted ? pgpAttachments : msg.attachments;
+      const attachments = effectiveMessageEncrypted ? pgpAttachments : msg.attachments;
       await loadMessagePublicKeyCandidates(msg, attachments);
-      if (msg.is_encrypted && getKeys().length > 0) {
+      if (effectiveMessageEncrypted && getKeys().length > 0) {
         await pgpDecrypt(msg);
-      } else if (msg.is_signed && parsedRawBytes) {
+      } else if (effectiveMessageSigned && parsedRawBytes) {
         const verificationKeys = await listPublicKeys().then(readVerificationKeys).catch(() => []);
         pgpBadges = await verifySignedMessage(parsedRawBytes, verificationKeys);
       }
@@ -676,7 +682,6 @@
       is_read: true,
       is_flagged: false,
       is_encrypted: false,
-      is_signed: false,
       attachments: [],
     };
   }
@@ -1252,6 +1257,8 @@
     parsedHtml = '';
     parsedText = '';
     parsedRawBytes = null;
+    detectedPgpEncrypted = false;
+    detectedPgpSigned = false;
     clearPgpAttachments();
     pgpDecryptError = '';
     pgpBadges = [];
@@ -1274,7 +1281,11 @@
           try {
             const rawBytes = Uint8Array.from(atob(full.raw_eml), c => c.charCodeAt(0));
             parsedRawBytes = rawBytes;
-            if (!full.is_encrypted) {
+            const pgpDetection = detectPgpMessage(rawBytes);
+            detectedPgpEncrypted = pgpDetection.isEncrypted;
+            detectedPgpSigned = pgpDetection.isSigned;
+            const messageIsEncrypted = full.is_encrypted || pgpDetection.isEncrypted;
+            if (!messageIsEncrypted) {
               const parsed = parseMimeMessage(rawBytes);
               parsedHtml = parsed.html ? prepareEmailHtml(parsed.html, {
                 accountId: full.account_id,
@@ -1286,7 +1297,7 @@
             }
             await harvestAutocrypt(rawBytes, full);
             await loadMessagePublicKeyCandidates(full, full.attachments);
-            if (full.is_signed && !full.is_encrypted) {
+            if (pgpDetection.isSigned && !messageIsEncrypted) {
               const verificationKeys = await listPublicKeys().then(readVerificationKeys).catch(() => []);
               pgpBadges = await verifySignedMessage(rawBytes, verificationKeys);
             }
@@ -1294,7 +1305,7 @@
             // Raw MIME unavailable; message still renders without it.
           }
         }
-        if (full.is_encrypted && getKeys().length > 0) {
+        if ((full.is_encrypted || detectedPgpEncrypted) && getKeys().length > 0) {
           void pgpDecrypt(full);
         }
         // Update in list
@@ -1971,7 +1982,7 @@
   $: bodyTextSegments = linkifySegments(displayedText);
   $: visibleServerAttachments = selectedMessage?.attachments.filter(att =>
     !isPgpSignatureAttachment(att) &&
-    (!selectedMessage?.is_encrypted || !isPgpTransportAttachment(att))
+    (!effectiveMessageEncrypted || !isPgpTransportAttachment(att))
   ) ?? [];
 
   $: emailOrigins = imageOriginsFromHtml(renderedHtml);
@@ -2213,7 +2224,7 @@
                     {selectedMessage.is_read ? tl('mail_markUnread') : tl('mail_markRead')}
                   </button>
                   {#if canToggleBodyView}
-                    {#if !selectedMessage.is_encrypted && emailOrigins.length > 0}
+                    {#if !effectiveMessageEncrypted && emailOrigins.length > 0}
                       <button role="menuitem" on:click={() => { actionsOpen = false; openOriginsForEmail(); }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>{tl('mail_imageSourcesEmail')}</button>
                     {/if}
 
@@ -2362,7 +2373,7 @@
               {/if}
             </div>
           {/if}
-          {#if selectedMessage.is_encrypted && pgpAttachments.length > 0}
+          {#if effectiveMessageEncrypted && pgpAttachments.length > 0}
             <div class="attachments">
               <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
@@ -2425,7 +2436,7 @@
             {#if pgpPublicKeyImportError}<p class="pgp-error">{pgpPublicKeyImportError}</p>{/if}
             {#if pgpPublicKeyImportSuccess}<p class="pgp-success">{pgpPublicKeyImportSuccess}</p>{/if}
             {#if viewMode === 'html' && htmlHasValue}
-              {#if selectedMessage.is_encrypted}
+              {#if effectiveMessageEncrypted}
                 <!-- Decrypted HTML: sandboxed iframe WITHOUT allow-same-origin (inline blob images) -->
                 {#key iframeKey}
                   <iframe
@@ -2462,7 +2473,7 @@
               {/if}
             {:else if parsedText}
               <pre class="body-text">{#each bodyTextSegments as seg}{#if 'href' in seg}<a href={seg.href} target="_blank" rel="noopener noreferrer">{seg.text}</a>{:else}{seg.text}{/if}{/each}</pre>
-            {:else if selectedMessage.is_encrypted}
+            {:else if effectiveMessageEncrypted}
               {#if pgpDecryptError}
                 <p class="pgp-error">{pgpDecryptError}</p>
               {:else if pgpDecrypting}

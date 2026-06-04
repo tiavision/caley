@@ -708,7 +708,6 @@ pub(super) fn message_to_json_with_attachments(
         "is_read": flags.iter().any(|f| f == "\\Seen"),
         "is_flagged": flags.iter().any(|f| f == "\\Flagged"),
         "is_encrypted": m.is_encrypted,
-        "is_signed": m.is_signed,
         "attachments": att_list,
     })
 }
@@ -755,7 +754,6 @@ mod tests {
             rowid: uid,
             size: None,
             is_encrypted: false,
-            is_signed: false,
         }
     }
 

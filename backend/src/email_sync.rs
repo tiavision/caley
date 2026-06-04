@@ -577,7 +577,7 @@ impl EmailSyncManager {
                 // SQLite write lock is held only for the fast DB writes, not file I/O.
                 let mut prepared: Vec<PreparedMessage> = Vec::with_capacity(bodies.len());
                 for (uid, raw_bytes, body_text, has_attach, attachments) in bodies {
-                    let (is_encrypted, is_signed) = imap_client::detect_pgp(&raw_bytes);
+                    let is_encrypted = imap_client::detect_pgp_encrypted(&raw_bytes);
                     // For encrypted messages, exclude body from FTS index.
                     let body_idx = if is_encrypted {
                         String::new()
@@ -609,7 +609,6 @@ impl EmailSyncManager {
                         has_attach,
                         body_idx,
                         is_encrypted,
-                        is_signed,
                         attachments: att_params,
                     });
                 }
@@ -626,7 +625,6 @@ impl EmailSyncManager {
                         &m.body_idx,
                         m.has_attach,
                         m.is_encrypted,
-                        m.is_signed,
                     )
                     .await?;
                     for att in &m.attachments {
@@ -658,7 +656,6 @@ struct PreparedMessage {
     has_attach: bool,
     body_idx: String,
     is_encrypted: bool,
-    is_signed: bool,
     attachments: Vec<PreparedAttachment>,
 }
 

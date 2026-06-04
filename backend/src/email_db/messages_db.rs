@@ -40,7 +40,6 @@ pub struct MessageRow {
     #[allow(dead_code)]
     pub size: Option<i64>,
     pub is_encrypted: bool,
-    pub is_signed: bool,
 }
 
 pub struct PageCursor {
@@ -228,18 +227,16 @@ pub async fn update_message_body<'e, E>(
     body_idx: &str,
     has_attachments: bool,
     is_encrypted: bool,
-    is_signed: bool,
 ) -> Result<()>
 where
     E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
 {
     sqlx::query(
-        "UPDATE cached_messages SET body_idx = ?, has_attachments = ?, is_encrypted = ?, is_signed = ? WHERE account_id = ? AND mailbox = ? AND uid = ?",
+        "UPDATE cached_messages SET body_idx = ?, has_attachments = ?, is_encrypted = ? WHERE account_id = ? AND mailbox = ? AND uid = ?",
     )
     .bind(body_idx)
     .bind(has_attachments as i64)
     .bind(is_encrypted as i64)
-    .bind(is_signed as i64)
     .bind(account_id)
     .bind(mailbox)
     .bind(uid as i64)
@@ -571,7 +568,7 @@ pub async fn list_messages(
     if let Some(off) = offset {
         let rows = sqlx::query(
             "SELECT uid, account_id, mailbox, message_id, thread_id, from_addr, to_addrs, cc_addrs,
-                    subject, sent_at, flags, has_attachments, rowid, is_encrypted, is_signed
+                    subject, sent_at, flags, has_attachments, rowid, is_encrypted
              FROM cached_messages
              WHERE account_id = ? AND mailbox = ?
              ORDER BY sent_at DESC, rowid DESC
@@ -594,7 +591,7 @@ pub async fn list_messages(
     let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
                 m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted, m.is_signed
+                m.rowid, m.is_encrypted
          FROM cached_messages m
          WHERE m.account_id = ",
     );
@@ -660,7 +657,7 @@ pub async fn list_messages_virtual(
         let rows = sqlx::query(
             "SELECT DISTINCT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
                     m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                    m.rowid, m.is_encrypted, m.is_signed
+                    m.rowid, m.is_encrypted
              FROM cached_messages m
              JOIN imap_accounts a ON a.account_id = m.account_id
              JOIN virtual_folder_rules r ON r.folder_id = ?
@@ -690,7 +687,7 @@ pub async fn list_messages_virtual(
     let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT DISTINCT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
                 m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted, m.is_signed
+                m.rowid, m.is_encrypted
          FROM cached_messages m
          JOIN imap_accounts a ON a.account_id = m.account_id
          JOIN virtual_folder_rules r ON r.folder_id = ",
@@ -743,7 +740,7 @@ pub async fn get_message(
 ) -> Result<Option<MessageRow>> {
     let row = sqlx::query(
         "SELECT uid, account_id, mailbox, message_id, thread_id, from_addr, to_addrs, cc_addrs,
-                subject, sent_at, flags, has_attachments, size, rowid, is_encrypted, is_signed
+                subject, sent_at, flags, has_attachments, size, rowid, is_encrypted
          FROM cached_messages WHERE account_id = ? AND mailbox = ? AND uid = ?",
     )
     .bind(account_id)
@@ -780,7 +777,7 @@ pub async fn list_thread_messages(
          )
          SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
                 m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted, m.is_signed
+                m.rowid, m.is_encrypted
            FROM cached_messages m
           WHERE m.account_id = ?
             AND ((m.mailbox = ? AND m.uid = ?)
@@ -821,7 +818,6 @@ fn row_to_message(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
         rowid: r.get(12),
         size: None,
         is_encrypted: r.get::<i64, _>(13) != 0,
-        is_signed: r.get::<i64, _>(14) != 0,
     }
 }
 
@@ -842,7 +838,6 @@ fn row_to_message_full(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
         size: r.get(12),
         rowid: r.get(13),
         is_encrypted: r.get::<i64, _>(14) != 0,
-        is_signed: r.get::<i64, _>(15) != 0,
     }
 }
 
@@ -887,7 +882,7 @@ pub async fn search_messages(
     let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
                 m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted, m.is_signed",
+                m.rowid, m.is_encrypted",
     );
     if use_fts {
         qb.push(
@@ -947,7 +942,7 @@ pub async fn search_messages_mailbox(
     let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
                 m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted, m.is_signed",
+                m.rowid, m.is_encrypted",
     );
     if use_fts {
         qb.push(
@@ -1010,7 +1005,7 @@ pub async fn search_messages_virtual(
     let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT DISTINCT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
                 m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted, m.is_signed",
+                m.rowid, m.is_encrypted",
     );
     if use_fts {
         qb.push(
@@ -1107,8 +1102,7 @@ mod tests {
                 message_id TEXT, thread_id TEXT, from_addr TEXT, to_addrs TEXT, cc_addrs TEXT,
                 subject TEXT, sent_at INTEGER, flags TEXT, has_attachments INTEGER NOT NULL DEFAULT 0,
                 rowid_override INTEGER, is_unread INTEGER NOT NULL DEFAULT 1,
-                is_encrypted INTEGER NOT NULL DEFAULT 0,
-                is_signed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (account_id, mailbox, uid)
+                is_encrypted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (account_id, mailbox, uid)
             )",
         )
         .execute(&pool)
