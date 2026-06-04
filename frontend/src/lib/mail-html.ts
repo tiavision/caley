@@ -133,3 +133,42 @@ export function imageOriginsFromHtml(html: string): string[] {
   }
   return [...found];
 }
+
+function portableImageSource(src: string): string {
+  const trimmed = src.trim();
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith('cid:') || lower.startsWith('http://') || lower.startsWith('https://') || imageDataPattern.test(trimmed)) {
+    return src;
+  }
+  if (!lower.startsWith('/api/email/proxy-image?')) return src;
+
+  try {
+    const url = new URL(trimmed, 'https://caley.local');
+    const cid = url.searchParams.get('cid');
+    if (cid) return `cid:${cid}`;
+    const remote = url.searchParams.get('url');
+    if (remote && /^(https?):\/\//i.test(remote)) return remote;
+  } catch {
+    // Leave malformed legacy URLs untouched.
+  }
+  return src;
+}
+
+export function restoreForwardedImageSources(html: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('img[src]').forEach(img => {
+    const src = img.getAttribute('src');
+    if (src) img.setAttribute('src', portableImageSource(src));
+  });
+  return doc.body.innerHTML;
+}
+
+export function cidReferencesFromHtml(html: string): string[] {
+  const found = new Set<string>();
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('img[src]').forEach(img => {
+    const src = portableImageSource(img.getAttribute('src') ?? '').trim();
+    if (src.toLowerCase().startsWith('cid:')) found.add(src.slice(4));
+  });
+  return [...found];
+}

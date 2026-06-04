@@ -21,7 +21,7 @@
   import { openVault, getKeys, isUnlocked } from '../lib/pgp/session.ts';
   import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
   import { buildProtectedMime, parseEnvelopeAddresses } from '../lib/pgp/compose.ts';
-  import { prepareEmailHtml, htmlToPlainText, imageOriginsFromHtml } from '../lib/mail-html.ts';
+  import { prepareEmailHtml, htmlToPlainText, imageOriginsFromHtml, restoreForwardedImageSources, cidReferencesFromHtml } from '../lib/mail-html.ts';
   import type { CalendarJson, CalDavAccountJson } from '../types/calendar.ts';
   import type * as openpgp from 'openpgp';
   import type { Account, Attachment, BodySegment, FolderKind, Identity, Mailbox, Message, SidebarAccountSection, SidebarMailbox, ThreadNode, ThreadTreeNode, VirtualFolder } from './mail/MailTypes.ts';
@@ -1718,14 +1718,10 @@
 
   async function openForward(msg: Message) {
     const attachments: File[] = [];
+    const forwardHtml = parsedHtml ? restoreForwardedImageSources(parsedHtml) : parsedHtml;
     // CIDs actually referenced in the HTML body are handled as inline images by the backend.
     // Only skip those; other attachments (even if they carry a Content-ID) must be forwarded normally.
-    const inlineImageCids = new Set<string>();
-    if (parsedHtml) {
-      for (const m of parsedHtml.matchAll(/\bcid:([^"'\s>)]+)/gi)) {
-        inlineImageCids.add(m[1]);
-      }
-    }
+    const inlineImageCids = new Set(forwardHtml ? cidReferencesFromHtml(forwardHtml) : []);
     for (const att of msg.attachments) {
       if (att.content_id && inlineImageCids.has(att.content_id)) continue;
       try {
@@ -1737,7 +1733,7 @@
         }
       } catch { /* skip attachment on error */ }
     }
-    composeDialog?.open({ mode: 'forward', replyTo: msg, attachments, parsedText, parsedHtml });
+    composeDialog?.open({ mode: 'forward', replyTo: msg, attachments, parsedText, parsedHtml: forwardHtml });
   }
 
   function openPopout(msg: Message) {

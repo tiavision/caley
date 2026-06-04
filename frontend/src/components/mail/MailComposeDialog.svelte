@@ -8,7 +8,7 @@
   import { getKeys, isUnlocked } from '../../lib/pgp/session.ts';
   import { parsePublicKey, listPublicKeys, type StoredPublicKey } from '../../lib/pgp/public-keys.ts';
   import { buildProtectedMime, parseEnvelopeAddresses } from '../../lib/pgp/compose.ts';
-  import { prepareEmailHtml } from '../../lib/mail-html.ts';
+  import { prepareEmailHtml, cidReferencesFromHtml } from '../../lib/mail-html.ts';
   import MailHtmlFrame from './MailHtmlFrame.svelte';
   import { formatMessageDateTime, keyHasEmail } from './mailUtils.ts';
   import type { Identity, Message } from './MailTypes.ts';
@@ -510,9 +510,7 @@
       // Fetch inline images referenced in the forward HTML so they can be embedded in the MIME.
       const inlineImages: Array<{ cid: string; contentType: string; bytes: Uint8Array }> = [];
       if (composeForwardHtml && composeForwardRef) {
-        const cids = [...new Set(
-          [...composeForwardHtml.matchAll(/\bcid:([^"'\s>)]+)/gi)].map(m => m[1])
-        )];
+        const cids = cidReferencesFromHtml(composeForwardHtml);
         for (const cid of cids) {
           try {
             const url = `/api/email/proxy-image?account_id=${encodeURIComponent(composeForwardRef.account_id)}&mailbox=${encodeURIComponent(composeForwardRef.mailbox)}&uid=${composeForwardRef.uid}&cid=${encodeURIComponent(cid)}`;

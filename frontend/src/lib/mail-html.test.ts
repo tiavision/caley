@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { imageOriginsFromHtml, prepareEmailHtml } from './mail-html.ts';
+import { cidReferencesFromHtml, imageOriginsFromHtml, prepareEmailHtml, restoreForwardedImageSources } from './mail-html.ts';
 
 function body(html: string): HTMLElement {
   return new DOMParser().parseFromString(html, 'text/html').body;
@@ -83,5 +83,24 @@ describe('prepareEmailHtml', () => {
     expect(style).toContain('font-weight: bold');
     expect(style).not.toContain('url');
     expect(style).not.toContain('position');
+  });
+
+  it('restores prepared image URLs to portable sources for forwarding', () => {
+    const prepared = `
+      <img src="/api/email/proxy-image?account_id=acct%201&mailbox=INBOX&uid=42&cid=logo%40example.test">
+      <img src="/api/email/proxy-image?url=https%3A%2F%2Fimg.example.test%2Fpixel.png%3Fx%3D1">
+    `;
+    const html = restoreForwardedImageSources(prepared);
+    const imgs = [...body(html).querySelectorAll('img')];
+
+    expect(imgs[0].getAttribute('src')).toBe('cid:logo@example.test');
+    expect(imgs[1].getAttribute('src')).toBe('https://img.example.test/pixel.png?x=1');
+    expect(cidReferencesFromHtml(html)).toEqual(['logo@example.test']);
+  });
+
+  it('extracts cid references from prepared display HTML', () => {
+    const html = '<img src="/api/email/proxy-image?account_id=a&mailbox=m&uid=1&cid=chart%40example.test">';
+
+    expect(cidReferencesFromHtml(html)).toEqual(['chart@example.test']);
   });
 });
