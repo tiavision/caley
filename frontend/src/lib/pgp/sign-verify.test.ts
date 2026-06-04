@@ -62,7 +62,7 @@ describe('PGP/MIME sign + verify', () => {
     const { privateKey } = await signingKey();
     const text = new TextDecoder().decode(await buildProtectedMime(baseMessage(privateKey)));
 
-    const micalg = /micalg=([^;]+);/.exec(text)![1];
+    const micalg = /micalg="?([^";\r\n]+)"?/.exec(text)![1];
     const sigArmor = text.slice(
       text.indexOf('-----BEGIN PGP SIGNATURE-----'),
       text.indexOf('-----END PGP SIGNATURE-----') + '-----END PGP SIGNATURE-----'.length,
@@ -106,15 +106,15 @@ describe('PGP/MIME sign + verify', () => {
     const text = new TextDecoder().decode(mime);
 
     expect(text).toContain('Content-Type: multipart/mixed;');
-    expect(text).toContain('protected-headers="v1"');
-    expect(text).toMatch(/\r\nFrom: Tester <tester@example\.com>\r\nTo: rcpt@example\.com\r\nSubject: Hi\r\n\r\n/);
-    expect(text).toContain('filename="note.txt"');
-    expect(text).toContain('name="OpenPGP_signature.asc"');
-    expect(text).toContain('Content-Description: OpenPGP digital signature');
-    expect(text).toContain('filename="OpenPGP_signature"');
+    expect(text).not.toContain('protected-headers="v1"');
+    expect(text).toContain('Content-Transfer-Encoding: 7bit');
+    expect(text).toContain('filename=note.txt;');
+    expect(text).toContain('size=16');
+    expect(text).toContain('name="signature.asc"');
+    expect(text).not.toContain('OpenPGP_signature');
 
     const signedBoundary = /^Content-Type: multipart\/signed;[^\r\n]+boundary="([^"]+)"/m.exec(text)![1];
-    const mixedBoundary = /Content-Type: multipart\/mixed; boundary="([^"]+)"/.exec(text)![1];
+    const mixedBoundary = /Content-Type: multipart\/mixed;\r\n boundary=([^\r\n]+)/.exec(text)![1];
     expect(text).toContain(`--${mixedBoundary}--\r\n\r\n--${signedBoundary}\r\nContent-Type: application/pgp-signature`);
     expect(await verifySignedMessage(mime, [publicKey])).toContain('verified');
 
@@ -131,8 +131,9 @@ describe('PGP/MIME sign + verify', () => {
     });
     const text = new TextDecoder().decode(mime);
 
-    expect(text.match(/filename="signature\.asc"/g)).toHaveLength(1);
-    expect(text).toContain('filename="OpenPGP_signature"');
+    expect(text.match(/filename=signature\.asc;/g)).toHaveLength(1);
+    expect(text).toContain('name="signature.asc"');
+    expect(text).not.toContain('OpenPGP_signature');
     expect(await verifySignedMessage(mime, [publicKey])).toContain('verified');
   });
 });
