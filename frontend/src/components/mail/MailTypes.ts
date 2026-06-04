@@ -67,8 +67,7 @@ export interface Message {
   sent_at: number | null;
   flags: string[];
   has_attachments: boolean;
-  body_text: string | null;
-  body_html: string | null;
+  raw_eml: string | null;
   is_read: boolean;
   is_flagged: boolean;
   is_encrypted: boolean;

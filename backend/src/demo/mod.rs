@@ -21,7 +21,11 @@ pub(super) const DEMO_WORK_CAL: &str = "/calendars/demo/work/";
 pub(super) const DEMO_PERSONAL_CAL: &str = "/calendars/demo/personal/";
 pub(super) const DEMO_FAMILY_CAL: &str = "/calendars/demo/family/";
 
-pub async fn seed(pool: &SqlitePool, encryption_key: &[u8; 32]) -> anyhow::Result<()> {
+pub async fn seed(
+    pool: &SqlitePool,
+    encryption_key: &[u8; 32],
+    data_dir: &std::path::Path,
+) -> anyhow::Result<()> {
     println!("[demo] seeding demo database for user {DEMO_USER_ID}");
     seed_user(pool).await?;
     seed_caldav_account(pool, encryption_key).await?;
@@ -31,7 +35,7 @@ pub async fn seed(pool: &SqlitePool, encryption_key: &[u8; 32]) -> anyhow::Resul
     contacts::seed_contacts(pool).await?;
     email::seed_imap_accounts(pool, encryption_key).await?;
     email::seed_mailboxes(pool).await?;
-    email::seed_messages(pool).await?;
+    email::seed_messages(pool, data_dir).await?;
     Ok(())
 }
 

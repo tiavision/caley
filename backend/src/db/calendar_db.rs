@@ -1168,7 +1168,7 @@ pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::
         .await?;
 
     let msg_rows =
-        sqlx::query("SELECT rowid, subject, from_addr, to_addrs, body_text FROM cached_messages")
+        sqlx::query("SELECT rowid, subject, from_addr, to_addrs, body_idx FROM cached_messages")
             .fetch_all(pool)
             .await?;
 
@@ -1177,7 +1177,7 @@ pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::
         let subject: String = row.get::<Option<String>, _>(1).unwrap_or_default();
         let from_addr: String = row.get::<Option<String>, _>(2).unwrap_or_default();
         let to_addrs_json: Option<String> = row.get(3);
-        let body_text: String = row.get::<Option<String>, _>(4).unwrap_or_default();
+        let body_idx: String = row.get::<Option<String>, _>(4).unwrap_or_default();
 
         let to_plain = to_addrs_json
             .as_deref()
@@ -1193,7 +1193,7 @@ pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::
         .bind(mode.normalize_text(&subject))
         .bind(mode.normalize_text(&from_addr))
         .bind(mode.normalize_text(&to_plain))
-        .bind(mode.normalize_text(&body_text))
+        .bind(body_idx)
         .bind(rowid)
         .execute(pool)
         .await?;

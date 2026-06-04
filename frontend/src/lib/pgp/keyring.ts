@@ -181,6 +181,16 @@ export async function decryptMessage(
 }
 
 /**
+ * Parse a plain (non-encrypted) raw MIME message into html/text/attachments.
+ * Used to render all messages through the same path as decrypted PGP messages.
+ */
+export function parseMimeMessage(rawBytes: Uint8Array): { html: string | null; text: string | null; attachments: DecryptedAttachment[] } {
+  const mimeStr = new TextDecoder('utf-8', { fatal: false }).decode(rawBytes);
+  const parsed = parseDecryptedMime(mimeStr);
+  return parsed ?? { html: null, text: mimeStr, attachments: [] };
+}
+
+/**
  * Verify a PGP/MIME or inline signed message.
  */
 export async function verifySignedMessage(

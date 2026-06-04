@@ -190,8 +190,8 @@
 
   // ── Quote helpers ──────────────────────────────────────────────────────────
 
-  function cleanQuotedBody(message: Message): string {
-    return (message.body_text ?? '').replace(/\r\n?/g, '\n').trim();
+  function cleanQuotedBody(parsedText: string): string {
+    return parsedText.replace(/\r\n?/g, '\n').trim();
   }
 
   function quoteHeaderLines(message: Message, includeSubject = false): string[] {
@@ -205,9 +205,9 @@
     return lines;
   }
 
-  function replyQuote(message: Message): string {
+  function replyQuote(message: Message, parsedText: string): string {
     const header = quoteHeaderLines(message, false);
-    const quotedLines = [...header, '', cleanQuotedBody(message)]
+    const quotedLines = [...header, '', cleanQuotedBody(parsedText)]
       .join('\n')
       .split('\n')
       .map(line => line ? `> ${line}` : '>')
@@ -215,22 +215,22 @@
     return `\n\n${quotedLines}`;
   }
 
-  function forwardQuote(message: Message): string {
+  function forwardQuote(message: Message, parsedText: string): string {
     const lines = [
       '',
       '',
       '--- Forwarded message ---',
       ...quoteHeaderLines(message, true),
       '',
-      cleanQuotedBody(message),
+      cleanQuotedBody(parsedText),
     ];
     return lines.join('\n').replace(/\n+$/, '');
   }
 
-  function buildForwardHtml(msg: Message): string | null {
-    if (!msg.body_html) return null;
+  function buildForwardHtml(msg: Message, parsedHtml: string | null): string | null {
+    if (!parsedHtml) return null;
     // Strip outer html/head/body document wrappers if present
-    let bodyContent = msg.body_html;
+    let bodyContent = parsedHtml;
     const bodyMatch = bodyContent.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
     if (bodyMatch) {
       bodyContent = bodyMatch[1];
@@ -260,6 +260,8 @@
     replyTo?: Message;
     subject?: string;
     attachments?: File[];
+    parsedText?: string;
+    parsedHtml?: string | null;
   } = {}) {
     composeError = '';
     composeSending = false;
@@ -278,7 +280,7 @@
       composeMode = 'reply';
       composeTo = replyTo.from || '';
       composeSubject = replyTo.subject?.startsWith('Re:') ? replyTo.subject : `Re: ${replyTo.subject || ''}`;
-      composeBody = replyQuote(replyTo);
+      composeBody = replyQuote(replyTo, options.parsedText ?? '');
       composeInReplyTo = replyTo.message_id;
       composeReferences = replyTo.message_id;
       composeForwardHtml = null;
@@ -294,7 +296,7 @@
       composeMode = 'reply';
       composeTo = replyTo.from || '';
       composeSubject = replyTo.subject?.startsWith('Re:') ? replyTo.subject : `Re: ${replyTo.subject || ''}`;
-      composeBody = replyQuote(replyTo);
+      composeBody = replyQuote(replyTo, options.parsedText ?? '');
       composeInReplyTo = replyTo.message_id;
       composeReferences = replyTo.message_id;
       composeForwardHtml = null;
@@ -329,13 +331,13 @@
       composeSubject = /^fwd:/i.test(forwardFrom.subject ?? '')
         ? (forwardFrom.subject ?? '')
         : `Fwd: ${forwardFrom.subject || ''}`;
-      const fwdHtml = buildForwardHtml(forwardFrom);
+      const fwdHtml = buildForwardHtml(forwardFrom, options.parsedHtml ?? null);
       if (fwdHtml) {
         composeBody = '';
         composeForwardHtml = fwdHtml;
-        composeForwardQuoteText = forwardQuote(forwardFrom);
+        composeForwardQuoteText = forwardQuote(forwardFrom, options.parsedText ?? '');
       } else {
-        composeBody = forwardQuote(forwardFrom);
+        composeBody = forwardQuote(forwardFrom, options.parsedText ?? '');
         composeForwardHtml = null;
         composeForwardQuoteText = null;
       }

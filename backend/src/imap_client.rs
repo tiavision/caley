@@ -194,7 +194,7 @@ pub fn detect_pgp(raw: &[u8]) -> (bool, bool) {
     (is_encrypted, is_signed)
 }
 
-/// Returns a vec of (uid, raw_bytes, body_text, raw_html, has_attachments, attachments).
+/// Returns a vec of (uid, raw_bytes, body_text, has_attachments, attachments).
 pub async fn fetch_bodies(
     session: &mut ImapSession,
     uids: &[u32],
@@ -203,7 +203,6 @@ pub async fn fetch_bodies(
         u32,
         Vec<u8>,
         String,
-        Option<String>,
         bool,
         Vec<AttachmentPart>,
     )>,
@@ -222,8 +221,8 @@ pub async fn fetch_bodies(
         };
         if let Some(body_bytes) = fetch.body() {
             let raw = body_bytes.to_vec();
-            let (text, html, has_attach, attachments) = parse_body_bytes(body_bytes)?;
-            results.push((uid, raw, text, html, has_attach, attachments));
+            let (text, has_attach, attachments) = parse_body_bytes(body_bytes)?;
+            results.push((uid, raw, text, has_attach, attachments));
         }
     }
     Ok(results)
@@ -552,7 +551,7 @@ fn format_addr(a: &mail_parser::Addr<'_>) -> String {
     }
 }
 
-fn parse_body_bytes(bytes: &[u8]) -> Result<(String, Option<String>, bool, Vec<AttachmentPart>)> {
+fn parse_body_bytes(bytes: &[u8]) -> Result<(String, bool, Vec<AttachmentPart>)> {
     use mail_parser::MessageParser;
     let parser = MessageParser::default();
     let msg = match parser.parse(bytes) {
@@ -560,19 +559,16 @@ fn parse_body_bytes(bytes: &[u8]) -> Result<(String, Option<String>, bool, Vec<A
         None => {
             return Ok((
                 String::from_utf8_lossy(bytes).into_owned(),
-                None,
                 false,
                 Vec::new(),
             ));
         }
     };
 
-    let body_html = msg.body_html(0).map(|h| h.as_ref().to_owned());
-
     let body_text = if let Some(text) = msg.body_text(0) {
         text.as_ref().to_owned()
-    } else if let Some(ref html) = body_html {
-        strip_tags(html)
+    } else if let Some(html) = msg.body_html(0) {
+        strip_tags(html.as_ref())
     } else {
         String::new()
     };
@@ -580,7 +576,7 @@ fn parse_body_bytes(bytes: &[u8]) -> Result<(String, Option<String>, bool, Vec<A
     let attachments = extract_attachments(&msg);
     let has_attachments = !attachments.is_empty();
 
-    Ok((body_text, body_html, has_attachments, attachments))
+    Ok((body_text, has_attachments, attachments))
 }
 
 fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
@@ -790,20 +786,6 @@ fn uids_to_set(uids: &[u32]) -> String {
     parts.join(",")
 }
 
-fn html_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            _ => out.push(c),
-        }
-    }
-    out
-}
-
 /// Relay an already-built RFC 5322 message without reconstructing its MIME headers.
 pub async fn send_raw_email(
     smtp_host: &str,
@@ -872,7 +854,7 @@ mod tests {
     fn extracts_unnamed_calendar_part_as_ics_attachment() {
         let raw = b"Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello\r\n--b\r\nContent-Type: text/calendar; method=REQUEST; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nBEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n--b--\r\n";
 
-        let (_, _, has_attachments, attachments) = parse_body_bytes(raw).unwrap();
+        let (_, has_attachments, attachments) = parse_body_bytes(raw).unwrap();
 
         assert!(has_attachments);
         assert_eq!(attachments.len(), 1);
@@ -884,7 +866,7 @@ mod tests {
     fn keeps_named_calendar_attachment_filename() {
         let raw = b"Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello\r\n--b\r\nContent-Type: text/calendar; name=\"invite.ics\"\r\nContent-Disposition: attachment; filename=\"invite.ics\"\r\n\r\nBEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n--b--\r\n";
 
-        let (_, _, has_attachments, attachments) = parse_body_bytes(raw).unwrap();
+        let (_, has_attachments, attachments) = parse_body_bytes(raw).unwrap();
 
         assert!(has_attachments);
         assert_eq!(attachments.len(), 1);
@@ -895,7 +877,7 @@ mod tests {
     fn gives_multiple_unnamed_calendar_parts_unique_filenames() {
         let raw = b"Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello\r\n--b\r\nContent-Type: text/calendar\r\n\r\nBEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n--b\r\nContent-Type: application/ics\r\n\r\nBEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n--b--\r\n";
 
-        let (_, _, has_attachments, attachments) = parse_body_bytes(raw).unwrap();
+        let (_, has_attachments, attachments) = parse_body_bytes(raw).unwrap();
 
         assert!(has_attachments);
         let filenames: Vec<_> = attachments
@@ -909,7 +891,7 @@ mod tests {
     fn does_not_expose_plain_text_body_as_attachment() {
         let raw = b"Content-Type: text/plain; charset=utf-8\r\n\r\nHello\r\n";
 
-        let (_, _, has_attachments, attachments) = parse_body_bytes(raw).unwrap();
+        let (_, has_attachments, attachments) = parse_body_bytes(raw).unwrap();
 
         assert!(!has_attachments);
         assert!(attachments.is_empty());

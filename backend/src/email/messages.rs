@@ -132,7 +132,8 @@ pub async fn get_message(
                 email_db::list_attachments(&state.db, &q.account_id, &q.mailbox, q.uid)
                     .await
                     .unwrap_or_default();
-            Json(message_to_json_with_attachments(&msg, &attachments)).into_response()
+            let raw_eml = load_raw_eml(&state.data_dir, &q.account_id, &q.mailbox, q.uid).await;
+            Json(message_to_json_with_attachments(&msg, &attachments, raw_eml)).into_response()
         }
         Ok(None) => (StatusCode::NOT_FOUND, "message not found").into_response(),
         Err(e) => {
@@ -140,6 +141,21 @@ pub async fn get_message(
             (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
         }
     }
+}
+
+async fn load_raw_eml(
+    data_dir: &std::path::Path,
+    account_id: &str,
+    mailbox: &str,
+    uid: u32,
+) -> Option<String> {
+    let path = eml_path(data_dir, account_id, mailbox, uid);
+    let compressed = tokio::fs::read(&path).await.ok()?;
+    let raw = zstd::decode_all(compressed.as_slice())
+        .map_err(|e| eprintln!("[email] raw_eml decompress error for {account_id}/{mailbox}/{uid}: {e}"))
+        .ok()?;
+    use base64::Engine as _;
+    Some(base64::engine::general_purpose::STANDARD.encode(&raw))
 }
 
 pub async fn get_thread(
@@ -638,12 +654,13 @@ fn parse_date_end(s: Option<&str>) -> Option<i64> {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 pub(super) fn message_to_json(m: &email_db::MessageRow) -> serde_json::Value {
-    message_to_json_with_attachments(m, &[])
+    message_to_json_with_attachments(m, &[], None)
 }
 
 pub(super) fn message_to_json_with_attachments(
     m: &email_db::MessageRow,
     attachments: &[email_db::AttachmentRow],
+    raw_eml: Option<String>,
 ) -> serde_json::Value {
     let to: Vec<String> = m
         .to_addrs
@@ -687,8 +704,7 @@ pub(super) fn message_to_json_with_attachments(
         "sent_at": m.sent_at,
         "flags": flags,
         "has_attachments": m.has_attachments,
-        "body_text": m.body_text,
-        "body_html": m.body_html,
+        "raw_eml": raw_eml,
         "is_read": flags.iter().any(|f| f == "\\Seen"),
         "is_flagged": flags.iter().any(|f| f == "\\Flagged"),
         "is_encrypted": m.is_encrypted,
@@ -736,9 +752,7 @@ mod tests {
             sent_at: Some(sent_at),
             flags: None,
             has_attachments: false,
-            body_text: None,
             rowid: uid,
-            body_html: None,
             size: None,
             is_encrypted: false,
             is_signed: false,

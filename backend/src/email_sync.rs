@@ -576,15 +576,14 @@ impl EmailSyncManager {
                 // Write .eml files to disk first (outside the DB transaction) so the
                 // SQLite write lock is held only for the fast DB writes, not file I/O.
                 let mut prepared: Vec<PreparedMessage> = Vec::with_capacity(bodies.len());
-                for (uid, raw_bytes, body_text, body_html, has_attach, attachments) in bodies {
+                for (uid, raw_bytes, body_text, has_attach, attachments) in bodies {
                     let (is_encrypted, is_signed) = imap_client::detect_pgp(&raw_bytes);
-                    // For encrypted messages, store nothing in FTS-indexed fields.
-                    let (body_text, body_html) = if is_encrypted {
-                        (String::new(), None)
+                    // For encrypted messages, exclude body from FTS index.
+                    let body_idx = if is_encrypted {
+                        String::new()
                     } else {
-                        (body_text, body_html)
+                        self.search_mode.normalize_text(&body_text)
                     };
-                    let body_idx = self.search_mode.normalize_text(&body_text);
 
                     let path = eml_path(&self.data_dir, account_id, mailbox, uid);
                     if let Some(dir) = path.parent() {
@@ -607,8 +606,6 @@ impl EmailSyncManager {
 
                     prepared.push(PreparedMessage {
                         uid,
-                        body_text,
-                        html: body_html,
                         has_attach,
                         body_idx,
                         is_encrypted,
@@ -626,8 +623,6 @@ impl EmailSyncManager {
                         account_id,
                         mailbox,
                         m.uid,
-                        &m.body_text,
-                        m.html.as_deref(),
                         &m.body_idx,
                         m.has_attach,
                         m.is_encrypted,
@@ -660,8 +655,6 @@ impl EmailSyncManager {
 
 struct PreparedMessage {
     uid: u32,
-    body_text: String,
-    html: Option<String>,
     has_attach: bool,
     body_idx: String,
     is_encrypted: bool,

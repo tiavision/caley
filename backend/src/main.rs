@@ -105,21 +105,21 @@ async fn main() -> anyhow::Result<()> {
 
     let encryption_key = crypto::derive_key(&args.encryption_key);
 
+    let data_dir = PathBuf::from(&database_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("./data"));
+
     if args.demo_mode {
         println!("Demo mode: seeding demo database");
-        demo::seed(&db, &encryption_key).await?;
+        demo::seed(&db, &encryption_key, &data_dir).await?;
     }
-
-    let sse_broadcaster = Arc::new(sse::SseBroadcaster::new());
 
     let use_oidc = args.oidc_issuer.is_some()
         && args.oidc_client_id.is_some()
         && args.oidc_client_secret.is_some();
 
-    let data_dir = PathBuf::from(&database_path)
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("./data"));
+    let sse_broadcaster = Arc::new(sse::SseBroadcaster::new());
 
     let sync_manager = sync::SyncManager::new(
         db.clone(),

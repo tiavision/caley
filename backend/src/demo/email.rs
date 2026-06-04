@@ -2,6 +2,8 @@ use sqlx::SqlitePool;
 
 use super::{DEMO_PERSONAL_ACCOUNT, DEMO_USER_ID, DEMO_WORK_ACCOUNT};
 
+// chrono is used in build_mime for RFC 2822 date formatting
+
 pub(super) async fn seed_imap_accounts(pool: &SqlitePool, key: &[u8; 32]) -> anyhow::Result<()> {
     // Account 1 — Work
     let enc_host = crate::crypto::encrypt("imap.work.example", key)?;
@@ -104,7 +106,40 @@ struct MessageSeed {
     is_unread: bool,
 }
 
-pub(super) async fn seed_messages(pool: &SqlitePool) -> anyhow::Result<()> {
+fn build_mime(m: &MessageSeed, sent_at: i64) -> String {
+    use std::fmt::Write as _;
+    // RFC 2822 date is approximated as UTC epoch string — good enough for demo.
+    let date = chrono::DateTime::from_timestamp(sent_at, 0)
+        .map(|dt| dt.format("%a, %d %b %Y %H:%M:%S +0000").to_string())
+        .unwrap_or_else(|| "Thu, 01 Jan 1970 00:00:00 +0000".to_string());
+    let mut s = String::new();
+    let _ = write!(
+        s,
+        "MIME-Version: 1.0\r\nFrom: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\nMessage-ID: {}\r\n",
+        m.from_addr, m.to_addrs, m.subject, date, m.message_id,
+    );
+    if let Some(tid) = m.thread_id {
+        let _ = write!(s, "In-Reply-To: {tid}\r\nReferences: {tid}\r\n");
+    }
+    let _ = write!(
+        s,
+        "Content-Type: multipart/alternative; boundary=\"demo-boundary\"\r\n\r\n\
+         --demo-boundary\r\n\
+         Content-Type: text/plain; charset=utf-8\r\n\r\n\
+         {}\r\n\
+         --demo-boundary\r\n\
+         Content-Type: text/html; charset=utf-8\r\n\r\n\
+         {}\r\n\
+         --demo-boundary--\r\n",
+        m.body_text, m.body_html,
+    );
+    s
+}
+
+pub(super) async fn seed_messages(
+    pool: &SqlitePool,
+    data_dir: &std::path::Path,
+) -> anyhow::Result<()> {
     let messages: &[MessageSeed] = &[
         // ── Work INBOX ────────────────────────────────────────────────────────
         MessageSeed {
@@ -513,8 +548,8 @@ pub(super) async fn seed_messages(pool: &SqlitePool) -> anyhow::Result<()> {
         sqlx::query(
             "INSERT OR IGNORE INTO cached_messages
                 (account_id, mailbox, uid, message_id, thread_id, from_addr, to_addrs,
-                 subject, sent_at, flags, body_text, body_html, subject_idx, body_idx, from_idx, is_unread)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 subject, sent_at, flags, subject_idx, body_idx, from_idx, is_unread)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(m.account)
         .bind(m.mailbox)
@@ -526,8 +561,6 @@ pub(super) async fn seed_messages(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(m.subject)
         .bind(sent_at)
         .bind(m.flags)
-        .bind(m.body_text)
-        .bind(m.body_html)
         .bind(m.subject)
         .bind(m.body_text)
         .bind(&from_lower)
@@ -545,6 +578,18 @@ pub(super) async fn seed_messages(pool: &SqlitePool) -> anyhow::Result<()> {
         .bind(&from_lower)
         .execute(pool)
         .await?;
+
+        // Write the .eml file so the frontend can render via MIME parse.
+        let path = crate::email_sync::eml_path(data_dir, m.account, m.mailbox, m.uid as u32);
+        if !path.exists() {
+            if let Some(dir) = path.parent() {
+                tokio::fs::create_dir_all(dir).await?;
+            }
+            let mime = build_mime(m, sent_at);
+            let compressed = zstd::encode_all(mime.as_bytes(), 3)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            tokio::fs::write(&path, compressed).await?;
+        }
     }
     Ok(())
 }

@@ -16,7 +16,7 @@
   import MailHtmlFrame from './mail/MailHtmlFrame.svelte';
   import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey, validateVault, eraseBytes } from '../lib/pgp/vault.ts';
   import { unlock } from '../lib/pgp/webauthn.ts';
-  import { decryptMessage, verifySignedMessage, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
+  import { decryptMessage, verifySignedMessage, parseMimeMessage, type DecryptedAttachment } from '../lib/pgp/keyring.ts';
   import { parsePublicKey, listPublicKeys, readVerificationKeys, savePublicKey, type StoredPublicKey } from '../lib/pgp/public-keys.ts';
   import { openVault, getKeys, isUnlocked } from '../lib/pgp/session.ts';
   import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
@@ -107,11 +107,14 @@
 
   let displayName = '';
 
+  // Per-message render state (unified for plain and encrypted messages)
+  let parsedHtml = '';
+  let parsedText = '';
+  let parsedRawBytes: Uint8Array | null = null;
+
   // PGP decryption state (per selected message)
   let pgpDecrypting = false;
   let pgpDecryptError = '';
-  let pgpDecryptedHtml = '';
-  let pgpDecryptedText = '';
   let pgpAttachments: (Attachment & { url: string; data: Uint8Array })[] = [];
   let pgpBadges: string[] = [];
   let pgpUnlocking = false;
@@ -135,8 +138,9 @@
     pgpDecryptGeneration++;
     pgpDecrypting = false;
     clearPgpAttachments();
-    pgpDecryptedHtml = '';
-    pgpDecryptedText = '';
+    parsedHtml = '';
+    parsedText = '';
+    parsedRawBytes = null;
     pgpBadges = [];
     pgpDecryptError = '';
     pgpPublicKeyImportError = '';
@@ -150,12 +154,6 @@
     if (document.hidden) clearPgpContent();
   }
 
-  async function fetchRawMessage(msg: Message): Promise<Uint8Array> {
-    const url = `/api/email/raw?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
-    const res = await apiFetch(url);
-    if (!res.ok) throw new Error('raw message fetch failed');
-    return new Uint8Array(await res.arrayBuffer());
-  }
 
   async function harvestAutocrypt(rawBytes: Uint8Array, msg: Message) {
     const sender = bareMailbox(msg.from);
@@ -239,19 +237,17 @@
   async function pgpDecrypt(msg: Message) {
     const keys = getKeys();
     if (keys.length === 0) return;
+    if (!parsedRawBytes) return;
     const generation = ++pgpDecryptGeneration;
     pgpDecrypting = true;
     pgpDecryptError = '';
-    pgpDecryptedHtml = '';
-    pgpDecryptedText = '';
     clearPgpAttachments();
     pgpBadges = [];
     try {
-      const rawBytes = await fetchRawMessage(msg);
       const verificationKeys = await listPublicKeys()
         .then(readVerificationKeys)
         .catch(() => []);
-      const result = await decryptMessage(keys, rawBytes, verificationKeys);
+      const result = await decryptMessage(keys, parsedRawBytes, verificationKeys);
       if (generation !== pgpDecryptGeneration || selectedMessage?.uid !== msg.uid ||
           selectedMessage?.account_id !== msg.account_id || selectedMessage?.mailbox !== msg.mailbox) return;
       pgpBadges = result.badges;
@@ -271,11 +267,13 @@
         await loadMessagePublicKeyCandidates(msg, pgpAttachments);
         if (result.html) {
           const withInlineImages = insertDecryptedInlineImages(result.html, result.attachments);
-          pgpDecryptedHtml = prepareEmailHtml(withInlineImages);
-          pgpDecryptedText = result.text ?? htmlToPlainText(result.html);
+          parsedHtml = prepareEmailHtml(withInlineImages);
+          parsedText = result.text ?? htmlToPlainText(result.html);
           viewMode = htmlAddsValue(result.html) ? 'html' : 'text';
         } else if (result.text) {
-          pgpDecryptedText = result.text;
+          parsedHtml = '';
+          parsedText = result.text;
+          viewMode = 'text';
         }
       }
     } catch {
@@ -306,10 +304,9 @@
       await loadMessagePublicKeyCandidates(msg, attachments);
       if (msg.is_encrypted && getKeys().length > 0) {
         await pgpDecrypt(msg);
-      } else if (msg.is_signed) {
-        const rawBytes = await fetchRawMessage(msg);
+      } else if (msg.is_signed && parsedRawBytes) {
         const verificationKeys = await listPublicKeys().then(readVerificationKeys).catch(() => []);
-        pgpBadges = await verifySignedMessage(rawBytes, verificationKeys);
+        pgpBadges = await verifySignedMessage(parsedRawBytes, verificationKeys);
       }
     } catch {
       pgpPublicKeyImportError = tl('pgp_publicKeyImportError');
@@ -675,8 +672,7 @@
       sent_at: null,
       flags: [],
       has_attachments: false,
-      body_text: null,
-      body_html: null,
+      raw_eml: null,
       is_read: true,
       is_flagged: false,
       is_encrypted: false,
@@ -1253,8 +1249,9 @@
     attachmentsExpanded = false;
     imagesNoticeDismissed = false;
     viewMode = 'text'; // reset while loading
-    pgpDecryptedHtml = '';
-    pgpDecryptedText = '';
+    parsedHtml = '';
+    parsedText = '';
+    parsedRawBytes = null;
     clearPgpAttachments();
     pgpDecryptError = '';
     pgpBadges = [];
@@ -1269,10 +1266,34 @@
       if (r.ok) {
         loaded = true;
         const full = await r.json() as Message;
-        viewMode = htmlAddsValue(full.body_html) ? 'html' : 'text';
         selectedMessage = full;
         void loadThread(full, activeThreadRequest);
         messageLoading = false;
+        // Decode raw bytes and parse MIME for all messages (unified render path).
+        if (full.raw_eml) {
+          try {
+            const rawBytes = Uint8Array.from(atob(full.raw_eml), c => c.charCodeAt(0));
+            parsedRawBytes = rawBytes;
+            if (!full.is_encrypted) {
+              const parsed = parseMimeMessage(rawBytes);
+              parsedHtml = parsed.html ? prepareEmailHtml(parsed.html, {
+                accountId: full.account_id,
+                mailbox: full.mailbox,
+                uid: full.uid,
+              }) : '';
+              parsedText = parsed.text ?? '';
+              viewMode = htmlAddsValue(parsed.html) ? 'html' : 'text';
+            }
+            await harvestAutocrypt(rawBytes, full);
+            await loadMessagePublicKeyCandidates(full, full.attachments);
+            if (full.is_signed && !full.is_encrypted) {
+              const verificationKeys = await listPublicKeys().then(readVerificationKeys).catch(() => []);
+              pgpBadges = await verifySignedMessage(rawBytes, verificationKeys);
+            }
+          } catch {
+            // Raw MIME unavailable; message still renders without it.
+          }
+        }
         if (full.is_encrypted && getKeys().length > 0) {
           void pgpDecrypt(full);
         }
@@ -1283,17 +1304,6 @@
         // Mark as read
         if (!full.is_read) {
           await setFlag(full, '\\Seen', true);
-        }
-        try {
-          const rawBytes = await fetchRawMessage(full);
-          await harvestAutocrypt(rawBytes, full);
-          await loadMessagePublicKeyCandidates(full, full.attachments);
-          if (full.is_signed && !full.is_encrypted) {
-            const verificationKeys = await listPublicKeys().then(readVerificationKeys).catch(() => []);
-            pgpBadges = await verifySignedMessage(rawBytes, verificationKeys);
-          }
-        } catch {
-          // Reading ordinary mail must not fail when raw/key harvesting is unavailable.
         }
       }
     } catch {}
@@ -1673,10 +1683,10 @@
     if (!msg) return;
     if (!e.shiftKey && e.key === 'r') {
       e.preventDefault();
-      composeDialog?.open({ mode: 'reply', replyTo: msg });
+      composeDialog?.open({ mode: 'reply', replyTo: msg, parsedText, parsedHtml });
     } else if (!e.shiftKey && e.key === 'a') {
       e.preventDefault();
-      composeDialog?.open({ mode: 'replyAll', replyTo: msg });
+      composeDialog?.open({ mode: 'replyAll', replyTo: msg, parsedText, parsedHtml });
     } else if (!e.shiftKey && e.key === 'f') {
       e.preventDefault();
       void openForward(msg);
@@ -1700,8 +1710,8 @@
     // CIDs actually referenced in the HTML body are handled as inline images by the backend.
     // Only skip those; other attachments (even if they carry a Content-ID) must be forwarded normally.
     const inlineImageCids = new Set<string>();
-    if (msg.body_html) {
-      for (const m of msg.body_html.matchAll(/\bcid:([^"'\s>)]+)/gi)) {
+    if (parsedHtml) {
+      for (const m of parsedHtml.matchAll(/\bcid:([^"'\s>)]+)/gi)) {
         inlineImageCids.add(m[1]);
       }
     }
@@ -1716,7 +1726,7 @@
         }
       } catch { /* skip attachment on error */ }
     }
-    composeDialog?.open({ mode: 'forward', replyTo: msg, attachments });
+    composeDialog?.open({ mode: 'forward', replyTo: msg, attachments, parsedText, parsedHtml });
   }
 
   function openPopout(msg: Message) {
@@ -1954,19 +1964,10 @@
   $: pageStart = totalMessages === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   $: pageEnd = Math.min(currentPage * pageSize, totalMessages);
 
-  $: renderedHtml = selectedMessage?.body_html
-    ? prepareEmailHtml(selectedMessage.body_html, {
-      accountId: selectedMessage.account_id,
-      mailbox: selectedMessage.mailbox,
-      uid: selectedMessage.uid,
-    })
-    : '';
-  $: htmlHasValue = htmlAddsValue(selectedMessage?.body_html ?? null);
-  $: encryptedHtmlHasValue = htmlAddsValue(pgpDecryptedHtml || null);
-  $: canToggleBodyView = selectedMessage?.is_encrypted ? encryptedHtmlHasValue : htmlHasValue;
-  $: displayedText = selectedMessage?.is_encrypted
-    ? pgpDecryptedText
-    : (selectedMessage?.body_text ?? '');
+  $: renderedHtml = parsedHtml;
+  $: htmlHasValue = htmlAddsValue(parsedHtml || null);
+  $: canToggleBodyView = htmlHasValue;
+  $: displayedText = parsedText;
   $: bodyTextSegments = linkifySegments(displayedText);
   $: visibleServerAttachments = selectedMessage?.attachments.filter(att =>
     !isPgpSignatureAttachment(att) &&
@@ -2191,14 +2192,14 @@
                 aria-label={selectedMessage.is_flagged ? tl('mail_unflag') : tl('mail_flag')}
                 title={selectedMessage.is_flagged ? tl('mail_unflag') : tl('mail_flag')}
               >★</button>
-              <button class="inline-action-btn" on:click={() => composeDialog?.open({ mode: 'reply', replyTo: selectedMessage! })} aria-label={tl('mail_reply')} title={tl('mail_reply')}>
+              <button class="inline-action-btn" on:click={() => composeDialog?.open({ mode: 'reply', replyTo: selectedMessage!, parsedText, parsedHtml })} aria-label={tl('mail_reply')} title={tl('mail_reply')}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
               </button>
               <div class="actions-wrapper" bind:this={actionsEl}>
                 <button class="actions-toggle" on:click={toggleActions} aria-label={tl('mail_messageActions')}>{#if usesDetailOverlay}⋮{:else}{tl('mail_actions')} <span class="actions-caret">▾</span>{/if}</button>
                 {#if actionsOpen}
                   <div class="actions-menu" role="menu">
-                  <button role="menuitem" on:click={() => { actionsOpen = false; composeDialog?.open({ mode: 'replyAll', replyTo: selectedMessage! }); }}>
+                  <button role="menuitem" on:click={() => { actionsOpen = false; composeDialog?.open({ mode: 'replyAll', replyTo: selectedMessage!, parsedText, parsedHtml }); }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="8 14 3 9 8 4"/><polyline points="14 14 9 9 14 4"/><path d="M21 20v-7a4 4 0 0 0-4-4H3"/></svg>
                     {tl('mail_replyAll')}
                   </button>
@@ -2423,23 +2424,46 @@
             {/if}
             {#if pgpPublicKeyImportError}<p class="pgp-error">{pgpPublicKeyImportError}</p>{/if}
             {#if pgpPublicKeyImportSuccess}<p class="pgp-success">{pgpPublicKeyImportSuccess}</p>{/if}
-            {#if selectedMessage.is_encrypted}
-              <!-- PGP encrypted message -->
-              {#if viewMode === 'html' && encryptedHtmlHasValue}
-                <!-- Decrypted HTML: sandboxed iframe WITHOUT allow-same-origin -->
+            {#if viewMode === 'html' && htmlHasValue}
+              {#if selectedMessage.is_encrypted}
+                <!-- Decrypted HTML: sandboxed iframe WITHOUT allow-same-origin (inline blob images) -->
                 {#key iframeKey}
                   <iframe
                     bind:this={iframeEl}
                     on:load={fitIframeToContent}
                     sandbox="allow-popups allow-popups-to-escape-sandbox"
-                    srcdoc={pgpDecryptedHtml}
+                    srcdoc={renderedHtml}
                     title={tl('nav_mail')}
                     class="html-body"
                   ></iframe>
                 {/key}
-              {:else if pgpDecryptedText}
-                <pre class="body-text">{#each bodyTextSegments as seg}{#if 'href' in seg}<a href={seg.href} target="_blank" rel="noopener noreferrer">{seg.text}</a>{:else}{seg.text}{/if}{/each}</pre>
-              {:else if pgpDecryptError}
+              {:else}
+                {#if blockedOrigins.length > 0 && !imagesNoticeDismissed}
+                  <div class="images-notice">
+                    <span>{tl('mail_imagesBlocked')}</span>
+                    {#each blockedOrigins as origin}
+                      <span class="origin-split-btn">
+                        <button class="origin-split-allow" on:click={() => allowOrigin(origin)}>{tl('mail_allowOrigin', { origin })}</button>
+                        <button class="origin-split-block" on:click={() => blockOriginSilently(origin)} title={tl('mail_blockSilently')}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></button>
+                      </span>
+                    {/each}
+                    <button class="dismiss-notice-btn" on:click={() => imagesNoticeDismissed = true} aria-label={tl('mail_dismiss')}>×</button>
+                  </div>
+                {/if}
+                {#key iframeKey}
+                  <MailHtmlFrame
+                    bind:element={iframeEl}
+                    on:load={fitIframeToContent}
+                    scrolling={usesDetailOverlay ? 'no' : undefined}
+                    srcdoc={renderedHtml}
+                    title={tl('nav_mail')}
+                  />
+                {/key}
+              {/if}
+            {:else if parsedText}
+              <pre class="body-text">{#each bodyTextSegments as seg}{#if 'href' in seg}<a href={seg.href} target="_blank" rel="noopener noreferrer">{seg.text}</a>{:else}{seg.text}{/if}{/each}</pre>
+            {:else if selectedMessage.is_encrypted}
+              {#if pgpDecryptError}
                 <p class="pgp-error">{pgpDecryptError}</p>
               {:else if pgpDecrypting}
                 <p aria-busy="true">{tl('pgp_decrypting')}</p>
@@ -2458,30 +2482,6 @@
                   {/if}
                 </div>
               {/if}
-            {:else if viewMode === 'html' && htmlHasValue}
-              {#if blockedOrigins.length > 0 && !imagesNoticeDismissed}
-                <div class="images-notice">
-                  <span>{tl('mail_imagesBlocked')}</span>
-                  {#each blockedOrigins as origin}
-                    <span class="origin-split-btn">
-                      <button class="origin-split-allow" on:click={() => allowOrigin(origin)}>{tl('mail_allowOrigin', { origin })}</button>
-                      <button class="origin-split-block" on:click={() => blockOriginSilently(origin)} title={tl('mail_blockSilently')}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></button>
-                    </span>
-                  {/each}
-                  <button class="dismiss-notice-btn" on:click={() => imagesNoticeDismissed = true} aria-label={tl('mail_dismiss')}>×</button>
-                </div>
-              {/if}
-              {#key iframeKey}
-                <MailHtmlFrame
-                  bind:element={iframeEl}
-                  on:load={fitIframeToContent}
-                  scrolling={usesDetailOverlay ? 'no' : undefined}
-                  srcdoc={renderedHtml}
-                  title={tl('nav_mail')}
-                />
-              {/key}
-            {:else if selectedMessage.body_text !== null}
-              <pre class="body-text">{#each bodyTextSegments as seg}{#if 'href' in seg}<a href={seg.href} target="_blank" rel="noopener noreferrer">{seg.text}</a>{:else}{seg.text}{/if}{/each}</pre>
             {:else}
               <div class="loading">{tl('mail_loadingBody')}</div>
             {/if}
