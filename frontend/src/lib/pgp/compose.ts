@@ -140,12 +140,6 @@ function parameterValue(name: string, value: string): string {
   return `${name}*=UTF-8''${encodeURIComponent(safe).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)}`;
 }
 
-function simpleParameterValue(name: string, value: string): string {
-  const safe = safeHeader(value).replace(/[";]/g, '');
-  if (!hasNonAscii(safe) && /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(safe)) return `${name}=${safe}`;
-  return parameterValue(name, value);
-}
-
 export function parseEnvelopeAddresses(value: string): string[] {
   return value
     .split(',')
@@ -177,6 +171,15 @@ function messageHeaders(headers: string[]): string {
   return `${headers.join('\r\n')}\r\n`;
 }
 
+function protectedHeaders(headers: string[]): string {
+  return headers
+    .filter(header => {
+      const name = header.split(':', 1)[0].toLowerCase();
+      return name !== 'mime-version' && name !== 'autocrypt';
+    })
+    .join('\r\n');
+}
+
 // Advertise the sender's key via an Autocrypt header instead of attaching it to
 // the signed body. K-9 / Thunderbird for Android fails signature verification
 // when a public key is attached to a signed message (thundernest/k-9#6511); the
@@ -192,7 +195,7 @@ function autocryptHeader(message: ProtectedComposeMessage): string | null {
   return `Autocrypt: addr=${addr};\r\n keydata=${keydata}`;
 }
 
-async function innerEntity(message: ProtectedComposeMessage): Promise<string> {
+async function innerEntity(message: ProtectedComposeMessage, signedProtectedHeaders: string | null = null): Promise<string> {
   const attachments = [...message.attachments];
 
   const textPart =
@@ -206,7 +209,7 @@ async function innerEntity(message: ProtectedComposeMessage): Promise<string> {
     if (message.inlineImages && message.inlineImages.length > 0) {
       const relBoundary = boundary('related');
       htmlPart =
-        `Content-Type: multipart/related;\r\n boundary=${relBoundary}\r\nContent-Transfer-Encoding: 7bit\r\n\r\n` +
+        `Content-Type: multipart/related; boundary="${relBoundary}"\r\n\r\n` +
       `--${relBoundary}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n${quotedPrintable(htmlBody)}\r\n`;
       for (const img of message.inlineImages) {
         const ct = asciiHeader(img.contentType || 'image/jpeg');
@@ -221,7 +224,7 @@ async function innerEntity(message: ProtectedComposeMessage): Promise<string> {
     }
     const altBoundary = boundary('alternative');
     bodyPart =
-      `Content-Type: multipart/alternative;\r\n boundary=${altBoundary}\r\nContent-Transfer-Encoding: 7bit\r\n\r\n` +
+      `Content-Type: multipart/alternative; boundary="${altBoundary}"\r\n\r\n` +
       `--${altBoundary}\r\n${textPart}` +
       `--${altBoundary}\r\n${htmlPart}` +
       `--${altBoundary}--\r\n`;
@@ -234,15 +237,17 @@ async function innerEntity(message: ProtectedComposeMessage): Promise<string> {
   }
 
   const mixedBoundary = boundary('mixed');
-  let entity = `Content-Transfer-Encoding: 7bit\r\nContent-Type: multipart/mixed;\r\n boundary=${mixedBoundary}\r\n\r\n`;
+  let entity = signedProtectedHeaders
+    ? `Content-Type: multipart/mixed; boundary="${mixedBoundary}";\r\n protected-headers="v1"\r\n${signedProtectedHeaders}\r\n\r\n`
+    : `Content-Type: multipart/mixed; boundary="${mixedBoundary}"\r\n\r\n`;
   entity += `--${mixedBoundary}\r\n${bodyPart}`;
   for (const attachment of attachments) {
-    const filename = simpleParameterValue('name', attachment.name);
-    const dispositionFilename = simpleParameterValue('filename', attachment.name);
+    const filename = parameterValue('name', attachment.name);
+    const dispositionFilename = parameterValue('filename', attachment.name);
     const contentType = safeHeader(attachment.type || 'application/octet-stream');
     const content = new Uint8Array(await attachment.arrayBuffer());
-    entity += `--${mixedBoundary}\r\nContent-Type: ${contentType};\r\n ${filename}\r\n`;
-    entity += `Content-Transfer-Encoding: base64\r\nContent-Disposition: attachment;\r\n ${dispositionFilename};\r\n size=${content.byteLength}\r\n\r\n`;
+    entity += `--${mixedBoundary}\r\nContent-Type: ${contentType}; ${filename}\r\n`;
+    entity += `Content-Disposition: attachment; ${dispositionFilename}\r\nContent-Transfer-Encoding: base64\r\n\r\n`;
     entity += `${base64Lines(content)}\r\n`;
   }
   entity += `--${mixedBoundary}--\r\n`;
@@ -257,7 +262,10 @@ export async function buildProtectedMime(message: ProtectedComposeMessage): Prom
   );
   const headers = messageHeaders(headerLines);
   const hasAttachments = message.attachments.length > 0;
-  const inner = await innerEntity(message);
+  const inner = await innerEntity(
+    message,
+    message.sign && !message.encrypt && hasAttachments ? protectedHeaders(headerLines) : null,
+  );
 
   if (message.encrypt) {
     const pgpMessage = await openpgp.createMessage({ binary: encoder.encode(inner) });
@@ -300,9 +308,11 @@ export async function buildProtectedMime(message: ProtectedComposeMessage): Prom
   const micalg = micalgForSignature(signatureObject);
   const signature = signatureObject.armor().replace(/\r?\n/g, '\r\n');
   const signedBoundary = boundary('signed');
-  const signaturePart = `Content-Type: application/pgp-signature; name="signature.asc"\r\nContent-Transfer-Encoding: 7bit\r\n\r\n${signature}\r\n`;
+  const signaturePart = hasAttachments
+    ? `Content-Type: application/pgp-signature; name="OpenPGP_signature.asc"\r\nContent-Description: OpenPGP digital signature\r\nContent-Disposition: attachment; filename="OpenPGP_signature"\r\n\r\n${signature}\r\n`
+    : `Content-Type: application/pgp-signature; name="signature.asc"\r\nContent-Disposition: attachment; filename="signature.asc"\r\n\r\n${signature}\r\n`;
   const body =
-    `Content-Transfer-Encoding: 7bit\r\nContent-Type: multipart/signed; boundary="${signedBoundary}";\r\n protocol="application/pgp-signature"; micalg="${micalg}"\r\n\r\n` +
+    `Content-Type: multipart/signed; protocol="application/pgp-signature"; micalg=${micalg}; boundary="${signedBoundary}"\r\n\r\n` +
     `--${signedBoundary}\r\n${signedContent}\r\n` +
     `--${signedBoundary}\r\n${signaturePart}` +
     `--${signedBoundary}--\r\n`;
