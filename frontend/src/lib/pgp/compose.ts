@@ -68,6 +68,17 @@ function boundary(label: string): string {
   return `----caley-${label}-${crypto.randomUUID().replace(/-/g, '')}`;
 }
 
+// Map an OpenPGP hash-algorithm id (RFC 4880 §9.4) to its RFC 3156 micalg token.
+const MICALG_BY_HASH: Record<number, string> = {
+  1: 'pgp-md5', 2: 'pgp-sha1', 3: 'pgp-ripemd160',
+  8: 'pgp-sha256', 9: 'pgp-sha384', 10: 'pgp-sha512', 11: 'pgp-sha224',
+};
+
+function micalgForSignature(signature: openpgp.Signature): string {
+  const hashAlgorithm = signature.packets[0]?.hashAlgorithm;
+  return (hashAlgorithm !== undefined && MICALG_BY_HASH[hashAlgorithm]) || 'pgp-sha256';
+}
+
 function base64Lines(bytes: Uint8Array): string {
   let binary = '';
   for (let offset = 0; offset < bytes.length; offset += 0x8000) {
@@ -243,16 +254,27 @@ export async function buildProtectedMime(message: ProtectedComposeMessage): Prom
     // Plain message: return headers + inner entity directly.
     return encoder.encode(headers + inner);
   }
-  const signedMessage = await openpgp.createMessage({ binary: encoder.encode(inner) });
-  const signature = await openpgp.sign({
+  // RFC 1521/3156: the CRLF immediately preceding the boundary delimiter belongs
+  // to the delimiter, not to the signed body part. Signing the trailing CRLF makes
+  // the signature cover bytes that no other client includes when verifying, so they
+  // report it invalid. Sign the canonical part content only; text mode normalizes
+  // line endings to CRLF, keeping the signature valid across line-ending rewrites.
+  const signedContent = inner.replace(/\r\n$/, '');
+  const signedMessage = await openpgp.createMessage({ text: signedContent });
+  const signatureObject = await openpgp.sign({
     message: signedMessage,
     signingKeys: message.signingKey,
     detached: true,
-    format: 'armored',
+    format: 'object',
   });
+  // micalg MUST name the hash actually used (RFC 3156 §5). Ed25519 keys hash with
+  // SHA-512, not SHA-256 — a hardcoded value makes strict verifiers reject the
+  // signature. The armor uses bare LF; MIME requires CRLF throughout the entity.
+  const micalg = micalgForSignature(signatureObject);
+  const signature = signatureObject.armor().replace(/\r?\n/g, '\r\n');
   const signedBoundary = boundary('signed');
   const body =
-    `Content-Type: multipart/signed; protocol="application/pgp-signature"; micalg=pgp-sha256; boundary="${signedBoundary}"\r\n\r\n` +
+    `Content-Type: multipart/signed; protocol="application/pgp-signature"; micalg=${micalg}; boundary="${signedBoundary}"\r\n\r\n` +
     `--${signedBoundary}\r\n${inner}` +
     `--${signedBoundary}\r\nContent-Type: application/pgp-signature; name="signature.asc"\r\nContent-Disposition: attachment; filename="signature.asc"\r\n\r\n${signature}\r\n` +
     `--${signedBoundary}--\r\n`;

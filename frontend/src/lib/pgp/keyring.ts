@@ -274,15 +274,37 @@ function extractDetachedSignedMime(mime: string): SignedBlock | null {
   if (!contentType.toLowerCase().startsWith('multipart/signed')) return null;
   const boundary = readParameter(contentType, 'boundary');
   if (!boundary) return null;
-  const parts = splitMultipart(mime.slice(headerEnd).replace(/^\r?\n\r?\n/, ''), boundary);
-  if (parts.length < 2) return null;
-  const signatureBegin = parts[1].indexOf('-----BEGIN PGP SIGNATURE-----');
-  const signatureEnd = parts[1].indexOf('-----END PGP SIGNATURE-----', signatureBegin);
+
+  // Slice the signed part's exact on-wire octets. Re-canonicalizing line endings
+  // (as splitMultipart does) would "repair" mangling introduced in transit/forwarding
+  // and validate signatures that strict clients reject. The CRLF that precedes the
+  // next boundary delimiter is part of the delimiter (RFC 1521), so it is excluded.
+  const delimiter = `--${boundary}`;
+  const open = findLineStart(mime, delimiter, headerEnd);
+  if (open === -1) return null;
+  const openLineEnd = mime.indexOf('\n', open);
+  if (openLineEnd === -1) return null;
+  const contentStart = openLineEnd + 1;
+
+  const next = mime.indexOf(`\n${delimiter}`, contentStart);
+  if (next === -1) return null;
+  let contentEnd = next; // index of the '\n' belonging to the delimiter's line break
+  if (mime[contentEnd - 1] === '\r') contentEnd -= 1;
+
+  const signatureBegin = mime.indexOf('-----BEGIN PGP SIGNATURE-----', next);
+  const signatureEnd = mime.indexOf('-----END PGP SIGNATURE-----', signatureBegin);
   if (signatureBegin === -1 || signatureEnd === -1) return null;
   return {
-    text: `${parts[0]}\r\n`,
-    signature: parts[1].slice(signatureBegin, signatureEnd + '-----END PGP SIGNATURE-----'.length),
+    text: mime.slice(contentStart, contentEnd),
+    signature: mime.slice(signatureBegin, signatureEnd + '-----END PGP SIGNATURE-----'.length),
   };
+}
+
+/** Index of `needle` when it starts a line at or after `from`, else -1. */
+function findLineStart(mime: string, needle: string, from: number): number {
+  if (mime.startsWith(needle, from)) return from;
+  const idx = mime.indexOf(`\n${needle}`, from);
+  return idx === -1 ? -1 : idx + 1;
 }
 
 // ── Decrypted MIME parsing ───────────────────────────────────────────────────
