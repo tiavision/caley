@@ -267,10 +267,10 @@ export async function buildProtectedMime(message: ProtectedComposeMessage): Prom
   // RFC 1521/3156: the CRLF immediately preceding the boundary delimiter belongs
   // to the delimiter, not to the signed body part. Signing the trailing CRLF makes
   // the signature cover bytes that no other client includes when verifying, so they
-  // report it invalid. Sign the canonical part content only; text mode normalizes
-  // line endings to CRLF, keeping the signature valid across line-ending rewrites.
+  // report it invalid. Sign the canonical part content as exact MIME octets; this
+  // keeps multipart/mixed bodies with attachments covered by the detached signature.
   const signedContent = inner.replace(/\r\n$/, '');
-  const signedMessage = await openpgp.createMessage({ text: signedContent });
+  const signedMessage = await openpgp.createMessage({ binary: encoder.encode(signedContent) });
   const signatureObject = await openpgp.sign({
     message: signedMessage,
     signingKeys: message.signingKey,

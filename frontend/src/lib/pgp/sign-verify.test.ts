@@ -96,6 +96,35 @@ describe('PGP/MIME sign + verify', () => {
     expect(await verifySignedMessage(new TextEncoder().encode(tampered), [publicKey]))
       .toContain('verification_failed');
   });
+
+  it('signs multipart/mixed messages with attachments as exact MIME octets', async () => {
+    const { privateKey, publicKey } = await signingKey();
+    const mime = await buildProtectedMime({
+      ...baseMessage(privateKey),
+      attachments: [new File(['attached content'], 'note.txt', { type: 'text/plain' })],
+    });
+    const text = new TextDecoder().decode(mime);
+
+    expect(text).toContain('Content-Type: multipart/mixed;');
+    expect(text).toContain('filename="note.txt"');
+    expect(await verifySignedMessage(mime, [publicKey])).toContain('verified');
+
+    const tampered = text.replace('YXR0YWNoZWQgY29udGVudA==', 'YXR0YWNoZWQgY29udGVuZA==');
+    expect(await verifySignedMessage(new TextEncoder().encode(tampered), [publicKey]))
+      .toContain('verification_failed');
+  });
+
+  it('keeps a forwarded signature.asc attachment inside the signed content', async () => {
+    const { privateKey, publicKey } = await signingKey();
+    const mime = await buildProtectedMime({
+      ...baseMessage(privateKey),
+      attachments: [new File(['-----BEGIN PGP SIGNATURE-----\nold\n-----END PGP SIGNATURE-----'], 'signature.asc', { type: 'application/pgp-signature' })],
+    });
+    const text = new TextDecoder().decode(mime);
+
+    expect(text.match(/filename="signature\.asc"/g)).toHaveLength(2);
+    expect(await verifySignedMessage(mime, [publicKey])).toContain('verified');
+  });
 });
 
 describe('PGP message detection', () => {
