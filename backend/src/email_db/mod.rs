@@ -258,9 +258,9 @@ pub async fn upsert_identity(
     let mut tx = pool.begin().await?;
     if is_default {
         sqlx::query(
-            "UPDATE email_identities SET is_default = 0 WHERE account_id = ? AND identity_id != ?",
+            "UPDATE email_identities SET is_default = 0 WHERE user_id = ? AND identity_id != ?",
         )
-        .bind(account_id)
+        .bind(user_id)
         .bind(identity_id)
         .execute(&mut *tx)
         .await?;
