@@ -89,6 +89,27 @@ export function prepareEmailHtml(html: string, context: MailHtmlContext = {}): s
       if (clean) node.setAttribute('style', clean);
       else node.removeAttribute('style');
     }
+
+    // Mirror valid numeric width/height HTML attributes into inline CSS so they
+    // take effect with author-level specificity. Browsers may ignore presentational
+    // hints when an invalid value like height="auto" is also present.
+    if (node instanceof HTMLImageElement) {
+      const wAttr = node.getAttribute('width');
+      const hAttr = node.getAttribute('height');
+      const currentStyle = node.getAttribute('style') ?? '';
+      const additions: string[] = [];
+      if (wAttr !== null) {
+        const w = parseInt(wAttr, 10);
+        if (!isNaN(w) && !/\bwidth\s*:/i.test(currentStyle)) additions.push(`width: ${w}px`);
+      }
+      if (hAttr !== null) {
+        const h = parseInt(hAttr, 10);
+        if (!isNaN(h) && !/\bheight\s*:/i.test(currentStyle)) additions.push(`height: ${h}px`);
+      }
+      if (additions.length) {
+        node.setAttribute('style', currentStyle ? `${currentStyle}; ${additions.join('; ')}` : additions.join('; '));
+      }
+    }
   };
 
   DOMPurify.addHook('afterSanitizeAttributes', hook);
@@ -98,7 +119,17 @@ export function prepareEmailHtml(html: string, context: MailHtmlContext = {}): s
       ALLOWED_TAGS: allowedTags,
       ALLOWED_ATTR: allowedAttrs,
       ALLOW_DATA_ATTR: false,
-      ADD_URI_SAFE_ATTR: ['src'],
+      // When ALLOWED_URI_REGEXP is set, DOMPurify validates every non-empty
+      // attribute value against it — not just href/src. Presentational attributes
+      // like width="150", height="auto", bgcolor="#eee" would be stripped because
+      // their values don't look like URIs. Adding them to URI_SAFE_ATTRIBUTES
+      // exempts them from that check.
+      ADD_URI_SAFE_ATTR: [
+        'src',
+        'align', 'bgcolor', 'border', 'cellpadding', 'cellspacing', 'color',
+        'colspan', 'dir', 'face', 'height', 'rel', 'rowspan', 'size', 'span',
+        'target', 'valign', 'width',
+      ],
       ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|cid):|data:image\/(?!svg\b)|\/api\/email\/proxy-image\?)/i,
     });
   } finally {
