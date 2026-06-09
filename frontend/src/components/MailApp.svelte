@@ -157,7 +157,9 @@
   }
 
   function clearPgpContentWhenHidden() {
-    if (document.hidden) clearPgpContent();
+    if (document.hidden && (detectedPgpEncrypted || detectedPgpSigned)) {
+      clearPgpContent();
+    }
   }
 
 
