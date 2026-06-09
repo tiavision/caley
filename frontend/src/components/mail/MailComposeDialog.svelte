@@ -599,7 +599,6 @@
 <dialog
   bind:this={dialog}
   class="compose-dialog"
-  on:click={(e) => { if (e.target === e.currentTarget) dialog?.close(); }}
   on:cancel={(e) => { e.preventDefault(); if (filePickerOpen) { filePickerOpen = false; } else { dialog?.close(); } }}
 >
   <article>
@@ -771,9 +770,13 @@
 
 <style>
   .compose-dialog {
-    max-width: 44rem;
-    width: 95vw;
-    max-height: 90dvh;
+    width: min(95vw, 44rem);
+    max-width: 95vw;
+    height: clamp(320px, 60dvh, 560px);
+    min-width: 360px;
+    min-height: 280px;
+    max-height: 95dvh;
+    resize: both;
     padding: 0;
     overflow: hidden;
   }
@@ -782,6 +785,12 @@
     padding: 0;
     margin: 0;
     overflow: hidden;
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
   }
 
   .compose-header {
@@ -805,6 +814,9 @@
     flex-direction: column;
     font-size: 0.9rem;
     color: var(--pico-color);
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .compose-row {
@@ -925,6 +937,10 @@
 
   .compose-body-row {
     padding: 0.25rem 1rem 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
 
   .compose-body-row textarea {
@@ -934,11 +950,13 @@
     outline: none !important;
     box-shadow: none !important;
     background: transparent !important;
-    resize: vertical;
+    resize: none;
     padding: 0.5rem 0 !important;
     margin: 0 !important;
     font-size: 0.9rem;
     color: var(--pico-color);
+    flex: 1;
+    min-height: 4rem;
   }
 
   .compose-body-row textarea:focus {
