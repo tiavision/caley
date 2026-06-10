@@ -539,7 +539,7 @@
           {todayStr}
           {locale}
           onEventClick={(ev) => eventDetail.open(ev)}
-          onMoreClick={(date, evs) => dayEventsDialog.open(date, evs)}
+          onMoreClick={(date, evs) => { focusedEventDate = date; dayEventsDialog.open(date, evs); }}
         />
       </div>
     {/if}
@@ -571,6 +571,7 @@
   bind:this={dayEventsDialog}
   {locale}
   onEventClick={(ev) => eventDetail.open(ev)}
+  onNewEvent={(date) => { focusedEventDate = date; formDialog.openNewEventForm(); }}
 />
 
 
