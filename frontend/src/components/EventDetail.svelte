@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import { makeTl } from '../lib/i18n.ts';
   import type { EventJson } from '../types/calendar.ts';
-  import { formatEventTime, formatRecurrence, formatAlarm, partstatKey } from '../lib/format.ts';
+  import { formatEventTimes, formatRecurrence, formatAlarm, partstatKey } from '../lib/format.ts';
   import ShareMenu from './ShareMenu.svelte';
 
   export let locale: string;
@@ -16,7 +16,7 @@
   let detailEditPopoverOpen = false;
   let dialogEl: HTMLDialogElement;
 
-  $: detailTimeText = detailEvent ? formatEventTime(detailEvent) : '';
+  $: detailTime = detailEvent ? formatEventTimes(detailEvent) : { localText: '', sourceText: '' };
   $: detailRecText = (detailEvent?.is_recurring && detailEvent?.recurrence)
     ? formatRecurrence(detailEvent.recurrence, locale) : '';
 
@@ -109,10 +109,13 @@
 
     {#if detailEvent}
       <div class="event-detail-body">
-        {#if detailTimeText}
+        {#if detailTime.localText}
           <div class="event-detail-row">
             <span class="event-detail-label">{tl('event_time')}</span>
-            <span>{detailTimeText}</span>
+            <span>{detailTime.localText}</span>
+            {#if detailTime.sourceText}
+              <span class="event-detail-secondary">{tl('event_originalTime')}: {detailTime.sourceText}</span>
+            {/if}
           </div>
         {/if}
         {#if detailEvent.location}
@@ -175,6 +178,10 @@
   .event-detail-label {
     font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
     color: var(--pico-muted-color, #666); font-weight: 600;
+  }
+  .event-detail-secondary {
+    color: var(--pico-muted-color, #666);
+    font-size: 0.875rem;
   }
 
   .edit-wrap { position: relative; }

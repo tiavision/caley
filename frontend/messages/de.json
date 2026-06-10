@@ -20,6 +20,7 @@
   "weekly_loading": "Termine werden geladen",
   "weekly_aria_close": "Schließen",
   "event_time": "Zeit",
+  "event_originalTime": "Ursprüngliche Zeit",
   "event_location": "Ort",
   "event_repeats": "Wiederholung",
   "event_description": "Beschreibung",

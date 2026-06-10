@@ -12,30 +12,115 @@ export function partstatKey(ps: PartStat): string {
   return PARTSTAT_KEYS[ps] ?? 'event_attendeeStatusNeedsAction';
 }
 
-export function formatEventTime(ev: EventJson): string {
+export interface EventTimeText {
+  localText: string;
+  sourceText: string;
+}
+
+function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+function supportsTimeZone(tz: string): boolean {
+  if (!tz) return false;
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: tz }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasExplicitOffset(value: string): boolean {
+  return /(?:Z|[+-]\d{2}:\d{2})$/.test(value);
+}
+
+function dateFromLocalWallTime(value: string): Date | null {
+  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return null;
+  return new Date(
+    Number(m[1]),
+    Number(m[2]) - 1,
+    Number(m[3]),
+    Number(m[4]),
+    Number(m[5]),
+    Number(m[6] ?? 0),
+  );
+}
+
+function dateFromEventValue(value: string, ignoreFallbackUtc: boolean): Date | null {
+  if (!value) return null;
+  if (ignoreFallbackUtc) return dateFromLocalWallTime(value);
+  const d = new Date(hasExplicitOffset(value) ? value : value + 'Z');
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function formatDatePart(date: Date, loc: string, timeZone?: string): string {
+  return new Intl.DateTimeFormat(loc, { dateStyle: 'long', ...(timeZone ? { timeZone } : {}) }).format(date);
+}
+
+function formatTimePart(date: Date, loc: string, timeZone?: string): string {
+  return new Intl.DateTimeFormat(loc, {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(timeZone ? { timeZone } : {}),
+  }).format(date);
+}
+
+function formatDateTimeRange(start: Date, end: Date | null, loc: string, timeZone?: string): string {
+  let text = formatDatePart(start, loc, timeZone) + ', ' + formatTimePart(start, loc, timeZone);
+  if (end) {
+    const startDate = formatDatePart(start, loc, timeZone);
+    const endDate = formatDatePart(end, loc, timeZone);
+    text += startDate === endDate
+      ? ' – ' + formatTimePart(end, loc, timeZone)
+      : ' – ' + endDate + ', ' + formatTimePart(end, loc, timeZone);
+  }
+  return text;
+}
+
+export function formatEventTimes(ev: EventJson): EventTimeText {
   const loc = navigator.language || 'en';
   if (ev.is_all_day) {
     if (ev.dtstart) {
       const [y, monthNum, d] = ev.dtstart.split('T')[0].split('-').map(Number);
-      return m.event_allDay() + ' · ' + new Date(y, monthNum - 1, d).toLocaleDateString(loc, { dateStyle: 'long' });
+      return {
+        localText: m.event_allDay() + ' · ' + new Date(y, monthNum - 1, d).toLocaleDateString(loc, { dateStyle: 'long' }),
+        sourceText: '',
+      };
     }
-    return m.event_allDay();
+    return { localText: m.event_allDay(), sourceText: '' };
   }
-  if (!ev.dtstart) return '';
-  const s = new Date(ev.dtstart.includes('Z') || ev.dtstart.includes('+') ? ev.dtstart : ev.dtstart + 'Z');
-  let text = s.toLocaleDateString(loc, { dateStyle: 'long' }) + ', ' +
-    s.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
-  if (ev.dtend) {
-    const e = new Date(ev.dtend.includes('Z') || ev.dtend.includes('+') ? ev.dtend : ev.dtend + 'Z');
-    if (s.toDateString() === e.toDateString()) {
-      text += ' – ' + e.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
+  if (!ev.dtstart) return { localText: '', sourceText: '' };
+
+  const eventTz = ev.tz || '';
+  const supportedEventTz = supportsTimeZone(eventTz);
+  const unsupportedNonUtcTz = !!eventTz && eventTz !== 'UTC' && !supportedEventTz;
+  const ignoreFallbackUtc = unsupportedNonUtcTz && ev.dtstart.endsWith('Z');
+  const s = dateFromEventValue(ev.dtstart, ignoreFallbackUtc);
+  if (!s) return { localText: '', sourceText: '' };
+
+  const e = ev.dtend ? dateFromEventValue(ev.dtend, ignoreFallbackUtc && ev.dtend.endsWith('Z')) : null;
+  const localText = formatDateTimeRange(s, e, loc);
+
+  let sourceText = '';
+  if (eventTz && eventTz !== 'UTC' && eventTz !== browserTimeZone()) {
+    if (supportedEventTz) {
+      sourceText = formatDateTimeRange(s, e, loc, eventTz) + ' ' + eventTz;
     } else {
-      text += ' – ' + e.toLocaleDateString(loc, { dateStyle: 'long' }) + ', ' +
-        e.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
+      sourceText = formatDateTimeRange(s, e, loc) + ' ' + eventTz;
     }
   }
-  if (ev.tz && ev.tz !== 'UTC') text += ' (' + ev.tz + ')';
-  return text;
+
+  return { localText, sourceText };
+}
+
+export function formatEventTime(ev: EventJson): string {
+  return formatEventTimes(ev).localText;
 }
 
 export function formatRecurrence(r: RecurrenceInfo | null, locale: string): string {

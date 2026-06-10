@@ -20,6 +20,7 @@
   "weekly_loading": "Loading events",
   "weekly_aria_close": "Close",
   "event_time": "Time",
+  "event_originalTime": "Original time",
   "event_location": "Location",
   "event_repeats": "Repeats",
   "event_description": "Description",
