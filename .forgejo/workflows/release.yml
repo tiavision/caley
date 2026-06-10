@@ -25,9 +25,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
+        run: git clone --depth 1 --branch ${{ github.ref_name }} ${{ github.server_url }}/${{ github.repository }}.git .
 
       - name: Validate version and tag
         run: |
