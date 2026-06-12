@@ -22,6 +22,7 @@
   let successMsg = '';
   let importing = false;
   let previewing = false;
+  let emailContext: { account_id: string; mailbox: string; uid: number } | undefined = undefined;
   let previewEvents: {
     uid: string;
     summary: string;
@@ -33,7 +34,7 @@
 
   $: isNewCal = selectedHref === NEW_CAL_SENTINEL;
 
-  export function open(file?: File) {
+  export function open(file?: File, ctx?: { account_id: string; mailbox: string; uid: number }) {
     const stored = localStorage.getItem('defaultCalendar');
     const active = calendars.find(c => c.is_active);
     const fallback = active?.href || calendars[0]?.href || NEW_CAL_SENTINEL;
@@ -47,6 +48,7 @@
     importing = false;
     previewing = false;
     previewEvents = [];
+    emailContext = ctx;
     selectedFile = file ?? null;
     if (fileInput) fileInput.value = '';
     dialogEl?.showModal();
@@ -118,6 +120,11 @@
       fd.append('file', file);
       fd.append('account_id', targetAccountId);
       fd.append('calendar_href', targetHref);
+      if (emailContext) {
+        fd.append('email_account_id', emailContext.account_id);
+        fd.append('email_mailbox', emailContext.mailbox);
+        fd.append('email_uid', String(emailContext.uid));
+      }
       const resp = await apiFetch('/api/import', { method: 'POST', body: fd });
       if (!resp.ok) { error = await resp.text(); return; }
       const result: { imported: number; errors: number } = await resp.json();

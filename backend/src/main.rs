@@ -265,6 +265,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/event", post(calendar::save_event))
         .route("/api/event", delete(calendar::delete_event))
         .route("/api/event/ics", get(calendar::get_event_ics))
+        .route("/api/email/message-events", get(calendar::get_message_events))
         .route("/api/search", get(calendar::search_events))
         .route("/api/contacts", get(contacts::list_contacts))
         .route("/api/contact", post(contacts::save_contact))

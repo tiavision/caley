@@ -101,6 +101,9 @@ pub async fn import_ics(
     let mut account_id = String::new();
     let mut calendar_href = String::new();
     let mut ics_content: Option<String> = None;
+    let mut email_account_id: Option<String> = None;
+    let mut email_mailbox: Option<String> = None;
+    let mut email_uid: Option<i64> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         match field.name() {
@@ -117,6 +120,15 @@ pub async fn import_ics(
                         .into_response();
                 }
             },
+            Some("email_account_id") => {
+                email_account_id = Some(field.text().await.unwrap_or_default());
+            }
+            Some("email_mailbox") => {
+                email_mailbox = Some(field.text().await.unwrap_or_default());
+            }
+            Some("email_uid") => {
+                email_uid = field.text().await.ok().and_then(|s| s.parse().ok());
+            }
             _ => {}
         }
     }
@@ -160,6 +172,26 @@ pub async fn import_ics(
                 .await
                 {
                     eprintln!("Cache insert failed for {uid}: {e}");
+                }
+                if let (Some(ea), Some(em), Some(eu)) =
+                    (&email_account_id, &email_mailbox, email_uid)
+                {
+                    if let Err(e) = sqlx::query(
+                        "INSERT OR IGNORE INTO email_imported_events \
+                         (email_account_id, email_mailbox, email_uid, cal_account_id, calendar_href, event_uid) \
+                         VALUES (?, ?, ?, ?, ?, ?)",
+                    )
+                    .bind(ea)
+                    .bind(em)
+                    .bind(eu)
+                    .bind(&account_id)
+                    .bind(&calendar_href)
+                    .bind(&uid)
+                    .execute(&state.db)
+                    .await
+                    {
+                        eprintln!("email_imported_events insert failed for {uid}: {e}");
+                    }
                 }
                 imported += 1;
             }
@@ -292,6 +324,67 @@ pub async fn search_events(
             (StatusCode::INTERNAL_SERVER_ERROR, "Search failed").into_response()
         }
     }
+}
+
+// GET /api/email/message-events
+
+#[derive(serde::Deserialize)]
+pub struct MessageEventsQuery {
+    pub account_id: String,
+    pub mailbox: String,
+    pub uid: i64,
+}
+
+pub async fn get_message_events(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<MessageEventsQuery>,
+) -> Response {
+    let rows = sqlx::query(
+        "SELECT e.account_id, e.calendar_href, e.dtstart, e.raw_ical, c.color \
+         FROM email_imported_events ie \
+         JOIN cached_events e ON e.account_id = ie.cal_account_id \
+             AND e.calendar_href = ie.calendar_href \
+             AND e.uid = ie.event_uid \
+         JOIN cached_calendars c ON c.account_id = e.account_id AND c.href = e.calendar_href \
+         JOIN caldav_accounts ca ON ca.account_id = e.account_id \
+         WHERE ie.email_account_id = ? AND ie.email_mailbox = ? AND ie.email_uid = ? \
+           AND ca.user_id = ?",
+    )
+    .bind(&q.account_id)
+    .bind(&q.mailbox)
+    .bind(q.uid)
+    .bind(&user.user_id)
+    .fetch_all(&state.db)
+    .await;
+
+    let rows = match rows {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[message-events] query failed: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let mut results: Vec<EventJson> = Vec::new();
+    for r in &rows {
+        let account_id: String = r.get(0);
+        let calendar_href: String = r.get(1);
+        let dtstart: String = r.get(2);
+        let raw_ical: String = r.get(3);
+        let color: Option<String> = r.get(4);
+        let color_str = color.as_deref().unwrap_or("");
+        if let Ok(date) = NaiveDate::parse_from_str(&dtstart, "%Y-%m-%d") {
+            if let Some(event) = CalDavClient::events_from_raw_ical(&raw_ical, date, date)
+                .into_iter()
+                .next()
+            {
+                results.push(build_event_json(&event, &account_id, color_str, &calendar_href));
+            }
+        }
+    }
+
+    Json(results).into_response()
 }
 
 // GET /api/event/ics

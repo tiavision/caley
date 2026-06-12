@@ -22,7 +22,9 @@
   import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
   import { buildProtectedMime, parseEnvelopeAddresses } from '../lib/pgp/compose.ts';
   import { prepareEmailHtml, htmlToPlainText, imageOriginsFromHtml, restoreForwardedImageSources, cidReferencesFromHtml } from '../lib/mail-html.ts';
-  import type { CalendarJson, CalDavAccountJson } from '../types/calendar.ts';
+  import EventDetail from './EventDetail.svelte';
+  import ThreadEventItem from './mail/ThreadEventItem.svelte';
+  import type { CalendarJson, CalDavAccountJson, EventJson } from '../types/calendar.ts';
   import type * as openpgp from 'openpgp';
   import type { Account, Attachment, BodySegment, FolderKind, Identity, Mailbox, Message, SidebarAccountSection, SidebarMailbox, ThreadNode, ThreadTreeNode, VirtualFolder } from './mail/MailTypes.ts';
   import { attachmentDataUrl, bareMailbox, buildThreadTree, canPreviewAttachment, canPreviewContentType, computePopoverStyle, folderKind, FOLDER_PRIORITY, folderSortKey, formatDate, formatMessageDateTime, htmlAddsValue, humanSize, identityKey, insertDecryptedInlineImages, intrinsicWidth, isIcsAttachment, isPgpPublicKeyAttachment, isPgpSignatureAttachment, isPgpTransportAttachment, keyHasEmail, linkifySegments, messageKey, sameMessage, senderName } from './mail/mailUtils.ts';
@@ -338,7 +340,7 @@
       }
       if (calendarAccounts.length === 0) await loadCalendarData();
       const file = new File([bytes], attachment.filename, { type: attachment.content_type || 'text/calendar' });
-      importDialog?.open(file);
+      importDialog?.open(file, { account_id: msg.account_id, mailbox: msg.mailbox, uid: msg.uid });
     } catch {
       pgpPublicKeyImportError = tl('cal_importError');
     } finally {
@@ -375,6 +377,9 @@
   let threadDialog: HTMLDialogElement;
   let emptyTrashDialog: HTMLDialogElement;
   let importDialog: ImportDialog;
+  let eventDetail: EventDetail;
+
+  let messageEvents: EventJson[] = [];
   let sidebarOpen = false;
 
   let usesDetailOverlay = false;
@@ -1251,6 +1256,7 @@
   async function openMessage(msg: Message) {
     const activeThreadRequest = ++threadRequest;
     threadMessages = [];
+    messageEvents = [];
     messageLoading = true;
     standaloneUnavailable = false;
     pgpDecryptGeneration++;
@@ -1282,6 +1288,7 @@
         const full = await r.json() as Message;
         selectedMessage = full;
         void loadThread(full, activeThreadRequest);
+        void loadMessageEvents(full);
         messageLoading = false;
         // Decode raw bytes and parse MIME for all messages (unified render path).
         if (full.raw_eml) {
@@ -1336,6 +1343,7 @@
   function clearOpenMessage() {
     threadRequest++;
     threadMessages = [];
+    messageEvents = [];
     threadDialog?.close();
     clearPgpAttachments();
     selectedMessage = null;
@@ -1368,6 +1376,16 @@
       if (request === threadRequest) threadMessages = data.messages || [];
     } catch {
       if (request === threadRequest) threadMessages = [];
+    }
+  }
+
+  async function loadMessageEvents(msg: Message) {
+    try {
+      const url = `/api/email/message-events?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
+      const r = await apiFetch(url);
+      messageEvents = r.ok ? await r.json() : [];
+    } catch {
+      messageEvents = [];
     }
   }
 
@@ -2062,6 +2080,15 @@
         <span class="thread-message-subject">{node.subject || tl('mail_noSubject')}</span>
         <span class="thread-message-date">{formatDate(node.sent_at)}</span>
       </button>
+      {#if isCurrentThreadMessage(node) && messageEvents.length > 0}
+        <ul class="thread-events">
+          {#each messageEvents as ev (ev.uid)}
+            <li>
+              <ThreadEventItem event={ev} {locale} onclick={() => { threadDialog?.close(); eventDetail.open(ev); }} />
+            </li>
+          {/each}
+        </ul>
+      {/if}
       {#if branch.children.length > 0}
         <ul>{@render threadBranch(branch.children)}</ul>
       {/if}
@@ -2359,7 +2386,7 @@
                   {/each}
                 </span>
               {/if}
-              {#if threadMessages.length > 1}
+              {#if threadMessages.length > 1 || messageEvents.length > 0}
                 <button
                   class="inline-action-btn thread-trigger"
                   on:click={() => threadDialog?.showModal()}
@@ -2627,6 +2654,9 @@
     </footer>
   </article>
 </dialog>
+
+<!-- ── Event detail (for events imported from emails) ─────────────────── -->
+<EventDetail bind:this={eventDetail} {locale} />
 
 <!-- ── Conversation threads dialog ───────────────────────────────────────── -->
 <dialog
