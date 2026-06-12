@@ -44,6 +44,15 @@ export interface EventJson {
   attendees: AttendeeFields[];
 }
 
+export interface SourceEmailJson {
+  account_id: string;
+  mailbox: string;
+  uid: number;
+  from: string | null;
+  subject: string | null;
+  sent_at: number | null;
+}
+
 export interface DayEventsJson {
   date_iso: string;
   day_name: string;

@@ -23,11 +23,11 @@
   import { buildProtectedMime, parseEnvelopeAddresses } from '../lib/pgp/compose.ts';
   import { prepareEmailHtml, htmlToPlainText, imageOriginsFromHtml, restoreForwardedImageSources, cidReferencesFromHtml } from '../lib/mail-html.ts';
   import EventDetail from './EventDetail.svelte';
-  import ThreadEventItem from './mail/ThreadEventItem.svelte';
+  import ThreadDialog from './mail/ThreadDialog.svelte';
   import type { CalendarJson, CalDavAccountJson, EventJson } from '../types/calendar.ts';
   import type * as openpgp from 'openpgp';
-  import type { Account, Attachment, BodySegment, FolderKind, Identity, Mailbox, Message, SidebarAccountSection, SidebarMailbox, ThreadNode, ThreadTreeNode, VirtualFolder } from './mail/MailTypes.ts';
-  import { attachmentDataUrl, bareMailbox, buildThreadTree, canPreviewAttachment, canPreviewContentType, computePopoverStyle, folderKind, FOLDER_PRIORITY, folderSortKey, formatDate, formatMessageDateTime, htmlAddsValue, humanSize, identityKey, insertDecryptedInlineImages, intrinsicWidth, isIcsAttachment, isPgpPublicKeyAttachment, isPgpSignatureAttachment, isPgpTransportAttachment, keyHasEmail, linkifySegments, messageKey, sameMessage, senderName } from './mail/mailUtils.ts';
+  import type { Account, Attachment, BodySegment, FolderKind, Identity, Mailbox, Message, SidebarAccountSection, SidebarMailbox, ThreadNode, VirtualFolder } from './mail/MailTypes.ts';
+  import { attachmentDataUrl, bareMailbox, canPreviewAttachment, canPreviewContentType, computePopoverStyle, folderKind, FOLDER_PRIORITY, folderSortKey, formatDate, formatMessageDateTime, htmlAddsValue, humanSize, identityKey, insertDecryptedInlineImages, intrinsicWidth, isIcsAttachment, isPgpPublicKeyAttachment, isPgpSignatureAttachment, isPgpTransportAttachment, keyHasEmail, linkifySegments, messageKey, sameMessage, senderName } from './mail/mailUtils.ts';
 
   export let standalone = false;
   export let initialMessage: { accountId: string; mailbox: string; uid: number } | null = null;
@@ -94,7 +94,6 @@
   let selectedMessage: Message | null = null;
   let listCursor: Message | null = null;
   let threadMessages: ThreadNode[] = [];
-  let threadTree: ThreadTreeNode[] = [];
   let threadRequest = 0;
   let queuedReaderNavigation: -1 | 1 | null = null;
   let messageLoading = false;
@@ -374,7 +373,7 @@
   let accountDialog: MailAccountDialog;
   let composeDialog: MailComposeDialog;
   let folderDialog: MailFolderDialog;
-  let threadDialog: HTMLDialogElement;
+  let threadDialog: ThreadDialog;
   let emptyTrashDialog: HTMLDialogElement;
   let importDialog: ImportDialog;
   let eventDetail: EventDetail;
@@ -597,6 +596,14 @@
       await loadStandalone();
     } else {
       await loadAll();
+      const params = new URLSearchParams(window.location.search);
+      const openAccountId = params.get('account_id');
+      const openMailbox = params.get('mailbox');
+      const openUid = Number(params.get('uid'));
+      if (openAccountId && openMailbox && Number.isInteger(openUid) && openUid > 0) {
+        await selectMailbox(openAccountId, openMailbox);
+        void openMessage(locatorMessage({ accountId: openAccountId, mailbox: openMailbox, uid: openUid }));
+      }
     }
     connectSSE();
 
@@ -1415,7 +1422,6 @@
     void openMessage(locatorMessage({ accountId: node.account_id, mailbox: node.mailbox, uid: node.uid }));
   }
 
-  $: threadTree = buildThreadTree(threadMessages);
 
   async function setFlag(msg: Message, flag: string, set: boolean): Promise<boolean> {
     try {
@@ -2066,35 +2072,6 @@
   $: silentEmailOrigins = emailOrigins.filter(o => blacklistOrigins.includes(o));
 </script>
 
-{#snippet threadBranch(nodes: ThreadTreeNode[])}
-  {#each nodes as branch}
-    {@const node = branch.message}
-    <li>
-      <button
-        class="thread-message"
-        class:current={isCurrentThreadMessage(node)}
-        aria-current={isCurrentThreadMessage(node) ? 'true' : undefined}
-        on:click={() => openThreadMessage(node)}
-      >
-        <span class="thread-message-from">{senderName(node.from) || tl('mail_unknownSender')}</span>
-        <span class="thread-message-subject">{node.subject || tl('mail_noSubject')}</span>
-        <span class="thread-message-date">{formatDate(node.sent_at)}</span>
-      </button>
-      {#if isCurrentThreadMessage(node) && messageEvents.length > 0}
-        <ul class="thread-events">
-          {#each messageEvents as ev (ev.uid)}
-            <li>
-              <ThreadEventItem event={ev} {locale} onclick={() => { threadDialog?.close(); eventDetail.open(ev); }} />
-            </li>
-          {/each}
-        </ul>
-      {/if}
-      {#if branch.children.length > 0}
-        <ul>{@render threadBranch(branch.children)}</ul>
-      {/if}
-    </li>
-  {/each}
-{/snippet}
 
 <div class="mail-page" class:standalone>
   <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
@@ -2389,7 +2366,7 @@
               {#if threadMessages.length > 1 || messageEvents.length > 0}
                 <button
                   class="inline-action-btn thread-trigger"
-                  on:click={() => threadDialog?.showModal()}
+                  on:click={() => threadDialog?.show()}
                   title={tl('mail_threads')}
                   aria-label={tl('mail_threads')}
                 >
@@ -2656,25 +2633,21 @@
 </dialog>
 
 <!-- ── Event detail (for events imported from emails) ─────────────────── -->
-<EventDetail bind:this={eventDetail} {locale} />
+<EventDetail bind:this={eventDetail} {locale}
+  onthreads={(_emails) => { eventDetail.close(); threadDialog?.show(); }}
+/>
 
 <!-- ── Conversation threads dialog ───────────────────────────────────────── -->
-<dialog
+<ThreadDialog
   bind:this={threadDialog}
-  class="thread-dialog"
-  on:click={(e) => { if (e.target === e.currentTarget) threadDialog?.close(); }}
-  on:cancel={(e) => { e.preventDefault(); threadDialog?.close(); }}
->
-  <article>
-    <header>
-      <h3>{tl('mail_threadsHeading')}</h3>
-      <button class="close-btn" aria-label={tl('mail_close')} on:click={() => threadDialog?.close()}></button>
-    </header>
-    <ul class="thread-tree" aria-label={tl('mail_threadsHeading')}>
-      {@render threadBranch(threadTree)}
-    </ul>
-  </article>
-</dialog>
+  {locale}
+  {threadMessages}
+  {messageEvents}
+  sourceUids={selectedMessage ? [{ account_id: selectedMessage.account_id, mailbox: selectedMessage.mailbox, uid: selectedMessage.uid }] : []}
+  highlightedUid={selectedMessage ? { account_id: selectedMessage.account_id, mailbox: selectedMessage.mailbox, uid: selectedMessage.uid } : undefined}
+  onmessageclick={openThreadMessage}
+  oneventclick={(ev) => { threadDialog?.close(); eventDetail.open(ev); }}
+/>
 
 {#if !standalone}
 <MailAccountDialog
@@ -3723,98 +3696,6 @@
       bottom: 2.25rem;
       right: 5.5rem;
     }
-  }
-
-  .thread-dialog {
-    width: min(640px, calc(100vw - 2rem));
-  }
-
-  .thread-dialog article {
-    margin: 0;
-    padding: 0;
-  }
-
-  .thread-dialog header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin: 0;
-    padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
-  }
-
-  .thread-dialog header h3 {
-    margin: 0;
-  }
-
-  .thread-tree,
-  .thread-tree ul {
-    list-style: none;
-    list-style-type: none;
-    margin: 0;
-    padding: 0;
-  }
-
-  .thread-tree li::marker {
-    content: '';
-  }
-
-  .thread-tree {
-    padding: 0.65rem;
-    max-height: min(65vh, 34rem);
-    overflow-y: auto;
-  }
-
-  .thread-tree ul {
-    padding-left: 1.15rem;
-    border-left: 1px solid var(--pico-muted-border-color, #ddd);
-  }
-
-  .thread-tree li {
-    margin: 0.2rem 0;
-  }
-
-  .thread-message {
-    display: grid;
-    grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr) auto;
-    align-items: baseline;
-    gap: 0.7rem;
-    width: 100%;
-    margin: 0;
-    padding: 0.55rem 0.65rem;
-    border: none;
-    border-radius: 0.35rem;
-    background: none;
-    color: inherit;
-    font-size: 0.84rem;
-    text-align: left;
-  }
-
-  .thread-message:hover,
-  .thread-message:focus-visible {
-    background: var(--pico-muted-border-color, #f5f5f5);
-  }
-
-  .thread-message.current {
-    background: var(--pico-primary-background, #e6f2fb);
-    box-shadow: inset 3px 0 0 var(--pico-primary, #0172ad);
-  }
-
-  .thread-message-from,
-  .thread-message-subject {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .thread-message-subject {
-    color: var(--pico-secondary, #444);
-  }
-
-  .thread-message-date {
-    color: var(--pico-muted-color, #888);
-    font-size: 0.75rem;
-    white-space: nowrap;
   }
 
   @media (max-width: 639px) {

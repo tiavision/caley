@@ -5,7 +5,9 @@
   import EventFormDialog from './EventFormDialog.svelte';
   import MonthPicker from './MonthPicker.svelte';
   import EventDetail from './EventDetail.svelte';
-  import type { EventJson, DayEventsJson, CalendarJson, MonthGridJson, CalDavAccountJson } from '../types/calendar.ts';
+  import ThreadDialog from './mail/ThreadDialog.svelte';
+  import type { EventJson, DayEventsJson, CalendarJson, MonthGridJson, CalDavAccountJson, SourceEmailJson } from '../types/calendar.ts';
+  import type { ThreadNode } from './mail/MailTypes.ts';
   import { getMonday, fmtDate, fmtYM } from '../lib/date.ts';
   import { apiFetch } from '../lib/api.ts';
   import MonthView from './MonthView.svelte';
@@ -237,6 +239,31 @@
   let eventDetail: EventDetail;
   let detailIsOpen = false;
   let mapUrl = 'https://www.openstreetmap.org/search?query={q}';
+
+  // ── Thread dialog (for events imported from email) ─────────────────────────
+  let threadDialog: ThreadDialog;
+  let calThreadMessages: ThreadNode[] = [];
+  let calMessageEvents: EventJson[] = [];
+  let calSourceUids: { account_id: string; mailbox: string; uid: number }[] = [];
+  let calCurrentEventUid: string | undefined = undefined;
+
+  async function openEventThread(emails: SourceEmailJson[], event: EventJson) {
+    if (!emails.length) return;
+    const src = emails[0];
+    calSourceUids = emails.map(e => ({ account_id: e.account_id, mailbox: e.mailbox, uid: e.uid }));
+    calCurrentEventUid = event.uid;
+    calMessageEvents = [];
+    calThreadMessages = [];
+    try {
+      const [threadRes, eventsRes] = await Promise.all([
+        apiFetch(`/api/email/thread?account_id=${encodeURIComponent(src.account_id)}&mailbox=${encodeURIComponent(src.mailbox)}&uid=${src.uid}`),
+        apiFetch(`/api/email/message-events?account_id=${encodeURIComponent(src.account_id)}&mailbox=${encodeURIComponent(src.mailbox)}&uid=${src.uid}`),
+      ]);
+      if (threadRes.ok) calThreadMessages = (await threadRes.json()).messages || [];
+      if (eventsRes.ok) calMessageEvents = await eventsRes.json();
+    } catch { /* show empty thread */ }
+    threadDialog?.show();
+  }
 
   // ── Event form ─────────────────────────────────────────────────────────────
   let formDialog: EventFormDialog;
@@ -553,6 +580,19 @@
   {locale}
   {mapUrl}
   onedit={(d) => formDialog.openEditForm(d.event, d.scope)}
+  onthreads={openEventThread}
+/>
+
+<!-- ── Thread dialog (email threads for imported events) ─────────────────── -->
+<ThreadDialog
+  bind:this={threadDialog}
+  {locale}
+  threadMessages={calThreadMessages}
+  messageEvents={calMessageEvents}
+  sourceUids={calSourceUids}
+  currentEventUid={calCurrentEventUid}
+  onmessageclick={(node) => { window.location.href = `/mail/?account_id=${encodeURIComponent(node.account_id)}&mailbox=${encodeURIComponent(node.mailbox)}&uid=${node.uid}`; }}
+  oneventclick={(ev) => { threadDialog.close(); eventDetail.open(ev); }}
 />
 
 <!-- ── Event form dialog ──────────────────────────────────────────────────── -->

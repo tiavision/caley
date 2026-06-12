@@ -1,20 +1,24 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { makeTl } from '../lib/i18n.ts';
-  import type { EventJson } from '../types/calendar.ts';
+  import type { EventJson, SourceEmailJson } from '../types/calendar.ts';
   import { formatEventTimes, formatRecurrence, formatAlarm, partstatKey } from '../lib/format.ts';
+  import { apiFetch } from '../lib/api.ts';
   import ShareMenu from './ShareMenu.svelte';
+  import UiIcon from './UiIcon.svelte';
 
   export let locale: string;
   export let isOpen = false;
   export let onedit: ((data: { event: EventJson; scope: 'series' | 'this_instance' }) => void) | undefined = undefined;
   export let mapUrl: string = 'https://www.openstreetmap.org/search?query={q}';
+  export let onthreads: ((emails: SourceEmailJson[], event: EventJson) => void) | undefined = undefined;
 
   $: tl = makeTl(locale);
 
   let detailEvent: EventJson | null = null;
   let detailEditPopoverOpen = false;
   let dialogEl: HTMLDialogElement;
+  let sourceEmails: SourceEmailJson[] = [];
 
   $: detailTime = detailEvent ? formatEventTimes(detailEvent) : { localText: '', sourceText: '' };
   $: detailRecText = (detailEvent?.is_recurring && detailEvent?.recurrence)
@@ -23,9 +27,21 @@
   export async function open(event: EventJson) {
     detailEvent = event;
     detailEditPopoverOpen = false;
+    sourceEmails = [];
     isOpen = true;
     await tick();
     dialogEl?.showModal();
+    void fetchSourceEmails(event);
+  }
+
+  async function fetchSourceEmails(event: EventJson) {
+    try {
+      const url = `/api/calendar/event-emails?cal_account_id=${encodeURIComponent(event.account_id)}&calendar_href=${encodeURIComponent(event.calendar_href)}&event_uid=${encodeURIComponent(event.uid)}`;
+      const r = await apiFetch(url);
+      if (r.ok) sourceEmails = await r.json();
+    } catch {
+      // non-fatal: thread icon simply won't appear
+    }
   }
 
   function openMap(event: MouseEvent, query: string) {
@@ -53,6 +69,7 @@
     if (!isOpen) return;
     isOpen = false;
     detailEvent = null;
+    sourceEmails = [];
     dialogEl?.close();
   }
 
@@ -88,6 +105,11 @@
       <h3>{detailEvent?.summary || ''}</h3>
       <div class="header-actions">
         {#if detailEvent}
+          {#if onthreads && sourceEmails.length > 0}
+            <button class="edit-btn" title={tl('mail_threads')} onclick={() => onthreads!(sourceEmails, detailEvent!)}>
+              <UiIcon name="tree" size={16} strokeWidth={2.2} />
+            </button>
+          {/if}
           <ShareMenu event={detailEvent} {locale} />
           <div class="edit-wrap">
             <button

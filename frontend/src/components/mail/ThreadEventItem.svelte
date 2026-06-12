@@ -4,9 +4,10 @@
 
   export let event: EventJson;
   export let onclick: () => void;
+  export let current: boolean = false;
 </script>
 
-<button class="thread-event" on:click={onclick} type="button">
+<button class="thread-event" class:current on:click={onclick} type="button">
   <span class="thread-event-icon" aria-hidden="true">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
       stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -39,6 +40,11 @@
 
   .thread-event:hover {
     background: color-mix(in srgb, var(--pico-primary-background) 22%, transparent);
+  }
+
+  .thread-event.current {
+    background: var(--pico-primary-background, #e6f2fb);
+    box-shadow: inset 3px 0 0 var(--pico-primary, #0172ad);
   }
 
   .thread-event-icon {

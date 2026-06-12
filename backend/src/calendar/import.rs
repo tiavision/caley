@@ -387,6 +387,69 @@ pub async fn get_message_events(
     Json(results).into_response()
 }
 
+// GET /api/calendar/event-emails
+
+#[derive(serde::Deserialize)]
+pub struct EventEmailsQuery {
+    pub cal_account_id: String,
+    pub calendar_href: String,
+    pub event_uid: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct SourceEmailJson {
+    pub account_id: String,
+    pub mailbox: String,
+    pub uid: i64,
+    pub from: Option<String>,
+    pub subject: Option<String>,
+    pub sent_at: Option<i64>,
+}
+
+pub async fn get_event_source_emails(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<EventEmailsQuery>,
+) -> Response {
+    let rows = sqlx::query(
+        "SELECT ie.email_account_id, ie.email_mailbox, ie.email_uid, \
+                cm.from_addr, cm.subject, cm.sent_at \
+         FROM email_imported_events ie \
+         JOIN caldav_accounts ca ON ca.account_id = ie.cal_account_id \
+         LEFT JOIN cached_messages cm ON cm.account_id = ie.email_account_id \
+             AND cm.mailbox = ie.email_mailbox AND cm.uid = ie.email_uid \
+         WHERE ie.cal_account_id = ? AND ie.calendar_href = ? AND ie.event_uid = ? \
+           AND ca.user_id = ?",
+    )
+    .bind(&q.cal_account_id)
+    .bind(&q.calendar_href)
+    .bind(&q.event_uid)
+    .bind(&user.user_id)
+    .fetch_all(&state.db)
+    .await;
+
+    match rows {
+        Ok(rows) => {
+            let results: Vec<SourceEmailJson> = rows
+                .iter()
+                .map(|r| SourceEmailJson {
+                    account_id: r.get(0),
+                    mailbox: r.get(1),
+                    uid: r.get(2),
+                    from: r.get(3),
+                    subject: r.get(4),
+                    sent_at: r.get(5),
+                })
+                .collect();
+            Json(results).into_response()
+        }
+        Err(e) => {
+            eprintln!("[event-emails] query failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
 // GET /api/event/ics
 #[derive(serde::Deserialize)]
 pub struct EventIcsQuery {
