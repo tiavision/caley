@@ -1,6 +1,6 @@
 [package]
 name = "caley"
-version = "0.9.7"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
