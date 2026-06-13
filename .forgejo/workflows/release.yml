@@ -40,7 +40,7 @@ jobs:
 
           echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
 
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists"
             exit 1
           fi
@@ -70,7 +70,12 @@ jobs:
           /usr/bin/podman push ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
 
       - name: Push tag
-        run: git push origin "$TAG"
+        run: |
+          set -eu
+
+          git push \
+            "https://${{ secrets.GIT_OWNER }}:${{ secrets.GIT_TOKEN }}@${{ env.REGISTRY }}/${{ github.repository }}.git" \
+            "$TAG"
 
       - name: Create Forgejo release
         run: |
@@ -99,6 +104,6 @@ jobs:
 
           curl --fail-with-body \
             -X POST "$api" \
-            -H "Authorization: token ${{ secrets.FORGEJO_TOKEN }}" \
+            -H "Authorization: token ${{ secrets.GIT_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d "$payload"
