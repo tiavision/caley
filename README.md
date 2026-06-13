@@ -73,6 +73,36 @@ Demo mode lets you explore the full Caley UI without connecting to any external 
 
 Messages have styled HTML bodies. Unread/read state, flags, delete, and move all work locally. Compose returns success without sending.
 
+### Showcase
+
+#### Light theme
+
+<p>
+  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-calendar.png"><img src="docs/screenshots/caley-calendar.png" alt="Caley demo calendar month view in light theme" width="49%"></a>
+  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-mail.png"><img src="docs/screenshots/caley-mail.png" alt="Caley demo mail inbox and message view" width="49%"></a>
+</p>
+<p>
+  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-compose.png"><img src="docs/screenshots/caley-compose.png" alt="Caley demo email compose dialog in light theme" width="49%"></a>
+  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-contacts.png"><img src="docs/screenshots/caley-contacts.png" alt="Caley demo contacts grid" width="49%"></a>
+</p>
+<p>
+  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-search.png"><img src="docs/screenshots/caley-search.png" alt="Caley demo calendar search results" width="49%"></a>
+</p>
+
+#### Dark theme
+
+<p>
+  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-calendar-dark.png"><img src="docs/screenshots/caley-calendar-dark.png" alt="Caley demo calendar month view in dark theme" width="49%"></a>
+  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-mail-dark.png"><img src="docs/screenshots/caley-mail-dark.png" alt="Caley demo mail inbox and message view in dark theme" width="49%"></a>
+</p>
+<p>
+  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-compose-dark.png"><img src="docs/screenshots/caley-compose-dark.png" alt="Caley demo email compose dialog in dark theme" width="49%"></a>
+  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-contacts-dark.png"><img src="docs/screenshots/caley-contacts-dark.png" alt="Caley demo contacts grid in dark theme" width="49%"></a>
+</p>
+<p>
+  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-search-dark.png"><img src="docs/screenshots/caley-search-dark.png" alt="Caley demo calendar search results in dark theme" width="49%"></a>
+</p>
+
 ### Run with Docker
 
 ```bash
