@@ -6,7 +6,7 @@
   import MonthPicker from './MonthPicker.svelte';
   import EventDetail from './EventDetail.svelte';
   import ThreadDialog from './mail/ThreadDialog.svelte';
-  import type { EventJson, DayEventsJson, CalendarJson, MonthGridJson, CalDavAccountJson, SourceEmailJson } from '../types/calendar.ts';
+  import type { EventJson, DayEventsJson, CalendarJson, MonthGridJson, CalDavAccountJson, SourceEmailJson, MessageEventGroupJson } from '../types/calendar.ts';
   import type { ThreadNode } from './mail/MailTypes.ts';
   import { getMonday, fmtDate, fmtYM } from '../lib/date.ts';
   import { apiFetch } from '../lib/api.ts';
@@ -243,24 +243,30 @@
   // ── Thread dialog (for events imported from email) ─────────────────────────
   let threadDialog: ThreadDialog;
   let calThreadMessages: ThreadNode[] = [];
-  let calMessageEvents: EventJson[] = [];
-  let calSourceUids: { account_id: string; mailbox: string; uid: number }[] = [];
+  let calEventsByMessageKey: Record<string, EventJson[]> = {};
   let calCurrentEventUid: string | undefined = undefined;
 
   async function openEventThread(emails: SourceEmailJson[], event: EventJson) {
     if (!emails.length) return;
     const src = emails[0];
-    calSourceUids = emails.map(e => ({ account_id: e.account_id, mailbox: e.mailbox, uid: e.uid }));
     calCurrentEventUid = event.uid;
-    calMessageEvents = [];
+    calEventsByMessageKey = {};
     calThreadMessages = [];
     try {
       const [threadRes, eventsRes] = await Promise.all([
         apiFetch(`/api/email/thread?account_id=${encodeURIComponent(src.account_id)}&mailbox=${encodeURIComponent(src.mailbox)}&uid=${src.uid}`),
-        apiFetch(`/api/email/message-events?account_id=${encodeURIComponent(src.account_id)}&mailbox=${encodeURIComponent(src.mailbox)}&uid=${src.uid}`),
+        apiFetch(`/api/email/thread-events?account_id=${encodeURIComponent(src.account_id)}&mailbox=${encodeURIComponent(src.mailbox)}&uid=${src.uid}`),
       ]);
       if (threadRes.ok) calThreadMessages = (await threadRes.json()).messages || [];
-      if (eventsRes.ok) calMessageEvents = await eventsRes.json();
+      if (eventsRes.ok) {
+        const groups = await eventsRes.json() as MessageEventGroupJson[];
+        calEventsByMessageKey = Object.fromEntries(
+          groups.map(group => [
+            `${group.account_id}\0${group.mailbox}\0${group.uid}`,
+            group.events,
+          ]),
+        );
+      }
     } catch { /* show empty thread */ }
     threadDialog?.show();
   }
@@ -588,8 +594,7 @@
   bind:this={threadDialog}
   {locale}
   threadMessages={calThreadMessages}
-  messageEvents={calMessageEvents}
-  sourceUids={calSourceUids}
+  eventsByMessageKey={calEventsByMessageKey}
   currentEventUid={calCurrentEventUid}
   onmessageclick={(node) => { window.location.href = `/mail/?account_id=${encodeURIComponent(node.account_id)}&mailbox=${encodeURIComponent(node.mailbox)}&uid=${node.uid}`; }}
   oneventclick={(ev) => { threadDialog.close(); eventDetail.open(ev); }}

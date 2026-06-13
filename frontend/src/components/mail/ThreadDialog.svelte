@@ -1,15 +1,13 @@
 <script lang="ts">
   import { makeTl } from '../../lib/i18n.ts';
-  import { buildThreadTree, senderName, formatDate } from './mailUtils.ts';
+  import { buildThreadTree, senderName, formatDate, identityKey } from './mailUtils.ts';
   import type { EventJson } from '../../types/calendar.ts';
   import type { ThreadNode } from './MailTypes.ts';
   import ThreadEventItem from './ThreadEventItem.svelte';
 
   export let locale: string;
   export let threadMessages: ThreadNode[] = [];
-  export let messageEvents: EventJson[] = [];
-  // Which messages have imported events underneath them
-  export let sourceUids: { account_id: string; mailbox: string; uid: number }[] = [];
+  export let eventsByMessageKey: Record<string, EventJson[]> = {};
   // Which message node should be styled as "current" (the one being read)
   export let highlightedUid: { account_id: string; mailbox: string; uid: number } | undefined = undefined;
   // Which event uid should be styled as "current" (when arriving from an event)
@@ -19,17 +17,14 @@
 
   $: tl = makeTl(locale);
   $: threadTree = buildThreadTree(threadMessages);
+  $: eventsRenderKey = Object.entries(eventsByMessageKey)
+    .map(([key, events]) => `${key}:${events.map(ev => `${ev.account_id}/${ev.calendar_href}/${ev.uid}`).join(',')}`)
+    .join('|');
 
   let dialogEl: HTMLDialogElement;
 
   export function show() { dialogEl?.showModal(); }
   export function close() { dialogEl?.close(); }
-
-  function isSourceMessage(node: ThreadNode): boolean {
-    return sourceUids.some(
-      s => s.account_id === node.account_id && s.mailbox === node.mailbox && s.uid === node.uid
-    );
-  }
 
   function isHighlightedMessage(node: ThreadNode): boolean {
     if (!highlightedUid) return false;
@@ -37,11 +32,27 @@
       highlightedUid.mailbox === node.mailbox &&
       highlightedUid.uid === node.uid;
   }
+
+  function nodeEvents(node: ThreadNode): EventJson[] {
+    const exact = eventsByMessageKey[identityKey(node.account_id, node.mailbox, node.uid)] ?? [];
+    if (exact.length > 0) return exact;
+
+    const uidMatches = Object.entries(eventsByMessageKey)
+      .filter(([key]) => key.endsWith(`\0${node.uid}`))
+      .flatMap(([, events]) => events);
+    if (uidMatches.length > 0) return uidMatches;
+
+    if (threadMessages.length === 1) {
+      return Object.values(eventsByMessageKey).flat();
+    }
+    return [];
+  }
 </script>
 
 {#snippet threadBranch(nodes)}
   {#each nodes as branch}
     {@const node = branch.message}
+    {@const events = nodeEvents(node)}
     <li>
       <button
         class="thread-message"
@@ -53,9 +64,9 @@
         <span class="thread-message-subject">{node.subject || tl('mail_noSubject')}</span>
         <span class="thread-message-date">{formatDate(node.sent_at)}</span>
       </button>
-      {#if isSourceMessage(node) && messageEvents.length > 0}
+      {#if events.length > 0}
         <ul class="thread-events">
-          {#each messageEvents as ev (ev.uid)}
+          {#each events as ev (ev.account_id + '\0' + ev.calendar_href + '\0' + ev.uid)}
             <li>
               <ThreadEventItem
                 event={ev}
@@ -87,7 +98,9 @@
       <button class="close-btn" aria-label={tl('mail_close')} on:click={close}></button>
     </header>
     <ul class="thread-tree" aria-label={tl('mail_threadsHeading')}>
-      {@render threadBranch(threadTree)}
+      {#key eventsRenderKey}
+        {@render threadBranch(threadTree)}
+      {/key}
     </ul>
   </article>
 </dialog>

@@ -53,6 +53,13 @@ export interface SourceEmailJson {
   sent_at: number | null;
 }
 
+export interface MessageEventGroupJson {
+  account_id: string;
+  mailbox: string;
+  uid: number;
+  events: EventJson[];
+}
+
 export interface DayEventsJson {
   date_iso: string;
   day_name: string;

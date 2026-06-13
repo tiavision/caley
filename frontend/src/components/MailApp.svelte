@@ -24,7 +24,7 @@
   import { prepareEmailHtml, htmlToPlainText, imageOriginsFromHtml, restoreForwardedImageSources, cidReferencesFromHtml } from '../lib/mail-html.ts';
   import EventDetail from './EventDetail.svelte';
   import ThreadDialog from './mail/ThreadDialog.svelte';
-  import type { CalendarJson, CalDavAccountJson, EventJson } from '../types/calendar.ts';
+  import type { CalendarJson, CalDavAccountJson, EventJson, MessageEventGroupJson } from '../types/calendar.ts';
   import type * as openpgp from 'openpgp';
   import type { Account, Attachment, BodySegment, FolderKind, Identity, Mailbox, Message, SidebarAccountSection, SidebarMailbox, ThreadNode, VirtualFolder } from './mail/MailTypes.ts';
   import { attachmentDataUrl, bareMailbox, canPreviewAttachment, canPreviewContentType, computePopoverStyle, folderKind, FOLDER_PRIORITY, folderSortKey, formatDate, formatMessageDateTime, htmlAddsValue, humanSize, identityKey, insertDecryptedInlineImages, intrinsicWidth, isIcsAttachment, isPgpPublicKeyAttachment, isPgpSignatureAttachment, isPgpTransportAttachment, keyHasEmail, linkifySegments, messageKey, sameMessage, senderName } from './mail/mailUtils.ts';
@@ -378,7 +378,8 @@
   let importDialog: ImportDialog;
   let eventDetail: EventDetail;
 
-  let messageEvents: EventJson[] = [];
+  let eventsByMessageKey: Record<string, EventJson[]> = {};
+  $: hasThreadEvents = Object.values(eventsByMessageKey).some(events => events.length > 0);
   let sidebarOpen = false;
 
   let usesDetailOverlay = false;
@@ -602,7 +603,16 @@
       const openUid = Number(params.get('uid'));
       if (openAccountId && openMailbox && Number.isInteger(openUid) && openUid > 0) {
         await selectMailbox(openAccountId, openMailbox);
-        void openMessage(locatorMessage({ accountId: openAccountId, mailbox: openMailbox, uid: openUid }));
+        const visible = messages.find(message =>
+          message.account_id === openAccountId && message.mailbox === openMailbox && message.uid === openUid
+        );
+        if (visible) {
+          openMessageFromList(visible, true);
+        } else {
+          detailOverlayVisible = true;
+          listCursor = null;
+          void openMessage(locatorMessage({ accountId: openAccountId, mailbox: openMailbox, uid: openUid }));
+        }
       }
     }
     connectSSE();
@@ -1263,7 +1273,7 @@
   async function openMessage(msg: Message) {
     const activeThreadRequest = ++threadRequest;
     threadMessages = [];
-    messageEvents = [];
+    eventsByMessageKey = {};
     messageLoading = true;
     standaloneUnavailable = false;
     pgpDecryptGeneration++;
@@ -1295,7 +1305,7 @@
         const full = await r.json() as Message;
         selectedMessage = full;
         void loadThread(full, activeThreadRequest);
-        void loadMessageEvents(full);
+        void loadThreadEvents(full, activeThreadRequest);
         messageLoading = false;
         // Decode raw bytes and parse MIME for all messages (unified render path).
         if (full.raw_eml) {
@@ -1350,7 +1360,7 @@
   function clearOpenMessage() {
     threadRequest++;
     threadMessages = [];
-    messageEvents = [];
+    eventsByMessageKey = {};
     threadDialog?.close();
     clearPgpAttachments();
     selectedMessage = null;
@@ -1386,13 +1396,24 @@
     }
   }
 
-  async function loadMessageEvents(msg: Message) {
+  async function loadThreadEvents(msg: Message, request: number) {
     try {
-      const url = `/api/email/message-events?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
+      const url = `/api/email/thread-events?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
       const r = await apiFetch(url);
-      messageEvents = r.ok ? await r.json() : [];
+      if (request !== threadRequest) return;
+      if (!r.ok) {
+        eventsByMessageKey = {};
+        return;
+      }
+      const groups = await r.json() as MessageEventGroupJson[];
+      eventsByMessageKey = Object.fromEntries(
+        groups.map(group => [
+          identityKey(group.account_id, group.mailbox, group.uid),
+          group.events,
+        ]),
+      );
     } catch {
-      messageEvents = [];
+      if (request === threadRequest) eventsByMessageKey = {};
     }
   }
 
@@ -2363,7 +2384,7 @@
                   {/each}
                 </span>
               {/if}
-              {#if threadMessages.length > 1 || messageEvents.length > 0}
+              {#if threadMessages.length > 1 || hasThreadEvents}
                 <button
                   class="inline-action-btn thread-trigger"
                   on:click={() => threadDialog?.show()}
@@ -2642,8 +2663,7 @@
   bind:this={threadDialog}
   {locale}
   {threadMessages}
-  {messageEvents}
-  sourceUids={selectedMessage ? [{ account_id: selectedMessage.account_id, mailbox: selectedMessage.mailbox, uid: selectedMessage.uid }] : []}
+  {eventsByMessageKey}
   highlightedUid={selectedMessage ? { account_id: selectedMessage.account_id, mailbox: selectedMessage.mailbox, uid: selectedMessage.uid } : undefined}
   onmessageclick={openThreadMessage}
   oneventclick={(ev) => { threadDialog?.close(); eventDetail.open(ev); }}

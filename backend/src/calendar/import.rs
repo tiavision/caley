@@ -8,6 +8,7 @@ use url::form_urlencoded;
 
 use crate::caldav::{CalDavClient, preview_events_from_raw_ical, split_vcalendar_into_events};
 use crate::db;
+use crate::email_db;
 use crate::oidc::{AppState, CurrentUser};
 use crate::sync::SyncTrigger;
 use sqlx::Row;
@@ -335,6 +336,14 @@ pub struct MessageEventsQuery {
     pub uid: i64,
 }
 
+#[derive(serde::Serialize)]
+pub struct MessageEventGroupJson {
+    pub account_id: String,
+    pub mailbox: String,
+    pub uid: i64,
+    pub events: Vec<EventJson>,
+}
+
 pub async fn get_message_events(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -379,12 +388,157 @@ pub async fn get_message_events(
                 .into_iter()
                 .next()
             {
-                results.push(build_event_json(&event, &account_id, color_str, &calendar_href));
+                results.push(build_event_json(
+                    &event,
+                    &account_id,
+                    color_str,
+                    &calendar_href,
+                ));
             }
         }
     }
 
     Json(results).into_response()
+}
+
+// GET /api/email/thread-events
+
+pub async fn get_thread_events(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<MessageEventsQuery>,
+) -> Response {
+    match email_db::get_account(
+        &state.db,
+        &q.account_id,
+        &user.user_id,
+        &state.encryption_key,
+    )
+    .await
+    {
+        Ok(Some(_)) => {}
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            eprintln!("[thread-events] account lookup failed: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    }
+
+    let rows = sqlx::query(
+        "WITH RECURSIVE connected(id) AS (
+             SELECT message_id FROM cached_messages
+              WHERE account_id = ? AND mailbox = ? AND uid = ? AND message_id IS NOT NULL
+             UNION
+             SELECT thread_id FROM cached_messages
+              WHERE account_id = ? AND mailbox = ? AND uid = ? AND thread_id IS NOT NULL
+             UNION
+             SELECT m.message_id
+               FROM cached_messages m JOIN connected c
+                 ON m.message_id = c.id OR m.thread_id = c.id
+              WHERE m.account_id = ? AND m.message_id IS NOT NULL
+             UNION
+             SELECT m.thread_id
+               FROM cached_messages m JOIN connected c
+                 ON m.message_id = c.id OR m.thread_id = c.id
+              WHERE m.account_id = ? AND m.thread_id IS NOT NULL
+         ),
+         thread_messages AS (
+             SELECT DISTINCT m.account_id, m.mailbox, m.uid, m.sent_at, m.rowid
+               FROM cached_messages m
+              WHERE m.account_id = ?
+                AND ((m.mailbox = ? AND m.uid = ?)
+                  OR m.message_id IN (SELECT id FROM connected)
+                  OR m.thread_id IN (SELECT id FROM connected))
+         )
+         SELECT tm.account_id, tm.mailbox, tm.uid,
+                e.account_id, e.calendar_href, e.dtstart, e.raw_ical, c.color
+           FROM thread_messages tm
+           JOIN email_imported_events ie
+             ON ie.email_account_id = tm.account_id
+            AND ie.email_mailbox = tm.mailbox
+            AND ie.email_uid = tm.uid
+           JOIN cached_events e
+             ON e.account_id = ie.cal_account_id
+            AND e.calendar_href = ie.calendar_href
+            AND e.uid = ie.event_uid
+           JOIN cached_calendars c
+             ON c.account_id = e.account_id AND c.href = e.calendar_href
+           JOIN caldav_accounts ca ON ca.account_id = e.account_id
+          WHERE ca.user_id = ?
+          ORDER BY COALESCE(tm.sent_at, 9223372036854775807), tm.rowid, e.dtstart",
+    )
+    .bind(&q.account_id)
+    .bind(&q.mailbox)
+    .bind(q.uid)
+    .bind(&q.account_id)
+    .bind(&q.mailbox)
+    .bind(q.uid)
+    .bind(&q.account_id)
+    .bind(&q.account_id)
+    .bind(&q.account_id)
+    .bind(&q.mailbox)
+    .bind(q.uid)
+    .bind(&user.user_id)
+    .fetch_all(&state.db)
+    .await;
+
+    let rows = match rows {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[thread-events] query failed: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let mut groups: Vec<MessageEventGroupJson> = Vec::new();
+    for r in &rows {
+        let message_account_id: String = r.get(0);
+        let message_mailbox: String = r.get(1);
+        let message_uid: i64 = r.get(2);
+        let account_id: String = r.get(3);
+        let calendar_href: String = r.get(4);
+        let dtstart: String = r.get(5);
+        let raw_ical: String = r.get(6);
+        let color: Option<String> = r.get(7);
+        let color_str = color.as_deref().unwrap_or("");
+        let Some(event) = NaiveDate::parse_from_str(&dtstart, "%Y-%m-%d")
+            .ok()
+            .and_then(|date| {
+                CalDavClient::events_from_raw_ical(&raw_ical, date, date)
+                    .into_iter()
+                    .next()
+            })
+        else {
+            continue;
+        };
+
+        if let Some(group) = groups.iter_mut().find(|group| {
+            group.account_id == message_account_id
+                && group.mailbox == message_mailbox
+                && group.uid == message_uid
+        }) {
+            group.events.push(build_event_json(
+                &event,
+                &account_id,
+                color_str,
+                &calendar_href,
+            ));
+        } else {
+            groups.push(MessageEventGroupJson {
+                account_id: message_account_id,
+                mailbox: message_mailbox,
+                uid: message_uid,
+                events: vec![build_event_json(
+                    &event,
+                    &account_id,
+                    color_str,
+                    &calendar_href,
+                )],
+            });
+        }
+    }
+
+    Json(groups).into_response()
 }
 
 // GET /api/calendar/event-emails

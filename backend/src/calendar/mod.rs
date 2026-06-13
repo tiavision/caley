@@ -16,7 +16,10 @@ pub(crate) mod events;
 pub(crate) mod import;
 
 pub use events::{create_calendar_handler, delete_event, save_event};
-pub use import::{get_event_ics, get_event_source_emails, get_message_events, import_ics, preview_ics_import, search_events};
+pub use import::{
+    get_event_ics, get_event_source_emails, get_message_events, get_thread_events, import_ics,
+    preview_ics_import, search_events,
+};
 
 pub(super) const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
 
