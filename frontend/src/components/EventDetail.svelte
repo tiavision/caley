@@ -189,6 +189,7 @@
 <style>
   .header-actions { display: flex; align-items: center; gap: 0.25rem; }
   .edit-btn {
+    display: inline-flex; align-items: center; justify-content: center;
     background: none; border: none; cursor: pointer;
     font-size: 1rem; color: var(--pico-muted-color);
     padding: 0.25rem; line-height: 1; transition: color 0.15s;
