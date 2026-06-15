@@ -187,6 +187,12 @@
 </dialog>
 
 <style>
+  /* When the title and icons no longer fit beside each other, drop the title to a
+     full-width second line while the icons stay on the top-right. wrap-reverse makes
+     the wrapped (icons) line render above the title line. */
+  header { flex-wrap: wrap-reverse; justify-content: flex-end; }
+  header h3 { flex: 1 1 auto; min-width: 10rem; }
+
   .header-actions { display: flex; align-items: center; gap: 0.25rem; }
   .edit-btn {
     display: inline-flex; align-items: center; justify-content: center;
