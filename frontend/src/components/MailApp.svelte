@@ -2309,8 +2309,8 @@
       {:else if selectedMessage}
         <div class="detail-header">
           <div class="detail-subject-row" class:stacked={detailHeaderStacked} use:observeDetailHeader>
+            {#if !standalone && usesDetailOverlay}<button class="detail-close-btn" aria-label={tl('mail_back')} on:click={returnToListFromReader}>←</button>{/if}
             <div class="detail-subject-line" bind:this={detailSubjectLineEl}>
-              {#if !standalone && usesDetailOverlay}<button class="detail-close-btn" aria-label={tl('mail_back')} on:click={returnToListFromReader}>←</button>{/if}
               <span class="detail-subject">{selectedMessage.subject || tl('mail_noSubject')}</span>
             </div>
             <div class="detail-controls" bind:this={detailControlsEl}>
@@ -3008,19 +3008,27 @@
   }
 
   .detail-subject-row.stacked {
-    flex-direction: column;
-    align-items: stretch;
+    display: grid;
+    grid-template-columns: auto 1fr;
     gap: 0.35rem;
+    align-items: center;
+  }
+
+  .detail-subject-row.stacked > .detail-close-btn {
+    grid-column: 1;
+    grid-row: 1;
   }
 
   .detail-subject-row.stacked .detail-controls {
-    order: 0;
-    width: 100%;
+    grid-column: 2;
+    grid-row: 1;
+    width: auto;
     justify-content: flex-end;
   }
 
   .detail-subject-row.stacked .detail-subject-line {
-    order: 1;
+    grid-column: 1 / -1;
+    grid-row: 2;
     width: 100%;
   }
 
