@@ -24,7 +24,7 @@
   import { prepareEmailHtml, htmlToPlainText, imageOriginsFromHtml, restoreForwardedImageSources, cidReferencesFromHtml } from '../lib/mail-html.ts';
   import EventDetail from './EventDetail.svelte';
   import ThreadDialog from './mail/ThreadDialog.svelte';
-  import type { CalendarJson, CalDavAccountJson, EventJson, MessageEventGroupJson } from '../types/calendar.ts';
+  import type { CalendarJson, CalDavAccountJson, EventJson, MessageEventGroupJson, SourceEmailJson } from '../types/calendar.ts';
   import type * as openpgp from 'openpgp';
   import type { Account, Attachment, BodySegment, FolderKind, Identity, Mailbox, Message, SidebarAccountSection, SidebarMailbox, ThreadNode, VirtualFolder } from './mail/MailTypes.ts';
   import { attachmentDataUrl, bareMailbox, canPreviewAttachment, canPreviewContentType, computePopoverStyle, folderKind, FOLDER_PRIORITY, folderSortKey, formatDate, formatMessageDateTime, htmlAddsValue, humanSize, identityKey, insertDecryptedInlineImages, intrinsicWidth, isIcsAttachment, isPgpPublicKeyAttachment, isPgpSignatureAttachment, isPgpTransportAttachment, keyHasEmail, linkifySegments, messageKey, sameMessage, senderName } from './mail/mailUtils.ts';
@@ -380,6 +380,7 @@
 
   let eventsByMessageKey: Record<string, EventJson[]> = {};
   $: hasThreadEvents = Object.values(eventsByMessageKey).some(events => events.length > 0);
+  let currentThreadEventUid: string | undefined = undefined;
   let sidebarOpen = false;
 
   let usesDetailOverlay = false;
@@ -1274,6 +1275,7 @@
     const activeThreadRequest = ++threadRequest;
     threadMessages = [];
     eventsByMessageKey = {};
+    currentThreadEventUid = undefined;
     messageLoading = true;
     standaloneUnavailable = false;
     pgpDecryptGeneration++;
@@ -1361,6 +1363,7 @@
     threadRequest++;
     threadMessages = [];
     eventsByMessageKey = {};
+    currentThreadEventUid = undefined;
     threadDialog?.close();
     clearPgpAttachments();
     selectedMessage = null;
@@ -1415,6 +1418,38 @@
     } catch {
       if (request === threadRequest) eventsByMessageKey = {};
     }
+  }
+
+  async function openEventThread(emails: SourceEmailJson[], event: EventJson) {
+    if (!emails.length) return;
+    const src = emails[0];
+    const activeThreadRequest = ++threadRequest;
+    currentThreadEventUid = event.uid;
+    threadMessages = [];
+    eventsByMessageKey = {};
+    try {
+      const [threadRes, eventsRes] = await Promise.all([
+        apiFetch(`/api/email/thread?account_id=${encodeURIComponent(src.account_id)}&mailbox=${encodeURIComponent(src.mailbox)}&uid=${src.uid}`),
+        apiFetch(`/api/email/thread-events?account_id=${encodeURIComponent(src.account_id)}&mailbox=${encodeURIComponent(src.mailbox)}&uid=${src.uid}`),
+      ]);
+      if (activeThreadRequest !== threadRequest) return;
+      if (threadRes.ok) threadMessages = (await threadRes.json()).messages || [];
+      if (eventsRes.ok) {
+        const groups = await eventsRes.json() as MessageEventGroupJson[];
+        eventsByMessageKey = Object.fromEntries(
+          groups.map(group => [
+            identityKey(group.account_id, group.mailbox, group.uid),
+            group.events,
+          ]),
+        );
+      }
+    } catch {
+      if (activeThreadRequest === threadRequest) {
+        threadMessages = [];
+        eventsByMessageKey = {};
+      }
+    }
+    if (activeThreadRequest === threadRequest) threadDialog?.show();
   }
 
   function isCurrentThreadMessage(node: ThreadNode): boolean {
@@ -2655,7 +2690,7 @@
 
 <!-- ── Event detail (for events imported from emails) ─────────────────── -->
 <EventDetail bind:this={eventDetail} {locale}
-  onthreads={(_emails) => { eventDetail.close(); threadDialog?.show(); }}
+  onthreads={(emails, event) => { eventDetail.close(); void openEventThread(emails, event); }}
 />
 
 <!-- ── Conversation threads dialog ───────────────────────────────────────── -->
@@ -2664,6 +2699,7 @@
   {locale}
   {threadMessages}
   {eventsByMessageKey}
+  currentEventUid={currentThreadEventUid}
   highlightedUid={selectedMessage ? { account_id: selectedMessage.account_id, mailbox: selectedMessage.mailbox, uid: selectedMessage.uid } : undefined}
   onmessageclick={openThreadMessage}
   oneventclick={(ev) => { threadDialog?.close(); eventDetail.open(ev); }}
