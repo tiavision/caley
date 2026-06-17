@@ -403,6 +403,7 @@ async fn security_headers(req: Request, next: Next) -> Response {
         frame-ancestors 'none'; \
         form-action 'self'; \
         img-src 'self' data:; \
+        manifest-src 'self'; \
         style-src 'self' 'unsafe-inline'; \
         script-src 'self'; \
         frame-src 'self'";

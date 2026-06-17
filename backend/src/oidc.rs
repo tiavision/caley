@@ -356,8 +356,9 @@ where
         let oidc_enabled = self.oidc_enabled;
 
         let path = request.uri().path().to_string();
-        // Always-public paths: the login page, auth endpoints, and static assets.
-        let is_static = path.starts_with("/assets/");
+        // Always-public paths: the login page, auth endpoints, and static assets
+        // referenced before authentication, such as the web app manifest and icons.
+        let is_static = is_public_static_asset(&path);
         if path == "/"
             || path.starts_with("/auth/")
             || path == "/logout"
@@ -393,4 +394,18 @@ where
             Ok(Redirect::temporary("/").into_response())
         })
     }
+}
+
+fn is_public_static_asset(path: &str) -> bool {
+    path.starts_with("/assets/")
+        || path.starts_with("/icons/")
+        || matches!(
+            path,
+            "/site.webmanifest"
+                | "/favicon.ico"
+                | "/favicon.png"
+                | "/caley-favicon.png"
+                | "/caley-logo.png"
+                | "/apple-touch-icon.png"
+        )
 }
