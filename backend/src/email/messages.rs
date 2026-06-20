@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
+    http::{StatusCode, header},
     response::{IntoResponse, Json, Response},
 };
 use chrono::{Datelike, Duration, Utc};
@@ -133,8 +133,16 @@ pub async fn get_message(
                 email_db::list_attachments(&state.db, &q.account_id, &q.mailbox, q.uid)
                     .await
                     .unwrap_or_default();
-            let raw_eml = load_raw_eml(&state.data_dir, &q.account_id, &q.mailbox, q.uid).await;
-            Json(message_to_json_with_attachments(&msg, &attachments, raw_eml)).into_response()
+            let render_body =
+                email_db::get_message_render_body(&state.db, &q.account_id, &q.mailbox, q.uid)
+                    .await
+                    .unwrap_or_default();
+            Json(message_to_json_with_attachments(
+                &msg,
+                &attachments,
+                render_body.as_ref(),
+            ))
+            .into_response()
         }
         Ok(None) => (StatusCode::NOT_FOUND, "message not found").into_response(),
         Err(e) => {
@@ -149,14 +157,53 @@ async fn load_raw_eml(
     account_id: &str,
     mailbox: &str,
     uid: u32,
-) -> Option<String> {
+) -> Option<Vec<u8>> {
     let path = eml_path(data_dir, account_id, mailbox, uid);
     let compressed = tokio::fs::read(&path).await.ok()?;
     let raw = zstd::decode_all(compressed.as_slice())
-        .map_err(|e| eprintln!("[email] raw_eml decompress error for {account_id}/{mailbox}/{uid}: {e}"))
+        .map_err(|e| {
+            eprintln!("[email] raw_eml decompress error for {account_id}/{mailbox}/{uid}: {e}")
+        })
         .ok()?;
-    use base64::Engine as _;
-    Some(base64::engine::general_purpose::STANDARD.encode(&raw))
+    Some(raw)
+}
+
+pub async fn get_raw_message(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(q): Query<GetMessageQuery>,
+) -> Response {
+    match email_db::get_account(
+        &state.db,
+        &q.account_id,
+        &user.user_id,
+        &state.encryption_key,
+    )
+    .await
+    {
+        Ok(Some(_)) => {}
+        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
+        Err(e) => {
+            eprintln!("[email] get_raw_message account lookup error: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        }
+    }
+
+    match load_raw_eml(&state.data_dir, &q.account_id, &q.mailbox, q.uid).await {
+        Some(raw) => (
+            [
+                (header::CONTENT_TYPE, "message/rfc822"),
+                (header::CACHE_CONTROL, "private, no-store"),
+                (
+                    header::HeaderName::from_static("x-content-type-options"),
+                    "nosniff",
+                ),
+            ],
+            raw,
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, "message source not found").into_response(),
+    }
 }
 
 pub async fn get_thread(
@@ -811,7 +858,7 @@ pub(super) fn message_to_json(m: &email_db::MessageRow) -> serde_json::Value {
 pub(super) fn message_to_json_with_attachments(
     m: &email_db::MessageRow,
     attachments: &[email_db::AttachmentRow],
-    raw_eml: Option<String>,
+    render_body: Option<&email_db::MessageBodyRow>,
 ) -> serde_json::Value {
     let to: Vec<String> = m
         .to_addrs
@@ -855,10 +902,14 @@ pub(super) fn message_to_json_with_attachments(
         "sent_at": m.sent_at,
         "flags": flags,
         "has_attachments": m.has_attachments,
-        "raw_eml": raw_eml,
+        "body_cached": render_body.is_some(),
+        "body_text": render_body.and_then(|body| body.body_text.as_deref()),
+        "body_html": render_body.and_then(|body| body.body_html.as_deref()),
+        "autocrypt_headers": render_body.map(|body| body.autocrypt_headers.as_slice()).unwrap_or_default(),
         "is_read": flags.iter().any(|f| f == "\\Seen"),
         "is_flagged": flags.iter().any(|f| f == "\\Flagged"),
         "is_encrypted": m.is_encrypted,
+        "is_signed": render_body.map(|body| body.is_signed).unwrap_or(false),
         "attachments": att_list,
     })
 }
@@ -885,8 +936,8 @@ pub(super) fn thread_message_to_json(m: &email_db::MessageRow) -> serde_json::Va
 
 #[cfg(test)]
 mod tests {
-    use super::dedupe_thread_messages;
-    use crate::email_db::MessageRow;
+    use super::{dedupe_thread_messages, message_to_json_with_attachments};
+    use crate::email_db::{MessageBodyRow, MessageRow};
 
     fn thread_row(mailbox: &str, uid: i64, message_id: &str, sent_at: i64) -> MessageRow {
         MessageRow {
@@ -919,5 +970,22 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].mailbox, "INBOX");
         assert_eq!(result[0].uid, 2);
+    }
+
+    #[test]
+    fn message_detail_contains_cached_body_but_never_raw_mime() {
+        let message = thread_row("INBOX", 1, "message", 1);
+        let body = MessageBodyRow {
+            body_text: Some("Hello".to_owned()),
+            body_html: Some("<p>Hello</p>".to_owned()),
+            autocrypt_headers: Vec::new(),
+            is_signed: false,
+        };
+
+        let json = message_to_json_with_attachments(&message, &[], Some(&body));
+
+        assert_eq!(json["body_cached"], true);
+        assert_eq!(json["body_text"], "Hello");
+        assert!(json.get("raw_eml").is_none());
     }
 }

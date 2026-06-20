@@ -296,6 +296,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/email/folder", delete(email::delete_virtual_folder))
         .route("/api/email/messages", get(email::list_messages))
         .route("/api/email/message", get(email::get_message))
+        .route("/api/email/message/raw", get(email::get_raw_message))
         .route("/api/email/thread", get(email::get_thread))
         .route("/api/email/message/flags", patch(email::update_flags))
         .route("/api/email/message/move", post(email::move_message))

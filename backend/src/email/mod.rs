@@ -22,8 +22,8 @@ pub use attachments::{
     remove_image_origin,
 };
 pub use messages::{
-    delete_message, empty_trash, get_message, get_thread, list_messages, move_message, search,
-    suggest_addrs, update_flags,
+    delete_message, empty_trash, get_message, get_raw_message, get_thread, list_messages,
+    move_message, search, suggest_addrs, update_flags,
 };
 pub use send::{autodiscover_handler, send_raw_email};
 

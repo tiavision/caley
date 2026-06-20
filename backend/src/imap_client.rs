@@ -200,6 +200,14 @@ pub struct AttachmentPart {
     pub part_index: usize,
 }
 
+pub struct MessageRenderBody {
+    pub body_text: Option<String>,
+    pub body_html: Option<String>,
+    pub search_text: String,
+    pub autocrypt_headers: Vec<String>,
+    pub is_signed: bool,
+}
+
 /// Fetches full raw bodies for a list of UIDs in one IMAP command.
 /// Detect PGP-encrypted content in raw message bytes.
 pub fn detect_pgp_encrypted(raw: &[u8]) -> bool {
@@ -208,19 +216,19 @@ pub fn detect_pgp_encrypted(raw: &[u8]) -> bool {
         || raw.windows(27).any(|w| w == b"-----BEGIN PGP MESSAGE-----")
 }
 
-/// Returns a vec of (uid, raw_bytes, body_text, has_attachments, attachments).
+pub fn detect_pgp_signed(raw: &[u8]) -> bool {
+    let mime = String::from_utf8_lossy(raw).to_ascii_lowercase();
+    (mime.contains("multipart/signed") && mime.contains("application/pgp-signature"))
+        || raw
+            .windows(b"-----BEGIN PGP SIGNED MESSAGE-----".len())
+            .any(|w| w == b"-----BEGIN PGP SIGNED MESSAGE-----")
+}
+
+/// Returns raw bytes plus the small render body and attachment index for each UID.
 pub async fn fetch_bodies(
     session: &mut ImapSession,
     uids: &[u32],
-) -> Result<
-    Vec<(
-        u32,
-        Vec<u8>,
-        String,
-        bool,
-        Vec<AttachmentPart>,
-    )>,
-> {
+) -> Result<Vec<(u32, Vec<u8>, MessageRenderBody, bool, Vec<AttachmentPart>)>> {
     if uids.is_empty() {
         return Ok(Vec::new());
     }
@@ -235,8 +243,8 @@ pub async fn fetch_bodies(
         };
         if let Some(body_bytes) = fetch.body() {
             let raw = body_bytes.to_vec();
-            let (text, has_attach, attachments) = parse_body_bytes(body_bytes)?;
-            results.push((uid, raw, text, has_attach, attachments));
+            let (render_body, has_attach, attachments) = parse_body_bytes(body_bytes)?;
+            results.push((uid, raw, render_body, has_attach, attachments));
         }
     }
     Ok(results)
@@ -592,32 +600,76 @@ fn format_addr(a: &mail_parser::Addr<'_>) -> String {
     }
 }
 
-fn parse_body_bytes(bytes: &[u8]) -> Result<(String, bool, Vec<AttachmentPart>)> {
+fn parse_body_bytes(bytes: &[u8]) -> Result<(MessageRenderBody, bool, Vec<AttachmentPart>)> {
     use mail_parser::MessageParser;
     let parser = MessageParser::default();
     let msg = match parser.parse(bytes) {
         Some(m) => m,
         None => {
+            let text = String::from_utf8_lossy(bytes).into_owned();
             return Ok((
-                String::from_utf8_lossy(bytes).into_owned(),
+                MessageRenderBody {
+                    body_text: Some(text.clone()),
+                    body_html: None,
+                    search_text: text,
+                    autocrypt_headers: extract_header_values(bytes, "autocrypt"),
+                    is_signed: detect_pgp_signed(bytes),
+                },
                 false,
                 Vec::new(),
             ));
         }
     };
 
-    let body_text = if let Some(text) = msg.body_text(0) {
-        text.as_ref().to_owned()
-    } else if let Some(html) = msg.body_html(0) {
-        strip_tags(html.as_ref())
-    } else {
-        String::new()
-    };
+    let body_text = msg.body_text(0).map(|text| text.as_ref().to_owned());
+    let body_html = msg.body_html(0).map(|html| html.as_ref().to_owned());
+    let search_text = body_text
+        .clone()
+        .unwrap_or_else(|| body_html.as_deref().map(strip_tags).unwrap_or_default());
 
     let attachments = extract_attachments(&msg);
     let has_attachments = !attachments.is_empty();
 
-    Ok((body_text, has_attachments, attachments))
+    Ok((
+        MessageRenderBody {
+            body_text,
+            body_html,
+            search_text,
+            autocrypt_headers: extract_header_values(bytes, "autocrypt"),
+            is_signed: detect_pgp_signed(bytes),
+        },
+        has_attachments,
+        attachments,
+    ))
+}
+
+fn extract_header_values(bytes: &[u8], name: &str) -> Vec<String> {
+    let raw = String::from_utf8_lossy(bytes);
+    let header_end = raw
+        .find("\r\n\r\n")
+        .or_else(|| raw.find("\n\n"))
+        .unwrap_or(raw.len());
+    let mut unfolded: Vec<String> = Vec::new();
+    for line in raw[..header_end].lines() {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            if let Some(previous) = unfolded.last_mut() {
+                previous.push(' ');
+                previous.push_str(line.trim());
+            }
+        } else {
+            unfolded.push(line.trim_end_matches('\r').to_owned());
+        }
+    }
+    let prefix = format!("{}:", name.to_ascii_lowercase());
+    unfolded
+        .into_iter()
+        .filter_map(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower
+                .starts_with(&prefix)
+                .then(|| line[prefix.len()..].trim().to_owned())
+        })
+        .collect()
 }
 
 fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
@@ -939,6 +991,21 @@ mod tests {
     }
 
     #[test]
+    fn extracts_render_body_and_unfolded_autocrypt_header() {
+        let raw = b"From: Alice <alice@example.test>\r\nAutocrypt: addr=alice@example.test;\r\n keydata=YWJj\r\nContent-Type: multipart/alternative; boundary=alt\r\n\r\n--alt\r\nContent-Type: text/plain\r\n\r\nHello\r\n--alt\r\nContent-Type: text/html\r\n\r\n<p>Hello</p>\r\n--alt--\r\n";
+
+        let (body, _, _) = parse_body_bytes(raw).unwrap();
+
+        assert_eq!(body.body_text.as_deref(), Some("Hello"));
+        assert_eq!(body.body_html.as_deref(), Some("<p>Hello</p>"));
+        assert_eq!(
+            body.autocrypt_headers,
+            vec!["addr=alice@example.test; keydata=YWJj"]
+        );
+        assert!(!body.is_signed);
+    }
+
+    #[test]
     fn detects_pgp_mime_encrypted_mail() {
         let raw = b"Content-Type: multipart/encrypted; protocol=\"application/pgp-encrypted\"; boundary=\"e\"\r\n\r\n--e\r\nContent-Type: application/pgp-encrypted\r\n\r\nVersion: 1\r\n--e--\r\n";
 
@@ -957,6 +1024,7 @@ mod tests {
         let raw = b"Content-Type: multipart/signed; protocol=\"application/pgp-signature\"; boundary=\"s\"\r\n\r\n--s\r\nContent-Type: text/plain\r\n\r\nHello\r\n--s\r\nContent-Type: application/pgp-signature\r\n\r\n-----BEGIN PGP SIGNATURE-----\r\nx\r\n-----END PGP SIGNATURE-----\r\n--s--\r\n";
 
         assert!(!detect_pgp_encrypted(raw));
+        assert!(detect_pgp_signed(raw));
     }
 
     #[test]

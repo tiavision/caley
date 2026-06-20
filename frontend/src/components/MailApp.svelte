@@ -115,7 +115,7 @@
   let detectedPgpEncrypted = false;
   let detectedPgpSigned = false;
   $: effectiveMessageEncrypted = !!selectedMessage?.is_encrypted || detectedPgpEncrypted;
-  $: effectiveMessageSigned = detectedPgpSigned;
+  $: effectiveMessageSigned = !!selectedMessage?.is_signed || detectedPgpSigned;
 
   // PGP decryption state (per selected message)
   let pgpDecrypting = false;
@@ -164,11 +164,22 @@
   }
 
 
-  async function harvestAutocrypt(rawBytes: Uint8Array, msg: Message) {
+  async function harvestAutocrypt(headers: string[], msg: Message) {
+    if (headers.length === 0) return;
+    const rawBytes = new TextEncoder().encode(
+      `${headers.map(value => `Autocrypt: ${value}`).join('\r\n')}\r\n\r\n`,
+    );
     const sender = bareMailbox(msg.from);
     for (const key of await autocryptKeys(rawBytes, msg.from)) {
       await savePublicKey(key, 'harvested_autocrypt', sender).catch(() => {});
     }
+  }
+
+  async function fetchRawMessage(msg: Message): Promise<Uint8Array> {
+    const url = `/api/email/message/raw?account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
+    const response = await apiFetch(url);
+    if (!response.ok) throw new Error('raw message fetch failed');
+    return new Uint8Array(await response.arrayBuffer());
   }
 
   function isSelectedMessage(msg: Message): boolean {
@@ -708,10 +719,14 @@
       sent_at: null,
       flags: [],
       has_attachments: false,
-      raw_eml: null,
+      body_cached: false,
+      body_text: null,
+      body_html: null,
+      autocrypt_headers: [],
       is_read: true,
       is_flagged: false,
       is_encrypted: false,
+      is_signed: false,
       attachments: [],
     };
   }
@@ -1309,16 +1324,28 @@
         void loadThread(full, activeThreadRequest);
         void loadThreadEvents(full, activeThreadRequest);
         messageLoading = false;
-        // Decode raw bytes and parse MIME for all messages (unified render path).
-        if (full.raw_eml) {
+        if (full.body_cached && !full.is_encrypted) {
+          parsedHtml = full.body_html ? prepareEmailHtml(full.body_html, {
+            accountId: full.account_id,
+            mailbox: full.mailbox,
+            uid: full.uid,
+          }) : '';
+          parsedText = full.body_text ?? '';
+          viewMode = htmlAddsValue(full.body_html) ? 'html' : 'text';
+        }
+        await harvestAutocrypt(full.autocrypt_headers, full);
+
+        // Legacy rows need raw MIME for rendering. Encrypted and signed messages
+        // need it for client-side cryptographic operations.
+        if (!full.body_cached || full.is_encrypted || full.is_signed) {
           try {
-            const rawBytes = Uint8Array.from(atob(full.raw_eml), c => c.charCodeAt(0));
+            const rawBytes = await fetchRawMessage(full);
             parsedRawBytes = rawBytes;
             const pgpDetection = detectPgpMessage(rawBytes);
             detectedPgpEncrypted = pgpDetection.isEncrypted;
             detectedPgpSigned = pgpDetection.isSigned;
             const messageIsEncrypted = full.is_encrypted || pgpDetection.isEncrypted;
-            if (!messageIsEncrypted) {
+            if (!messageIsEncrypted && !full.body_cached) {
               const parsed = parseMimeMessage(rawBytes);
               parsedHtml = parsed.html ? prepareEmailHtml(parsed.html, {
                 accountId: full.account_id,
@@ -1328,8 +1355,17 @@
               parsedText = parsed.text ?? '';
               viewMode = htmlAddsValue(parsed.html) ? 'html' : 'text';
             }
-            await harvestAutocrypt(rawBytes, full);
-            await loadMessagePublicKeyCandidates(full, full.attachments);
+            if (!full.body_cached) {
+              await harvestAutocrypt(
+                new TextDecoder().decode(rawBytes)
+                  .split(/\r?\n\r?\n/, 1)[0]
+                  .replace(/\r?\n[ \t]+/g, ' ')
+                  .split(/\r?\n/)
+                  .filter(line => line.toLowerCase().startsWith('autocrypt:'))
+                  .map(line => line.slice(line.indexOf(':') + 1).trim()),
+                full,
+              );
+            }
             if (pgpDetection.isSigned && !messageIsEncrypted) {
               const verificationKeys = await listPublicKeys().then(readVerificationKeys).catch(() => []);
               pgpBadges = await verifySignedMessage(rawBytes, verificationKeys);
@@ -1338,6 +1374,7 @@
             // Raw MIME unavailable; message still renders without it.
           }
         }
+        await loadMessagePublicKeyCandidates(full, full.attachments);
         if ((full.is_encrypted || detectedPgpEncrypted) && getKeys().length > 0) {
           void pgpDecrypt(full);
         }

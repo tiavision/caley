@@ -576,13 +576,13 @@ impl EmailSyncManager {
                 // Write .eml files to disk first (outside the DB transaction) so the
                 // SQLite write lock is held only for the fast DB writes, not file I/O.
                 let mut prepared: Vec<PreparedMessage> = Vec::with_capacity(bodies.len());
-                for (uid, raw_bytes, body_text, has_attach, attachments) in bodies {
+                for (uid, raw_bytes, render_body, has_attach, attachments) in bodies {
                     let is_encrypted = imap_client::detect_pgp_encrypted(&raw_bytes);
                     // For encrypted messages, exclude body from FTS index.
                     let body_idx = if is_encrypted {
                         String::new()
                     } else {
-                        self.search_mode.normalize_text(&body_text)
+                        self.search_mode.normalize_text(&render_body.search_text)
                     };
 
                     let path = eml_path(&self.data_dir, account_id, mailbox, uid);
@@ -609,6 +609,10 @@ impl EmailSyncManager {
                         has_attach,
                         body_idx,
                         is_encrypted,
+                        body_text: (!is_encrypted).then_some(render_body.body_text).flatten(),
+                        body_html: (!is_encrypted).then_some(render_body.body_html).flatten(),
+                        autocrypt_headers: render_body.autocrypt_headers,
+                        is_signed: render_body.is_signed,
                         attachments: att_params,
                     });
                 }
@@ -625,6 +629,17 @@ impl EmailSyncManager {
                         &m.body_idx,
                         m.has_attach,
                         m.is_encrypted,
+                    )
+                    .await?;
+                    email_db::upsert_message_render_body(
+                        &mut *tx,
+                        account_id,
+                        mailbox,
+                        m.uid,
+                        m.body_text.as_deref(),
+                        m.body_html.as_deref(),
+                        &m.autocrypt_headers,
+                        m.is_signed,
                     )
                     .await?;
                     for att in &m.attachments {
@@ -656,6 +671,10 @@ struct PreparedMessage {
     has_attach: bool,
     body_idx: String,
     is_encrypted: bool,
+    body_text: Option<String>,
+    body_html: Option<String>,
+    autocrypt_headers: Vec<String>,
+    is_signed: bool,
     attachments: Vec<PreparedAttachment>,
 }
 

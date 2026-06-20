@@ -569,6 +569,22 @@ pub(super) async fn seed_messages(
         .await?;
 
         sqlx::query(
+            "INSERT INTO cached_message_bodies
+                (account_id, mailbox, uid, body_text, body_html, autocrypt_headers, is_signed)
+             VALUES (?, ?, ?, ?, ?, '[]', 0)
+             ON CONFLICT(account_id, mailbox, uid) DO UPDATE SET
+                body_text = excluded.body_text,
+                body_html = excluded.body_html",
+        )
+        .bind(m.account)
+        .bind(m.mailbox)
+        .bind(m.uid)
+        .bind(m.body_text)
+        .bind(m.body_html)
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
             "INSERT OR IGNORE INTO message_addresses (account_id, mailbox, uid, field, addr)
              VALUES (?, ?, ?, 'from', ?)",
         )
