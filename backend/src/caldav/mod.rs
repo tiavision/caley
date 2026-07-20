@@ -9,6 +9,7 @@ use crate::version;
 pub(crate) mod generation;
 pub(crate) mod parsing;
 pub mod types;
+pub(crate) mod windows_tz;
 
 pub use generation::{
     add_exdate, add_recurrence_override, generate_ical_event, generate_new_uid,
