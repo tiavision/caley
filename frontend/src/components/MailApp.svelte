@@ -680,7 +680,7 @@
       const raw = localStorage.getItem('mail-view-state');
       if (raw) {
         const s = JSON.parse(raw);
-        if (s.folderId && virtualFolders.find((f: { id: string }) => f.id === s.folderId)) {
+        if (s.folderId && virtualFolders.find((f: { folder_id: string }) => f.folder_id === s.folderId)) {
           await selectVirtualFolder(s.folderId);
           return;
         }
@@ -1936,6 +1936,7 @@
       selectedAccountId = null;
       selectedMailbox = null;
       messages = [];
+      saveNavState();
     }
   }
 
@@ -2855,6 +2856,7 @@
       clearMarkedSelection();
       selectedFolderId = null;
       messages = [];
+      saveNavState();
     }
   }}
 />
