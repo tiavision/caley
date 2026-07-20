@@ -39,22 +39,8 @@ function hasExplicitOffset(value: string): boolean {
   return /(?:Z|[+-]\d{2}:\d{2})$/.test(value);
 }
 
-function dateFromLocalWallTime(value: string): Date | null {
-  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
-  if (!m) return null;
-  return new Date(
-    Number(m[1]),
-    Number(m[2]) - 1,
-    Number(m[3]),
-    Number(m[4]),
-    Number(m[5]),
-    Number(m[6] ?? 0),
-  );
-}
-
-function dateFromEventValue(value: string, ignoreFallbackUtc: boolean): Date | null {
+function dateFromEventValue(value: string): Date | null {
   if (!value) return null;
-  if (ignoreFallbackUtc) return dateFromLocalWallTime(value);
   const d = new Date(hasExplicitOffset(value) ? value : value + 'Z');
   return isNaN(d.getTime()) ? null : d;
 }
@@ -98,13 +84,18 @@ export function formatEventTimes(ev: EventJson): EventTimeText {
   if (!ev.dtstart) return { localText: '', sourceText: '' };
 
   const eventTz = ev.tz || '';
+  // The backend always resolves `tz` and its `dtstart`/`dtend` offsets
+  // together (see caldav::parsing::resolve_tzid): whenever `tz` isn't
+  // something Intl can format, the timestamp itself still carries a
+  // correct explicit UTC offset (or `Z` for a genuine UTC/floating-time
+  // event, in which case `tz` is reported as `'UTC'`). So the value can
+  // always be parsed at face value — `tz` only affects how the "source
+  // timezone" line below is rendered.
   const supportedEventTz = supportsTimeZone(eventTz);
-  const unsupportedNonUtcTz = !!eventTz && eventTz !== 'UTC' && !supportedEventTz;
-  const ignoreFallbackUtc = unsupportedNonUtcTz && ev.dtstart.endsWith('Z');
-  const s = dateFromEventValue(ev.dtstart, ignoreFallbackUtc);
+  const s = dateFromEventValue(ev.dtstart);
   if (!s) return { localText: '', sourceText: '' };
 
-  const e = ev.dtend ? dateFromEventValue(ev.dtend, ignoreFallbackUtc && ev.dtend.endsWith('Z')) : null;
+  const e = ev.dtend ? dateFromEventValue(ev.dtend) : null;
   const localText = formatDateTimeRange(s, e, loc);
 
   let sourceText = '';

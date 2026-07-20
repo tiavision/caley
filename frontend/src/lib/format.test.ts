@@ -67,17 +67,21 @@ describe('formatEventTimes', () => {
     expect(formatted.sourceText).toBe('');
   });
 
-  it('keeps unsupported timezone fallback values as wall-clock local time', () => {
-    const expectedWallTime = new Date(2026, 5, 10, 14, 0, 0);
+  it('parses the explicit offset even when the tz label is not Intl-resolvable', () => {
+    // The backend resolves TZID via chrono-tz / a Windows-name table / the
+    // event's own VTIMEZONE block before formatting, so dtstart/dtend always
+    // carry a correct explicit UTC offset even when `tz` itself is a raw,
+    // non-IANA label (e.g. a custom VTIMEZONE with no IANA equivalent).
+    const start = new Date('2026-06-10T14:00:00Z');
     const formatted = formatEventTimes(event({
-      dtstart: '2026-06-10T14:00:00Z',
-      dtend: '2026-06-10T15:00:00Z',
-      tz: 'W. Europe Standard Time',
+      dtstart: '2026-06-10T16:00:00+02:00',
+      dtend: '2026-06-10T17:00:00+02:00',
+      tz: 'Custom Zone',
     }));
 
-    expect(formatted.localText).toContain(timeText(expectedWallTime));
-    expect(formatted.sourceText).toContain(timeText(expectedWallTime));
-    expect(formatted.sourceText).toContain('W. Europe Standard Time');
+    expect(formatted.localText).toContain(timeText(start));
+    expect(formatted.sourceText).toContain(timeText(start));
+    expect(formatted.sourceText).toContain('Custom Zone');
   });
 
   it('leaves all-day events without a source timezone line', () => {
