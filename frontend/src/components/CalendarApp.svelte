@@ -30,7 +30,8 @@
 
   let selectedWeekStart: Date = getMonday(new Date());
   let gridMonth: string = fmtYM(selectedWeekStart);
-  const todayStr: string = fmtDate(new Date());
+  let todayStr: string = fmtDate(new Date());
+  let midnightTimer: ReturnType<typeof setTimeout> | null = null;
   let touchStartX = 0;
   let touchStartY = 0;
 
@@ -211,6 +212,19 @@
     } else {
       fetchEvents();
     }
+  }
+
+  function refreshToday() {
+    const newTodayStr = fmtDate(new Date());
+    if (newTodayStr !== todayStr) todayStr = newTodayStr;
+    scheduleMidnightRefresh();
+  }
+
+  function scheduleMidnightRefresh() {
+    if (midnightTimer) clearTimeout(midnightTimer);
+    const now = new Date();
+    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 5);
+    midnightTimer = setTimeout(refreshToday, next.getTime() - now.getTime());
   }
 
   function navigateToday() {
@@ -427,10 +441,12 @@
     if (savedView === 'month') viewMode = 'month';
 
     window.addEventListener('keydown', handleKeydown);
+    document.addEventListener('visibilitychange', refreshToday);
 
     getUser().then(u => { if (u.map_url) mapUrl = u.map_url; });
 
     setupSSE();
+    scheduleMidnightRefresh();
     fetchCalendars();
     fetchEvents();
     fetchMonthGrid();
@@ -439,7 +455,9 @@
   onDestroy(() => {
     sseSource?.close();
     if (sseReconnectTimer) clearTimeout(sseReconnectTimer);
+    if (midnightTimer) clearTimeout(midnightTimer);
     window.removeEventListener('keydown', handleKeydown);
+    document.removeEventListener('visibilitychange', refreshToday);
     for (const id of reminderTimeouts) clearTimeout(id);
   });
 </script>
