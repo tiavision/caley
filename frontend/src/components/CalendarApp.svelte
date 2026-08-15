@@ -118,7 +118,7 @@
   function setupSSE() {
     sseSource = new EventSource('/api/events/stream');
     sseSource.onopen = () => {
-      if (sseConnectedOnce) { fetchCalendars(); fetchEvents(); fetchMonthGrid(); }
+      if (sseConnectedOnce) { refreshToday(); fetchCalendars(); fetchEvents(); fetchMonthGrid(); }
       sseConnectedOnce = true;
     };
     sseSource.addEventListener('events_refetch', () => { fetchEvents(); fetchMonthGrid(); });
@@ -224,7 +224,13 @@
 
   function refreshToday() {
     const newTodayStr = fmtDate(new Date());
-    if (newTodayStr !== todayStr) todayStr = newTodayStr;
+    if (newTodayStr !== todayStr) {
+      todayStr = newTodayStr;
+      // Server-derived state (weekly is_today, past-day collapsing, month
+      // grid) must roll over together with the client-side highlight.
+      fetchEvents();
+      fetchMonthGrid();
+    }
     scheduleMidnightRefresh();
   }
 
@@ -449,7 +455,12 @@
     if (savedView === 'month') viewMode = 'month';
 
     window.addEventListener('keydown', handleKeydown);
+    // visibilitychange misses window re-focus while the tab stayed visible,
+    // and pageshow covers bfcache restores; the midnight timer alone is
+    // throttled across system sleep.
     document.addEventListener('visibilitychange', refreshToday);
+    window.addEventListener('focus', refreshToday);
+    window.addEventListener('pageshow', refreshToday);
 
     getUser().then(u => { if (u.map_url) mapUrl = u.map_url; });
 
@@ -466,6 +477,8 @@
     if (midnightTimer) clearTimeout(midnightTimer);
     window.removeEventListener('keydown', handleKeydown);
     document.removeEventListener('visibilitychange', refreshToday);
+    window.removeEventListener('focus', refreshToday);
+    window.removeEventListener('pageshow', refreshToday);
     for (const id of reminderTimeouts) clearTimeout(id);
   });
 </script>
