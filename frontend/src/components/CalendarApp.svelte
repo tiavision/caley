@@ -10,6 +10,7 @@
   import type { ThreadNode } from './mail/MailTypes.ts';
   import { getMonday, fmtDate, fmtYM } from '../lib/date.ts';
   import { apiFetch } from '../lib/api.ts';
+  import { dateFromEventValue, eventStartDate, localDateIso, eventTimeLabel, formatEventTime } from '../lib/format.ts';
   import MonthView from './MonthView.svelte';
   import DayEventsDialog from './DayEventsDialog.svelte';
 
@@ -27,6 +28,12 @@
   let eventsLoading = false;
   let monthPickerOpen = false;
   let viewMode: 'week' | 'month' = 'week';
+
+  // Viewer timezone, sent with event/grid requests so the backend buckets
+  // days and renders time ranges in the user's local timezone.
+  const userTzParam = encodeURIComponent(
+    (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; } })()
+  );
 
   let selectedWeekStart: Date = getMonday(new Date());
   let gridMonth: string = fmtYM(selectedWeekStart);
@@ -69,7 +76,7 @@
       const start = fmtDate(selectedWeekStart);
       const endDate = new Date(selectedWeekStart); endDate.setDate(endDate.getDate() + 6);
       const end = fmtDate(endDate);
-      const res = await apiFetch(`/api/events?start=${start}&end=${end}`);
+      const res = await apiFetch(`/api/events?start=${start}&end=${end}&tz=${userTzParam}`);
       if (res.ok) {
         days = await res.json();
         await tick();
@@ -86,7 +93,7 @@
     try {
       const start = monthGrid.days[0].date_str;
       const end = monthGrid.days[monthGrid.days.length - 1].date_str;
-      const res = await apiFetch(`/api/events?start=${start}&end=${end}`);
+      const res = await apiFetch(`/api/events?start=${start}&end=${end}&tz=${userTzParam}`);
       if (res.ok) monthViewDays = await res.json();
     } catch {}
     eventsLoading = false;
@@ -95,7 +102,7 @@
   async function fetchMonthGrid(month?: string) {
     try {
       const m = month || gridMonth;
-      const res = await apiFetch(`/api/calendar?month=${m}`);
+      const res = await apiFetch(`/api/calendar?month=${m}&tz=${userTzParam}`);
       if (res.ok) {
         monthGrid = await res.json();
         if (viewMode === 'month') await fetchMonthViewEvents();
@@ -124,14 +131,15 @@
           ...day,
           events: day.events.filter(ev => !(ev.account_id === payload.account_id && ev.uid === uid)),
         }));
-        const dateIso = payload.event.dtstart.substring(0, 10);
+        const startDate = eventStartDate(payload.event);
+        const dateIso = startDate ? localDateIso(startDate) : payload.event.dtstart.substring(0, 10);
         days = days.map(day => {
           if (day.date_iso !== dateIso) return day;
           const events = [...day.events, payload.event!].sort((a, b) => {
-            const aDay = a.time_range === 'All day';
-            const bDay = b.time_range === 'All day';
-            if (aDay !== bDay) return bDay ? 1 : -1;
-            return a.time_range < b.time_range ? -1 : 1;
+            if (a.is_all_day !== b.is_all_day) return a.is_all_day ? -1 : 1;
+            const aMs = eventStartDate(a)?.getTime() ?? 0;
+            const bMs = eventStartDate(b)?.getTime() ?? 0;
+            return aMs - bMs;
           });
           return { ...day, events };
         });
@@ -187,7 +195,7 @@
 
   async function fetchPickerGrid(month: string) {
     try {
-      const res = await apiFetch(`/api/calendar?month=${month}`);
+      const res = await apiFetch(`/api/calendar?month=${month}&tz=${userTzParam}`);
       if (res.ok) pickerGrid = await res.json();
     } catch {}
   }
@@ -379,7 +387,7 @@
       for (const day of days) {
         for (const ev of day.events) {
           if (!ev.alarms.length) continue;
-          const toMs = (s: string) => s ? new Date(s.includes('Z') || s.includes('+') ? s : s + 'Z').getTime() : NaN;
+          const toMs = (s: string) => { const d = s ? dateFromEventValue(s) : null; return d ? d.getTime() : NaN; };
           const startMs = toMs(ev.dtstart), endMs = toMs(ev.dtend);
           for (const alarm of ev.alarms) {
             let fireMs: number;
@@ -395,7 +403,7 @@
             }
             if (isNaN(fireMs) || fireMs <= now || fireMs > horizon) continue;
             reminderTimeouts.push(setTimeout(() => {
-              if (Notification.permission === 'granted') new Notification(ev.summary, { body: ev.time_range });
+              if (Notification.permission === 'granted') new Notification(ev.summary, { body: formatEventTime(ev) });
             }, fireMs - now));
           }
         }
@@ -571,7 +579,7 @@
                   onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); eventDetail.open(event); } }}
                 >
                   <div class="appt-content">
-                    <span class="appt-time">{event.time_range.split('-')[0]}</span> · {event.summary}
+                    <span class="appt-time">{eventTimeLabel(event)}</span> · {event.summary}
                   </div>
                 </article>
               {/each}

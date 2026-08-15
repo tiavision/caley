@@ -337,6 +337,7 @@ pub async fn search_events(
                             &account_id,
                             color_str,
                             &calendar_href,
+                            None,
                         ));
                     }
                 }
@@ -430,6 +431,7 @@ pub async fn get_message_events(
                     &account_id,
                     color_str,
                     &calendar_href,
+                    None,
                 ));
             }
         }
@@ -559,6 +561,7 @@ pub async fn get_thread_events(
                 &account_id,
                 color_str,
                 &calendar_href,
+                None,
             ));
         } else {
             groups.push(MessageEventGroupJson {
@@ -570,6 +573,7 @@ pub async fn get_thread_events(
                     &account_id,
                     color_str,
                     &calendar_href,
+                    None,
                 )],
             });
         }

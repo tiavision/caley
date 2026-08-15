@@ -33,6 +33,7 @@ export interface EventJson {
   dtstart: string;
   dtend: string;
   is_all_day: boolean;
+  /** IANA name or raw TZID label; '' means floating time (naive dtstart). */
   tz: string;
   location: string;
   description: string;

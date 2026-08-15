@@ -146,20 +146,15 @@ pub fn generate_ical_event(
 
     if let Some((rid_date, rid_tz)) = recurrence_id {
         let is_date = rid_date.len() <= 10;
+        // Keep only the local part: a trailing `Z`/`±HH:MM` offset must not
+        // leak into the compacted RECURRENCE-ID value.
+        let rid_local = rid_date.get(..19).unwrap_or(rid_date);
         let rid_ical = if is_date {
             rid_date.replace('-', "")
+        } else if rid_tz.is_empty() || rid_tz == "UTC" {
+            format!("{}Z", rid_local.replace('-', "").replace(':', ""))
         } else {
-            if rid_tz.is_empty() || rid_tz == "UTC" {
-                format!(
-                    "{}Z",
-                    rid_date.replace('-', "").replace(':', "").replace('T', "T")
-                )
-            } else {
-                format!(
-                    "{}",
-                    rid_date.replace('-', "").replace(':', "").replace('T', "T")
-                )
-            }
+            rid_local.replace('-', "").replace(':', "")
         };
         if is_date && is_all_day {
             ical.push_str(&format!("RECURRENCE-ID;VALUE=DATE:{}\r\n", rid_ical));
@@ -400,9 +395,12 @@ pub fn add_exdate(ical_data: &str, occurrence_dtstart: &str, tz: &str) -> String
         let parts: Vec<&str> = occurrence_dtstart.splitn(2, 'T').collect();
         let date_compact = parts[0].replace('-', "");
         let time_str = parts.get(1).copied().unwrap_or("000000Z");
+        // "09:00:00-05:00" → "090000": drop separators and stop before any
+        // trailing offset digits.
         let time_compact: String = time_str
             .chars()
-            .take_while(|c| c.is_ascii_digit())
+            .filter(|c| c.is_ascii_digit())
+            .take(6)
             .collect();
         if occurrence_dtstart.ends_with('Z') || tz.is_empty() || tz == "UTC" {
             format!("EXDATE:{}T{}Z", date_compact, time_compact)
@@ -681,12 +679,15 @@ fn rebuild_vevent(
 
     if let Some((rid_date, rid_tz)) = target_recurrence_id {
         let is_date = rid_date.len() <= 10;
+        // Keep only the local part: a trailing `Z`/`±HH:MM` offset must not
+        // leak into the compacted RECURRENCE-ID value.
+        let rid_local = rid_date.get(..19).unwrap_or(rid_date);
         let rid_ical = if is_date {
             rid_date.replace('-', "")
         } else if rid_tz.is_empty() || rid_tz == "UTC" {
-            format!("{}Z", rid_date.replace('-', "").replace(':', ""))
+            format!("{}Z", rid_local.replace('-', "").replace(':', ""))
         } else {
-            rid_date.replace('-', "").replace(':', "")
+            rid_local.replace('-', "").replace(':', "")
         };
         if is_date && is_all_day {
             out.push_str(&format!("RECURRENCE-ID;VALUE=DATE:{}\n", rid_ical));

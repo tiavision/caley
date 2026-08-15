@@ -35,14 +35,38 @@ function supportsTimeZone(tz: string): boolean {
   }
 }
 
-function hasExplicitOffset(value: string): boolean {
-  return /(?:Z|[+-]\d{2}:\d{2})$/.test(value);
+export function dateFromEventValue(value: string): Date | null {
+  if (!value) return null;
+  // Anchored events carry an explicit offset (or `Z`); floating events arrive
+  // as a naive `YYYY-MM-DDTHH:MM:SS` string, which `new Date` parses as local
+  // time — exactly the RFC 5545 floating-time contract.
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d;
 }
 
-function dateFromEventValue(value: string): Date | null {
-  if (!value) return null;
-  const d = new Date(hasExplicitOffset(value) ? value : value + 'Z');
-  return isNaN(d.getTime()) ? null : d;
+/// Browser-local Date of an event's start (all-day → local midnight).
+export function eventStartDate(ev: Pick<EventJson, 'dtstart' | 'is_all_day'>): Date | null {
+  if (!ev.dtstart) return null;
+  if (ev.is_all_day) {
+    const [y, mo, d] = ev.dtstart.split('T')[0].split('-').map(Number);
+    return new Date(y, mo - 1, d);
+  }
+  return dateFromEventValue(ev.dtstart);
+}
+
+export function localDateIso(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/// Short browser-local start-time label for calendar grid chips.
+export function eventTimeLabel(ev: EventJson): string {
+  if (ev.is_all_day) return m.event_allDay();
+  const d = eventStartDate(ev);
+  if (!d) return '';
+  return new Intl.DateTimeFormat(navigator.language || 'en', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(d);
 }
 
 function formatDatePart(date: Date, loc: string, timeZone?: string): string {
@@ -84,13 +108,13 @@ export function formatEventTimes(ev: EventJson): EventTimeText {
   if (!ev.dtstart) return { localText: '', sourceText: '' };
 
   const eventTz = ev.tz || '';
-  // The backend always resolves `tz` and its `dtstart`/`dtend` offsets
-  // together (see caldav::parsing::resolve_tzid): whenever `tz` isn't
-  // something Intl can format, the timestamp itself still carries a
-  // correct explicit UTC offset (or `Z` for a genuine UTC/floating-time
-  // event, in which case `tz` is reported as `'UTC'`). So the value can
-  // always be parsed at face value — `tz` only affects how the "source
-  // timezone" line below is rendered.
+  // The backend resolves `tz` and the `dtstart`/`dtend` offsets together
+  // (see caldav::parsing::resolve_tzid): anchored events always carry a
+  // correct explicit UTC offset (or `Z`, with `tz` reported as `'UTC'`),
+  // while floating events arrive as naive strings with `tz === ''` and are
+  // parsed as viewer-local wall clock. So the value can always be parsed at
+  // face value — `tz` only affects how the "source timezone" line below is
+  // rendered.
   const supportedEventTz = supportsTimeZone(eventTz);
   const s = dateFromEventValue(ev.dtstart);
   if (!s) return { localText: '', sourceText: '' };

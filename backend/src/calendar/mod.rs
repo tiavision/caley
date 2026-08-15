@@ -230,15 +230,48 @@ pub(super) async fn require_account_client(
     }
 }
 
+/// Today's date in the viewer's timezone, falling back to server-local time
+/// when the request carried no usable `tz` parameter.
+pub(super) fn viewer_today(viewer_tz: Option<chrono_tz::Tz>) -> NaiveDate {
+    match viewer_tz {
+        Some(tz) => chrono::Utc::now().with_timezone(&tz).date_naive(),
+        None => chrono::Local::now().date_naive(),
+    }
+}
+
+/// Viewer-local (date, start "HH:MM", end "HH:MM") for an expanded event.
+/// Floating and all-day events pass through their wall-clock parts, as does
+/// everything when no viewer timezone is known.
+pub(super) fn viewer_local_parts(
+    event: &crate::caldav::Event,
+    viewer_tz: Option<chrono_tz::Tz>,
+) -> (NaiveDate, Option<String>, Option<String>) {
+    use chrono::TimeZone as _;
+    let (Some(tz), Some(start_ts)) = (viewer_tz, event.start_ts) else {
+        return (event.date, event.start_time.clone(), event.end_time.clone());
+    };
+    let start = tz.timestamp_opt(start_ts, 0).unwrap();
+    let end_time = event
+        .end_ts
+        .map(|ts| tz.timestamp_opt(ts, 0).unwrap().format("%H:%M").to_string());
+    (
+        start.date_naive(),
+        Some(start.format("%H:%M").to_string()),
+        end_time,
+    )
+}
+
 pub(super) fn build_event_json(
     event: &crate::caldav::Event,
     account_id: &str,
     color: &str,
     calendar_href: &str,
+    viewer_tz: Option<chrono_tz::Tz>,
 ) -> EventJson {
-    let time_range = match (&event.start_time, &event.end_time) {
+    let (_, start_time, end_time) = viewer_local_parts(event, viewer_tz);
+    let time_range = match (start_time, end_time) {
         (Some(s), Some(e)) => format!("{}-{}", s, e),
-        (Some(s), None) => s.clone(),
+        (Some(s), None) => s,
         (None, _) => "All day".to_string(),
     };
     let dot_color = if color.is_empty() {
@@ -310,21 +343,23 @@ pub async fn list_events(
     user: CurrentUser,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    let today = chrono::Local::now().date_naive();
-    let weekday = today.weekday().num_days_from_monday();
-    let week_start = today - chrono::TimeDelta::days(weekday as i64);
-
     let mut start: Option<NaiveDate> = None;
     let mut end: Option<NaiveDate> = None;
+    let mut viewer_tz: Option<chrono_tz::Tz> = None;
     if let Some(query) = raw_query {
         for (key, value) in form_urlencoded::parse(query.as_bytes()) {
             match key.as_ref() {
                 "start" => start = NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok(),
                 "end" => end = NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok(),
+                "tz" => viewer_tz = value.parse::<chrono_tz::Tz>().ok(),
                 _ => {}
             }
         }
     }
+
+    let today = viewer_today(viewer_tz);
+    let weekday = today.weekday().num_days_from_monday();
+    let week_start = today - chrono::TimeDelta::days(weekday as i64);
     let start = start.unwrap_or(week_start);
     let end = end.unwrap_or(week_start + chrono::TimeDelta::days(6));
 
@@ -352,8 +387,13 @@ pub async fn list_events(
         }
     }
 
-    let start_str = start.format("%Y-%m-%d").to_string();
-    let end_str = end.format("%Y-%m-%d").to_string();
+    // Source-tz date columns and source-tz expansion can differ from the
+    // viewer-local bucket date by up to a day (real-world offsets < ±14h),
+    // so fetch and expand with one day of slack on both sides.
+    let fetch_start = start - chrono::TimeDelta::days(1);
+    let fetch_end = end + chrono::TimeDelta::days(1);
+    let start_str = fetch_start.format("%Y-%m-%d").to_string();
+    let end_str = fetch_end.format("%Y-%m-%d").to_string();
 
     let raw_pairs = db::get_raw_events(&state.db, &active_hrefs, &start_str, &end_str)
         .await
@@ -365,9 +405,10 @@ pub async fn list_events(
             .get(&format!("{}\0{}", account_id, calendar_href))
             .map(|s| s.as_str())
             .unwrap_or("");
-        for event in CalDavClient::events_from_raw_ical(&raw_ical, start, end) {
-            let json = build_event_json(&event, &account_id, color, &calendar_href);
-            all_events.push((event.date, json));
+        for event in CalDavClient::events_from_raw_ical(&raw_ical, fetch_start, fetch_end) {
+            let (local_date, _, _) = viewer_local_parts(&event, viewer_tz);
+            let json = build_event_json(&event, &account_id, color, &calendar_href, viewer_tz);
+            all_events.push((local_date, json));
         }
     }
 
@@ -406,15 +447,18 @@ pub async fn list_calendar(
     user: CurrentUser,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    let today = chrono::Local::now().date_naive();
     let mut month_param: Option<String> = None;
+    let mut viewer_tz: Option<chrono_tz::Tz> = None;
     if let Some(query) = raw_query {
         for (key, value) in form_urlencoded::parse(query.as_bytes()) {
-            if key == "month" {
-                month_param = Some(value.into_owned());
+            match key.as_ref() {
+                "month" => month_param = Some(value.into_owned()),
+                "tz" => viewer_tz = value.parse::<chrono_tz::Tz>().ok(),
+                _ => {}
             }
         }
     }
+    let today = viewer_today(viewer_tz);
 
     let first_day = if let Some(ref m) = month_param {
         NaiveDate::parse_from_str(&format!("{}-01", m), "%Y-%m-%d")
@@ -459,34 +503,22 @@ pub async fn list_calendar(
         }
     }
 
-    let month_start_str = first_day.format("%Y-%m-%d").to_string();
-    let month_end_str = last_day.format("%Y-%m-%d").to_string();
+    // ±1 day slack: the SQL date columns and expansion window are source-tz
+    // while the dots are bucketed by viewer-local date.
+    let fetch_start = first_day - chrono::TimeDelta::days(1);
+    let fetch_end = last_day + chrono::TimeDelta::days(1);
 
     let mut colors_map: HashMap<NaiveDate, Vec<String>> = HashMap::new();
 
-    let non_recurring =
-        db::get_event_dates_for_month(&state.db, &active_hrefs, &month_start_str, &month_end_str)
-            .await
-            .unwrap_or_default();
-    for (account_id, calendar_href, dtstart_str) in non_recurring {
-        if let Ok(date) = NaiveDate::parse_from_str(&dtstart_str, "%Y-%m-%d") {
-            let color = color_map
-                .get(&format!("{}\0{}", account_id, calendar_href))
-                .map(|s| s.as_str())
-                .unwrap_or("");
-            let dot_color = if color.is_empty() {
-                NEUTRAL_DOT_COLOR.to_string()
-            } else {
-                color.to_string()
-            };
-            colors_map.entry(date).or_default().push(dot_color);
-        }
-    }
-
-    let recurring_raw = db::get_recurring_raw_events(&state.db, &active_hrefs)
-        .await
-        .unwrap_or_default();
-    for (account_id, calendar_href, raw_ical) in recurring_raw {
+    let raw_pairs = db::get_raw_events(
+        &state.db,
+        &active_hrefs,
+        &fetch_start.format("%Y-%m-%d").to_string(),
+        &fetch_end.format("%Y-%m-%d").to_string(),
+    )
+    .await
+    .unwrap_or_default();
+    for (account_id, calendar_href, raw_ical) in raw_pairs {
         let color = color_map
             .get(&format!("{}\0{}", account_id, calendar_href))
             .map(|s| s.as_str())
@@ -496,11 +528,11 @@ pub async fn list_calendar(
         } else {
             color.to_string()
         };
-        for event in CalDavClient::events_from_raw_ical(&raw_ical, first_day, last_day) {
-            colors_map
-                .entry(event.date)
-                .or_default()
-                .push(dot_color.clone());
+        for event in CalDavClient::events_from_raw_ical(&raw_ical, fetch_start, fetch_end) {
+            let (date, _, _) = viewer_local_parts(&event, viewer_tz);
+            if date >= first_day && date <= last_day {
+                colors_map.entry(date).or_default().push(dot_color.clone());
+            }
         }
     }
 
@@ -592,5 +624,73 @@ pub async fn toggle_calendar(
             eprintln!("Database error toggling calendar: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod viewer_local_tests {
+    use super::*;
+
+    fn timed_event(date: &str, start_time: &str, start_ts: Option<i64>, end_ts: Option<i64>) -> crate::caldav::Event {
+        crate::caldav::Event {
+            uid: "test".into(),
+            summary: String::new(),
+            description: String::new(),
+            location: String::new(),
+            dtstart: String::new(),
+            dtend: None,
+            date: NaiveDate::parse_from_str(date, "%Y-%m-%d").unwrap(),
+            start_time: Some(start_time.to_string()),
+            end_time: None,
+            start_ts,
+            end_ts,
+            is_all_day: false,
+            tz: String::new(),
+            is_recurring: false,
+            recurrence: None,
+            master_dtstart: String::new(),
+            alarms: vec![],
+            attendees: vec![],
+        }
+    }
+
+    #[test]
+    fn anchored_event_shifts_to_viewer_date_and_time() {
+        // 2026-01-15T23:30:00-05:00 == 2026-01-16T04:30:00Z
+        let ev = timed_event("2026-01-15", "23:30", Some(1768537800), Some(1768541400));
+        let berlin: chrono_tz::Tz = "Europe/Berlin".parse().unwrap();
+        let (date, start, end) = viewer_local_parts(&ev, Some(berlin));
+        assert_eq!(date.to_string(), "2026-01-16");
+        assert_eq!(start.as_deref(), Some("05:30"));
+        assert_eq!(end.as_deref(), Some("06:30"));
+    }
+
+    #[test]
+    fn floating_event_passes_wall_clock_through() {
+        let ev = timed_event("2026-01-15", "09:00", None, None);
+        let berlin: chrono_tz::Tz = "Europe/Berlin".parse().unwrap();
+        let (date, start, _) = viewer_local_parts(&ev, Some(berlin));
+        assert_eq!(date.to_string(), "2026-01-15");
+        assert_eq!(start.as_deref(), Some("09:00"));
+    }
+
+    #[test]
+    fn all_day_event_passes_through() {
+        let mut ev = timed_event("2026-01-15", "00:00", None, None);
+        ev.is_all_day = true;
+        ev.start_time = None;
+        let berlin: chrono_tz::Tz = "Europe/Berlin".parse().unwrap();
+        let (date, start, end) = viewer_local_parts(&ev, Some(berlin));
+        assert_eq!(date.to_string(), "2026-01-15");
+        assert_eq!(start, None);
+        assert_eq!(end, None);
+    }
+
+    #[test]
+    fn missing_viewer_tz_passes_through() {
+        let ev = timed_event("2026-01-15", "23:30", Some(1768537800), None);
+        let (date, start, _) = viewer_local_parts(&ev, None);
+        assert_eq!(date.to_string(), "2026-01-15");
+        assert_eq!(start.as_deref(), Some("23:30"));
     }
 }

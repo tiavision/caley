@@ -3,6 +3,7 @@
   import { makeTl } from '../lib/i18n.ts';
   import type { PartStat, AlarmFields, AttendeeFields, RecurrenceInfo, EventJson, CalendarJson, ContactJson, CalDavAccountJson } from '../types/calendar.ts';
   import { fmtDate } from '../lib/date.ts';
+  import { dateFromEventValue, localDateIso } from '../lib/format.ts';
   import { apiFetch } from '../lib/api.ts';
   import RecurrenceBuilder from './RecurrenceBuilder.svelte';
 
@@ -23,7 +24,7 @@
   let formSaving = false;
 
   let fUid = '', fSummary = '', fDate = '', fStartTime = '', fEndTime = '';
-  let fIsAllDay = false, fLocation = '', fDescription = '', fTz = '';
+  let fIsAllDay = false, fLocation = '', fDescription = '', fTz = '', fOriginalTz = '';
   let fOriginalDtstart = '', fOriginalCalendarHref = '', fOriginalAccountId = '', fCalendarHref = '', fAccountId = '';
   let formAlarms: AlarmFields[] = [];
   let formAttendees: AttendeeFields[] = [];
@@ -117,7 +118,7 @@
     formMode = 'create'; formScope = 'series';
     fUid = ''; fSummary = ''; fDate = focusedEventDate || fmtDate(new Date());
     fIsAllDay = true; fStartTime = ''; fEndTime = '';
-    fLocation = ''; fDescription = ''; fTz = getUserTz();
+    fLocation = ''; fDescription = ''; fTz = getUserTz(); fOriginalTz = '';
     fOriginalDtstart = ''; fOriginalCalendarHref = ''; fOriginalAccountId = '';
     const stored = localStorage.getItem('defaultCalendar');
     const active = calendars.find(c => c.is_active);
@@ -140,18 +141,21 @@
     loadContacts();
     formMode = 'edit'; formScope = scope;
     fUid = ev.uid; fSummary = ev.summary; fLocation = ev.location;
-    fDescription = ev.description; fTz = ev.tz || getUserTz();
+    // Always edit and save in the browser's timezone (re-anchoring the event);
+    // the master's original tz is kept only for RECURRENCE-ID/EXDATE targeting.
+    fDescription = ev.description; fTz = getUserTz(); fOriginalTz = ev.tz || '';
     fOriginalDtstart = ev.dtstart; fOriginalCalendarHref = ev.calendar_href; fOriginalAccountId = ev.account_id;
     fAccountId = ev.account_id; fCalendarHref = ev.calendar_href; fIsAllDay = ev.is_all_day;
     let dtstart = ev.dtstart;
     if (scope === 'series' && ev.is_recurring && ev.master_dtstart) dtstart = ev.master_dtstart;
-    fDate = dtstart.split('T')[0] || '';
     if (!fIsAllDay) {
-      const sm = dtstart.match(/T(\d{2}:\d{2})/);
-      fStartTime = sm ? sm[1] : '';
-      const em = ev.dtend?.match(/T(\d{2}:\d{2})/);
-      fEndTime = em ? em[1] : '';
-    } else { fStartTime = ''; fEndTime = ''; }
+      const s = dateFromEventValue(dtstart);
+      const e = ev.dtend ? dateFromEventValue(ev.dtend) : null;
+      const hm = (d: Date) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      fDate = s ? localDateIso(s) : (dtstart.split('T')[0] || '');
+      fStartTime = s ? hm(s) : '';
+      fEndTime = e ? hm(e) : '';
+    } else { fDate = dtstart.split('T')[0] || ''; fStartTime = ''; fEndTime = ''; }
     if (scope === 'series' && ev.is_recurring) populateRecurrence(ev.recurrence);
     else resetRecurrence();
     formAlarms = [...ev.alarms]; formAttendees = [...ev.attendees]; formError = '';
@@ -171,7 +175,7 @@
     p.append('date', fDate); p.append('is_all_day', fIsAllDay ? 'true' : '');
     p.append('start_time', fStartTime); p.append('end_time', fEndTime);
     p.append('location', fLocation); p.append('description', fDescription);
-    p.append('tz', fTz); p.append('scope', formScope);
+    p.append('tz', fTz); p.append('original_tz', fOriginalTz); p.append('scope', formScope);
     p.append('original_dtstart', fOriginalDtstart);
     p.append('original_calendar_href', fOriginalCalendarHref);
     p.append('original_account_id', fOriginalAccountId);
@@ -209,7 +213,7 @@
     formSaving = true;
     let url = `/api/event?account_id=${encodeURIComponent(fAccountId)}&uid=${encodeURIComponent(fUid)}&calendar_href=${encodeURIComponent(fCalendarHref)}`;
     if (formScope === 'this_instance' && fOriginalDtstart)
-      url += `&scope=this_instance&original_dtstart=${encodeURIComponent(fOriginalDtstart)}&tz=${encodeURIComponent(fTz)}`;
+      url += `&scope=this_instance&original_dtstart=${encodeURIComponent(fOriginalDtstart)}&tz=${encodeURIComponent(fOriginalTz)}`;
     try {
       const res = await apiFetch(url, { method: 'DELETE' });
       if (res.ok) { formDialogEl?.close(); ondeleted?.(); }

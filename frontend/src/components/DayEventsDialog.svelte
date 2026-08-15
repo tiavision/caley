@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { makeTl } from '../lib/i18n.ts';
+  import { eventTimeLabel } from '../lib/format.ts';
   import type { EventJson } from '../types/calendar.ts';
 
   export let locale: string;
@@ -70,7 +71,7 @@
           onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleEventClick(event); } }}
         >
           <div class="appt-content">
-            <span class="appt-time">{event.time_range.split('-')[0]}</span> · {event.summary}
+            <span class="appt-time">{eventTimeLabel(event)}</span> · {event.summary}
           </div>
         </article>
       {/each}

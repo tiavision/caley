@@ -57,6 +57,12 @@ pub async fn save_event(
         .unwrap_or("series")
         .to_string();
     let original_dtstart = parse_form_field(&form, "original_dtstart");
+    // Timezone the recurring master was authored in; the RECURRENCE-ID must
+    // stay in that zone even when the edited override is saved in `tz`.
+    let original_tz = parse_form_field(&form, "original_tz")
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&tz)
+        .to_string();
     let original_calendar_href =
         parse_form_field(&form, "original_calendar_href").map(|s| s.to_string());
     let original_account_id = parse_form_field(&form, "original_account_id")
@@ -184,7 +190,7 @@ pub async fn save_event(
             end_time,
             &tz,
             is_all_day,
-            Some((rid_value, &tz)),
+            Some((rid_value, &original_tz)),
             None,
             &alarms,
             &attendees,
@@ -201,7 +207,7 @@ pub async fn save_event(
                     end_time,
                     &tz,
                     is_all_day,
-                    Some((rid_value, &tz)),
+                    Some((rid_value, &original_tz)),
                     None,
                     &alarms,
                     &attendees,
@@ -544,7 +550,7 @@ pub(super) async fn optimistic_upsert(
             .into_iter()
             .next()
             .and_then(|ev| {
-                serde_json::to_string(&build_event_json(&ev, account_id, color, calendar_href)).ok()
+                serde_json::to_string(&build_event_json(&ev, account_id, color, calendar_href, None)).ok()
             })
     } else {
         None

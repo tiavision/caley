@@ -63,6 +63,12 @@ pub struct Event {
     pub date: NaiveDate,
     pub start_time: Option<String>,
     pub end_time: Option<String>,
+    /// UTC epoch seconds for anchored (non-floating) timed events; `None`
+    /// for all-day and floating events, whose wall clock has no fixed instant.
+    #[serde(skip)]
+    pub start_ts: Option<i64>,
+    #[serde(skip)]
+    pub end_ts: Option<i64>,
     pub is_all_day: bool,
     pub tz: String,
     pub is_recurring: bool,

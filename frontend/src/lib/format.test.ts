@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatEventTimes } from './format.ts';
+import { formatEventTimes, eventStartDate, localDateIso, eventTimeLabel } from './format.ts';
 import type { EventJson } from '../types/calendar.ts';
 
 function event(overrides: Partial<EventJson>): EventJson {
@@ -69,9 +69,10 @@ describe('formatEventTimes', () => {
 
   it('parses the explicit offset even when the tz label is not Intl-resolvable', () => {
     // The backend resolves TZID via chrono-tz / a Windows-name table / the
-    // event's own VTIMEZONE block before formatting, so dtstart/dtend always
-    // carry a correct explicit UTC offset even when `tz` itself is a raw,
-    // non-IANA label (e.g. a custom VTIMEZONE with no IANA equivalent).
+    // event's own VTIMEZONE block before formatting, so anchored events
+    // always carry a correct explicit UTC offset even when `tz` itself is a
+    // raw, non-IANA label (e.g. a custom VTIMEZONE with no IANA equivalent).
+    // (Floating events instead arrive naive with `tz === ''` — see below.)
     const start = new Date('2026-06-10T14:00:00Z');
     const formatted = formatEventTimes(event({
       dtstart: '2026-06-10T16:00:00+02:00',
@@ -94,5 +95,54 @@ describe('formatEventTimes', () => {
 
     expect(formatted.localText).toContain('All day');
     expect(formatted.sourceText).toBe('');
+  });
+
+  it('renders floating events at face value with no source line', () => {
+    // Naive string + empty tz = floating time: shown as the same wall clock
+    // in every viewer timezone.
+    const wall = new Date(2026, 5, 10, 9, 0, 0);
+    const formatted = formatEventTimes(event({
+      dtstart: '2026-06-10T09:00:00',
+      dtend: '2026-06-10T10:00:00',
+      tz: '',
+    }));
+
+    expect(formatted.localText).toContain(timeText(wall));
+    expect(formatted.sourceText).toBe('');
+  });
+});
+
+describe('eventStartDate / localDateIso', () => {
+  it('buckets an offset event into the browser-local date', () => {
+    const ev = event({ dtstart: '2026-06-10T23:30:00-05:00' });
+    const d = eventStartDate(ev)!;
+    expect(localDateIso(d)).toBe(localDateIso(new Date('2026-06-11T04:30:00Z')));
+  });
+
+  it('keeps all-day events on their literal date', () => {
+    const ev = event({ dtstart: '2026-06-10', is_all_day: true });
+    expect(localDateIso(eventStartDate(ev)!)).toBe('2026-06-10');
+  });
+
+  it('keeps floating events on their wall-clock date', () => {
+    const ev = event({ dtstart: '2026-06-10T23:30:00', tz: '' });
+    expect(localDateIso(eventStartDate(ev)!)).toBe('2026-06-10');
+  });
+});
+
+describe('eventTimeLabel', () => {
+  it('shows the browser-local start time for anchored events', () => {
+    const ev = event({ dtstart: '2026-06-10T14:00:00+02:00' });
+    expect(eventTimeLabel(ev)).toBe(timeText(new Date('2026-06-10T12:00:00Z')));
+  });
+
+  it('shows the wall-clock time for floating events', () => {
+    const ev = event({ dtstart: '2026-06-10T09:00:00', tz: '' });
+    expect(eventTimeLabel(ev)).toBe(timeText(new Date(2026, 5, 10, 9, 0, 0)));
+  });
+
+  it('labels all-day events', () => {
+    const ev = event({ dtstart: '2026-06-10', is_all_day: true });
+    expect(eventTimeLabel(ev)).not.toBe('');
   });
 });

@@ -44,21 +44,29 @@ enum ResolvedTz {
         offset: FixedOffset,
         canonical: String,
     },
-    /// No TZID was present (floating time), or the TZID could not be
-    /// resolved by any fallback in `resolve_tzid`. The naive wall-clock
-    /// time is treated as UTC — a deliberate, logged default, not a silent
-    /// failure.
-    Unresolved,
+    /// The raw value carried a `Z` suffix (RFC 5545 UTC form).
+    Utc,
+    /// No TZID and no `Z` suffix (RFC 5545 floating time), or the TZID could
+    /// not be resolved by any fallback in `resolve_tzid`. The wall-clock time
+    /// is preserved as-is and rendered in the viewer's local timezone.
+    Floating,
 }
 
 impl ResolvedTz {
-    /// The string to store as `Event.tz` for display purposes.
+    /// The string to store as `Event.tz` for display purposes. Empty means
+    /// floating time.
     fn display_tz(&self) -> String {
         match self {
             ResolvedTz::Named(tz) => tz.name().to_string(),
             ResolvedTz::Fixed { canonical, .. } => canonical.clone(),
-            ResolvedTz::Unresolved => "UTC".to_string(),
+            ResolvedTz::Utc => "UTC".to_string(),
+            ResolvedTz::Floating => String::new(),
         }
+    }
+
+    /// Whether the value denotes a fixed instant (anything but floating time).
+    fn is_anchored(&self) -> bool {
+        !matches!(self, ResolvedTz::Floating)
     }
 }
 
@@ -68,14 +76,22 @@ impl ResolvedTz {
 /// 2. A Windows/CLDR timezone name table lookup (handles Outlook/Exchange
 ///    TZIDs like "Eastern Standard Time").
 /// 3. The event's own embedded VTIMEZONE block, if any, evaluated for `at`.
-/// 4. Unresolved — naive time is treated as UTC by callers.
+/// 4. Floating — the wall-clock time is preserved as-is.
+///
+/// `value_is_utc` reflects whether the raw date value carried a `Z` suffix;
+/// it decides between UTC and floating when no TZID resolves.
 fn resolve_tzid(
     tzid: Option<&str>,
     timezones: &[ical::parser::ical::component::IcalTimeZone],
     at: NaiveDateTime,
+    value_is_utc: bool,
 ) -> ResolvedTz {
     let Some(tzid) = tzid else {
-        return ResolvedTz::Unresolved;
+        return if value_is_utc {
+            ResolvedTz::Utc
+        } else {
+            ResolvedTz::Floating
+        };
     };
 
     if let Ok(tz) = tzid.parse::<chrono_tz::Tz>() {
@@ -100,8 +116,12 @@ fn resolve_tzid(
         }
     }
 
-    eprintln!("caldav: unable to resolve TZID {tzid:?}, treating naive time as UTC");
-    ResolvedTz::Unresolved
+    eprintln!("caldav: unable to resolve TZID {tzid:?}, treating time as floating");
+    if value_is_utc {
+        ResolvedTz::Utc
+    } else {
+        ResolvedTz::Floating
+    }
 }
 
 fn vtimezone_tzid(vtz: &ical::parser::ical::component::IcalTimeZone) -> Option<String> {
@@ -452,6 +472,7 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
         let mut dtstart_tzid: Option<String> = None;
         let mut dtstart_is_date = false;
         let mut dtend_value: Option<String> = None;
+        let mut dtend_tzid: Option<String> = None;
         let mut duration_str: Option<String> = None;
         let mut rrule: Option<String> = None;
         let mut rdates: Vec<DateProperty> = Vec::new();
@@ -499,6 +520,15 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
                 }
                 "DTEND" => {
                     dtend_value = property.value;
+                    if let Some(params) = &property.params {
+                        for (key, vals) in params {
+                            if key == "TZID" {
+                                if let Some(first_val) = vals.first() {
+                                    dtend_tzid = Some(first_val.clone());
+                                }
+                            }
+                        }
+                    }
                 }
                 "DURATION" => duration_str = property.value,
                 "RRULE" => rrule = property.value,
@@ -520,7 +550,7 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
                                 rdates.push(DateProperty {
                                     value: v.to_string(),
                                     tzid: rdate_tzid.clone(),
-                                    resolved: ResolvedTz::Unresolved,
+                                    resolved: ResolvedTz::Floating,
                                 });
                             }
                         }
@@ -544,7 +574,7 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
                                 exdates.push(DateProperty {
                                     value: v.to_string(),
                                     tzid: exdate_tzid.clone(),
-                                    resolved: ResolvedTz::Unresolved,
+                                    resolved: ResolvedTz::Floating,
                                 });
                             }
                         }
@@ -609,11 +639,34 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
             Some(dt) => dt,
             None => continue,
         };
-        let dtstart_tz = resolve_tzid(dtstart_tzid.as_deref(), &timezones, dtstart);
+        let dtstart_tz = resolve_tzid(
+            dtstart_tzid.as_deref(),
+            &timezones,
+            dtstart,
+            raw_dtstart.ends_with('Z'),
+        );
 
         let duration = if let Some(ref dtend_raw) = dtend_value {
             match parse_dtstart(dtend_raw) {
-                Some(dtend) => dtend - dtstart,
+                Some(dtend) => {
+                    let dtend_tz = resolve_tzid(
+                        dtend_tzid.as_deref(),
+                        &timezones,
+                        dtend,
+                        dtend_raw.ends_with('Z'),
+                    );
+                    if dtstart_tz.is_anchored() && dtend_tz.is_anchored() {
+                        // Instant delta: honors a DTEND whose TZID (or UTC
+                        // form) differs from DTSTART's.
+                        TimeDelta::seconds(
+                            naive_to_utc_timestamp(dtend, &dtend_tz)
+                                - naive_to_utc_timestamp(dtstart, &dtstart_tz),
+                        )
+                    } else {
+                        // Floating on either side: nominal wall-clock delta.
+                        dtend - dtstart
+                    }
+                }
                 None => continue,
             }
         } else if let Some(ref dur) = duration_str {
@@ -632,17 +685,34 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
 
         let recurrence_id = recurrence_id_value.as_ref().and_then(|v| parse_dtstart(v));
         let recurrence_id_tz = match recurrence_id {
-            Some(rid) => resolve_tzid(recurrence_id_tzid.as_deref(), &timezones, rid),
-            None => ResolvedTz::Unresolved,
+            Some(rid) => resolve_tzid(
+                recurrence_id_tzid.as_deref(),
+                &timezones,
+                rid,
+                recurrence_id_value
+                    .as_deref()
+                    .is_some_and(|v| v.ends_with('Z')),
+            ),
+            None => ResolvedTz::Floating,
         };
 
         for rdate in rdates.iter_mut() {
             let at = parse_dtstart(&rdate.value).unwrap_or(dtstart);
-            rdate.resolved = resolve_tzid(rdate.tzid.as_deref(), &timezones, at);
+            rdate.resolved = resolve_tzid(
+                rdate.tzid.as_deref(),
+                &timezones,
+                at,
+                rdate.value.ends_with('Z'),
+            );
         }
         for exdate in exdates.iter_mut() {
             let at = parse_dtstart(&exdate.value).unwrap_or(dtstart);
-            exdate.resolved = resolve_tzid(exdate.tzid.as_deref(), &timezones, at);
+            exdate.resolved = resolve_tzid(
+                exdate.tzid.as_deref(),
+                &timezones,
+                at,
+                exdate.value.ends_with('Z'),
+            );
         }
 
         let mut alarms: Vec<Alarm> = Vec::new();
@@ -816,7 +886,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
             let expanded = expand_recurring(master, start, end);
 
             let master_dtstart_str = if master.dtstart_is_date {
-                format_datetime_with_tz(master.dtstart, &ResolvedTz::Unresolved)
+                format_datetime_with_tz(master.dtstart, &ResolvedTz::Floating)
                     .split('T')
                     .next()
                     .unwrap_or("")
@@ -912,8 +982,16 @@ fn push_date_property_line(out: &mut String, prop: &str, date_property: &DatePro
                 .unwrap_or_else(|| format!("{prop};VALUE=DATE-TIME:{}\n", date_property.value));
             out.push_str(&line);
         }
-        ResolvedTz::Unresolved => {
-            out.push_str(&format!("{prop};VALUE=DATE-TIME:{}\n", date_property.value));
+        // UTC and floating both use the synthetic block's internal UTC label
+        // (matching the DTSTART line in `expand_recurring`); expansion results
+        // are read back as naive wall clock, so the label cancels out.
+        ResolvedTz::Utc | ResolvedTz::Floating => {
+            let v = &date_property.value;
+            if v.contains('T') {
+                out.push_str(&format!("{prop}:{}Z\n", v.trim_end_matches('Z')));
+            } else {
+                out.push_str(&format!("{prop};VALUE=DATE-TIME:{v}\n"));
+            }
         }
     }
 }
@@ -939,7 +1017,7 @@ fn expand_recurring(master: &RawIcalEvent, start: NaiveDate, end: NaiveDate) -> 
                 let utc_dt = fixed_offset_to_utc_naive(master.dtstart, *offset);
                 rrule_str.push_str(&format!("DTSTART:{}Z\n", utc_dt.format("%Y%m%dT%H%M%S")));
             }
-            ResolvedTz::Unresolved => {
+            ResolvedTz::Utc | ResolvedTz::Floating => {
                 rrule_str.push_str(&format!(
                     "DTSTART:{}Z\n",
                     master.dtstart.format("%Y%m%dT%H%M%S")
@@ -1011,10 +1089,10 @@ fn format_datetime_with_tz(dt: NaiveDateTime, tz: &ResolvedTz) -> String {
                 format!("{}Z", dt.format("%Y-%m-%dT%H:%M:%S"))
             }
         },
-        // Floating time (no TZID) or a TZID that exhausted every fallback in
-        // `resolve_tzid` (which already logs unresolved TZIDs) — treat the
-        // naive wall-clock time as UTC.
-        ResolvedTz::Unresolved => format!("{}Z", dt.format("%Y-%m-%dT%H:%M:%S")),
+        ResolvedTz::Utc => format!("{}Z", dt.format("%Y-%m-%dT%H:%M:%S")),
+        // Floating time keeps its naive form — no offset suffix — so the
+        // frontend renders the wall clock in the viewer's local timezone.
+        ResolvedTz::Floating => dt.format("%Y-%m-%dT%H:%M:%S").to_string(),
     }
 }
 
@@ -1065,6 +1143,10 @@ fn create_event(
         None => (None, None),
     };
 
+    let anchored_ts = |dt: NaiveDateTime, is_date: bool| {
+        (!is_date && tz.is_anchored()).then(|| naive_to_utc_timestamp(dt, tz))
+    };
+
     Event {
         uid: uid.to_string(),
         summary: summary.to_string(),
@@ -1075,6 +1157,8 @@ fn create_event(
         date,
         start_time,
         end_time,
+        start_ts: anchored_ts(dtstart, dtstart_is_date),
+        end_ts: dtend.and_then(|dt| anchored_ts(dt, dtend_is_date)),
         is_all_day: dtstart_is_date,
         tz: tz.display_tz(),
         is_recurring,
@@ -1157,7 +1241,9 @@ fn naive_to_utc_timestamp(dt: NaiveDateTime, tz: &ResolvedTz) -> i64 {
             chrono::LocalResult::Ambiguous(local_dt, _) => local_dt.timestamp(),
             chrono::LocalResult::None => dt.and_utc().timestamp(),
         },
-        ResolvedTz::Unresolved => dt.and_utc().timestamp(),
+        // Floating has no true instant; labeling it UTC keeps RECURRENCE-ID
+        // matching self-consistent.
+        ResolvedTz::Utc | ResolvedTz::Floating => dt.and_utc().timestamp(),
     }
 }
 
@@ -1688,7 +1774,7 @@ END:VCALENDAR\r\n";
     }
 
     #[test]
-    fn floating_time_defaults_to_utc_unchanged() {
+    fn floating_time_stays_floating() {
         let ical = "BEGIN:VCALENDAR\r\n\
 VERSION:2.0\r\n\
 PRODID:-//Test//EN\r\n\
@@ -1701,7 +1787,84 @@ END:VEVENT\r\n\
 END:VCALENDAR\r\n";
 
         let event = preview_one(ical);
+        assert_eq!(event.tz, "");
+        assert_eq!(event.dtstart, "2026-01-15T09:00:00");
+        assert_eq!(event.dtend.as_deref(), Some("2026-01-15T10:00:00"));
+    }
+
+    #[test]
+    fn utc_z_value_reported_as_utc() {
+        let ical = "BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+PRODID:-//Test//EN\r\n\
+BEGIN:VEVENT\r\n\
+UID:utc-z\r\n\
+DTSTART:20260115T090000Z\r\n\
+DTEND:20260115T100000Z\r\n\
+SUMMARY:UTC Event\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let event = preview_one(ical);
         assert_eq!(event.tz, "UTC");
         assert_eq!(event.dtstart, "2026-01-15T09:00:00Z");
+        assert_eq!(event.dtend.as_deref(), Some("2026-01-15T10:00:00Z"));
+    }
+
+    #[test]
+    fn unresolvable_tzid_falls_back_to_floating() {
+        let ical = "BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+PRODID:-//Test//EN\r\n\
+BEGIN:VEVENT\r\n\
+UID:nonsense-zone\r\n\
+DTSTART;TZID=Nonsense/Zone:20260115T090000\r\n\
+SUMMARY:Unknown Zone Event\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let event = preview_one(ical);
+        assert_eq!(event.tz, "");
+        // Wall clock is preserved instead of being shifted via a UTC relabel.
+        assert_eq!(event.dtstart, "2026-01-15T09:00:00");
+    }
+
+    #[test]
+    fn dtend_with_different_tzid_uses_instant_duration() {
+        // Berlin 09:00 to New York 06:00 is a 3-hour event; the displayed
+        // dtend stays in DTSTART's zone.
+        let ical = "BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+PRODID:-//Test//EN\r\n\
+BEGIN:VEVENT\r\n\
+UID:cross-tzid\r\n\
+DTSTART;TZID=Europe/Berlin:20260115T090000\r\n\
+DTEND;TZID=America/New_York:20260115T060000\r\n\
+SUMMARY:Cross Zone Event\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let event = preview_one(ical);
+        assert!(event.dtstart.starts_with("2026-01-15T09:00:00+01:00"));
+        assert_eq!(event.dtend.as_deref(), Some("2026-01-15T12:00:00+01:00"));
+    }
+
+    #[test]
+    fn dtend_utc_with_zoned_dtstart() {
+        // New York 09:00 (14:00Z) to 15:00Z is a one-hour event.
+        let ical = "BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+PRODID:-//Test//EN\r\n\
+BEGIN:VEVENT\r\n\
+UID:zoned-start-utc-end\r\n\
+DTSTART;TZID=America/New_York:20260115T090000\r\n\
+DTEND:20260115T150000Z\r\n\
+SUMMARY:Mixed Form Event\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let event = preview_one(ical);
+        assert!(event.dtstart.starts_with("2026-01-15T09:00:00-05:00"));
+        assert_eq!(event.dtend.as_deref(), Some("2026-01-15T10:00:00-05:00"));
     }
 }

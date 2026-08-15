@@ -5,6 +5,7 @@
   import EventDetail from './EventDetail.svelte';
   import EventFormDialog from './EventFormDialog.svelte';
   import type { EventJson, CalendarJson, CalDavAccountJson } from '../types/calendar.ts';
+  import { dateFromEventValue } from '../lib/format.ts';
   import { apiFetch } from '../lib/api.ts';
 
   let locale = 'en';
@@ -105,6 +106,12 @@
   }
 
   function formatDate(dtstart: string): string {
+    // Timed values are parsed as instants (or floating local wall clock) so
+    // the shown date is the viewer-local one; date-only values stay literal.
+    if (dtstart.includes('T') && dtstart.includes('-')) {
+      const d = dateFromEventValue(dtstart);
+      if (d) return d.toLocaleDateString(locale, { dateStyle: 'long' });
+    }
     const datePart = dtstart.split('T')[0].replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
     const [y, mo, d] = datePart.split('-').map(Number);
     if (!y || !mo || !d) return dtstart;
