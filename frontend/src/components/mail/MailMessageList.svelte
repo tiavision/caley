@@ -904,4 +904,10 @@
       flex: 1;
     }
   }
+
+  @media (max-width: 1023px) {
+    .detail-resize-handle {
+      display: none;
+    }
+  }
 </style>
