@@ -3415,9 +3415,9 @@
   .detail-body {
     flex: 1;
     overflow-y: auto;
-    padding: 1rem;
     display: flex;
     flex-direction: column;
+    border-radius: var(--pico-border-radius);
   }
 
   .body-text {
