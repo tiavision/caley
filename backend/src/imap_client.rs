@@ -930,6 +930,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn decodes_cp1252_alias_encoded_word_subject() {
+        // Real-world senders commonly label windows-1252 as "Cp1252" (or
+        // "cp1252") rather than the canonical "windows-1252" charset name.
+        let raw = b"Subject: =?Cp1252?Q?Zahnarztpraxis_Dr._Julia_Pennig_Terminbest=E4tigung?=\r\n\r\nbody";
+        let (_, _, _, _, _, subject, ..) = parse_header_bytes(raw);
+        assert_eq!(
+            subject.as_deref(),
+            Some("Zahnarztpraxis Dr. Julia Pennig Terminbestätigung")
+        );
+    }
+
+    #[test]
     fn test_reply_parent_prefers_in_reply_to() {
         let raw = b"Message-ID: <child@example.test>\r\nIn-Reply-To: <parent@example.test>\r\nReferences: <root@example.test> <other@example.test>\r\n\r\nbody";
         let (_, parent, ..) = parse_header_bytes(raw);
