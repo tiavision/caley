@@ -111,6 +111,7 @@
   // Per-message render state (unified for plain and encrypted messages)
   let parsedHtml = '';
   let parsedText = '';
+  let pgpSubject = '';
   let parsedRawBytes: Uint8Array | null = null;
   let detectedPgpEncrypted = false;
   let detectedPgpSigned = false;
@@ -145,6 +146,7 @@
     clearPgpAttachments();
     parsedHtml = '';
     parsedText = '';
+    pgpSubject = '';
     parsedRawBytes = null;
     detectedPgpEncrypted = false;
     detectedPgpSigned = false;
@@ -274,6 +276,7 @@
       if (result.badges.includes('decrypt_failed') || result.badges.includes('missing_key') || result.badges.includes('unsupported_alg')) {
         pgpDecryptError = tl('pgp_decryptFailed');
       } else {
+        pgpSubject = result.subject ?? '';
         pgpAttachments = result.attachments.map(attachment => ({
           filename: attachment.filename,
           content_type: attachment.contentType,
@@ -1303,6 +1306,7 @@
     viewMode = 'text'; // reset while loading
     parsedHtml = '';
     parsedText = '';
+    pgpSubject = '';
     parsedRawBytes = null;
     detectedPgpEncrypted = false;
     detectedPgpSigned = false;
@@ -2349,7 +2353,7 @@
           <div class="detail-subject-row" class:stacked={detailHeaderStacked} use:observeDetailHeader>
             {#if !standalone && usesDetailOverlay}<button class="detail-close-btn" aria-label={tl('mail_back')} on:click={returnToListFromReader}>←</button>{/if}
             <div class="detail-subject-line" bind:this={detailSubjectLineEl}>
-              <span class="detail-subject">{selectedMessage.subject || tl('mail_noSubject')}</span>
+              <span class="detail-subject">{pgpSubject || selectedMessage.subject || tl('mail_noSubject')}</span>
             </div>
             <div class="detail-controls" bind:this={detailControlsEl}>
               <button

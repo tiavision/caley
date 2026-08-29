@@ -18,6 +18,8 @@ export interface DecryptResult {
   html: string | null;
   badges: DecryptBadge[];
   attachments: DecryptedAttachment[];
+  /** Protected subject recovered from headers inside the encrypted payload, if any. */
+  subject: string | null;
 }
 
 export interface DecryptedAttachment {
@@ -104,7 +106,7 @@ export async function decryptMessage(
   // Extract the PGP block from the MIME structure.
   const pgpBlock = extractPgpBlock(mimeStr);
   if (!pgpBlock) {
-    return { text: mimeStr, html: null, badges: [], attachments: [] };
+    return { text: mimeStr, html: null, badges: [], attachments: [], subject: null };
   }
 
   let message: openpgp.Message<string | Uint8Array>;
@@ -112,9 +114,9 @@ export async function decryptMessage(
     message = await openpgp.readMessage({ armoredMessage: pgpBlock.ciphertext });
   } catch (e) {
     if (hasArgon2(e)) {
-      return { text: null, html: null, badges: ['unsupported_alg'], attachments: [] };
+      return { text: null, html: null, badges: ['unsupported_alg'], attachments: [], subject: null };
     }
-    return { text: null, html: null, badges: ['decrypt_failed'], attachments: [] };
+    return { text: null, html: null, badges: ['decrypt_failed'], attachments: [], subject: null };
   }
 
   let decrypted: openpgp.DecryptMessageResult;
@@ -127,9 +129,9 @@ export async function decryptMessage(
     });
   } catch (e) {
     if (hasArgon2(e)) {
-      return { text: null, html: null, badges: ['unsupported_alg'], attachments: [] };
+      return { text: null, html: null, badges: ['unsupported_alg'], attachments: [], subject: null };
     }
-    return { text: null, html: null, badges: ['decrypt_failed'], attachments: [] };
+    return { text: null, html: null, badges: ['decrypt_failed'], attachments: [], subject: null };
   }
 
   badges.push('encrypted');
@@ -170,7 +172,7 @@ export async function decryptMessage(
   // server cannot see inner bodies or attachments without the private key.
   const inner = parseDecryptedMime(decryptedText);
   if (inner) {
-    return { text: inner.text, html: inner.html, badges, attachments: inner.attachments };
+    return { text: inner.text, html: inner.html, badges, attachments: inner.attachments, subject: inner.subject };
   }
 
   // Inline PGP commonly decrypts to an ordinary body rather than a MIME entity.
@@ -182,6 +184,7 @@ export async function decryptMessage(
     html: isHtml ? decryptedText : null,
     badges,
     attachments: [],
+    subject: null,
   };
 }
 
@@ -189,10 +192,10 @@ export async function decryptMessage(
  * Parse a plain (non-encrypted) raw MIME message into html/text/attachments.
  * Used to render all messages through the same path as decrypted PGP messages.
  */
-export function parseMimeMessage(rawBytes: Uint8Array): { html: string | null; text: string | null; attachments: DecryptedAttachment[] } {
+export function parseMimeMessage(rawBytes: Uint8Array): { html: string | null; text: string | null; attachments: DecryptedAttachment[]; subject: string | null } {
   const mimeStr = new TextDecoder('utf-8', { fatal: false }).decode(rawBytes);
   const parsed = parseDecryptedMime(mimeStr);
-  return parsed ?? { html: null, text: mimeStr, attachments: [] };
+  return parsed ?? { html: null, text: mimeStr, attachments: [], subject: null };
 }
 
 export function detectPgpMessage(rawBytes: Uint8Array): PgpMessageDetection {
@@ -349,6 +352,7 @@ interface ParsedDecryptedMime {
   text: string | null;
   html: string | null;
   attachments: DecryptedAttachment[];
+  subject: string | null;
 }
 
 interface MimeEntity {
@@ -362,9 +366,34 @@ function parseDecryptedMime(raw: string): ParsedDecryptedMime | null {
   const entity = parseEntity(raw);
   if (!entity || entity.headers.size === 0) return null;
 
-  const parsed: ParsedDecryptedMime = { text: null, html: null, attachments: [] };
+  const parsed: ParsedDecryptedMime = {
+    text: null,
+    html: null,
+    attachments: [],
+    subject: extractProtectedSubject(entity),
+  };
   collectMimeContent(entity, parsed);
   return parsed;
+}
+
+/**
+ * Recover a "protected" Subject carried as a header on the top-level MIME entity
+ * inside the cryptographic payload (RFC 9788 / draft-ietf-lamps-header-protection).
+ * The `protected-headers="v1"` Content-Type marker is accepted but not required —
+ * older clients omit it, and callers always prefer this value when present.
+ */
+function extractProtectedSubject(entity: MimeEntity): string | null {
+  const direct = entity.headers.get('subject');
+  if (direct && direct.trim()) return decodeMimeWords(direct).trim();
+
+  // Legacy "Memory Hole" wrapper: a text/rfc822-headers part holding the headers.
+  for (const child of entity.children) {
+    if (child.contentType === 'text/rfc822-headers') {
+      const subject = parseHeaders(child.body).get('subject');
+      if (subject && subject.trim()) return decodeMimeWords(subject).trim();
+    }
+  }
+  return null;
 }
 
 function parseEntity(raw: string): MimeEntity | null {
