@@ -4,6 +4,8 @@ use quick_xml::Reader;
 use quick_xml::events::Event as XmlEvent;
 use rrule::RRuleSet;
 
+use crate::xml_util::resolve_ref;
+
 use super::types::{Alarm, Attendee, Calendar, Event, PartStat, RecurrenceInfo, SyncResult};
 
 struct DateProperty {
@@ -248,7 +250,6 @@ pub(crate) fn resolve_url(current_url: &str, href: &str) -> String {
 
 pub(crate) fn extract_hrefs(xml: &str, element_local_name: &str) -> anyhow::Result<Vec<String>> {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
 
     let mut in_target = false;
     let mut in_href = false;
@@ -260,7 +261,7 @@ pub(crate) fn extract_hrefs(xml: &str, element_local_name: &str) -> anyhow::Resu
         match reader.read_event_into(&mut buf)? {
             XmlEvent::Start(e) => {
                 let local = e.local_name();
-                let local = std::str::from_utf8(local.as_ref())?;
+                let local = local.into_inner();
                 if local == element_local_name {
                     in_target = true;
                 } else if in_target && local == "href" {
@@ -270,12 +271,17 @@ pub(crate) fn extract_hrefs(xml: &str, element_local_name: &str) -> anyhow::Resu
             }
             XmlEvent::Text(e) => {
                 if in_href {
-                    current_href.push_str(&e.unescape()?);
+                    current_href.push_str(&e.xml10_content());
+                }
+            }
+            XmlEvent::GeneralRef(r) => {
+                if in_href {
+                    current_href.push_str(&resolve_ref(&r));
                 }
             }
             XmlEvent::End(e) => {
                 let local = e.local_name();
-                let local = std::str::from_utf8(local.as_ref())?;
+                let local = local.into_inner();
                 if local == "href" {
                     if in_href && !current_href.is_empty() {
                         hrefs.push(current_href.trim().to_string());
@@ -299,16 +305,13 @@ pub(crate) fn extract_hrefs(xml: &str, element_local_name: &str) -> anyhow::Resu
 
 pub(crate) fn extract_text_prop(xml: &str, prop_local_name: &str) -> Option<String> {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
     let mut in_prop = false;
     let mut text = String::new();
     let mut buf = Vec::new();
     loop {
         match reader.read_event_into(&mut buf).ok()? {
             XmlEvent::Start(e) => {
-                let local = std::str::from_utf8(e.local_name().as_ref())
-                    .ok()?
-                    .to_string();
+                let local = e.local_name().into_inner().to_string();
                 if local == prop_local_name {
                     in_prop = true;
                     text.clear();
@@ -316,15 +319,16 @@ pub(crate) fn extract_text_prop(xml: &str, prop_local_name: &str) -> Option<Stri
             }
             XmlEvent::Text(e) => {
                 if in_prop {
-                    if let Ok(s) = e.unescape() {
-                        text.push_str(&s);
-                    }
+                    text.push_str(&e.xml10_content());
+                }
+            }
+            XmlEvent::GeneralRef(r) => {
+                if in_prop {
+                    text.push_str(&resolve_ref(&r));
                 }
             }
             XmlEvent::End(e) => {
-                let local = std::str::from_utf8(e.local_name().as_ref())
-                    .ok()?
-                    .to_string();
+                let local = e.local_name().into_inner().to_string();
                 if local == prop_local_name && in_prop {
                     let trimmed = text.trim().to_string();
                     if !trimmed.is_empty() {
@@ -342,7 +346,6 @@ pub(crate) fn extract_text_prop(xml: &str, prop_local_name: &str) -> Option<Stri
 
 pub(super) fn parse_all_calendars(xml: &str, base_url: &str) -> anyhow::Result<Vec<Calendar>> {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
 
     let base_url_resolved = resolve_url(base_url, "");
     let mut calendars = Vec::new();
@@ -358,48 +361,81 @@ pub(super) fn parse_all_calendars(xml: &str, base_url: &str) -> anyhow::Result<V
         match reader.read_event_into(&mut buf)? {
             XmlEvent::Start(e) => {
                 let local = e.local_name();
-                let local = std::str::from_utf8(local.as_ref())?;
+                let local = local.into_inner();
                 match local {
-                    "href" => in_href = true,
-                    "displayname" => in_displayname = true,
-                    "calendar-color" => in_color = true,
+                    "href" => {
+                        in_href = true;
+                        current_href = Some(String::new());
+                    }
+                    "displayname" => {
+                        in_displayname = true;
+                        current_displayname = Some(String::new());
+                    }
+                    "calendar-color" => {
+                        in_color = true;
+                        current_color = Some(String::new());
+                    }
                     _ => {}
                 }
             }
             XmlEvent::Text(e) => {
+                let text = e.xml10_content();
                 if in_href {
-                    current_href = Some(e.unescape()?.to_string());
+                    current_href.get_or_insert_default().push_str(&text);
                 } else if in_displayname {
-                    current_displayname = Some(e.unescape()?.to_string());
+                    current_displayname.get_or_insert_default().push_str(&text);
                 } else if in_color {
-                    current_color = Some(e.unescape()?.to_string());
+                    current_color.get_or_insert_default().push_str(&text);
+                }
+            }
+            XmlEvent::GeneralRef(r) => {
+                let text = resolve_ref(&r);
+                if in_href {
+                    current_href.get_or_insert_default().push_str(&text);
+                } else if in_displayname {
+                    current_displayname.get_or_insert_default().push_str(&text);
+                } else if in_color {
+                    current_color.get_or_insert_default().push_str(&text);
                 }
             }
             XmlEvent::End(e) => {
                 let local = e.local_name();
-                let local = std::str::from_utf8(local.as_ref())?;
+                let local = local.into_inner();
                 match local {
                     "href" => in_href = false,
                     "displayname" => in_displayname = false,
                     "calendar-color" => in_color = false,
                     "response" => {
-                        if let Some(href) = &current_href {
+                        if let Some(href) = current_href
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|h| !h.is_empty())
+                        {
                             let resolved = resolve_url(base_url, href);
                             if resolved.trim_end_matches('/')
                                 != base_url_resolved.trim_end_matches('/')
                             {
-                                let name = current_displayname.clone().unwrap_or_else(|| {
-                                    resolved
-                                        .trim_end_matches('/')
-                                        .rsplit('/')
-                                        .next()
-                                        .unwrap_or("unknown")
-                                        .to_string()
-                                });
+                                let name = current_displayname
+                                    .as_deref()
+                                    .map(str::trim)
+                                    .filter(|n| !n.is_empty())
+                                    .map(str::to_string)
+                                    .unwrap_or_else(|| {
+                                        resolved
+                                            .trim_end_matches('/')
+                                            .rsplit('/')
+                                            .next()
+                                            .unwrap_or("unknown")
+                                            .to_string()
+                                    });
                                 calendars.push(Calendar {
                                     name,
                                     href: resolved,
-                                    color: current_color.clone(),
+                                    color: current_color
+                                        .as_deref()
+                                        .map(str::trim)
+                                        .filter(|c| !c.is_empty())
+                                        .map(str::to_string),
                                 });
                             }
                         }
@@ -1289,7 +1325,6 @@ pub(super) fn extract_events_with_hrefs(
     base_url: &str,
 ) -> anyhow::Result<Vec<(String, String, String)>> {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
 
     let mut results = Vec::new();
     let mut in_response = false;
@@ -1305,7 +1340,7 @@ pub(super) fn extract_events_with_hrefs(
         match reader.read_event_into(&mut buf)? {
             XmlEvent::Start(e) => {
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref())?;
+                let local = lname.into_inner();
                 match local {
                     "response" => {
                         in_response = true;
@@ -1323,7 +1358,17 @@ pub(super) fn extract_events_with_hrefs(
                 }
             }
             XmlEvent::Text(e) => {
-                let text = e.unescape()?;
+                let text = e.xml10_content();
+                if in_calendar_data {
+                    current_ical.push_str(&text);
+                } else if in_href {
+                    current_href.push_str(&text);
+                } else if in_etag {
+                    current_etag.push_str(&text);
+                }
+            }
+            XmlEvent::GeneralRef(r) => {
+                let text = resolve_ref(&r);
                 if in_calendar_data {
                     current_ical.push_str(&text);
                 } else if in_href {
@@ -1334,7 +1379,7 @@ pub(super) fn extract_events_with_hrefs(
             }
             XmlEvent::End(e) => {
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref())?;
+                let local = lname.into_inner();
                 match local {
                     "href" => in_href = false,
                     "getetag" => in_etag = false,
@@ -1344,7 +1389,7 @@ pub(super) fn extract_events_with_hrefs(
                             results.push((
                                 resolve_url(base_url, current_href.trim()),
                                 current_etag.trim().trim_matches('"').to_string(),
-                                current_ical.clone(),
+                                current_ical.trim().to_string(),
                             ));
                         }
                         in_response = false;
@@ -1361,7 +1406,6 @@ pub(super) fn extract_events_with_hrefs(
 
 pub(super) fn extract_sync_result(xml: &str, base_url: &str) -> anyhow::Result<SyncResult> {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
 
     let mut new_token = String::new();
     let mut changed = Vec::new();
@@ -1386,7 +1430,7 @@ pub(super) fn extract_sync_result(xml: &str, base_url: &str) -> anyhow::Result<S
             XmlEvent::Start(e) => {
                 depth += 1;
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref())?;
+                let local = lname.into_inner();
                 match local {
                     "sync-token" if depth == 2 => in_sync_token_top = true,
                     "response" => {
@@ -1407,7 +1451,21 @@ pub(super) fn extract_sync_result(xml: &str, base_url: &str) -> anyhow::Result<S
                 }
             }
             XmlEvent::Text(e) => {
-                let text = e.unescape()?;
+                let text = e.xml10_content();
+                if in_sync_token_top {
+                    new_token.push_str(&text);
+                } else if in_calendar_data {
+                    current_ical.push_str(&text);
+                } else if in_href {
+                    current_href.push_str(&text);
+                } else if in_etag {
+                    current_etag.push_str(&text);
+                } else if in_status {
+                    current_status.push_str(&text);
+                }
+            }
+            XmlEvent::GeneralRef(r) => {
+                let text = resolve_ref(&r);
                 if in_sync_token_top {
                     new_token.push_str(&text);
                 } else if in_calendar_data {
@@ -1422,7 +1480,7 @@ pub(super) fn extract_sync_result(xml: &str, base_url: &str) -> anyhow::Result<S
             }
             XmlEvent::End(e) => {
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref())?;
+                let local = lname.into_inner();
                 match local {
                     "sync-token" => in_sync_token_top = false,
                     "href" => in_href = false,
@@ -1437,7 +1495,7 @@ pub(super) fn extract_sync_result(xml: &str, base_url: &str) -> anyhow::Result<S
                             changed.push((
                                 href,
                                 current_etag.trim().trim_matches('"').to_string(),
-                                current_ical.clone(),
+                                current_ical.trim().to_string(),
                             ));
                         }
                         in_response = false;
@@ -1451,7 +1509,7 @@ pub(super) fn extract_sync_result(xml: &str, base_url: &str) -> anyhow::Result<S
         }
     }
     Ok(SyncResult {
-        new_token,
+        new_token: new_token.trim().to_string(),
         changed,
         deleted,
     })
@@ -1459,7 +1517,6 @@ pub(super) fn extract_sync_result(xml: &str, base_url: &str) -> anyhow::Result<S
 
 pub(crate) fn extract_ctag_and_token(xml: &str) -> (Option<String>, Option<String>) {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
 
     let mut ctag: Option<String> = None;
     let mut sync_token: Option<String> = None;
@@ -1471,7 +1528,7 @@ pub(crate) fn extract_ctag_and_token(xml: &str) -> (Option<String>, Option<Strin
         match reader.read_event_into(&mut buf) {
             Ok(XmlEvent::Start(e)) => {
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref()).unwrap_or("");
+                let local = lname.into_inner();
                 match local {
                     "getctag" => in_ctag = true,
                     "sync-token" => in_token = true,
@@ -1479,20 +1536,19 @@ pub(crate) fn extract_ctag_and_token(xml: &str) -> (Option<String>, Option<Strin
                 }
             }
             Ok(XmlEvent::Text(e)) => {
-                if let Ok(text) = e.unescape() {
-                    let text = text.trim().to_string();
-                    if !text.is_empty() {
-                        if in_ctag {
-                            ctag = Some(text);
-                        } else if in_token {
-                            sync_token = Some(text);
-                        }
+                let text = e.xml10_content();
+                let text = text.trim().to_string();
+                if !text.is_empty() {
+                    if in_ctag {
+                        ctag = Some(text);
+                    } else if in_token {
+                        sync_token = Some(text);
                     }
                 }
             }
             Ok(XmlEvent::End(e)) => {
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref()).unwrap_or("");
+                let local = lname.into_inner();
                 match local {
                     "getctag" => in_ctag = false,
                     "sync-token" => in_token = false,
@@ -1509,7 +1565,6 @@ pub(crate) fn extract_ctag_and_token(xml: &str) -> (Option<String>, Option<Strin
 /// Parse the expiry from a WebDAV push SUBSCRIBE response.
 pub(super) fn extract_push_expiry(xml: &str) -> Option<i64> {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
 
     let mut in_expires = false;
     let mut expires_text = String::new();
@@ -1519,7 +1574,7 @@ pub(super) fn extract_push_expiry(xml: &str) -> Option<i64> {
         match reader.read_event_into(&mut buf) {
             Ok(XmlEvent::Start(e)) => {
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref()).unwrap_or("");
+                let local = lname.into_inner();
                 if local == "expires" {
                     in_expires = true;
                     expires_text.clear();
@@ -1527,14 +1582,17 @@ pub(super) fn extract_push_expiry(xml: &str) -> Option<i64> {
             }
             Ok(XmlEvent::Text(e)) => {
                 if in_expires {
-                    if let Ok(t) = e.unescape() {
-                        expires_text.push_str(t.as_ref());
-                    }
+                    expires_text.push_str(&e.xml10_content());
+                }
+            }
+            Ok(XmlEvent::GeneralRef(r)) => {
+                if in_expires {
+                    expires_text.push_str(&resolve_ref(&r));
                 }
             }
             Ok(XmlEvent::End(e)) => {
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref()).unwrap_or("");
+                let local = lname.into_inner();
                 if local == "expires" {
                     in_expires = false;
                 }
@@ -1866,5 +1924,71 @@ END:VCALENDAR\r\n";
         let event = preview_one(ical);
         assert!(event.dtstart.starts_with("2026-01-15T09:00:00-05:00"));
         assert_eq!(event.dtend.as_deref(), Some("2026-01-15T10:00:00-05:00"));
+    }
+}
+
+#[cfg(test)]
+mod xml_entity_tests {
+    use super::*;
+
+    // quick-xml 0.42 reports entity references as separate events; make sure the
+    // DAV parsers still reassemble text values that contain `&amp;` etc.
+
+    #[test]
+    fn extract_hrefs_reassembles_entities_in_href() {
+        let xml = r#"<multistatus xmlns="DAV:">
+            <response>
+                <href>/calendars/user/a&amp;b/</href>
+            </response>
+        </multistatus>"#;
+        let hrefs = extract_hrefs(xml, "response").unwrap();
+        assert_eq!(hrefs, vec!["/calendars/user/a&b/"]);
+    }
+
+    #[test]
+    fn extract_text_prop_reassembles_entities() {
+        let xml = r#"<multistatus xmlns="DAV:">
+            <prop><displayname>Rock &amp; Roll &#128512;</displayname></prop>
+        </multistatus>"#;
+        assert_eq!(
+            extract_text_prop(xml, "displayname").as_deref(),
+            Some("Rock & Roll 😀")
+        );
+    }
+
+    #[test]
+    fn extract_events_with_hrefs_parses_calendar_data_report() {
+        let xml = "<multistatus xmlns=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">\
+            <response>\
+                <href>/cal/work/evt1.ics</href>\
+                <propstat><prop>\
+                    <getetag>\"abc&amp;123\"</getetag>\
+                    <c:calendar-data>\n\
+BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:evt1\r\nEND:VEVENT\r\nEND:VCALENDAR\n\
+                    </c:calendar-data>\
+                </prop></propstat>\
+            </response>\
+        </multistatus>";
+        let out = extract_events_with_hrefs(xml, "https://dav.example.com/").unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].0, "https://dav.example.com/cal/work/evt1.ics");
+        assert_eq!(out[0].1, "abc&123");
+        assert!(out[0].2.starts_with("BEGIN:VCALENDAR"));
+        assert!(out[0].2.ends_with("END:VCALENDAR"));
+    }
+
+    #[test]
+    fn parse_all_calendars_keeps_entity_in_displayname() {
+        let xml = r#"<multistatus xmlns="DAV:">
+            <response>
+                <href>/cal/work/</href>
+                <propstat><prop>
+                    <displayname>Me &amp; Work</displayname>
+                </prop></propstat>
+            </response>
+        </multistatus>"#;
+        let cals = parse_all_calendars(xml, "https://dav.example.com/cal/").unwrap();
+        assert_eq!(cals.len(), 1);
+        assert_eq!(cals[0].name, "Me & Work");
     }
 }

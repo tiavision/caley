@@ -18,6 +18,7 @@ mod settings;
 mod sse;
 mod sync;
 mod version;
+mod xml_util;
 
 use axum::Router;
 use axum::extract::Request;

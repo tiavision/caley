@@ -56,7 +56,6 @@ fn substitute(template: &str, email: &str) -> String {
 
 fn parse_autoconfig_xml(xml: &str, email: &str) -> Option<AutodiscoverResult> {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
 
     let mut buf = Vec::new();
 
@@ -77,14 +76,12 @@ fn parse_autoconfig_xml(xml: &str, email: &str) -> Option<AutodiscoverResult> {
     loop {
         match reader.read_event_into(&mut buf).ok()? {
             XmlEvent::Start(e) => {
-                let name = std::str::from_utf8(e.local_name().as_ref())
-                    .unwrap_or("")
-                    .to_ascii_lowercase();
+                let name = e.local_name().into_inner().to_ascii_lowercase();
                 match name.as_str() {
                     "incomingserver" => {
                         let is_imap = e.attributes().flatten().any(|a| {
-                            a.key.local_name().as_ref() == b"type"
-                                && a.value.as_ref().eq_ignore_ascii_case(b"imap")
+                            a.key.local_name().into_inner() == "type"
+                                && a.value.eq_ignore_ascii_case("imap")
                         });
                         if is_imap && imap_host.is_none() {
                             in_incoming_imap = true;
@@ -92,8 +89,8 @@ fn parse_autoconfig_xml(xml: &str, email: &str) -> Option<AutodiscoverResult> {
                     }
                     "outgoingserver" => {
                         let is_smtp = e.attributes().flatten().any(|a| {
-                            a.key.local_name().as_ref() == b"type"
-                                && a.value.as_ref().eq_ignore_ascii_case(b"smtp")
+                            a.key.local_name().into_inner() == "type"
+                                && a.value.eq_ignore_ascii_case("smtp")
                         });
                         if is_smtp && smtp_host.is_none() {
                             in_outgoing_smtp = true;
@@ -105,7 +102,7 @@ fn parse_autoconfig_xml(xml: &str, email: &str) -> Option<AutodiscoverResult> {
                 }
             }
             XmlEvent::Text(e) => {
-                let text = e.unescape().unwrap_or_default().trim().to_string();
+                let text = e.xml10_content().trim().to_string();
                 if text.is_empty() {
                     continue;
                 }
@@ -139,9 +136,7 @@ fn parse_autoconfig_xml(xml: &str, email: &str) -> Option<AutodiscoverResult> {
                 }
             }
             XmlEvent::End(e) => {
-                let name = std::str::from_utf8(e.local_name().as_ref())
-                    .unwrap_or("")
-                    .to_ascii_lowercase();
+                let name = e.local_name().into_inner().to_ascii_lowercase();
                 match name.as_str() {
                     "incomingserver" => in_incoming_imap = false,
                     "outgoingserver" => in_outgoing_smtp = false,

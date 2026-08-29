@@ -16,10 +16,10 @@ dotenvy = { version = "0.15.7" }
 futures-util = "0.3"
 hkdf = "0.12"
 ical = "0.11"
-quick-xml = "0.37"
+quick-xml = "0.42"
 rand = "0.9"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots"] }
-rrule = "0.13"
+rrule = "0.14"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -39,14 +39,14 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 p256 = { version = "0.13", features = ["ecdh"] }
 rust-stemmers = "1.2"
-async-imap = { version = "0.9", default-features = false, features = ["runtime-tokio"] }
+async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 tokio-rustls = "0.26"
 rustls-pki-types = "1"
 webpki-roots = "0.26"
 mail-parser = "0.11"
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
-infer = "0.19.0"
+infer = "0.22.0"
 idna = "1"
 tar = "0.4"
 flate2 = "1"

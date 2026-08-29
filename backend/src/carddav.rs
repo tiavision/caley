@@ -5,6 +5,7 @@ use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 
 use crate::caldav::{CalDavClient, extract_ctag_and_token, extract_hrefs, resolve_url};
+use crate::xml_util::resolve_ref;
 
 #[derive(Serialize, Clone)]
 pub struct Addressbook {
@@ -127,7 +128,6 @@ async fn find_addressbooks_in_home(
 
 fn parse_addressbooks(xml: &str, base_url: &str) -> anyhow::Result<Vec<Addressbook>> {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
 
     let base_resolved = resolve_url(base_url, "");
     let mut books = Vec::new();
@@ -142,50 +142,73 @@ fn parse_addressbooks(xml: &str, base_url: &str) -> anyhow::Result<Vec<Addressbo
         match reader.read_event_into(&mut buf)? {
             XmlEvent::Start(e) => {
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref())?;
+                let local = lname.into_inner();
                 match local {
-                    "href" => in_href = true,
-                    "displayname" => in_displayname = true,
+                    "href" => {
+                        in_href = true;
+                        current_href = Some(String::new());
+                    }
+                    "displayname" => {
+                        in_displayname = true;
+                        current_name = Some(String::new());
+                    }
                     "addressbook" => is_addressbook = true,
                     _ => {}
                 }
             }
             XmlEvent::Empty(e) => {
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref())?;
+                let local = lname.into_inner();
                 if local == "addressbook" {
                     is_addressbook = true;
                 }
             }
             XmlEvent::Text(e) => {
-                let text = e.unescape()?.to_string();
+                let text = e.xml10_content();
                 if in_href {
-                    current_href = Some(text);
+                    current_href.get_or_insert_default().push_str(&text);
                 } else if in_displayname {
-                    current_name = Some(text);
+                    current_name.get_or_insert_default().push_str(&text);
+                }
+            }
+            XmlEvent::GeneralRef(r) => {
+                let text = resolve_ref(&r);
+                if in_href {
+                    current_href.get_or_insert_default().push_str(&text);
+                } else if in_displayname {
+                    current_name.get_or_insert_default().push_str(&text);
                 }
             }
             XmlEvent::End(e) => {
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref())?;
+                let local = lname.into_inner();
                 match local {
                     "href" => in_href = false,
                     "displayname" => in_displayname = false,
                     "response" => {
                         if is_addressbook {
-                            if let Some(href) = &current_href {
+                            if let Some(href) = current_href
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|h| !h.is_empty())
+                            {
                                 let resolved = resolve_url(base_url, href);
                                 if resolved.trim_end_matches('/')
                                     != base_resolved.trim_end_matches('/')
                                 {
-                                    let name = current_name.clone().unwrap_or_else(|| {
-                                        resolved
-                                            .trim_end_matches('/')
-                                            .rsplit('/')
-                                            .next()
-                                            .unwrap_or("Contacts")
-                                            .to_string()
-                                    });
+                                    let name = current_name
+                                        .as_deref()
+                                        .map(str::trim)
+                                        .filter(|n| !n.is_empty())
+                                        .map(str::to_string)
+                                        .unwrap_or_else(|| {
+                                            resolved
+                                                .trim_end_matches('/')
+                                                .rsplit('/')
+                                                .next()
+                                                .unwrap_or("Contacts")
+                                                .to_string()
+                                        });
                                     books.push(Addressbook {
                                         href: resolved,
                                         name,
@@ -265,7 +288,6 @@ fn extract_contacts_with_hrefs(
     base_url: &str,
 ) -> anyhow::Result<Vec<(String, String, String)>> {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
 
     let mut results = Vec::new();
     let mut in_response = false;
@@ -281,7 +303,7 @@ fn extract_contacts_with_hrefs(
         match reader.read_event_into(&mut buf)? {
             XmlEvent::Start(e) => {
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref())?;
+                let local = lname.into_inner();
                 match local {
                     "response" => {
                         in_response = true;
@@ -299,7 +321,17 @@ fn extract_contacts_with_hrefs(
                 }
             }
             XmlEvent::Text(e) => {
-                let text = e.unescape()?;
+                let text = e.xml10_content();
+                if in_address_data {
+                    current_vcard.push_str(&text);
+                } else if in_href {
+                    current_href.push_str(&text);
+                } else if in_etag {
+                    current_etag.push_str(&text);
+                }
+            }
+            XmlEvent::GeneralRef(r) => {
+                let text = resolve_ref(&r);
                 if in_address_data {
                     current_vcard.push_str(&text);
                 } else if in_href {
@@ -310,7 +342,7 @@ fn extract_contacts_with_hrefs(
             }
             XmlEvent::End(e) => {
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref())?;
+                let local = lname.into_inner();
                 match local {
                     "href" => in_href = false,
                     "getetag" => in_etag = false,
@@ -320,7 +352,7 @@ fn extract_contacts_with_hrefs(
                             results.push((
                                 resolve_url(base_url, current_href.trim()),
                                 current_etag.trim().trim_matches('"').to_string(),
-                                current_vcard.clone(),
+                                current_vcard.trim().to_string(),
                             ));
                         }
                         in_response = false;
@@ -337,7 +369,6 @@ fn extract_contacts_with_hrefs(
 
 fn extract_card_sync_result(xml: &str, base_url: &str) -> anyhow::Result<CardSyncResult> {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
 
     let mut new_token = String::new();
     let mut changed = Vec::new();
@@ -362,7 +393,7 @@ fn extract_card_sync_result(xml: &str, base_url: &str) -> anyhow::Result<CardSyn
             XmlEvent::Start(e) => {
                 depth += 1;
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref())?;
+                let local = lname.into_inner();
                 match local {
                     "sync-token" if depth == 2 => in_sync_token_top = true,
                     "response" => {
@@ -383,7 +414,21 @@ fn extract_card_sync_result(xml: &str, base_url: &str) -> anyhow::Result<CardSyn
                 }
             }
             XmlEvent::Text(e) => {
-                let text = e.unescape()?;
+                let text = e.xml10_content();
+                if in_sync_token_top {
+                    new_token.push_str(&text);
+                } else if in_address_data {
+                    current_vcard.push_str(&text);
+                } else if in_href {
+                    current_href.push_str(&text);
+                } else if in_etag {
+                    current_etag.push_str(&text);
+                } else if in_status {
+                    current_status.push_str(&text);
+                }
+            }
+            XmlEvent::GeneralRef(r) => {
+                let text = resolve_ref(&r);
                 if in_sync_token_top {
                     new_token.push_str(&text);
                 } else if in_address_data {
@@ -398,7 +443,7 @@ fn extract_card_sync_result(xml: &str, base_url: &str) -> anyhow::Result<CardSyn
             }
             XmlEvent::End(e) => {
                 let lname = e.local_name();
-                let local = std::str::from_utf8(lname.as_ref())?;
+                let local = lname.into_inner();
                 match local {
                     "sync-token" => in_sync_token_top = false,
                     "href" => in_href = false,
@@ -413,7 +458,7 @@ fn extract_card_sync_result(xml: &str, base_url: &str) -> anyhow::Result<CardSyn
                             changed.push((
                                 href,
                                 current_etag.trim().trim_matches('"').to_string(),
-                                current_vcard.clone(),
+                                current_vcard.trim().to_string(),
                             ));
                         }
                         in_response = false;
@@ -427,7 +472,7 @@ fn extract_card_sync_result(xml: &str, base_url: &str) -> anyhow::Result<CardSyn
         }
     }
     Ok(CardSyncResult {
-        new_token,
+        new_token: new_token.trim().to_string(),
         changed,
         deleted,
     })

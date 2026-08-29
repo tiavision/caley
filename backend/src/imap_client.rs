@@ -398,9 +398,9 @@ async fn append_message(
         .await?;
 
     loop {
-        let response = session.read_response().await.ok_or_else(|| {
+        let response = session.read_response().await?.ok_or_else(|| {
             anyhow!("IMAP connection closed while appending to mailbox {mailbox:?}")
-        })??;
+        })?;
         match response.parsed() {
             Response::Continue { .. } => break,
             Response::Done {
@@ -423,9 +423,9 @@ async fn append_message(
     session.as_mut().flush().await?;
 
     loop {
-        let response = session.read_response().await.ok_or_else(|| {
+        let response = session.read_response().await?.ok_or_else(|| {
             anyhow!("IMAP connection closed while completing APPEND to mailbox {mailbox:?}")
-        })??;
+        })?;
         if let Response::Done {
             tag,
             status,

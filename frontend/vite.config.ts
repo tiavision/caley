@@ -3,6 +3,8 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { resolve } from 'path';
 
+const root = import.meta.dirname;
+
 export default defineConfig({
   appType: 'mpa',
   plugins: [
@@ -20,13 +22,13 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        index: resolve(__dirname, 'index.html'),
-        calendar: resolve(__dirname, 'calendar/index.html'),
-        settings: resolve(__dirname, 'settings/index.html'),
-        search: resolve(__dirname, 'search/index.html'),
-        contacts: resolve(__dirname, 'contacts/index.html'),
-        mail: resolve(__dirname, 'mail/index.html'),
-        mailView: resolve(__dirname, 'mail/view/index.html'),
+        index: resolve(root, 'index.html'),
+        calendar: resolve(root, 'calendar/index.html'),
+        settings: resolve(root, 'settings/index.html'),
+        search: resolve(root, 'search/index.html'),
+        contacts: resolve(root, 'contacts/index.html'),
+        mail: resolve(root, 'mail/index.html'),
+        mailView: resolve(root, 'mail/view/index.html'),
       },
     },
   },
