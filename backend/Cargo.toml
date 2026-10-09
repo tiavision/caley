@@ -39,7 +39,7 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 p256 = { version = "0.13", features = ["ecdh"] }
 rust-stemmers = "1.2"
-async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
+async-imap = { version = "0.12", default-features = false, features = ["runtime-tokio"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 tokio-rustls = "0.26"
 rustls-pki-types = "1"
