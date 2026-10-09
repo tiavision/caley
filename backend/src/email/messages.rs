@@ -128,7 +128,10 @@ pub async fn get_message(
     }
 
     match email_db::get_message(&state.db, &q.account_id, &q.mailbox, q.uid).await {
-        Ok(Some(msg)) => {
+        Ok(Some(mut msg)) => {
+            if msg.reply_to_addrs.is_none() {
+                msg.reply_to_addrs = backfill_reply_to(&state, &q).await;
+            }
             let attachments =
                 email_db::list_attachments(&state.db, &q.account_id, &q.mailbox, q.uid)
                     .await
@@ -150,6 +153,18 @@ pub async fn get_message(
             (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
         }
     }
+}
+
+/// Parses Reply-To from the cached .eml for rows synced before the column existed.
+async fn backfill_reply_to(state: &AppState, q: &GetMessageQuery) -> Option<String> {
+    let raw = load_raw_eml(&state.data_dir, &q.account_id, &q.mailbox, q.uid).await?;
+    let addrs = serde_json::to_string(&crate::imap_client::parse_reply_to(&raw)).ok()?;
+    if let Err(e) =
+        email_db::set_message_reply_to(&state.db, &q.account_id, &q.mailbox, q.uid, &addrs).await
+    {
+        eprintln!("[email] reply_to backfill error: {e}");
+    }
+    Some(addrs)
 }
 
 async fn load_raw_eml(
@@ -870,6 +885,11 @@ pub(super) fn message_to_json_with_attachments(
         .as_deref()
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or_default();
+    let reply_to: Vec<String> = m
+        .reply_to_addrs
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
     let flags: Vec<String> = m
         .flags
         .as_deref()
@@ -898,6 +918,7 @@ pub(super) fn message_to_json_with_attachments(
         "from": m.from_addr,
         "to": to,
         "cc": cc,
+        "reply_to": reply_to,
         "subject": m.subject,
         "sent_at": m.sent_at,
         "flags": flags,
@@ -956,6 +977,7 @@ mod tests {
             rowid: uid,
             size: None,
             is_encrypted: false,
+            reply_to_addrs: None,
         }
     }
 

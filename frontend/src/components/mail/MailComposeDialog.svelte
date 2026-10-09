@@ -253,6 +253,12 @@
     return `<br><div style="border-left:2px solid #ccc;padding-left:8px;margin:8px 0"><div>---------- Forwarded message ---------</div>${headerHtml}<br>${bodyContent}</div>`;
   }
 
+  // Replies go to Reply-To when the original message sets it, otherwise to the sender.
+  function replyRecipients(msg: Message): string[] {
+    if (msg.reply_to?.length) return msg.reply_to;
+    return msg.from ? [msg.from] : [];
+  }
+
   // ── Public open/close interface ────────────────────────────────────────────
 
   export function open(options: {
@@ -278,7 +284,7 @@
     if (mode === 'reply' && options.replyTo) {
       const replyTo = options.replyTo;
       composeMode = 'reply';
-      composeTo = replyTo.from || '';
+      composeTo = replyRecipients(replyTo).join(', ');
       composeSubject = replyTo.subject?.startsWith('Re:') ? replyTo.subject : `Re: ${replyTo.subject || ''}`;
       composeBody = replyQuote(replyTo, options.parsedText ?? '');
       composeInReplyTo = replyTo.message_id;
@@ -294,7 +300,7 @@
     } else if (mode === 'replyAll' && options.replyTo) {
       const replyTo = options.replyTo;
       composeMode = 'reply';
-      composeTo = replyTo.from || '';
+      composeTo = replyRecipients(replyTo).join(', ');
       composeSubject = replyTo.subject?.startsWith('Re:') ? replyTo.subject : `Re: ${replyTo.subject || ''}`;
       composeBody = replyQuote(replyTo, options.parsedText ?? '');
       composeInReplyTo = replyTo.message_id;
@@ -310,10 +316,11 @@
       const myIdentity = identities.find(i => i.identity_id === composeIdentityId);
       const myEmail = myIdentity?.email.toLowerCase() ?? '';
       const allRecipients = [...(replyTo.to ?? []), ...(replyTo.cc ?? [])];
+      const excluded = new Set([replyTo.from ?? '', ...replyRecipients(replyTo)].map(a => a.toLowerCase()));
       const ccAddresses = allRecipients
         .filter(addr => {
           const a = addr.toLowerCase();
-          return !a.includes(myEmail) && a !== (replyTo.from ?? '').toLowerCase();
+          return !a.includes(myEmail) && !excluded.has(a);
         })
         .join(', ');
       composeCc = ccAddresses;

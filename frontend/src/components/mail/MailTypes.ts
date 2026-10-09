@@ -63,6 +63,7 @@ export interface Message {
   from: string | null;
   to: string[];
   cc: string[];
+  reply_to?: string[];
   subject: string | null;
   sent_at: number | null;
   flags: string[];

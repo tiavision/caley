@@ -138,7 +138,7 @@ pub async fn fetch_headers(session: &mut ImapSession, uids: &[u32]) -> Result<Ve
         return Ok(vec![]);
     }
     let uid_set = uids_to_set(uids);
-    let fetch_items = "(FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO)])";
+    let fetch_items = "(FLAGS RFC822.SIZE BODY.PEEK[HEADER.FIELDS (FROM TO CC REPLY-TO SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO)])";
 
     let mut stream = session.uid_fetch(&uid_set, fetch_items).await?;
     let mut headers = Vec::new();
@@ -158,6 +158,7 @@ pub async fn fetch_headers(session: &mut ImapSession, uids: &[u32]) -> Result<Ve
             from_addr,
             to_addrs,
             cc_addrs,
+            reply_to_addrs,
             subject,
             sent_at,
             from_emails,
@@ -178,6 +179,7 @@ pub async fn fetch_headers(session: &mut ImapSession, uids: &[u32]) -> Result<Ve
             from_addr,
             to_addrs: to_addrs.map(|v| serde_json::to_string(&v).unwrap_or_default()),
             cc_addrs: cc_addrs.map(|v| serde_json::to_string(&v).unwrap_or_default()),
+            reply_to_addrs: Some(serde_json::to_string(&reply_to_addrs).unwrap_or_default()),
             subject,
             sent_at,
             flags: Some(flags_json),
@@ -498,6 +500,7 @@ fn parse_header_bytes(
     Option<String>,      // from_addr
     Option<Vec<String>>, // to_addrs
     Option<Vec<String>>, // cc_addrs
+    Vec<String>,         // reply_to_addrs
     Option<String>,      // subject
     Option<i64>,         // sent_at
     Vec<String>,         // from_emails (lowercased, name stripped)
@@ -523,6 +526,7 @@ fn parse_header_bytes(
     });
     let to_addrs = msg.to().map(address_to_strings);
     let cc_addrs = msg.cc().map(address_to_strings);
+    let reply_to_addrs = msg.reply_to().map(address_to_strings).unwrap_or_default();
     let from_emails = msg.from().map(address_to_emails).unwrap_or_default();
     let to_emails = msg.to().map(address_to_emails).unwrap_or_default();
     let cc_emails = msg.cc().map(address_to_emails).unwrap_or_default();
@@ -535,12 +539,21 @@ fn parse_header_bytes(
         from_addr,
         to_addrs,
         cc_addrs,
+        reply_to_addrs,
         subject,
         sent_at,
         from_emails,
         to_emails,
         cc_emails,
     )
+}
+
+/// Extracts formatted Reply-To addresses from raw message bytes.
+pub fn parse_reply_to(bytes: &[u8]) -> Vec<String> {
+    mail_parser::MessageParser::default()
+        .parse_headers(bytes)
+        .and_then(|msg| msg.reply_to().map(address_to_strings))
+        .unwrap_or_default()
 }
 
 fn hv_first_text(hv: &mail_parser::HeaderValue<'_>) -> Option<String> {
@@ -934,11 +947,21 @@ mod tests {
         // Real-world senders commonly label windows-1252 as "Cp1252" (or
         // "cp1252") rather than the canonical "windows-1252" charset name.
         let raw = b"Subject: =?Cp1252?Q?Zahnarztpraxis_Dr._Julia_Pennig_Terminbest=E4tigung?=\r\n\r\nbody";
-        let (_, _, _, _, _, subject, ..) = parse_header_bytes(raw);
+        let (_, _, _, _, _, _, subject, ..) = parse_header_bytes(raw);
         assert_eq!(
             subject.as_deref(),
             Some("Zahnarztpraxis Dr. Julia Pennig Terminbestätigung")
         );
+    }
+
+    #[test]
+    fn parses_reply_to_addresses() {
+        let raw = b"From: Sender <sender@example.test>\r\nReply-To: List <list@example.test>, other@example.test\r\n\r\nbody";
+        let (_, _, _, _, _, reply_to, ..) = parse_header_bytes(raw);
+        let expected = vec!["List <list@example.test>".to_owned(), "other@example.test".to_owned()];
+        assert_eq!(reply_to, expected);
+        assert_eq!(parse_reply_to(raw), expected);
+        assert!(parse_reply_to(b"From: a@example.test\r\n\r\nbody").is_empty());
     }
 
     #[test]

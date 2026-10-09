@@ -12,6 +12,8 @@ pub struct MessageHeader {
     pub from_addr: Option<String>,
     pub to_addrs: Option<String>,
     pub cc_addrs: Option<String>,
+    /// JSON array of Reply-To addresses; `[]` when the header is absent.
+    pub reply_to_addrs: Option<String>,
     pub subject: Option<String>,
     pub sent_at: Option<i64>,
     pub flags: Option<String>,
@@ -40,6 +42,8 @@ pub struct MessageRow {
     #[allow(dead_code)]
     pub size: Option<i64>,
     pub is_encrypted: bool,
+    /// JSON array of Reply-To addresses; NULL for rows cached before it was tracked.
+    pub reply_to_addrs: Option<String>,
 }
 
 pub struct PageCursor {
@@ -107,14 +111,16 @@ pub async fn upsert_message_header(
     sqlx::query(
         "INSERT INTO cached_messages
             (account_id, mailbox, uid, message_id, thread_id, from_addr, to_addrs, cc_addrs,
-             subject, sent_at, flags, has_attachments, size, subject_idx, from_idx, to_idx, is_unread)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             reply_to_addrs, subject, sent_at, flags, has_attachments, size, subject_idx,
+             from_idx, to_idx, is_unread)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(account_id, mailbox, uid) DO UPDATE SET
             message_id      = excluded.message_id,
             thread_id       = excluded.thread_id,
             from_addr       = excluded.from_addr,
             to_addrs        = excluded.to_addrs,
             cc_addrs        = excluded.cc_addrs,
+            reply_to_addrs  = excluded.reply_to_addrs,
             subject         = excluded.subject,
             sent_at         = excluded.sent_at,
             flags           = excluded.flags,
@@ -133,6 +139,7 @@ pub async fn upsert_message_header(
     .bind(&h.from_addr)
     .bind(&h.to_addrs)
     .bind(&h.cc_addrs)
+    .bind(&h.reply_to_addrs)
     .bind(&h.subject)
     .bind(h.sent_at)
     .bind(&h.flags)
@@ -655,7 +662,7 @@ pub async fn list_messages(
     if let Some(off) = offset {
         let rows = sqlx::query(
             "SELECT uid, account_id, mailbox, message_id, thread_id, from_addr, to_addrs, cc_addrs,
-                    subject, sent_at, flags, has_attachments, rowid, is_encrypted
+                    subject, sent_at, flags, has_attachments, rowid, is_encrypted, reply_to_addrs
              FROM cached_messages
              WHERE account_id = ? AND mailbox = ?
              ORDER BY sent_at DESC, rowid DESC
@@ -678,7 +685,7 @@ pub async fn list_messages(
     let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
                 m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted
+                m.rowid, m.is_encrypted, m.reply_to_addrs
          FROM cached_messages m
          WHERE m.account_id = ",
     );
@@ -744,7 +751,7 @@ pub async fn list_messages_virtual(
         let rows = sqlx::query(
             "SELECT DISTINCT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
                     m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                    m.rowid, m.is_encrypted
+                    m.rowid, m.is_encrypted, m.reply_to_addrs
              FROM cached_messages m
              JOIN imap_accounts a ON a.account_id = m.account_id
              JOIN virtual_folder_rules r ON r.folder_id = ?
@@ -774,7 +781,7 @@ pub async fn list_messages_virtual(
     let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT DISTINCT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
                 m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted
+                m.rowid, m.is_encrypted, m.reply_to_addrs
          FROM cached_messages m
          JOIN imap_accounts a ON a.account_id = m.account_id
          JOIN virtual_folder_rules r ON r.folder_id = ",
@@ -827,7 +834,7 @@ pub async fn get_message(
 ) -> Result<Option<MessageRow>> {
     let row = sqlx::query(
         "SELECT uid, account_id, mailbox, message_id, thread_id, from_addr, to_addrs, cc_addrs,
-                subject, sent_at, flags, has_attachments, size, rowid, is_encrypted
+                subject, sent_at, flags, has_attachments, size, rowid, is_encrypted, reply_to_addrs
          FROM cached_messages WHERE account_id = ? AND mailbox = ? AND uid = ?",
     )
     .bind(account_id)
@@ -864,7 +871,7 @@ pub async fn list_thread_messages(
          )
          SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
                 m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted
+                m.rowid, m.is_encrypted, m.reply_to_addrs
            FROM cached_messages m
           WHERE m.account_id = ?
             AND ((m.mailbox = ? AND m.uid = ?)
@@ -905,6 +912,7 @@ fn row_to_message(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
         rowid: r.get(12),
         size: None,
         is_encrypted: r.get::<i64, _>(13) != 0,
+        reply_to_addrs: r.get(14),
     }
 }
 
@@ -925,7 +933,28 @@ fn row_to_message_full(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
         size: r.get(12),
         rowid: r.get(13),
         is_encrypted: r.get::<i64, _>(14) != 0,
+        reply_to_addrs: r.get(15),
     }
+}
+
+/// Stores Reply-To addresses parsed lazily for rows cached before the column existed.
+pub async fn set_message_reply_to(
+    pool: &SqlitePool,
+    account_id: &str,
+    mailbox: &str,
+    uid: u32,
+    reply_to_addrs: &str,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE cached_messages SET reply_to_addrs = ? WHERE account_id = ? AND mailbox = ? AND uid = ?",
+    )
+    .bind(reply_to_addrs)
+    .bind(account_id)
+    .bind(mailbox)
+    .bind(uid as i64)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────
@@ -969,7 +998,7 @@ pub async fn search_messages(
     let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
                 m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted",
+                m.rowid, m.is_encrypted, m.reply_to_addrs",
     );
     if use_fts {
         qb.push(
@@ -1029,7 +1058,7 @@ pub async fn search_messages_mailbox(
     let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
                 m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted",
+                m.rowid, m.is_encrypted, m.reply_to_addrs",
     );
     if use_fts {
         qb.push(
@@ -1092,7 +1121,7 @@ pub async fn search_messages_virtual(
     let mut qb = QueryBuilder::<Sqlite>::new(
         "SELECT DISTINCT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
                 m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted",
+                m.rowid, m.is_encrypted, m.reply_to_addrs",
     );
     if use_fts {
         qb.push(
@@ -1189,7 +1218,8 @@ mod tests {
                 message_id TEXT, thread_id TEXT, from_addr TEXT, to_addrs TEXT, cc_addrs TEXT,
                 subject TEXT, sent_at INTEGER, flags TEXT, has_attachments INTEGER NOT NULL DEFAULT 0,
                 rowid_override INTEGER, is_unread INTEGER NOT NULL DEFAULT 1,
-                is_encrypted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (account_id, mailbox, uid)
+                is_encrypted INTEGER NOT NULL DEFAULT 0, reply_to_addrs TEXT,
+                PRIMARY KEY (account_id, mailbox, uid)
             )",
         )
         .execute(&pool)
