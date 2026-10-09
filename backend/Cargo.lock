@@ -470,7 +470,7 @@ dependencies = [
  "openssl",
  "p256",
  "quick-xml",
- "rand 0.9.5",
+ "rand 0.10.2",
  "reqwest",
  "rrule",
  "rust-stemmers",

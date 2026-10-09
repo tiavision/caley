@@ -17,7 +17,7 @@ futures-util = "0.3"
 hkdf = "0.12"
 ical = "0.11"
 quick-xml = "0.42"
-rand = "0.9"
+rand = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots"] }
 rrule = "0.14"
 serde = { version = "1", features = ["derive"] }
