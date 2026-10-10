@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use hkdf::Hkdf;
 use p256::SecretKey;
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::sec1::ToSec1Point;
 use sha2::Sha256;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, sleep};
@@ -709,10 +709,10 @@ fn derive_push_keys(
     let mut okm = [0u8; 48];
     hk.expand(b"caley-push-ecdh-v1", &mut okm).ok()?;
 
-    let secret_key = SecretKey::from_bytes((&okm[..32]).into()).ok()?;
+    let secret_key = SecretKey::from_slice(&okm[..32]).ok()?;
     let public_key = secret_key.public_key();
     // Uncompressed EC point: 04 || x || y = 65 bytes
-    let encoded = public_key.to_encoded_point(false);
+    let encoded = public_key.to_sec1_point(false);
 
     let p256dh = URL_SAFE_NO_PAD.encode(encoded.as_bytes());
     let auth = URL_SAFE_NO_PAD.encode(&okm[32..48]);
