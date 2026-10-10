@@ -371,6 +371,7 @@ pub async fn autodiscover_handler(
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .user_agent(crate::version::USER_AGENT)
+        .use_preconfigured_tls(crate::imap_client::tls_config())
         .build()
     {
         Ok(c) => c,

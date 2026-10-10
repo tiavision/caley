@@ -192,6 +192,7 @@ pub async fn proxy_image(
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .user_agent(version::USER_AGENT)
+        .use_preconfigured_tls(crate::imap_client::tls_config())
         .redirect(reqwest::redirect::Policy::default())
         .build()
     {

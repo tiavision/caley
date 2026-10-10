@@ -169,8 +169,8 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let oidc_provider: Option<Arc<OidcProvider>> = if use_oidc {
-        let http_client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
+        let http_client = openidconnect::reqwest::Client::builder()
+            .redirect(openidconnect::reqwest::redirect::Policy::none())
             .build()?;
         let issuer = IssuerUrl::new(args.oidc_issuer.clone().unwrap())?;
         let provider_meta = ProviderMetadataWithLogout::discover_async(issuer, &http_client)

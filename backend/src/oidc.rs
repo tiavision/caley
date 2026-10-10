@@ -41,7 +41,7 @@ pub type OidcCoreClient = CoreClient<
 pub struct OidcProvider {
     pub client: OidcCoreClient,
     pub end_session_endpoint: Option<EndSessionUrl>,
-    pub http_client: reqwest::Client,
+    pub http_client: openidconnect::reqwest::Client,
 }
 
 #[derive(Clone, Debug, ValueEnum)]

@@ -11,13 +11,17 @@ use crate::email_db::MessageHeader;
 
 pub type ImapSession = async_imap::Session<tokio_rustls::client::TlsStream<TcpStream>>;
 
-fn tls_connector() -> Result<TlsConnector> {
+/// Shared TLS config (bundled webpki roots) for IMAP and reqwest, so no system CA store is needed.
+pub fn tls_config() -> rustls::ClientConfig {
     let mut root_store = rustls::RootCertStore::empty();
     root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let config = rustls::ClientConfig::builder()
+    rustls::ClientConfig::builder()
         .with_root_certificates(root_store)
-        .with_no_client_auth();
-    Ok(TlsConnector::from(Arc::new(config)))
+        .with_no_client_auth()
+}
+
+fn tls_connector() -> Result<TlsConnector> {
+    Ok(TlsConnector::from(Arc::new(tls_config())))
 }
 
 pub async fn connect(host: &str, port: u16, username: &str, password: &str) -> Result<ImapSession> {

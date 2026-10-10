@@ -32,6 +32,7 @@ impl CalDavClient {
     pub fn new(base_url: String, username: String, password: String) -> anyhow::Result<Self> {
         let client = Client::builder()
             .user_agent(version::USER_AGENT)
+            .use_preconfigured_tls(crate::imap_client::tls_config())
             .redirect(reqwest::redirect::Policy::none())
             .build()?;
         Ok(Self {
