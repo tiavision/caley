@@ -32,7 +32,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 hmac = "0.13"
 tower = "0.5"
 tower-http = { version = "0.6.11", features = ["auth", "fs"] }
-tower-sessions = "0.14"
+tower-sessions = "0.15"
 tower-sessions-sqlx-store = { version = "0.15", features = ["sqlite"] }
 time = "0.3"
 url = "2"
