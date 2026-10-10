@@ -408,12 +408,12 @@ async fn append_message(
             Response::Done {
                 tag,
                 status,
-                code,
-                information,
+                outcome,
             } if tag == &request_id => {
                 return Err(anyhow!(
-                    "IMAP APPEND to mailbox {mailbox:?} rejected before upload: {status:?} {code:?} {}",
-                    information.as_deref().unwrap_or("")
+                    "IMAP APPEND to mailbox {mailbox:?} rejected before upload: {status:?} {:?} {}",
+                    outcome.code,
+                    outcome.information.as_deref().unwrap_or("")
                 ));
             }
             _ => {}
@@ -431,8 +431,7 @@ async fn append_message(
         if let Response::Done {
             tag,
             status,
-            code,
-            information,
+            outcome,
         } = response.parsed()
         {
             if tag != &request_id {
@@ -441,8 +440,9 @@ async fn append_message(
             return match status {
                 Status::Ok => Ok(()),
                 _ => Err(anyhow!(
-                    "IMAP APPEND to mailbox {mailbox:?} rejected after upload: {status:?} {code:?} {}",
-                    information.as_deref().unwrap_or("")
+                    "IMAP APPEND to mailbox {mailbox:?} rejected after upload: {status:?} {:?} {}",
+                    outcome.code,
+                    outcome.information.as_deref().unwrap_or("")
                 )),
             };
         }

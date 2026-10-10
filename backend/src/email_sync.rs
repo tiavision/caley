@@ -705,7 +705,7 @@ fn sha2_hex(input: String) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(input.as_bytes());
-    format!("{:x}", hasher.finalize())
+    hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Deterministic path to the compressed `.eml.zst` file for a given message.
