@@ -1,4 +1,4 @@
-use sqlx::{Row, SqlitePool};
+use sqlx::{AssertSqlSafe, Row, SqlitePool};
 use std::collections::HashSet;
 
 #[derive(sqlx::FromRow)]
@@ -82,7 +82,7 @@ pub async fn remove_stale_addressbooks(
         let sql = format!(
             "DELETE FROM contact_push_subscriptions WHERE account_id = ? AND addressbook_href NOT IN ({placeholders})"
         );
-        let mut q = sqlx::query(&sql).bind(account_id);
+        let mut q = sqlx::query(AssertSqlSafe(sql)).bind(account_id);
         for h in fresh_hrefs {
             q = q.bind(h.as_str());
         }
@@ -91,7 +91,7 @@ pub async fn remove_stale_addressbooks(
         let sql = format!(
             "DELETE FROM cached_contacts WHERE account_id = ? AND addressbook_href NOT IN ({placeholders})"
         );
-        let mut q = sqlx::query(&sql).bind(account_id);
+        let mut q = sqlx::query(AssertSqlSafe(sql)).bind(account_id);
         for h in fresh_hrefs {
             q = q.bind(h.as_str());
         }
@@ -100,7 +100,7 @@ pub async fn remove_stale_addressbooks(
         let sql = format!(
             "DELETE FROM cached_addressbooks WHERE account_id = ? AND href NOT IN ({placeholders})"
         );
-        let mut q = sqlx::query(&sql).bind(account_id);
+        let mut q = sqlx::query(AssertSqlSafe(sql)).bind(account_id);
         for h in fresh_hrefs {
             q = q.bind(h.as_str());
         }

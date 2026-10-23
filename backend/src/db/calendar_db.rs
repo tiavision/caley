@@ -1,4 +1,4 @@
-use sqlx::{Row, SqlitePool};
+use sqlx::{AssertSqlSafe, Row, SqlitePool};
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -385,7 +385,7 @@ pub async fn remove_stale_calendars(
         let sql = format!(
             "DELETE FROM push_subscriptions WHERE account_id = ? AND calendar_href NOT IN ({placeholders})"
         );
-        let mut q = sqlx::query(&sql).bind(account_id);
+        let mut q = sqlx::query(AssertSqlSafe(sql)).bind(account_id);
         for h in fresh_hrefs {
             q = q.bind(h.as_str());
         }
@@ -394,7 +394,7 @@ pub async fn remove_stale_calendars(
         let sql = format!(
             "DELETE FROM cached_events WHERE account_id = ? AND calendar_href NOT IN ({placeholders})"
         );
-        let mut q = sqlx::query(&sql).bind(account_id);
+        let mut q = sqlx::query(AssertSqlSafe(sql)).bind(account_id);
         for h in fresh_hrefs {
             q = q.bind(h.as_str());
         }
@@ -403,7 +403,7 @@ pub async fn remove_stale_calendars(
         let sql = format!(
             "DELETE FROM cached_calendars WHERE account_id = ? AND href NOT IN ({placeholders})"
         );
-        let mut q = sqlx::query(&sql).bind(account_id);
+        let mut q = sqlx::query(AssertSqlSafe(sql)).bind(account_id);
         for h in fresh_hrefs {
             q = q.bind(h.as_str());
         }
@@ -934,7 +934,7 @@ pub async fn get_raw_events(
     )
     .replacen("WHERE\n         AND", "WHERE", 1);
 
-    let mut q = sqlx::query(&sql).bind(end).bind(start);
+    let mut q = sqlx::query(AssertSqlSafe(sql)).bind(end).bind(start);
     for (account_id, href) in calendar_keys {
         q = q.bind(account_id.as_str()).bind(href.as_str());
     }
@@ -980,14 +980,14 @@ pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::
             .execute(pool)
             .await?;
 
-        sqlx::query(&format!(
+        sqlx::query(AssertSqlSafe(format!(
             "CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
                 summary_idx, description_idx, location_idx,
                 content='cached_events',
                 content_rowid='rowid',
                 tokenize='{tokenizer}'
             )"
-        ))
+        )))
         .execute(pool)
         .await?;
 
@@ -1033,14 +1033,14 @@ pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::
             .execute(pool)
             .await?;
 
-        sqlx::query(&format!(
+        sqlx::query(AssertSqlSafe(format!(
             "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
                 subject_idx, body_idx, from_idx, to_idx,
                 content='cached_messages',
                 content_rowid='rowid',
                 tokenize='{tokenizer}'
             )"
-        ))
+        )))
         .execute(pool)
         .await?;
 

@@ -11,7 +11,7 @@ use crate::db;
 use crate::email_db;
 use crate::oidc::{AppState, CurrentUser};
 use crate::sync::SyncTrigger;
-use sqlx::{Row, SqlitePool};
+use sqlx::{AssertSqlSafe, Row, SqlitePool};
 
 use super::{EventJson, build_event_json, require_account_client};
 
@@ -306,7 +306,7 @@ pub async fn search_events(
     }
     sql.push_str(" ORDER BY e.dtstart DESC LIMIT 100");
 
-    let mut query = sqlx::query(&sql).bind(fts).bind(user_id);
+    let mut query = sqlx::query(AssertSqlSafe(sql)).bind(fts).bind(user_id);
     if let Some(s) = start {
         query = query.bind(s);
     }

@@ -25,7 +25,7 @@ serde_json = "1"
 sha2 = "0.11"
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["webpki-tokio", "logging"] }
 hyper-util = { version = "0.1.20", features = ["client", "tokio"] }
-sqlx = { version = "0.9", features = ["sqlite", "runtime-tokio", "macros", "migrate"] }
+sqlx = { version = "0.9", features = ["sqlite", "runtime-tokio", "macros", "migrate", "time"] }
 libsqlite3-sys = { version = "0.30", features = ["bundled"] }
 tokio = { version = "1.52.3", features = ["macros", "net", "rt-multi-thread", "time", "sync"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -33,7 +33,8 @@ hmac = "0.13"
 tower = "0.5"
 tower-http = { version = "0.7.1", features = ["auth", "fs"] }
 tower-sessions = "0.14"
-tower-sessions-sqlx-store = { version = "0.15", features = ["sqlite"] }
+async-trait = "0.1"
+rmp-serde = "1"
 time = "0.3"
 url = "2"
 uuid = { version = "1", features = ["v4"] }

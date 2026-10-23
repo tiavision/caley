@@ -1,4 +1,4 @@
-use sqlx::SqlitePool;
+use sqlx::{AssertSqlSafe, SqlitePool};
 
 use super::{DEMO_CALDAV_ACCOUNT, DEMO_FAMILY_CAL, DEMO_PERSONAL_CAL, DEMO_WORK_CAL};
 
@@ -239,12 +239,14 @@ pub(super) async fn seed_events(pool: &SqlitePool) -> anyhow::Result<()> {
     for e in events {
         let dtstart_value_type = if e.is_all_day { ";VALUE=DATE" } else { "" };
 
-        let dtstart_dt: String = sqlx::query_scalar(&format!("SELECT {}", e.dtstart_expr))
-            .fetch_one(pool)
-            .await?;
-        let dtend_dt: String = sqlx::query_scalar(&format!("SELECT {}", e.dtend_expr))
-            .fetch_one(pool)
-            .await?;
+        let dtstart_dt: String =
+            sqlx::query_scalar(AssertSqlSafe(format!("SELECT {}", e.dtstart_expr)))
+                .fetch_one(pool)
+                .await?;
+        let dtend_dt: String =
+            sqlx::query_scalar(AssertSqlSafe(format!("SELECT {}", e.dtend_expr)))
+                .fetch_one(pool)
+                .await?;
         let dtstart_date = ical_dt_to_date(&dtstart_dt);
         let dtend_date = ical_dt_to_date(&dtend_dt);
 

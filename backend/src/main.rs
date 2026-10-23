@@ -14,6 +14,7 @@ mod local_auth;
 mod oidc;
 mod pgp;
 mod search;
+mod session_store;
 mod settings;
 mod sse;
 mod sync;
@@ -32,11 +33,11 @@ use oidc::{AppState, OidcProvider, UserIdClaim};
 use openidconnect::core::CoreClient;
 use openidconnect::{ClientId, ClientSecret, IssuerUrl, ProviderMetadataWithLogout, RedirectUrl};
 use search::SearchMode;
+use session_store::SqliteStore;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tower_http::services::ServeDir;
 use tower_sessions::{Expiry, SessionManagerLayer, cookie::SameSite};
-use tower_sessions_sqlx_store::SqliteStore;
 use webauthn_rs::prelude::*;
 
 #[derive(clap::Parser, Debug)]

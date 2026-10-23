@@ -538,10 +538,10 @@ pub(super) async fn seed_messages(
     ];
 
     for m in messages {
-        let sent_at: i64 =
-            sqlx::query_scalar(&format!("SELECT unixepoch('now', '-{} days')", m.days_ago))
-                .fetch_one(pool)
-                .await?;
+        let sent_at: i64 = sqlx::query_scalar("SELECT unixepoch('now', ?)")
+            .bind(format!("-{} days", m.days_ago))
+            .fetch_one(pool)
+            .await?;
 
         let from_lower = extract_email_addr(m.from_addr);
 

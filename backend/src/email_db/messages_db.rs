@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::collections::HashMap;
 
-use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
+use sqlx::{AssertSqlSafe, QueryBuilder, Row, Sqlite, SqlitePool};
 
 // ── Message types ─────────────────────────────────────────────────────────────
 
@@ -58,10 +58,6 @@ pub enum PageDirection {
 }
 
 pub struct AttachmentRow {
-    pub id: i64,
-    pub account_id: String,
-    pub mailbox: String,
-    pub uid: i64,
     pub filename: Option<String>,
     pub content_type: Option<String>,
     pub size: Option<i64>,
@@ -349,7 +345,9 @@ pub async fn delete_messages_by_uids(
     let sql = format!(
         "DELETE FROM cached_messages WHERE account_id = ? AND mailbox = ? AND uid IN ({placeholders})"
     );
-    let mut q = sqlx::query(&sql).bind(account_id).bind(mailbox);
+    let mut q = sqlx::query(AssertSqlSafe(sql))
+        .bind(account_id)
+        .bind(mailbox);
     for uid in uids {
         q = q.bind(*uid as i64);
     }
@@ -370,7 +368,9 @@ pub async fn delete_attachments_by_uids(
     let sql = format!(
         "DELETE FROM cached_attachments WHERE account_id = ? AND mailbox = ? AND uid IN ({placeholders})"
     );
-    let mut q = sqlx::query(&sql).bind(account_id).bind(mailbox);
+    let mut q = sqlx::query(AssertSqlSafe(sql))
+        .bind(account_id)
+        .bind(mailbox);
     for uid in uids {
         q = q.bind(*uid as i64);
     }
@@ -477,7 +477,7 @@ pub async fn list_attachments(
     uid: u32,
 ) -> Result<Vec<AttachmentRow>> {
     let rows = sqlx::query(
-        "SELECT id, account_id, mailbox, uid, filename, content_type, size, part_index, content_id
+        "SELECT filename, content_type, size, part_index, content_id
          FROM cached_attachments WHERE account_id = ? AND mailbox = ? AND uid = ?",
     )
     .bind(account_id)
@@ -489,15 +489,11 @@ pub async fn list_attachments(
     Ok(rows
         .iter()
         .map(|r| AttachmentRow {
-            id: r.get(0),
-            account_id: r.get(1),
-            mailbox: r.get(2),
-            uid: r.get(3),
-            filename: r.get(4),
-            content_type: r.get(5),
-            size: r.get(6),
-            part_index: r.get(7),
-            content_id: r.get(8),
+            filename: r.get(0),
+            content_type: r.get(1),
+            size: r.get(2),
+            part_index: r.get(3),
+            content_id: r.get(4),
         })
         .collect())
 }
@@ -510,7 +506,7 @@ pub async fn get_attachment_by_cid(
     cid: &str,
 ) -> Result<Option<AttachmentRow>> {
     let row = sqlx::query(
-        "SELECT id, account_id, mailbox, uid, filename, content_type, size, part_index, content_id
+        "SELECT filename, content_type, size, part_index, content_id
          FROM cached_attachments
          WHERE account_id = ? AND mailbox = ? AND uid = ? AND content_id = ?",
     )
@@ -522,15 +518,11 @@ pub async fn get_attachment_by_cid(
     .await?;
 
     Ok(row.map(|r| AttachmentRow {
-        id: r.get(0),
-        account_id: r.get(1),
-        mailbox: r.get(2),
-        uid: r.get(3),
-        filename: r.get(4),
-        content_type: r.get(5),
-        size: r.get(6),
-        part_index: r.get(7),
-        content_id: r.get(8),
+        filename: r.get(0),
+        content_type: r.get(1),
+        size: r.get(2),
+        part_index: r.get(3),
+        content_id: r.get(4),
     }))
 }
 
@@ -542,7 +534,7 @@ pub async fn get_attachment_by_filename(
     filename: &str,
 ) -> Result<Option<AttachmentRow>> {
     let row = sqlx::query(
-        "SELECT id, account_id, mailbox, uid, filename, content_type, size, part_index, content_id
+        "SELECT filename, content_type, size, part_index, content_id
          FROM cached_attachments
          WHERE account_id = ? AND mailbox = ? AND uid = ? AND filename = ?",
     )
@@ -554,15 +546,11 @@ pub async fn get_attachment_by_filename(
     .await?;
 
     Ok(row.map(|r| AttachmentRow {
-        id: r.get(0),
-        account_id: r.get(1),
-        mailbox: r.get(2),
-        uid: r.get(3),
-        filename: r.get(4),
-        content_type: r.get(5),
-        size: r.get(6),
-        part_index: r.get(7),
-        content_id: r.get(8),
+        filename: r.get(0),
+        content_type: r.get(1),
+        size: r.get(2),
+        part_index: r.get(3),
+        content_id: r.get(4),
     }))
 }
 
