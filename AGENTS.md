@@ -5,7 +5,7 @@
 Two-package monorepo with no root-level tooling:
 
 - **`backend/`** — Rust 2024 Axum binary. Handles auth, CalDAV/CardDAV/IMAP/SMTP clients, SQLite persistence, encryption, background sync, SSE, WebAuthn/OpenPGP endpoints, and static frontend serving.
-- **`frontend/`** — Vite + Svelte 5 static multi-page app. Pico CSS + Sass, TypeScript strict mode, i18n via `@inlang/paraglide-js`.
+- **`frontend/`** — Vite + Svelte 5 static multi-page app. temper CSS (`@tiaforge-ui/temper`, `data-*` attributes) + Sass for app-specific rules, TypeScript strict mode, i18n via `@inlang/paraglide-js`.
 
 There is no root `package.json`, Cargo workspace, or shared command runner. Work inside the package directory.
 

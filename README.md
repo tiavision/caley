@@ -17,7 +17,7 @@ It connects to existing CalDAV, CardDAV, IMAP, and SMTP servers, stores local ca
 ## Architecture
 
 - **`backend/`** — Rust 2024 Axum server. Handles auth, CalDAV/CardDAV/IMAP/SMTP clients, SQLite persistence, encryption, sync tasks, WebAuthn/OpenPGP endpoints, SSE, and static frontend serving.
-- **`frontend/`** — Vite + Svelte 5 static multi-page app. Pico CSS, Sass, TypeScript, and `@inlang/paraglide-js` i18n.
+- **`frontend/`** — Vite + Svelte 5 static multi-page app. temper CSS (`@tiaforge-ui/temper`), Sass, TypeScript, and `@inlang/paraglide-js` i18n.
 
 There is no root-level package manager or workspace. Run backend and frontend commands from their own directories.
 
