@@ -7,7 +7,7 @@
   import EventColorDot from './EventColorDot.svelte';
   import CreateCalendarDialog from './CreateCalendarDialog.svelte';
   import ImportDialog from './ImportDialog.svelte';
-  import UiIcon from './UiIcon.svelte';
+  import NavToggle from './NavToggle.svelte';
   import type { CalendarJson, CalDavAccountJson } from '../types/calendar.ts';
   import EncryptionSettings from './settings/EncryptionSettings.svelte';
 
@@ -169,13 +169,14 @@
   }
 </script>
 
-<div class="settings-form">
-  <div class="settings-header">
-    <h2>{tl('settings_heading')}</h2>
-    <span class="locale-group">
-      🌐
+<div data-layout="center" data-gap="lg" data-pad="lg" style="--tm-measure: 40rem">
+  <div data-layout="row" data-gap="sm">
+    <NavToggle />
+    <h2 data-grow style="--tm-grow-basis: 12rem">{tl('settings_heading')}</h2>
+    <label data-layout="row" data-gap="sm">
+      <span data-icon="globe" data-muted></span>
       <select
-        class="locale-picker"
+        data-size="sm"
         aria-label={tl('settings_language')}
         bind:value={selectedLocale}
         onchange={onLocaleChange}
@@ -184,131 +185,143 @@
           <option value={opt.value}>{opt.label}</option>
         {/each}
       </select>
-    </span>
+    </label>
   </div>
 
-  {#if !loading}
-    <div class="tabs" role="tablist">
+  {#if loading}
+    <p aria-busy="true">{tl('nav_loading')}</p>
+  {:else}
+    <div role="tablist" aria-label={tl('settings_heading')}>
       <button
+        type="button"
         role="tab"
-        class:active={tab === 'settings'}
+        id="settings-tab-general"
+        aria-controls="settings-panel-general"
         aria-selected={tab === 'settings'}
         onclick={() => switchTab('settings')}
       >{tl('nav_settings')}</button>
       <button
+        type="button"
         role="tab"
-        class:active={tab === 'encryption'}
+        id="settings-tab-encryption"
+        aria-controls="settings-panel-encryption"
         aria-selected={tab === 'encryption'}
         onclick={() => switchTab('encryption')}
       >{tl('pgp_tabEncryption')}</button>
     </div>
-  {/if}
 
-  {#if loading}
-    <p aria-busy="true">{tl('nav_loading')}</p>
-  {:else if tab === 'settings'}
-    <div class="settings-panel">
-      <div class="cal-actions">
-        <button class="cal-action-btn" onclick={openAddAccountDialog}>
+    <div
+      role="tabpanel"
+      id="settings-panel-general"
+      aria-labelledby="settings-tab-general"
+      hidden={tab !== 'settings'}
+      data-layout="stack"
+      data-gap="lg"
+    >
+      <div data-layout="row" data-gap="sm">
+        <button type="button" data-variant="outline" data-size="sm" data-icon="user-plus" onclick={openAddAccountDialog}>
           {tl('mail_addAccount')}
         </button>
-        <button class="cal-action-btn" onclick={() => createCalDialog.open()}>
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <button type="button" data-variant="outline" data-size="sm" data-icon="calendar-plus" onclick={() => createCalDialog.open()}>
           {tl('cal_createCalendar')}
         </button>
-        <button class="cal-action-btn" onclick={() => importDialog.open()}>
+        <button type="button" data-variant="outline" data-size="sm" data-icon="upload" onclick={() => importDialog.open()}>
           {tl('cal_import')}
         </button>
       </div>
+
       {#if calendarsLoading}
         <p aria-busy="true">{tl('nav_loading')}</p>
       {:else if caldavAccounts.length === 0}
-        <p class="settings-subtitle">{tl('settings_subtitle')}</p>
+        <p data-muted>{tl('settings_subtitle')}</p>
       {:else}
-        <div class="caldav-account-list">
-          {#each caldavAccounts as account (account.account_id)}
-            <section class="caldav-account">
-              <header class="caldav-account-header">
-                <div>
-                  <h3>{account.display_name}</h3>
-                  <p>{account.caldav_username}</p>
-                </div>
-                <div class="caldav-account-actions">
-                  <button class="secondary small" onclick={() => openEditAccountDialog(account)}>{tl('contacts_edit')}</button>
-                  <button class="contrast outline small" onclick={() => onDeleteCalDavAccount(account)}>{tl('contacts_delete')}</button>
-                </div>
-              </header>
-              <h4>{tl('cal_calendars')}</h4>
-              <ul class="calendar-list">
-                {#each account.calendars as cal (cal.account_id + cal.href)}
-                  <li>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={cal.is_active}
-                        onchange={(e) => toggleCalendar(cal.account_id, cal.href, (e.target as HTMLInputElement).checked)}
-                      />
-                      <EventColorDot color={cal.color} />
-                      {cal.name}
-                    </label>
-                  </li>
+        {#each caldavAccounts as account (account.account_id)}
+          <article data-layout="stack" data-gap="sm">
+            <header data-layout="row" data-gap="sm" data-justify="between">
+              <div data-layout="stack" data-gap="none">
+                <h3>{account.display_name}</h3>
+                <small data-muted>{account.caldav_username}</small>
+              </div>
+              <div data-layout="row" data-gap="xs">
+                <button type="button" data-variant="secondary" data-size="sm" onclick={() => openEditAccountDialog(account)}>{tl('contacts_edit')}</button>
+                <button type="button" data-variant="outline" data-tone="danger" data-size="sm" onclick={() => onDeleteCalDavAccount(account)}>{tl('contacts_delete')}</button>
+              </div>
+            </header>
+            <h4 data-caption>{tl('cal_calendars')}</h4>
+            <div data-layout="stack" data-gap="xs">
+              {#each account.calendars as cal (cal.account_id + cal.href)}
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={cal.is_active}
+                    onchange={(e) => toggleCalendar(cal.account_id, cal.href, (e.target as HTMLInputElement).checked)}
+                  />
+                  <EventColorDot color={cal.color} />
+                  {cal.name}
+                </label>
+              {/each}
+            </div>
+            {#if account.addressbooks.length > 0}
+              <h4 data-caption>{tl('contacts_addressbooks')}</h4>
+              <ul data-layout="stack" data-gap="xs">
+                {#each account.addressbooks as ab (ab.account_id + ab.href)}
+                  <li>{ab.name}</li>
                 {/each}
               </ul>
-              {#if account.addressbooks.length > 0}
-                <h4>{tl('contacts_addressbooks')}</h4>
-                <ul class="calendar-list">
-                  {#each account.addressbooks as ab (ab.account_id + ab.href)}
-                    <li>{ab.name}</li>
-                  {/each}
-                </ul>
-              {/if}
-            </section>
-          {/each}
-        </div>
+            {/if}
+          </article>
+        {/each}
       {/if}
 
       <hr />
-      <button class="delete-account-btn" onclick={onDeleteAccount} disabled={deleting} aria-busy={deleting}>
+      <button type="button" data-variant="outline" data-tone="danger" data-self="start" data-icon="trash-2" onclick={onDeleteAccount} disabled={deleting} aria-busy={deleting}>
         {tl('settings_deleteAccount')}
       </button>
     </div>
-  {:else if tab === 'encryption'}
-  <EncryptionSettings {locale} />
+
+    <div
+      role="tabpanel"
+      id="settings-panel-encryption"
+      aria-labelledby="settings-tab-encryption"
+      hidden={tab !== 'encryption'}
+    >
+      {#if tab === 'encryption'}
+        <EncryptionSettings {locale} />
+      {/if}
+    </div>
   {/if}
 </div>
 
-<dialog bind:this={accountDialog} onclick={(e) => { if (e.target === e.currentTarget) accountDialog?.close(); }}>
-  <article>
-    <header>
-      <h3>{editingAccountId ? tl('mail_editAccountHeading') : tl('mail_addAccountHeading')}</h3>
-      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={() => accountDialog?.close()}></button>
-    </header>
-    <form class="settings-connection-form" onsubmit={(e) => { e.preventDefault(); onSubmit(); }}>
-      <label>
-        <span>{tl('settings_accountName')}</span>
-        <input type="text" bind:value={caldavDisplayName} />
-      </label>
-      <label>
-        <span>{tl('settings_baseUrl')}</span>
-        <input type="url" placeholder={tl('settings_baseUrlPlaceholder')} bind:value={caldavBaseUrl} required />
-      </label>
-      <label>
-        <span>{tl('settings_username')}</span>
-        <input type="text" placeholder={tl('settings_usernamePlaceholder')} bind:value={caldavUsername} required />
-      </label>
-      <label>
-        <span>{tl('settings_password')}</span>
-        <input type="password" placeholder={!hasPassword ? tl('settings_passwordPlaceholder') : tl('settings_passwordHint')} bind:value={caldavPassword} />
-      </label>
-      {#if errorMsg}
-        <p class="error-msg">{errorMsg}</p>
-      {/if}
-      <footer>
-        <button type="submit" disabled={saving} aria-busy={saving}>{tl('settings_submit')}</button>
-        <button type="button" class="secondary" onclick={() => accountDialog?.close()}>{tl('event_cancel')}</button>
-      </footer>
-    </form>
-  </article>
+<dialog id="caldav-account-dialog" closedby="any" aria-labelledby="caldav-account-title" bind:this={accountDialog}>
+  <header>
+    <h2 id="caldav-account-title">{editingAccountId ? tl('mail_editAccountHeading') : tl('mail_addAccountHeading')}</h2>
+    <button type="button" commandfor="caldav-account-dialog" command="close" aria-label={tl('weekly_aria_close')}></button>
+  </header>
+  <form data-layout="stack" data-gap="md" onsubmit={(e) => { e.preventDefault(); onSubmit(); }}>
+    <label>
+      {tl('settings_accountName')}
+      <input type="text" bind:value={caldavDisplayName} />
+    </label>
+    <label>
+      {tl('settings_baseUrl')}
+      <input type="url" placeholder={tl('settings_baseUrlPlaceholder')} bind:value={caldavBaseUrl} required />
+    </label>
+    <label>
+      {tl('settings_username')}
+      <input type="text" autocomplete="username" placeholder={tl('settings_usernamePlaceholder')} bind:value={caldavUsername} required />
+    </label>
+    <label>
+      {tl('settings_password')}
+      <input type="password" autocomplete="current-password" placeholder={!hasPassword ? tl('settings_passwordPlaceholder') : tl('settings_passwordHint')} bind:value={caldavPassword} />
+    </label>
+    {#if errorMsg}
+      <div data-callout data-tone="danger" role="alert">{errorMsg}</div>
+    {/if}
+    <footer>
+      <button type="button" data-variant="secondary" commandfor="caldav-account-dialog" command="close">{tl('event_cancel')}</button>
+      <button type="submit" disabled={saving} aria-busy={saving}>{tl('settings_submit')}</button>
+    </footer>
+  </form>
 </dialog>
 
 <CreateCalendarDialog
@@ -324,175 +337,3 @@
   {locale}
   onimported={fetchCalendars}
 />
-
-<style>
-  .settings-form {
-    box-sizing: border-box;
-    width: 100%;
-    padding: 1rem;
-  }
-
-  .settings-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-
-    h2 {
-      margin: 0;
-      flex: 1;
-    }
-  }
-
-  .locale-group {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-
-  .delete-account-btn {
-    background: none;
-    border: 1px solid var(--pico-del-color);
-    color: var(--pico-del-color);
-    margin-top: 0.5rem;
-    width: auto;
-  }
-
-  .delete-account-btn:hover {
-    background-color: var(--pico-del-color);
-    color: white;
-  }
-
-  .tabs {
-    align-items: center;
-    align-self: flex-start;
-    background: var(--pico-muted-border-color);
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: 0.5rem;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.15rem;
-    margin-bottom: 1.5rem;
-    margin-top: 1rem;
-    max-width: 100%;
-    padding: 0.15rem;
-  }
-
-  .tabs button {
-    background: none;
-    border: 1px solid transparent;
-    border-radius: 0.35rem;
-    box-shadow: none;
-    color: var(--pico-muted-color);
-    cursor: pointer;
-    font-size: 0.9rem;
-    font-weight: 500;
-    line-height: 1.2;
-    margin: 0;
-    min-height: 2rem;
-    padding: 0.4rem 0.75rem;
-    transition: color 0.15s, background-color 0.15s, border-color 0.15s;
-    white-space: nowrap;
-    width: auto;
-  }
-
-  .tabs button:hover {
-    background: var(--pico-card-background-color);
-    color: var(--pico-primary);
-  }
-
-  .tabs button.active {
-    background: var(--pico-card-background-color);
-    border-color: var(--pico-card-border-color);
-    color: var(--pico-primary);
-    font-weight: 600;
-  }
-
-  .settings-panel {
-    max-width: 32rem;
-  }
-
-  .settings-subtitle {
-    color: var(--pico-muted-color);
-    margin-bottom: 1rem;
-  }
-
-  .settings-connection-form {
-    max-width: 30rem;
-  }
-
-  .settings-connection-form input {
-    max-width: 30rem;
-  }
-
-  .settings-connection-form button[type="submit"] {
-    width: auto;
-  }
-
-  .settings-panel hr {
-    max-width: 30rem;
-    margin: 1.25rem 0 0.75rem;
-  }
-
-  @media (max-width: 640px) {
-    .settings-form {
-      padding: 0.75rem;
-    }
-
-    .settings-header {
-      align-items: flex-start;
-    }
-
-    .tabs {
-      width: 100%;
-    }
-
-    .tabs button {
-      flex: 1 1 auto;
-      min-width: 8rem;
-    }
-  }
-
-  .calendar-list {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 0.75rem;
-  }
-  .calendar-list li { list-style: none; }
-  .calendar-list label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-  }
-  .calendar-list input[type="checkbox"] {
-    cursor: pointer;
-    margin: 0;
-  }
-
-  .cal-actions {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-  }
-  .cal-action-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.3rem 0.6rem;
-    font-size: 0.8rem;
-    background: none;
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    color: var(--pico-muted-color);
-    cursor: pointer;
-    line-height: 1.4;
-    margin-bottom: 0;
-    transition: color 0.15s, border-color 0.15s;
-  }
-  .cal-action-btn:hover {
-    color: var(--pico-primary);
-    border-color: var(--pico-primary);
-  }
-
-</style>

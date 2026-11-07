@@ -56,63 +56,47 @@
   }
 </script>
 
-<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
-<dialog
-  bind:this={dialogEl}
-  onclick={(e) => { if (e.target === e.currentTarget) dialogEl?.close(); }}
->
-  <article>
-    <header>
-      <h3>{tl('cal_createCalendar')}</h3>
-      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={() => dialogEl?.close()}></button>
-    </header>
+<dialog id="create-calendar-dialog" closedby="any" aria-labelledby="create-calendar-title" bind:this={dialogEl}>
+  <header>
+    <h2 id="create-calendar-title">{tl('cal_createCalendar')}</h2>
+    <button type="button" commandfor="create-calendar-dialog" command="close" aria-label={tl('weekly_aria_close')}></button>
+  </header>
 
-    {#if error}
-      <div class="form-error">{error}</div>
+  {#if error}
+    <div data-callout data-tone="danger" role="alert">{error}</div>
+  {/if}
+
+  <form data-layout="stack" data-gap="md" onsubmit={(e) => { e.preventDefault(); submit(); }}>
+    <label>
+      {tl('cal_createCalendarName')}
+      <input type="text" bind:value={name} required />
+    </label>
+
+    {#if accounts.length > 1}
+      <label>
+        {tl('cal_createAccount')}
+        <select bind:value={accountId} required>
+          {#each accounts as account (account.account_id)}
+            <option value={account.account_id}>{account.display_name}</option>
+          {/each}
+        </select>
+      </label>
     {/if}
 
-    <form onsubmit={(e) => { e.preventDefault(); submit(); }}>
-      <label>
-        <span>{tl('cal_createCalendarName')}</span>
-        <input type="text" bind:value={name} required />
-      </label>
+    <label>
+      <input type="checkbox" bind:checked={useColor} />
+      {tl('cal_createCalendarColor')}
+    </label>
 
-      {#if accounts.length > 1}
-        <label>
-          <span>{tl('cal_createAccount')}</span>
-          <select bind:value={accountId} required>
-            {#each accounts as account (account.account_id)}
-              <option value={account.account_id}>{account.display_name}</option>
-            {/each}
-          </select>
-        </label>
-      {/if}
+    {#if useColor}
+      <input type="color" aria-label={tl('cal_createCalendarColor')} bind:value={color} />
+    {/if}
 
-      <label class="color-toggle">
-        <input type="checkbox" bind:checked={useColor} />
-        <span>{tl('cal_createCalendarColor')}</span>
-      </label>
-
-      {#if useColor}
-        <label>
-          <input type="color" bind:value={color} />
-        </label>
-      {/if}
-
-      <footer>
-        <button type="submit" aria-busy={saving}>{tl('cal_createCalendarSave')}</button>
-        <button type="button" class="secondary" onclick={() => dialogEl?.close()}>
-          {tl('event_cancel')}
-        </button>
-      </footer>
-    </form>
-  </article>
+    <footer>
+      <button type="button" data-variant="secondary" commandfor="create-calendar-dialog" command="close">
+        {tl('event_cancel')}
+      </button>
+      <button type="submit" aria-busy={saving}>{tl('cal_createCalendarSave')}</button>
+    </footer>
+  </form>
 </dialog>
-
-<style>
-  .color-toggle {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-</style>
