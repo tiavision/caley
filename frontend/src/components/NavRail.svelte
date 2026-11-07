@@ -98,9 +98,9 @@
 {#if user}
   <nav data-rail popover id="nav" aria-label={tl('nav_label')}>
     <header>
-      <a href="/" class="brand" data-rail-label>
+      <a href="/" class="brand" aria-label={tl('app_brand')}>
         <img src="/icons/favicon-48x48.png" alt="" />
-        <span>{tl('app_brand')}</span>
+        <span data-rail-label>{tl('app_brand')}</span>
       </a>
       <input
         type="checkbox"
@@ -144,8 +144,15 @@
     color: var(--tm-text);
     text-decoration: none;
   }
+  /* The logo stays as the mark of the collapsed rail; temper hides the text. Rail links are padded for an
+     18px icon, so the collapsed brand drops its side padding to fit the 24px logo. */
   .brand img {
+    flex-shrink: 0;
     inline-size: 1.5rem;
     block-size: 1.5rem;
+  }
+  :global([data-rail]:has([data-rail-collapse]:checked)) .brand {
+    justify-content: center;
+    padding-inline: 0;
   }
 </style>

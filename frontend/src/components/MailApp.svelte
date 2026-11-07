@@ -3030,10 +3030,11 @@
     text-align: center;
   }
 
+  /* Next to the FAB, vertically centered on it: the FAB is 1.4 control heights tall, --tm-space-lg from the edges. */
   .origins-trigger {
     position: fixed;
-    inset-block-end: 2.25rem;
-    inset-inline-end: 6rem;
+    inset-block-end: calc(var(--tm-space-lg) + var(--tm-control-h) * 0.2);
+    inset-inline-end: calc(var(--tm-space-lg) + var(--tm-control-h) * 1.4 + var(--tm-space-md));
     z-index: 50;
     box-shadow: var(--tm-shadow-lg);
   }
