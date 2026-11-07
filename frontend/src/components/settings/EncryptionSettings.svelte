@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { makeTl } from '../../lib/i18n.ts';
-  import UiIcon from '../UiIcon.svelte';
   export let locale: string;
   $: tl = makeTl(locale);
 
@@ -742,744 +741,440 @@
   });
 </script>
 
-  <div class="encryption-panel">
-    {#if pgpVault}
-      <div class="pgp-heading">
+<div data-layout="stack" data-gap="lg">
+  {#if pgpVault}
+    <section data-layout="stack" data-gap="md">
+      <div data-layout="row" data-gap="sm">
         <h3>{tl('pgp_vaultHeading')}</h3>
-        <span class="pgp-key-status {pgpVaultUnlocked ? 'unlocked' : 'locked'}">
-          {pgpVaultUnlocked ? tl('pgp_vaultUnlocked') : tl('pgp_vaultLocked')}
-        </span>
-      </div>
-      {#if pgpUnlockError}<p class="pgp-error">{pgpUnlockError}</p>{/if}
-      {#if pgpDeviceActionError}<p class="pgp-error">{pgpDeviceActionError}</p>{/if}
-
-      <div class="pgp-global-actions">
         {#if pgpVaultUnlocked}
-          <button class="secondary" onclick={onPgpLockVault}>{tl('pgp_lockVault')}</button>
+          <span data-badge data-tone="success" data-icon="lock-open">{tl('pgp_vaultUnlocked')}</span>
+        {:else}
+          <span data-badge data-tone="neutral" data-icon="lock">{tl('pgp_vaultLocked')}</span>
+        {/if}
+      </div>
+      {#if pgpUnlockError}<div data-callout data-tone="danger" role="alert">{pgpUnlockError}</div>{/if}
+      {#if pgpDeviceActionError}<div data-callout data-tone="danger" role="alert">{pgpDeviceActionError}</div>{/if}
+
+      <div data-layout="row" data-gap="sm">
+        {#if pgpVaultUnlocked}
+          <button type="button" data-variant="secondary" data-icon="lock" onclick={onPgpLockVault}>{tl('pgp_lockVault')}</button>
         {:else if pgpLocalActiveMethods.length === 1}
-          <button onclick={() => onPgpUnlockVault(pgpLocalActiveMethods[0])} disabled={pgpUnlocking} aria-busy={pgpUnlocking}>
+          <button type="button" data-icon="lock-open" onclick={() => onPgpUnlockVault(pgpLocalActiveMethods[0])} disabled={pgpUnlocking} aria-busy={pgpUnlocking}>
             {pgpUnlocking ? tl('pgp_unlocking') : tl('pgp_unlockVaultButton')}
           </button>
         {:else if pgpLocalActiveMethods.length > 1}
-          <button onclick={() => openUnlockDialog(false)}>{tl('pgp_unlockVaultButton')}</button>
+          <button type="button" data-icon="lock-open" onclick={() => openUnlockDialog(false)}>{tl('pgp_unlockVaultButton')}</button>
         {/if}
-        <button class="secondary danger" onclick={onPgpResetVault} disabled={pgpResetting} aria-busy={pgpResetting}>
+        {#if pgpVaultUnlocked}
+          <button type="button" data-variant="secondary" onclick={onPgpRotateVaultKey}>{tl('pgp_rotateVaultKey')}</button>
+        {/if}
+        <button type="button" data-variant="outline" data-tone="danger" onclick={onPgpResetVault} disabled={pgpResetting} aria-busy={pgpResetting}>
           {tl('pgp_startOverButton')}
         </button>
-        {#if pgpVaultUnlocked}
-          <button class="secondary" onclick={onPgpRotateVaultKey}>{tl('pgp_rotateVaultKey')}</button>
-        {/if}
       </div>
+    </section>
 
-      <div class="pgp-section-heading">
-        <h4>{tl('pgp_privateKeysHeading')}</h4>
-        <span
-          class="pgp-tooltip-anchor"
-          title={pgpVaultUnlocked ? tl('pgp_importPrivateKeyButton') : tl('pgp_importUnlockFirst')}
-        >
-          <button
-            class="pgp-icon-btn"
-            onclick={openPrivateKeyDialog}
-            disabled={!pgpVaultUnlocked}
-            title={pgpVaultUnlocked ? tl('pgp_importPrivateKeyButton') : tl('pgp_importUnlockFirst')}
-            aria-label={pgpVaultUnlocked ? tl('pgp_importPrivateKeyButton') : tl('pgp_importUnlockFirst')}
-          >
-            <UiIcon name="import" />
-          </button>
-        </span>
+    <section data-layout="stack" data-gap="sm">
+      <div data-layout="row" data-gap="sm" data-wrap="none">
+        <h4 data-grow>{tl('pgp_privateKeysHeading')}</h4>
+        <button
+          type="button"
+          data-variant="ghost"
+          data-size="sm"
+          data-icon="import"
+          onclick={openPrivateKeyDialog}
+          disabled={!pgpVaultUnlocked}
+          aria-label={pgpVaultUnlocked ? tl('pgp_importPrivateKeyButton') : tl('pgp_importUnlockFirst')}
+          data-tooltip
+        ></button>
       </div>
-      <p class="pgp-section-hint">{tl('pgp_privateKeysHint')}</p>
-      <ul class="pgp-key-list">
-        {#each pgpVaultRecords as record (record.fingerprint)}
-          <li class="pgp-key-item pgp-private-key-item">
-            <div class="pgp-key-info pgp-private-key-info">
-              <div class="pgp-private-key-header">
-                <span class="pgp-fingerprint" title={record.fingerprint}>{record.fingerprint}</span>
-                <div class="pgp-key-actions">
+      <p data-muted>{tl('pgp_privateKeysHint')}</p>
+      {#if pgpVaultRecords.length > 0}
+        <ul data-list>
+          {#each pgpVaultRecords as record (record.fingerprint)}
+            <li data-layout="stack" data-gap="xs">
+              <div data-layout="row" data-gap="sm" data-wrap="none">
+                <code data-grow data-truncate title={record.fingerprint}>{record.fingerprint}</code>
+                <div data-layout="row" data-gap="xs" data-wrap="none">
                   {#if pgpVaultUnlocked}
                     <button
-                      class="pgp-icon-btn"
+                      type="button"
+                      data-variant="ghost"
+                      data-size="sm"
+                      data-icon="user-plus"
                       onclick={() => openIdentityDialog(record.fingerprint)}
-                      title={tl('pgp_addIdentity')}
                       aria-label={tl('pgp_addIdentity')}
-                    >
-                      <UiIcon name="identity-plus" />
-                    </button>
+                      data-tooltip
+                    ></button>
                     <button
-                      class="pgp-icon-btn"
+                      type="button"
+                      data-variant="ghost"
+                      data-size="sm"
+                      data-icon="import"
                       onclick={() => openOwnPublicKeyDialog(record.fingerprint)}
-                      title={tl('pgp_importOwnPublicKey')}
                       aria-label={tl('pgp_importOwnPublicKey')}
-                    >
-                      <UiIcon name="import" />
-                    </button>
+                      data-tooltip
+                    ></button>
                   {/if}
                   {#if pgpVaultUnlocked || pgpOwnPublicKeys.has(record.fingerprint)}
                     <button
-                      class="pgp-icon-btn"
+                      type="button"
+                      data-variant="ghost"
+                      data-size="sm"
+                      data-icon="download"
                       onclick={() => onPgpExportPublicKey(record.fingerprint)}
-                      title={tl('pgp_exportPublicKey')}
                       aria-label={tl('pgp_exportPublicKey')}
-                    >
-                      <UiIcon name="export" />
-                    </button>
+                      data-tooltip
+                    ></button>
                   {/if}
                   {#if pgpVaultUnlocked}
                     <button
-                      class="pgp-icon-btn danger"
+                      type="button"
+                      data-variant="ghost"
+                      data-size="sm"
+                      data-tone="danger"
+                      data-icon="trash-2"
                       onclick={() => onPgpRemoveKey(record.fingerprint)}
-                      title={tl('pgp_removeKey')}
                       aria-label={tl('pgp_removeKey')}
-                    >
-                      <UiIcon name="trash" />
-                    </button>
+                      data-tooltip
+                    ></button>
                   {/if}
                 </div>
               </div>
               {#if record.fingerprint === pgpJustEnrolled}
-                <span class="pgp-success">{tl('pgp_enrolled')}</span>
+                <small data-tone="success">{tl('pgp_enrolled')}</small>
               {/if}
               {#if displayedKeyIdentities(record.fingerprint, pgpUnlockRevision, pgpStoredKeyIdentities).length > 0}
-                <span class="pgp-identity-heading">{tl('pgp_keyIdentities')}</span>
+                <small data-caption>{tl('pgp_keyIdentities')}</small>
                 {#each displayedKeyIdentities(record.fingerprint, pgpUnlockRevision, pgpStoredKeyIdentities) as identity (identity.userID)}
-                  <span class="pgp-key-identity">{identity.userID}</span>
+                  <span>{identity.userID}</span>
                 {/each}
               {/if}
-            </div>
-          </li>
-        {/each}
-      </ul>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
 
-      <div class="pgp-section-heading">
-        <h4>{tl('pgp_devicesHeading')}</h4>
+    <section data-layout="stack" data-gap="sm">
+      <div data-layout="row" data-gap="sm" data-wrap="none">
+        <h4 data-grow>{tl('pgp_devicesHeading')}</h4>
         {#if pgpVaultUnlocked}
           <button
-            class="pgp-icon-btn"
+            type="button"
+            data-variant="ghost"
+            data-size="sm"
+            data-icon="key-round"
             onclick={openAccessDialog}
-            title={tl('pgp_addAccessMethod')}
             aria-label={tl('pgp_addAccessMethod')}
-          >
-            <UiIcon name="key-plus" />
-          </button>
+            data-tooltip
+          ></button>
         {/if}
       </div>
-      <p class="pgp-section-hint">{tl('pgp_accessMethodsHint')}</p>
-      <ul class="pgp-key-list">
-        {#each pgpVault.devices.filter(device => device.status === 'active') as device (device.cred_id)}
-          <li class="pgp-key-item">
-            <div class="pgp-key-info">
-              <span>{device.device_label ?? tl('pgp_defaultAccessMethod')}</span>
-              {#if pgpLocalActiveMethods.some(method => method.cred_id === device.cred_id)}
-                <span class="pgp-key-status local">{tl('pgp_thisBrowser')}</span>
-              {/if}
-            </div>
-            <div class="pgp-key-actions">
+      <p data-muted>{tl('pgp_accessMethodsHint')}</p>
+      {#if pgpVault.devices.some(device => device.status === 'active')}
+        <ul data-list>
+          {#each pgpVault.devices.filter(device => device.status === 'active') as device (device.cred_id)}
+            <li data-layout="row" data-justify="between">
+              <span data-grow>
+                {device.device_label ?? tl('pgp_defaultAccessMethod')}
+                {#if pgpLocalActiveMethods.some(method => method.cred_id === device.cred_id)}
+                  <span data-badge data-tone="accent">{tl('pgp_thisBrowser')}</span>
+                {/if}
+              </span>
               {#if pgpVaultUnlocked}
                 <button
-                  class="pgp-icon-btn danger"
+                  type="button"
+                  data-variant="ghost"
+                  data-size="sm"
+                  data-tone="danger"
+                  data-icon="trash-2"
                   onclick={() => onPgpRemoveDevice(device)}
-                  title={tl('pgp_removeDevice')}
                   aria-label={tl('pgp_removeDevice')}
-                >
-                  <UiIcon name="trash" />
-                </button>
+                  data-tooltip
+                ></button>
               {/if}
-            </div>
-          </li>
-        {/each}
-      </ul>
+            </li>
+          {/each}
+        </ul>
+      {/if}
 
       {#if pgpVault.devices.some(device => device.status === 'pending')}
-        <div class="pgp-section-heading">
-          <h4>{tl('pgp_pendingDevices')}</h4>
-        </div>
-        <ul class="pgp-key-list">
+        <h4>{tl('pgp_pendingDevices')}</h4>
+        <ul data-list>
           {#each pgpVault.devices.filter(device => device.status === 'pending') as device (device.cred_id)}
-            <li class="pgp-key-item">
-              <div class="pgp-key-info">
-                <span>{device.device_label ?? tl('pgp_defaultAccessMethod')}</span>
+            <li data-layout="row" data-justify="between">
+              <span data-grow>
+                {device.device_label ?? tl('pgp_defaultAccessMethod')}
                 {#if pgpLocalPendingMethods.some(method => method.cred_id === device.cred_id)}
-                  <span class="pgp-key-status local">{tl('pgp_thisBrowser')}</span>
+                  <span data-badge data-tone="accent">{tl('pgp_thisBrowser')}</span>
                 {/if}
-              </div>
-              <div class="pgp-key-actions">
-                {#if pgpVaultUnlocked}
-                  <button class="secondary small" onclick={() => onPgpApproveDevice(device)}>{tl('pgp_approveDevice')}</button>
+              </span>
+              {#if pgpVaultUnlocked}
+                <div data-layout="row" data-gap="xs" data-wrap="none">
+                  <button type="button" data-variant="secondary" data-size="sm" onclick={() => onPgpApproveDevice(device)}>{tl('pgp_approveDevice')}</button>
                   <button
-                    class="pgp-icon-btn danger"
+                    type="button"
+                    data-variant="ghost"
+                    data-size="sm"
+                    data-tone="danger"
+                    data-icon="trash-2"
                     onclick={() => onPgpRemoveDevice(device)}
-                    title={tl('pgp_removeDevice')}
                     aria-label={tl('pgp_removeDevice')}
-                  >
-                    <UiIcon name="trash" />
-                  </button>
-                {/if}
-              </div>
+                    data-tooltip
+                  ></button>
+                </div>
+              {/if}
             </li>
           {/each}
         </ul>
       {/if}
 
       {#if pgpLocalPendingMethods.length > 0 && pgpPairingSas}
-        <p class="pgp-pairing">{tl('pgp_pairingWaiting', { sas: pgpPairingSas })}</p>
+        <div data-callout role="status">{tl('pgp_pairingWaiting', { sas: pgpPairingSas })}</div>
       {/if}
       {#if !pgpVaultUnlocked && pgpLocalActiveMethods.length === 0 && pgpLocalPendingMethods.length === 0}
-        <div class="pgp-global-actions">
-          <button class="secondary" onclick={openAccessDialog}>{tl('pgp_setupBrowser')}</button>
-          <button class="secondary" onclick={() => openUnlockDialog(true)}>{tl('pgp_recoverAccessMethod')}</button>
+        <div data-layout="row" data-gap="sm">
+          <button type="button" data-variant="secondary" onclick={openAccessDialog}>{tl('pgp_setupBrowser')}</button>
+          <button type="button" data-variant="secondary" onclick={() => openUnlockDialog(true)}>{tl('pgp_recoverAccessMethod')}</button>
         </div>
-    {/if}
-
-    {:else}
-      <div class="pgp-heading">
-        <h3>{tl('pgp_vaultHeading')}</h3>
+      {/if}
+    </section>
+  {:else}
+    <section data-layout="stack" data-gap="md">
+      <div data-layout="row" data-gap="sm" data-wrap="none">
+        <h3 data-grow>{tl('pgp_vaultHeading')}</h3>
         <button
-          class="pgp-icon-btn"
+          type="button"
+          data-variant="ghost"
+          data-size="sm"
+          data-icon="import"
           onclick={openPrivateKeyDialog}
-          title={tl('pgp_importPrivateKeyButton')}
           aria-label={tl('pgp_importPrivateKeyButton')}
-        >
-          <UiIcon name="import" />
-        </button>
+          data-tooltip
+        ></button>
       </div>
       <p>{tl('pgp_setupHint')}</p>
       {#if pgpHasCredentials}
         <p>{tl('pgp_partialEnrollment')}</p>
-        <button class="secondary danger" onclick={onPgpResetVault} disabled={pgpResetting} aria-busy={pgpResetting}>
+        <button type="button" data-variant="outline" data-tone="danger" data-self="start" onclick={onPgpResetVault} disabled={pgpResetting} aria-busy={pgpResetting}>
           {tl('pgp_startOverButton')}
         </button>
       {/if}
-    {/if}
-
-    <section class="pgp-public-keys">
-      <div class="pgp-section-heading">
-        <h3>{tl('pgp_publicKeysHeading')}</h3>
-        <button
-          class="pgp-icon-btn"
-          onclick={openPublicKeyDialog}
-          title={tl('pgp_importPublicKeyButton')}
-          aria-label={tl('pgp_importPublicKeyButton')}
-        >
-          <UiIcon name="import" />
-        </button>
-      </div>
-      <p>{tl('pgp_publicKeysHint')}</p>
-      {#if pgpPublicImportError}<p class="pgp-error">{pgpPublicImportError}</p>{/if}
-      {#if pgpPublicImportSuccess}<p class="pgp-success">{pgpPublicImportSuccess}</p>{/if}
-
-      {#if pgpTrustedSenderKeys.length > 0}
-        <h4>{tl('pgp_trustedKeys')}</h4>
-        <ul class="pgp-key-list">
-          {#each pgpTrustedSenderKeys as key (key.fingerprint)}
-            <li class="pgp-key-item">
-              <div class="pgp-key-info pgp-public-key-info">
-                <span>{key.email || tl('pgp_noKeyEmail')}</span>
-                <span class="pgp-fingerprint">{key.fingerprint.slice(0, 16)}…</span>
-                {#if key.source === 'harvested_autocrypt'}
-                  <span class="pgp-key-source">{tl('pgp_sourceAutocrypt')}</span>
-                {:else if key.source === 'harvested_attachment'}
-                  <span class="pgp-key-source">{tl('pgp_sourceSignedAttachment')}</span>
-                {/if}
-              </div>
-              <div class="pgp-key-actions">
-                <button
-                  class="pgp-icon-btn danger"
-                  onclick={() => onPgpRemovePublicKey(key.fingerprint)}
-                  title={tl('pgp_removeKey')}
-                  aria-label={tl('pgp_removeKey')}
-                >
-                  <UiIcon name="trash" />
-                </button>
-              </div>
-            </li>
-          {/each}
-        </ul>
-      {/if}
     </section>
-  </div>
+  {/if}
 
-<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
+  <hr />
+
+  <section data-layout="stack" data-gap="sm">
+    <div data-layout="row" data-gap="sm" data-wrap="none">
+      <h3 data-grow>{tl('pgp_publicKeysHeading')}</h3>
+      <button
+        type="button"
+        data-variant="ghost"
+        data-size="sm"
+        data-icon="import"
+        onclick={openPublicKeyDialog}
+        aria-label={tl('pgp_importPublicKeyButton')}
+        data-tooltip
+      ></button>
+    </div>
+    <p data-muted>{tl('pgp_publicKeysHint')}</p>
+    {#if pgpPublicImportError}<div data-callout data-tone="danger" role="alert">{pgpPublicImportError}</div>{/if}
+    {#if pgpPublicImportSuccess}<div data-callout data-tone="success" role="status">{pgpPublicImportSuccess}</div>{/if}
+
+    {#if pgpTrustedSenderKeys.length > 0}
+      <h4>{tl('pgp_trustedKeys')}</h4>
+      <ul data-list>
+        {#each pgpTrustedSenderKeys as key (key.fingerprint)}
+          <li data-layout="row" data-justify="between" data-wrap="none">
+            <div data-grow data-layout="stack" data-gap="none">
+              <span data-truncate>{key.email || tl('pgp_noKeyEmail')}</span>
+              <small><code>{key.fingerprint.slice(0, 16)}…</code></small>
+              {#if key.source === 'harvested_autocrypt'}
+                <small data-muted>{tl('pgp_sourceAutocrypt')}</small>
+              {:else if key.source === 'harvested_attachment'}
+                <small data-muted>{tl('pgp_sourceSignedAttachment')}</small>
+              {/if}
+            </div>
+            <button
+              type="button"
+              data-variant="ghost"
+              data-size="sm"
+              data-tone="danger"
+              data-icon="trash-2"
+              onclick={() => onPgpRemovePublicKey(key.fingerprint)}
+              aria-label={tl('pgp_removeKey')}
+              data-tooltip
+            ></button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
+</div>
+
 <dialog
+  id="pgp-private-key-dialog"
+  closedby="any"
+  aria-labelledby="pgp-private-key-title"
   bind:this={pgpPrivateKeyDialog}
-  onclick={(e) => { if (e.target === e.currentTarget) closePrivateKeyDialog(); }}
   oncancel={(e) => { e.preventDefault(); closePrivateKeyDialog(); }}
 >
-  <article>
-    <header>
-      <h3>{tl('pgp_importHeading')}</h3>
-      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={closePrivateKeyDialog}></button>
-    </header>
-    {#if pgpEnrollError}<p class="pgp-error">{pgpEnrollError}</p>{/if}
-    {#if pgpImportError}<p class="pgp-error">{pgpImportError}</p>{/if}
-    <form onsubmit={(e) => { e.preventDefault(); pgpImportedKey ? (pgpVault ? onPgpAddKey() : onPgpEnroll()) : onPgpImport(); }}>
-      {#if !pgpImportedKey}
+  <header>
+    <h2 id="pgp-private-key-title">{tl('pgp_importHeading')}</h2>
+    <button type="button" commandfor="pgp-private-key-dialog" command="close" aria-label={tl('weekly_aria_close')} onclick={closePrivateKeyDialog}></button>
+  </header>
+  {#if pgpEnrollError}<div data-callout data-tone="danger" role="alert">{pgpEnrollError}</div>{/if}
+  {#if pgpImportError}<div data-callout data-tone="danger" role="alert">{pgpImportError}</div>{/if}
+  <form data-layout="stack" data-gap="md" onsubmit={(e) => { e.preventDefault(); pgpImportedKey ? (pgpVault ? onPgpAddKey() : onPgpEnroll()) : onPgpImport(); }}>
+    {#if !pgpImportedKey}
+      <label>
+        {tl('pgp_importArmoredKey')}
+        <textarea rows="6" bind:value={pgpArmoredKey} placeholder="-----BEGIN PGP PRIVATE KEY BLOCK-----"></textarea>
+      </label>
+      <label>
+        {tl('pgp_importPassphrase')}
+        <input type="password" bind:value={pgpPassphrase} autocomplete="current-password" />
+      </label>
+    {:else}
+      <p><strong>{tl('pgp_fingerprint')}:</strong> <code>{pgpImportedFingerprint}</code></p>
+      {#if !pgpVault}
+        <p data-muted>{tl('pgp_firstAccessMethodHint')}</p>
         <label>
-          <span>{tl('pgp_importArmoredKey')}</span>
-          <textarea rows="6" bind:value={pgpArmoredKey} placeholder="-----BEGIN PGP PRIVATE KEY BLOCK-----"></textarea>
+          {tl('pgp_deviceLabel')}
+          <input type="text" bind:value={pgpDeviceLabel} placeholder={tl('pgp_deviceLabelPlaceholder')} />
         </label>
-        <label>
-          <span>{tl('pgp_importPassphrase')}</span>
-          <input type="password" bind:value={pgpPassphrase} autocomplete="current-password" />
-        </label>
-      {:else}
-        <p class="pgp-fingerprint"><strong>{tl('pgp_fingerprint')}:</strong> {pgpImportedFingerprint}</p>
-        {#if !pgpVault}
-          <p class="pgp-section-hint">{tl('pgp_firstAccessMethodHint')}</p>
-          <label>
-            <span>{tl('pgp_deviceLabel')}</span>
-            <input type="text" bind:value={pgpDeviceLabel} placeholder={tl('pgp_deviceLabelPlaceholder')} />
-          </label>
-        {/if}
       {/if}
-      <footer>
-        {#if !pgpImportedKey}
-          <button type="submit" disabled={pgpImporting || !pgpArmoredKey} aria-busy={pgpImporting}>
-            {pgpImporting ? tl('pgp_importing') : tl('pgp_importButton')}
-          </button>
-        {:else if pgpVault}
-          <button type="submit" disabled={pgpEnrolling} aria-busy={pgpEnrolling}>
-            {pgpEnrolling ? tl('pgp_importing') : tl('pgp_addToVaultButton')}
-          </button>
-        {:else}
-          <button type="submit" disabled={pgpEnrolling} aria-busy={pgpEnrolling}>
-            {pgpEnrolling ? tl('pgp_enrolling') : tl('pgp_createVaultButton')}
-          </button>
-        {/if}
-        <button type="button" class="secondary" onclick={closePrivateKeyDialog}>{tl('event_cancel')}</button>
-      </footer>
-    </form>
-  </article>
-</dialog>
-
-<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
-<dialog
-  bind:this={pgpIdentityDialog}
-  onclick={(e) => { if (e.target === e.currentTarget) pgpIdentityDialog?.close(); }}
->
-  <article>
-    <header>
-      <h3>{tl('pgp_addIdentity')}</h3>
-      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={() => pgpIdentityDialog?.close()}></button>
-    </header>
-    {#if pgpKeyActionError}<p class="pgp-error">{pgpKeyActionError}</p>{/if}
-    <form onsubmit={(e) => { e.preventDefault(); onPgpAddIdentity(); }}>
-      <label>
-        <span>{tl('pgp_identityName')}</span>
-        <input type="text" bind:value={pgpIdentityName} />
-      </label>
-      <label>
-        <span>{tl('pgp_identityEmail')}</span>
-        <input type="email" bind:value={pgpIdentityEmail} required />
-      </label>
-      <label>
-        <span>{tl('pgp_identityComment')}</span>
-        <input type="text" bind:value={pgpIdentityComment} />
-      </label>
-      <footer>
-        <button type="submit" disabled={pgpKeyActionSaving} aria-busy={pgpKeyActionSaving}>
-          {pgpKeyActionSaving ? tl('mail_saving') : tl('mail_add')}
+    {/if}
+    <footer>
+      <button type="button" data-variant="secondary" commandfor="pgp-private-key-dialog" command="close" onclick={closePrivateKeyDialog}>{tl('event_cancel')}</button>
+      {#if !pgpImportedKey}
+        <button type="submit" disabled={pgpImporting || !pgpArmoredKey} aria-busy={pgpImporting}>
+          {pgpImporting ? tl('pgp_importing') : tl('pgp_importButton')}
         </button>
-        <button type="button" class="secondary" onclick={() => pgpIdentityDialog?.close()}>{tl('event_cancel')}</button>
-      </footer>
-    </form>
-  </article>
-</dialog>
-
-<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
-<dialog
-  bind:this={pgpOwnPublicKeyDialog}
-  onclick={(e) => { if (e.target === e.currentTarget) pgpOwnPublicKeyDialog?.close(); }}
->
-  <article>
-    <header>
-      <h3>{tl('pgp_importOwnPublicKey')}</h3>
-      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={() => pgpOwnPublicKeyDialog?.close()}></button>
-    </header>
-    <p class="pgp-section-hint">{tl('pgp_importOwnPublicKeyHint')}</p>
-    {#if pgpKeyActionError}<p class="pgp-error">{pgpKeyActionError}</p>{/if}
-    <form onsubmit={(e) => { e.preventDefault(); onPgpOwnPublicImport(); }}>
-      <label>
-        <span>{tl('pgp_importArmoredPublicKey')}</span>
-        <textarea rows="6" bind:value={pgpManagedPublicArmored} placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----"></textarea>
-      </label>
-      <footer>
-        <button type="submit" disabled={pgpKeyActionSaving || !pgpManagedPublicArmored} aria-busy={pgpKeyActionSaving}>
-          {pgpKeyActionSaving ? tl('pgp_importing') : tl('pgp_importPublicKeyButton')}
-        </button>
-        <button type="button" class="secondary" onclick={() => pgpOwnPublicKeyDialog?.close()}>{tl('event_cancel')}</button>
-      </footer>
-    </form>
-  </article>
-</dialog>
-
-<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
-<dialog
-  bind:this={pgpAccessDialog}
-  onclick={(e) => { if (e.target === e.currentTarget) pgpAccessDialog?.close(); }}
->
-  <article>
-    <header>
-      <h3>{pgpVaultUnlocked ? tl('pgp_addAccessMethod') : tl('pgp_setupBrowser')}</h3>
-      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={() => pgpAccessDialog?.close()}></button>
-    </header>
-    <p class="pgp-section-hint">{tl('pgp_addAccessMethodHint')}</p>
-    {#if pgpEnrollError}<p class="pgp-error">{pgpEnrollError}</p>{/if}
-    <form onsubmit={(e) => { e.preventDefault(); onPgpRegisterDevice(); }}>
-      <label>
-        <span>{tl('pgp_deviceLabel')}</span>
-        <input type="text" bind:value={pgpDeviceLabel} placeholder={tl('pgp_deviceLabelPlaceholder')} />
-      </label>
-      <footer>
+      {:else if pgpVault}
         <button type="submit" disabled={pgpEnrolling} aria-busy={pgpEnrolling}>
-          {pgpEnrolling ? tl('pgp_enrolling') : tl('pgp_addAccessMethod')}
+          {pgpEnrolling ? tl('pgp_importing') : tl('pgp_addToVaultButton')}
         </button>
-        <button type="button" class="secondary" onclick={() => pgpAccessDialog?.close()}>{tl('event_cancel')}</button>
-      </footer>
-    </form>
-  </article>
+      {:else}
+        <button type="submit" disabled={pgpEnrolling} aria-busy={pgpEnrolling}>
+          {pgpEnrolling ? tl('pgp_enrolling') : tl('pgp_createVaultButton')}
+        </button>
+      {/if}
+    </footer>
+  </form>
 </dialog>
 
-<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
-<dialog
-  bind:this={pgpUnlockDialog}
-  onclick={(e) => { if (e.target === e.currentTarget) pgpUnlockDialog?.close(); }}
->
-  <article>
-    <header>
-      <h3>{pgpUnlockDialogRecovery ? tl('pgp_recoverAccessMethod') : tl('pgp_unlockHeading')}</h3>
-      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={() => pgpUnlockDialog?.close()}></button>
-    </header>
-    <p class="pgp-section-hint">
-      {pgpUnlockDialogRecovery ? tl('pgp_recoverAccessHint') : tl('pgp_chooseAccessMethod')}
-    </p>
-    {#if pgpUnlockError}<p class="pgp-error">{pgpUnlockError}</p>{/if}
-    <ul class="pgp-key-list">
+<dialog id="pgp-identity-dialog" closedby="any" aria-labelledby="pgp-identity-title" bind:this={pgpIdentityDialog}>
+  <header>
+    <h2 id="pgp-identity-title">{tl('pgp_addIdentity')}</h2>
+    <button type="button" commandfor="pgp-identity-dialog" command="close" aria-label={tl('weekly_aria_close')}></button>
+  </header>
+  {#if pgpKeyActionError}<div data-callout data-tone="danger" role="alert">{pgpKeyActionError}</div>{/if}
+  <form data-layout="stack" data-gap="md" onsubmit={(e) => { e.preventDefault(); onPgpAddIdentity(); }}>
+    <label>
+      {tl('pgp_identityName')}
+      <input type="text" bind:value={pgpIdentityName} />
+    </label>
+    <label>
+      {tl('pgp_identityEmail')}
+      <input type="email" bind:value={pgpIdentityEmail} required />
+    </label>
+    <label>
+      {tl('pgp_identityComment')}
+      <input type="text" bind:value={pgpIdentityComment} />
+    </label>
+    <footer>
+      <button type="button" data-variant="secondary" commandfor="pgp-identity-dialog" command="close">{tl('event_cancel')}</button>
+      <button type="submit" disabled={pgpKeyActionSaving} aria-busy={pgpKeyActionSaving}>
+        {pgpKeyActionSaving ? tl('mail_saving') : tl('mail_add')}
+      </button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="pgp-own-public-key-dialog" closedby="any" aria-labelledby="pgp-own-public-key-title" bind:this={pgpOwnPublicKeyDialog}>
+  <header>
+    <h2 id="pgp-own-public-key-title">{tl('pgp_importOwnPublicKey')}</h2>
+    <button type="button" commandfor="pgp-own-public-key-dialog" command="close" aria-label={tl('weekly_aria_close')}></button>
+  </header>
+  <p data-muted>{tl('pgp_importOwnPublicKeyHint')}</p>
+  {#if pgpKeyActionError}<div data-callout data-tone="danger" role="alert">{pgpKeyActionError}</div>{/if}
+  <form data-layout="stack" data-gap="md" onsubmit={(e) => { e.preventDefault(); onPgpOwnPublicImport(); }}>
+    <label>
+      {tl('pgp_importArmoredPublicKey')}
+      <textarea rows="6" bind:value={pgpManagedPublicArmored} placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----"></textarea>
+    </label>
+    <footer>
+      <button type="button" data-variant="secondary" commandfor="pgp-own-public-key-dialog" command="close">{tl('event_cancel')}</button>
+      <button type="submit" disabled={pgpKeyActionSaving || !pgpManagedPublicArmored} aria-busy={pgpKeyActionSaving}>
+        {pgpKeyActionSaving ? tl('pgp_importing') : tl('pgp_importPublicKeyButton')}
+      </button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="pgp-access-dialog" closedby="any" aria-labelledby="pgp-access-title" bind:this={pgpAccessDialog}>
+  <header>
+    <h2 id="pgp-access-title">{pgpVaultUnlocked ? tl('pgp_addAccessMethod') : tl('pgp_setupBrowser')}</h2>
+    <button type="button" commandfor="pgp-access-dialog" command="close" aria-label={tl('weekly_aria_close')}></button>
+  </header>
+  <p data-muted>{tl('pgp_addAccessMethodHint')}</p>
+  {#if pgpEnrollError}<div data-callout data-tone="danger" role="alert">{pgpEnrollError}</div>{/if}
+  <form data-layout="stack" data-gap="md" onsubmit={(e) => { e.preventDefault(); onPgpRegisterDevice(); }}>
+    <label>
+      {tl('pgp_deviceLabel')}
+      <input type="text" bind:value={pgpDeviceLabel} placeholder={tl('pgp_deviceLabelPlaceholder')} />
+    </label>
+    <footer>
+      <button type="button" data-variant="secondary" commandfor="pgp-access-dialog" command="close">{tl('event_cancel')}</button>
+      <button type="submit" disabled={pgpEnrolling} aria-busy={pgpEnrolling}>
+        {pgpEnrolling ? tl('pgp_enrolling') : tl('pgp_addAccessMethod')}
+      </button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="pgp-unlock-dialog" closedby="any" aria-labelledby="pgp-unlock-title" bind:this={pgpUnlockDialog}>
+  <header>
+    <h2 id="pgp-unlock-title">{pgpUnlockDialogRecovery ? tl('pgp_recoverAccessMethod') : tl('pgp_unlockHeading')}</h2>
+    <button type="button" commandfor="pgp-unlock-dialog" command="close" aria-label={tl('weekly_aria_close')}></button>
+  </header>
+  <p data-muted>
+    {pgpUnlockDialogRecovery ? tl('pgp_recoverAccessHint') : tl('pgp_chooseAccessMethod')}
+  </p>
+  {#if pgpUnlockError}<div data-callout data-tone="danger" role="alert">{pgpUnlockError}</div>{/if}
+  {#if pgpUnlockCandidates.length > 0}
+    <ul data-list>
       {#each pgpUnlockCandidates as device (device.cred_id)}
-        <li class="pgp-key-item">
-          <span>{device.device_label ?? tl('pgp_defaultAccessMethod')}</span>
-          <button class="secondary small" onclick={() => selectUnlockMethod(device)} disabled={pgpUnlocking}>
+        <li data-layout="row" data-justify="between">
+          <span data-grow>{device.device_label ?? tl('pgp_defaultAccessMethod')}</span>
+          <button type="button" data-variant="secondary" data-size="sm" onclick={() => selectUnlockMethod(device)} disabled={pgpUnlocking} aria-busy={pgpUnlocking}>
             {pgpUnlocking ? tl('pgp_unlocking') : tl('pgp_unlockVaultButton')}
           </button>
         </li>
       {/each}
     </ul>
-  </article>
+  {/if}
 </dialog>
 
-<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
-<dialog
-  bind:this={pgpPublicKeyDialog}
-  onclick={(e) => { if (e.target === e.currentTarget) pgpPublicKeyDialog?.close(); }}
->
-  <article>
-    <header>
-      <h3>{tl('pgp_importPublicKeyButton')}</h3>
-      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={() => pgpPublicKeyDialog?.close()}></button>
-    </header>
-    {#if pgpPublicImportError}<p class="pgp-error">{pgpPublicImportError}</p>{/if}
-    <form onsubmit={(e) => { e.preventDefault(); onPgpPublicImport(); }}>
-      <label>
-        <span>{tl('pgp_importArmoredPublicKey')}</span>
-        <textarea rows="6" bind:value={pgpPublicArmoredKey} placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----"></textarea>
-      </label>
-      <footer>
-        <button type="submit" disabled={pgpPublicImporting || !pgpPublicArmoredKey} aria-busy={pgpPublicImporting}>
-          {pgpPublicImporting ? tl('pgp_importing') : tl('pgp_importPublicKeyButton')}
-        </button>
-        <button type="button" class="secondary" onclick={() => pgpPublicKeyDialog?.close()}>{tl('event_cancel')}</button>
-      </footer>
-    </form>
-  </article>
+<dialog id="pgp-public-key-dialog" closedby="any" aria-labelledby="pgp-public-key-title" bind:this={pgpPublicKeyDialog}>
+  <header>
+    <h2 id="pgp-public-key-title">{tl('pgp_importPublicKeyButton')}</h2>
+    <button type="button" commandfor="pgp-public-key-dialog" command="close" aria-label={tl('weekly_aria_close')}></button>
+  </header>
+  {#if pgpPublicImportError}<div data-callout data-tone="danger" role="alert">{pgpPublicImportError}</div>{/if}
+  <form data-layout="stack" data-gap="md" onsubmit={(e) => { e.preventDefault(); onPgpPublicImport(); }}>
+    <label>
+      {tl('pgp_importArmoredPublicKey')}
+      <textarea rows="6" bind:value={pgpPublicArmoredKey} placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----"></textarea>
+    </label>
+    <footer>
+      <button type="button" data-variant="secondary" commandfor="pgp-public-key-dialog" command="close">{tl('event_cancel')}</button>
+      <button type="submit" disabled={pgpPublicImporting || !pgpPublicArmoredKey} aria-busy={pgpPublicImporting}>
+        {pgpPublicImporting ? tl('pgp_importing') : tl('pgp_importPublicKeyButton')}
+      </button>
+    </footer>
+  </form>
 </dialog>
-
-
-<style>
-  .pgp-error {
-    color: var(--pico-del-color);
-    font-size: 0.9rem;
-  }
-
-  .pgp-success {
-    color: var(--pico-ins-color);
-    font-size: 0.9rem;
-  }
-
-  .pgp-fingerprint {
-    font-family: monospace;
-    font-size: 0.85rem;
-    word-break: break-all;
-  }
-
-  .pgp-key-list {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .pgp-heading,
-  .pgp-section-heading {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
-  }
-
-  .pgp-heading {
-    margin-bottom: 1rem;
-  }
-
-  .pgp-heading h3,
-  .pgp-section-heading h3,
-  .pgp-section-heading h4 {
-    margin: 0;
-  }
-
-  .pgp-section-heading {
-    margin-top: 1rem;
-    margin-bottom: 0.65rem;
-  }
-
-  .pgp-tooltip-anchor {
-    display: inline-flex;
-  }
-
-  .pgp-icon-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0.15rem 0.25rem;
-    margin: 0;
-    line-height: 1;
-    color: var(--pico-muted-color);
-    flex-shrink: 0;
-    transition: color 0.15s;
-  }
-
-  .pgp-icon-btn:hover:not(:disabled) {
-    color: var(--pico-color);
-    background: none;
-  }
-
-  .pgp-icon-btn:disabled {
-    color: var(--pico-muted-color);
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .pgp-icon-btn.danger:hover:not(:disabled) {
-    color: var(--pico-del-color);
-  }
-
-  .pgp-section-hint {
-    color: var(--pico-muted-color);
-    font-size: 0.9rem;
-    margin-top: 0;
-    margin-bottom: 0.75rem;
-  }
-
-  .pgp-pairing {
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    padding: 0.75rem;
-    font-size: 0.9rem;
-  }
-
-  .pgp-public-keys {
-    border-top: 1px solid var(--pico-muted-border-color);
-    margin-top: 1.5rem;
-    padding-top: 1.25rem;
-  }
-
-  .pgp-public-key-info {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 0.15rem;
-  }
-
-  .pgp-private-key-info {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 0.2rem;
-    text-align: left;
-  }
-
-  .pgp-private-key-item {
-    align-items: stretch;
-  }
-
-  .pgp-private-key-header {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    min-width: 0;
-    width: 100%;
-  }
-
-  .pgp-private-key-header .pgp-fingerprint {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    word-break: normal;
-  }
-
-  .pgp-private-key-header .pgp-key-actions {
-    flex-wrap: nowrap;
-  }
-
-  .pgp-identity-heading {
-    color: var(--pico-muted-color);
-    font-size: 0.8rem;
-  }
-
-  .pgp-key-identity {
-    font-size: 0.9rem;
-  }
-
-  .pgp-key-source {
-    color: var(--pico-muted-color);
-    font-size: 0.85rem;
-  }
-
-  .pgp-key-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    text-align: left;
-  }
-
-  .pgp-key-info {
-    display: flex;
-    min-width: 0;
-    flex: 1;
-  }
-
-  .pgp-key-status {
-    font-size: 0.75rem;
-    padding: 0.1rem 0.4rem;
-    border-radius: 999px;
-    white-space: nowrap;
-  }
-
-  .pgp-key-status.unlocked {
-    background: color-mix(in srgb, var(--pico-ins-color) 15%, transparent);
-    color: var(--pico-ins-color);
-  }
-
-  .pgp-key-status.locked {
-    background: color-mix(in srgb, var(--pico-muted-color) 15%, transparent);
-    color: var(--pico-muted-color);
-  }
-
-  .pgp-key-status.local {
-    background: color-mix(in srgb, var(--pico-primary) 12%, transparent);
-    color: var(--pico-primary);
-  }
-
-  .pgp-key-actions {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 0.4rem;
-    flex-shrink: 0;
-  }
-
-  .pgp-key-actions button.small {
-    padding: 0.2rem 0.5rem;
-    font-size: 0.8rem;
-    margin-bottom: 0;
-  }
-
-  .pgp-global-actions {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    margin-bottom: 1rem;
-  }
-
-  .pgp-global-actions button {
-    margin-bottom: 0;
-    width: auto;
-  }
-
-  /* ── CalDAV account cards ────────────────────────────────────────────────── */
-
-  .caldav-account-list {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    margin-bottom: 1rem;
-  }
-
-  .caldav-account {
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    padding: 0.875rem 1rem;
-  }
-
-  .caldav-account-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 0.75rem;
-    margin-bottom: 0.65rem;
-  }
-
-  .caldav-account-header h3 {
-    margin: 0 0 0.15rem;
-    font-size: 1rem;
-    font-weight: 600;
-  }
-
-  .caldav-account-header p {
-    margin: 0;
-    font-size: 0.85rem;
-    color: var(--pico-muted-color);
-  }
-
-  .caldav-account-actions {
-    display: flex;
-    gap: 0.35rem;
-    flex-shrink: 0;
-    align-items: flex-start;
-  }
-
-  /* Match global fieldset legend style for sub-section labels */
-  .caldav-account h4 {
-    font-size: 0.8125rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    font-weight: 600;
-    color: var(--pico-muted-color);
-    margin: 0.5rem 0 0.35rem;
-  }
-
-  /* ── Encryption panel ────────────────────────────────────────────────────── */
-
-  .encryption-panel {
-    max-width: 32rem;
-  }
-
-  /* ── Danger secondary button ─────────────────────────────────────────────── */
-
-  button.secondary.danger {
-    --pico-color: var(--pico-del-color);
-    --pico-border-color: color-mix(in srgb, var(--pico-del-color) 50%, transparent);
-  }
-
-  button.secondary.danger:hover,
-  button.secondary.danger:focus {
-    --pico-background-color: color-mix(in srgb, var(--pico-del-color) 10%, transparent);
-    --pico-border-color: var(--pico-del-color);
-  }
-</style>
