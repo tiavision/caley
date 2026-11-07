@@ -145,162 +145,98 @@
   }
 </script>
 
-<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
-<dialog
-  bind:this={dialogEl}
-  onclick={(e) => { if (e.target === e.currentTarget) dialogEl?.close(); }}
->
-  <article>
-    <header>
-      <h3>{tl('cal_import')}</h3>
-      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={() => dialogEl?.close()}></button>
-    </header>
+<dialog bind:this={dialogEl} id="import-ics" closedby="any">
+  <header>
+    <h2>{tl('cal_import')}</h2>
+    <button type="button" commandfor="import-ics" command="close" aria-label={tl('weekly_aria_close')}></button>
+  </header>
 
-    {#if error}
-      <div class="form-error">{error}</div>
+  {#if error}
+    <div data-callout data-tone="danger" role="alert">{error}</div>
+  {/if}
+  {#if successMsg}
+    <div data-callout data-tone="success" role="status">{successMsg}</div>
+  {/if}
+
+  <form data-layout="stack" data-gap="md" onsubmit={(e) => { e.preventDefault(); submit(); }}>
+    <label>
+      {tl('cal_importFile')}
+      <input type="file" accept=".ics,.ical,text/calendar" bind:this={fileInput} required={!selectedFile} onchange={onFileChange} />
+    </label>
+
+    {#if selectedFile}
+      <div data-layout="row" data-gap="sm" data-wrap="none">
+        <small data-muted data-truncate data-grow>{selectedFile.name}</small>
+        <button type="button" data-variant="secondary" data-size="sm" onclick={preview} disabled={previewing || importing} aria-busy={previewing}>
+          {tl('cal_importPreview')}
+        </button>
+      </div>
     {/if}
-    {#if successMsg}
-      <div class="form-success">{successMsg}</div>
-    {/if}
 
-    <form onsubmit={(e) => { e.preventDefault(); submit(); }}>
-      <label>
-        <span>{tl('cal_importFile')}</span>
-        <input type="file" accept=".ics,.ical,text/calendar" bind:this={fileInput} required={!selectedFile} onchange={onFileChange} />
-      </label>
-
-      {#if selectedFile}
-        <div class="import-file-summary">
-          <span>{selectedFile.name}</span>
-          <button type="button" class="outline secondary small" onclick={preview} disabled={previewing || importing} aria-busy={previewing}>
-            {tl('cal_importPreview')}
-          </button>
-        </div>
-      {/if}
-
-      {#if previewEvents.length > 0}
-        <div class="import-preview" aria-live="polite">
-          <h4>{tl('cal_importPreviewHeading')}</h4>
-          <ul>
-            {#each previewEvents as event (event.uid)}
-              <li>
-                <strong>{event.summary || tl('cal_importUntitledEvent')}</strong>
-                <span>{formatEventDate(event)}</span>
-                {#if event.location}<span>{event.location}</span>{/if}
-              </li>
-            {/each}
-          </ul>
-        </div>
-      {/if}
-
-      <label>
-        <span>{tl('cal_importCalendar')}</span>
-        <select
-          value={`${selectedAccountId}\0${selectedHref}`}
-          onchange={(e) => {
-            const value = (e.target as HTMLSelectElement).value;
-            if (value === NEW_CAL_SENTINEL) {
-              selectedHref = NEW_CAL_SENTINEL;
-              selectedAccountId = accounts[0]?.account_id || '';
-            } else {
-              const [accountId, href] = value.split('\0');
-              selectedAccountId = accountId;
-              selectedHref = href;
-            }
-          }}
-        >
-          {#each accounts as account (account.account_id)}
-            <optgroup label={account.display_name}>
-              {#each account.calendars as cal (cal.account_id + cal.href)}
-                <option value={`${cal.account_id}\0${cal.href}`}>{cal.name}</option>
-              {/each}
-            </optgroup>
+    {#if previewEvents.length > 0}
+      <section data-layout="stack" data-gap="sm" aria-live="polite">
+        <h3>{tl('cal_importPreviewHeading')}</h3>
+        <ul data-list>
+          {#each previewEvents as event (event.uid)}
+            <li data-layout="stack" data-gap="none">
+              <strong>{event.summary || tl('cal_importUntitledEvent')}</strong>
+              <small data-muted>{formatEventDate(event)}</small>
+              {#if event.location}<small data-muted>{event.location}</small>{/if}
+            </li>
           {/each}
-          <option disabled>─────</option>
-          <option value={NEW_CAL_SENTINEL}>{tl('cal_importNewCalendar')}</option>
+        </ul>
+      </section>
+    {/if}
+
+    <label>
+      {tl('cal_importCalendar')}
+      <select
+        value={`${selectedAccountId}\0${selectedHref}`}
+        onchange={(e) => {
+          const value = (e.target as HTMLSelectElement).value;
+          if (value === NEW_CAL_SENTINEL) {
+            selectedHref = NEW_CAL_SENTINEL;
+            selectedAccountId = accounts[0]?.account_id || '';
+          } else {
+            const [accountId, href] = value.split('\0');
+            selectedAccountId = accountId;
+            selectedHref = href;
+          }
+        }}
+      >
+        {#each accounts as account (account.account_id)}
+          <optgroup label={account.display_name}>
+            {#each account.calendars as cal (cal.account_id + cal.href)}
+              <option value={`${cal.account_id}\0${cal.href}`}>{cal.name}</option>
+            {/each}
+          </optgroup>
+        {/each}
+        <option disabled>─────</option>
+        <option value={NEW_CAL_SENTINEL}>{tl('cal_importNewCalendar')}</option>
+      </select>
+    </label>
+
+    {#if isNewCal && accounts.length > 1}
+      <label>
+        {tl('mail_account')}
+        <select bind:value={selectedAccountId}>
+          {#each accounts as account (account.account_id)}
+            <option value={account.account_id}>{account.display_name}</option>
+          {/each}
         </select>
       </label>
+    {/if}
 
-      {#if isNewCal && accounts.length > 1}
-        <label>
-          <span>{tl('mail_account')}</span>
-          <select bind:value={selectedAccountId}>
-            {#each accounts as account (account.account_id)}
-              <option value={account.account_id}>{account.display_name}</option>
-            {/each}
-          </select>
-        </label>
-      {/if}
+    {#if isNewCal}
+      <label>
+        {tl('cal_importNewCalendarName')}
+        <input type="text" bind:value={newCalName} required={isNewCal} />
+      </label>
+    {/if}
 
-      {#if isNewCal}
-        <label>
-          <span>{tl('cal_importNewCalendarName')}</span>
-          <input type="text" bind:value={newCalName} required={isNewCal} />
-        </label>
-      {/if}
-
-      <footer>
-        <button type="submit" aria-busy={importing}>{tl('cal_importSubmit')}</button>
-        <button type="button" class="secondary" onclick={() => dialogEl?.close()}>
-          {tl('event_cancel')}
-        </button>
-      </footer>
-    </form>
-  </article>
+    <footer>
+      <button type="button" data-variant="ghost" commandfor="import-ics" command="close">{tl('event_cancel')}</button>
+      <button type="submit" aria-busy={importing}>{tl('cal_importSubmit')}</button>
+    </footer>
+  </form>
 </dialog>
-
-<style>
-  .import-file-summary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    margin: -0.35rem 0 0.75rem;
-    color: var(--pico-muted-color);
-    font-size: 0.875rem;
-  }
-
-  .import-file-summary span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .import-file-summary button {
-    flex-shrink: 0;
-    margin: 0;
-  }
-
-  .import-preview {
-    border-left: 3px solid var(--pico-primary-background);
-    padding-left: 0.75rem;
-    margin-bottom: 0.75rem;
-  }
-
-  .import-preview h4 {
-    margin: 0 0 0.5rem;
-    font-size: 0.95rem;
-  }
-
-  .import-preview ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.45rem;
-  }
-
-  .import-preview li {
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-    min-width: 0;
-  }
-
-  .import-preview li span {
-    color: var(--pico-muted-color);
-    font-size: 0.85rem;
-  }
-</style>

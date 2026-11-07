@@ -5,7 +5,6 @@
   import { formatEventTimes, formatRecurrence, formatAlarm, partstatKey } from '../lib/format.ts';
   import { apiFetch } from '../lib/api.ts';
   import ShareMenu from './ShareMenu.svelte';
-  import UiIcon from './UiIcon.svelte';
 
   export let locale: string;
   export let isOpen = false;
@@ -16,7 +15,8 @@
   $: tl = makeTl(locale);
 
   let detailEvent: EventJson | null = null;
-  let detailEditPopoverOpen = false;
+  let editChoiceEl: HTMLElement;
+  let editBtn: HTMLButtonElement;
   let dialogEl: HTMLDialogElement;
   let sourceEmails: SourceEmailJson[] = [];
 
@@ -26,7 +26,7 @@
 
   export async function open(event: EventJson) {
     detailEvent = event;
-    detailEditPopoverOpen = false;
+    hideEditChoice();
     sourceEmails = [];
     isOpen = true;
     await tick();
@@ -68,6 +68,7 @@
   export function close() {
     if (!isOpen) return;
     isOpen = false;
+    hideEditChoice();
     detailEvent = null;
     sourceEmails = [];
     dialogEl?.close();
@@ -76,7 +77,9 @@
   export function triggerEdit() {
     if (!detailEvent) return;
     if (detailEvent.is_recurring) {
-      detailEditPopoverOpen = !detailEditPopoverOpen;
+      // Same as clicking the edit button, which opens the choice popover via popovertarget.
+      try { editChoiceEl?.togglePopover({ source: editBtn } as unknown as boolean); }
+      catch { editChoiceEl?.togglePopover(); }
     } else {
       const ev = detailEvent;
       close();
@@ -84,163 +87,116 @@
     }
   }
 
+  function hideEditChoice() {
+    if (editChoiceEl?.matches(':popover-open')) editChoiceEl.hidePopover();
+  }
+
+  function partstatTone(partstat: string): 'success' | 'danger' | 'warning' | 'neutral' {
+    if (partstat === 'ACCEPTED') return 'success';
+    if (partstat === 'DECLINED') return 'danger';
+    if (partstat === 'TENTATIVE') return 'warning';
+    return 'neutral';
+  }
+
   function editWith(scope: 'series' | 'this_instance') {
     if (!detailEvent) return;
+    hideEditChoice();
     const ev = detailEvent;
     close();
     onedit?.({ event: ev, scope });
   }
 </script>
 
-<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
 <dialog
   bind:this={dialogEl}
   id="event-detail"
-  onclick={(e) => { if (e.target === e.currentTarget) close(); }}
+  closedby="any"
   onclose={close}
-  oncancel={(e) => { e.preventDefault(); close(); }}
 >
-  <article>
-    <header>
-      <h3>{detailEvent?.summary || ''}</h3>
-      <div class="header-actions">
-        {#if detailEvent}
-          {#if onthreads && sourceEmails.length > 0}
-            <button class="edit-btn" title={tl('mail_threads')} onclick={() => onthreads!(sourceEmails, detailEvent!)}>
-              <UiIcon name="tree" size={16} strokeWidth={2.2} />
-            </button>
-          {/if}
-          <ShareMenu event={detailEvent} {locale} />
-          <div class="edit-wrap">
-            <button
-              class="edit-btn"
-              title={tl('event_edit')}
-              onclick={() => triggerEdit()}
-            >&#9998;</button>
-            {#if detailEditPopoverOpen}
-              <div class="edit-choice-popover">
-                <button onclick={() => editWith('series')}>{tl('event_editSeries')}</button>
-                <button onclick={() => editWith('this_instance')}>{tl('event_editInstance')}</button>
-              </div>
-            {/if}
-          </div>
+  <header data-layout="row" data-gap="xs" data-align="start">
+    <h2 data-grow>{detailEvent?.summary || ''}</h2>
+    <div data-layout="row" data-gap="xs" data-wrap="none">
+      {#if detailEvent}
+        {#if onthreads && sourceEmails.length > 0}
+          <button type="button" data-variant="ghost" data-icon="list-tree" aria-label={tl('mail_threads')} data-tooltip
+            onclick={() => onthreads!(sourceEmails, detailEvent!)}></button>
         {/if}
-        <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={close}></button>
-      </div>
-    </header>
+        <ShareMenu event={detailEvent} {locale} />
+        {#if detailEvent.is_recurring}
+          <button type="button" bind:this={editBtn} data-variant="ghost" data-icon="pencil" aria-label={tl('event_edit')}
+            popovertarget="event-edit-choice"></button>
+        {:else}
+          <button type="button" bind:this={editBtn} data-variant="ghost" data-icon="pencil" aria-label={tl('event_edit')} data-tooltip
+            onclick={() => triggerEdit()}></button>
+        {/if}
+      {/if}
+      <button type="button" commandfor="event-detail" command="close" aria-label={tl('weekly_aria_close')}></button>
+    </div>
+  </header>
 
-    {#if detailEvent}
-      <div class="event-detail-body">
-        {#if detailTime.localText}
-          <div class="event-detail-row">
-            <span class="event-detail-label">{tl('event_time')}</span>
-            <span>{detailTime.localText}</span>
+  <div popover id="event-edit-choice" data-menu bind:this={editChoiceEl}>
+    <button type="button" onclick={() => editWith('series')}>{tl('event_editSeries')}</button>
+    <button type="button" onclick={() => editWith('this_instance')}>{tl('event_editInstance')}</button>
+  </div>
+
+  {#if detailEvent}
+    <dl data-pairs>
+      {#if detailTime.localText}
+        <div>
+          <dt>{tl('event_time')}</dt>
+          <dd>
+            {detailTime.localText}
             {#if detailTime.sourceText}
-              <span class="event-detail-secondary">{tl('event_originalTime')}: {detailTime.sourceText}</span>
+              <br /><small data-muted>{tl('event_originalTime')}: {detailTime.sourceText}</small>
             {/if}
-          </div>
-        {/if}
-        {#if detailEvent.location}
-          <div class="event-detail-row">
-            <span class="event-detail-label">{tl('event_location')}</span>
-            <a href="geo:0,0?q={encodeURIComponent(detailEvent.location)}" onclick={(e) => openMap(e, detailEvent!.location)} rel="noopener noreferrer">{detailEvent.location}</a>
-          </div>
-        {/if}
-        {#if detailRecText}
-          <div class="event-detail-row">
-            <span class="event-detail-label">{tl('event_repeats')}</span>
-            <span>{detailRecText}</span>
-          </div>
-        {/if}
-        {#if detailEvent.description}
-          <div>
-            <span class="event-detail-label">{tl('event_description')}</span>
-            <p style="margin:0.25rem 0 0;white-space:pre-wrap;word-break:break-word">{detailEvent.description}</p>
-          </div>
-        {/if}
-        {#if detailEvent.alarms.length > 0}
-          <div class="event-detail-row">
-            <span class="event-detail-label">{tl('event_reminder')}</span>
-            <div>
-              {#each detailEvent.alarms as alarm}
-                <div>{formatAlarm(alarm)}</div>
-              {/each}
-            </div>
-          </div>
-        {/if}
-        {#if detailEvent.attendees.length > 0}
-          <div class="event-detail-row">
-            <span class="event-detail-label">{tl('event_attendees')}</span>
-            <div class="attendee-list-detail">
-              {#each detailEvent.attendees as att}
-                <div class="attendee-detail-row">
-                  <span class="attendee-badge attendee-badge--{att.partstat.toLowerCase()}">{tl(partstatKey(att.partstat))}</span>
-                  <span>{att.cn ? `${att.cn} <${att.email}>` : att.email}</span>
-                </div>
-              {/each}
-            </div>
-          </div>
-        {/if}
-      </div>
-    {/if}
-  </article>
+          </dd>
+        </div>
+      {/if}
+      {#if detailEvent.location}
+        <div>
+          <dt>{tl('event_location')}</dt>
+          <dd><a href="geo:0,0?q={encodeURIComponent(detailEvent.location)}" onclick={(e) => openMap(e, detailEvent!.location)} rel="noopener noreferrer">{detailEvent.location}</a></dd>
+        </div>
+      {/if}
+      {#if detailRecText}
+        <div>
+          <dt>{tl('event_repeats')}</dt>
+          <dd>{detailRecText}</dd>
+        </div>
+      {/if}
+      {#if detailEvent.description}
+        <div>
+          <dt>{tl('event_description')}</dt>
+          <dd class="description">{detailEvent.description}</dd>
+        </div>
+      {/if}
+      {#if detailEvent.alarms.length > 0}
+        <div>
+          <dt>{tl('event_reminder')}</dt>
+          <dd data-layout="stack" data-gap="xs">
+            {#each detailEvent.alarms as alarm}
+              <span>{formatAlarm(alarm)}</span>
+            {/each}
+          </dd>
+        </div>
+      {/if}
+      {#if detailEvent.attendees.length > 0}
+        <div>
+          <dt>{tl('event_attendees')}</dt>
+          <dd data-layout="stack" data-gap="xs">
+            {#each detailEvent.attendees as att}
+              <span data-layout="row" data-gap="sm">
+                <span data-badge data-tone={partstatTone(att.partstat)}>{tl(partstatKey(att.partstat))}</span>
+                <span>{att.cn ? `${att.cn} <${att.email}>` : att.email}</span>
+              </span>
+            {/each}
+          </dd>
+        </div>
+      {/if}
+    </dl>
+  {/if}
 </dialog>
 
 <style>
-  /* When the title and icons no longer fit beside each other, drop the title to a
-     full-width second line while the icons stay on the top-right. wrap-reverse makes
-     the wrapped (icons) line render above the title line. */
-  header { flex-wrap: wrap-reverse; justify-content: flex-end; }
-  header h3 { flex: 1 1 auto; min-width: 10rem; }
-
-  .header-actions { display: flex; align-items: center; gap: 0.25rem; }
-  .edit-btn {
-    display: inline-flex; align-items: center; justify-content: center;
-    background: none; border: none; cursor: pointer;
-    font-size: 1rem; color: var(--pico-muted-color);
-    padding: 0.25rem; line-height: 1; transition: color 0.15s;
-  }
-  .edit-btn:hover { color: var(--pico-primary-background); }
-
-  .event-detail-body { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
-  .event-detail-row { display: flex; flex-direction: column; gap: 0.125rem; }
-  .event-detail-label {
-    font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
-    color: var(--pico-muted-color, #666); font-weight: 600;
-  }
-  .event-detail-secondary {
-    color: var(--pico-muted-color, #666);
-    font-size: 0.875rem;
-  }
-
-  .edit-wrap { position: relative; }
-  .edit-choice-popover {
-    position: absolute;
-    top: calc(100% + 0.25rem);
-    right: 0;
-    z-index: 10;
-    display: flex;
-    flex-direction: column;
-    gap: 0.125rem;
-    padding: 0.25rem;
-    background: var(--pico-background-color);
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    box-shadow: 0 0.25rem 1rem rgba(0,0,0,0.2);
-    white-space: nowrap;
-  }
-  .edit-choice-popover button {
-    background: none; border: none; text-align: left; font-size: 0.875rem;
-    cursor: pointer; padding: 0.5rem 0.75rem; border-radius: var(--pico-border-radius);
-    color: var(--pico-color); white-space: nowrap;
-  }
-  .edit-choice-popover button:hover { background: var(--pico-primary-background); color: var(--pico-primary-inverse); }
-
-  .attendee-list-detail { display: flex; flex-direction: column; gap: 0.25rem; }
-  .attendee-detail-row { display: flex; align-items: center; gap: 0.5rem; }
-  .attendee-badge { font-size: 0.75rem; font-weight: 600; padding: 0.1rem 0.45rem; border-radius: 999px; white-space: nowrap; }
-  .attendee-badge--accepted { background: #d1fae5; color: #065f46; }
-  .attendee-badge--declined { background: #fee2e2; color: #991b1b; }
-  .attendee-badge--tentative { background: #fef9c3; color: #854d0e; }
-  .attendee-badge--needs-action { background: var(--pico-secondary-background); color: var(--pico-secondary-inverse); opacity: 0.7; }
+  .description { white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>

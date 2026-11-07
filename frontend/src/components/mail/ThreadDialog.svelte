@@ -53,19 +53,22 @@
   {#each nodes as branch}
     {@const node = branch.message}
     {@const events = nodeEvents(node)}
-    <li>
+    <li data-layout="stack" data-gap="xs">
       <button
-        class="thread-message"
-        class:current={isHighlightedMessage(node)}
-        aria-current={isHighlightedMessage(node) ? 'true' : undefined}
+        type="button"
+        data-variant="item"
+        data-layout="row"
+        data-gap="sm"
+        data-wrap="none"
+        aria-current={isHighlightedMessage(node) ? 'true' : null}
         on:click={() => onmessageclick?.(node)}
       >
-        <span class="thread-message-from">{senderName(node.from) || tl('mail_unknownSender')}</span>
-        <span class="thread-message-subject">{node.subject || tl('mail_noSubject')}</span>
-        <span class="thread-message-date">{formatDate(node.sent_at)}</span>
+        <span class="from" data-truncate>{senderName(node.from) || tl('mail_unknownSender')}</span>
+        <span data-truncate data-grow data-muted>{node.subject || tl('mail_noSubject')}</span>
+        <small data-muted>{formatDate(node.sent_at)}</small>
       </button>
       {#if events.length > 0}
-        <ul class="thread-events">
+        <ul class="branch" data-layout="stack" data-gap="xs">
           {#each events as ev (ev.account_id + '\0' + ev.calendar_href + '\0' + ev.uid)}
             <li>
               <ThreadEventItem
@@ -79,122 +82,36 @@
         </ul>
       {/if}
       {#if branch.children.length > 0}
-        <ul>{@render threadBranch(branch.children)}</ul>
+        <ul class="branch" data-layout="stack" data-gap="xs">{@render threadBranch(branch.children)}</ul>
       {/if}
     </li>
   {/each}
 {/snippet}
 
-<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
 <dialog
   bind:this={dialogEl}
-  class="thread-dialog"
-  on:click={(e) => { if (e.target === e.currentTarget) close(); }}
-  on:cancel={(e) => { e.preventDefault(); close(); }}
+  id="thread-dialog"
+  closedby="any"
+  data-layout="stack"
+  style="--tm-dialog-width: 40rem"
 >
-  <article>
-    <header>
-      <h3>{tl('mail_threadsHeading')}</h3>
-      <button class="close-btn" aria-label={tl('mail_close')} on:click={close}></button>
-    </header>
-    <ul class="thread-tree" aria-label={tl('mail_threadsHeading')}>
-      {#key eventsRenderKey}
-        {@render threadBranch(threadTree)}
-      {/key}
-    </ul>
-  </article>
+  <header>
+    <h2>{tl('mail_threadsHeading')}</h2>
+    <button type="button" commandfor="thread-dialog" command="close" aria-label={tl('mail_close')}></button>
+  </header>
+  <ul class="tree" data-layout="stack" data-gap="xs" data-grow data-scroll="y" aria-label={tl('mail_threadsHeading')}>
+    {#key eventsRenderKey}
+      {@render threadBranch(threadTree)}
+    {/key}
+  </ul>
 </dialog>
 
 <style>
-  .thread-dialog {
-    width: min(640px, calc(100vw - 2rem));
+  /* Thread tree: nested replies are indented with a guide line. */
+  .tree, .branch { list-style: none; margin: 0; padding: 0; }
+  .branch {
+    padding-inline-start: var(--tm-space-md);
+    border-inline-start: 1px solid var(--tm-border);
   }
-
-  .thread-dialog article {
-    margin: 0;
-    padding: 0;
-  }
-
-  .thread-dialog header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin: 0;
-    padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
-  }
-
-  .thread-dialog header h3 {
-    margin: 0;
-  }
-
-  .thread-tree,
-  .thread-tree ul {
-    list-style: none;
-    list-style-type: none;
-    margin: 0;
-    padding: 0;
-  }
-
-  .thread-tree li::marker {
-    content: '';
-  }
-
-  .thread-tree {
-    padding: 0.65rem;
-    max-height: min(65vh, 34rem);
-    overflow-y: auto;
-  }
-
-  .thread-tree ul {
-    padding-left: 1.15rem;
-    border-left: 1px solid var(--pico-muted-border-color, #ddd);
-  }
-
-  .thread-tree li {
-    margin: 0.2rem 0;
-  }
-
-  .thread-message {
-    display: grid;
-    grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr) auto;
-    align-items: baseline;
-    gap: 0.7rem;
-    width: 100%;
-    margin: 0;
-    padding: 0.55rem 0.65rem;
-    border: none;
-    border-radius: 0.35rem;
-    background: none;
-    color: inherit;
-    font-size: 0.84rem;
-    text-align: left;
-  }
-
-  .thread-message:hover,
-  .thread-message:focus-visible {
-    background: var(--pico-muted-border-color, #f5f5f5);
-  }
-
-  .thread-message.current {
-    background: var(--pico-primary-background, #e6f2fb);
-    box-shadow: inset 3px 0 0 var(--pico-primary, #0172ad);
-  }
-
-  .thread-message-from,
-  .thread-message-subject {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .thread-message-subject {
-    color: var(--pico-secondary, #444);
-  }
-
-  .thread-message-date {
-    color: var(--pico-muted-color, #888);
-    font-size: 0.75rem;
-    white-space: nowrap;
-  }
+  .from { flex: 0 1 10rem; font-weight: 550; }
 </style>
