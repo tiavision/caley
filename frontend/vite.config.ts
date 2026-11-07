@@ -17,6 +17,15 @@ export default defineConfig({
       project: './project.inlang',
       outdir: './src/paraglide',
     }),
+    // Pages render in JS: make the entry script render-blocking so a cross-document view transition
+    // (app.scss) captures the mounted page, not an empty <main>. Vite drops the attribute from the source tag.
+    {
+      name: 'caley-render-blocking-entry',
+      transformIndexHtml: {
+        order: 'post',
+        handler: (html) => html.replace(/<script type="module"(?![^>]*\bblocking=)/g, '<script type="module" blocking="render"'),
+      },
+    },
   ],
   css: {
     preprocessorOptions: {

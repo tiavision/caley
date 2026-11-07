@@ -30,3 +30,45 @@ a.mail-attachment-chip:hover {
   block-size: 1.25rem;
   min-block-size: 0;
 }
+
+// Page transitions: cross-document view transitions between the app pages (same-origin navigations).
+// The rail keeps its place and cross-fades (only aria-current changes); <main> fades with a short lift.
+// Entry scripts carry blocking="render" so the new page is captured after Svelte has mounted.
+@view-transition {
+  navigation: auto;
+}
+
+body[data-shell] > nav[data-rail] {
+  view-transition-name: nav-rail;
+}
+
+body[data-shell] > main {
+  view-transition-name: page;
+}
+
+::view-transition-group(*) {
+  animation-duration: 200ms;
+  animation-timing-function: var(--tm-ease, ease);
+}
+
+::view-transition-old(page) {
+  animation: 120ms ease-in both page-out;
+}
+
+::view-transition-new(page) {
+  animation: 200ms ease-out 60ms both page-in;
+}
+
+@keyframes page-out {
+  to { opacity: 0; }
+}
+
+@keyframes page-in {
+  from { opacity: 0; translate: 0 0.5rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @view-transition {
+    navigation: none;
+  }
+}
