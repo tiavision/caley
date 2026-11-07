@@ -1,8 +1,6 @@
 <script lang="ts">
   import { getLocale, makeTl } from '../../lib/i18n.ts';
   import { apiFetch } from '../../lib/api.ts';
-  import SelectDropdown from '../SelectDropdown.svelte';
-  import UiIcon from '../UiIcon.svelte';
   import { readVault, decryptPrivateKeys, localActiveDevice, rememberLocalDevice, unwrapVaultKey, validateVault, eraseBytes } from '../../lib/pgp/vault.ts';
   import { unlock } from '../../lib/pgp/webauthn.ts';
   import { getKeys, isUnlocked } from '../../lib/pgp/session.ts';
@@ -604,448 +602,285 @@
 </script>
 
 <dialog
+  id="mail-compose"
   bind:this={dialog}
   class="compose-dialog"
+  data-layout="stack"
+  data-gap="none"
+  data-pad="none"
   on:cancel={(e) => { e.preventDefault(); if (filePickerOpen) { filePickerOpen = false; } else { dialog?.close(); } }}
 >
-  <article>
-    <header class="compose-header">
-      <span class="compose-title">{composeMode === 'forward' ? tl('mail_forward') : composeMode === 'replyAll' ? tl('mail_replyAll') : composeMode === 'reply' ? tl('mail_reply') : tl('mail_newMessage')}</span>
-      <button class="close-btn" aria-label={tl('mail_close')} on:click={() => dialog?.close()}></button>
-    </header>
-    <form on:submit|preventDefault={sendEmail} class="compose-form">
-      {#if identities.length > 1}
-        <div class="compose-row">
-          <span class="compose-label">{tl('mail_composeFrom')}</span>
-          <SelectDropdown
-            options={identities.map(id => ({ value: id.identity_id, label: id.name, secondary: `<${id.email}>` }))}
-            bind:value={composeIdentityId}
-          />
-        </div>
-      {/if}
-      <div class="compose-row">
-        <span class="compose-label">{tl('mail_composeTo')}</span>
-        <div class="compose-input-wrap">
-          <input class="compose-input" bind:value={composeTo} placeholder={tl('mail_composeToPlaceholder')}
-            on:input={(e) => onRecipientInput('to', e.currentTarget.value)}
-            on:keydown={onRecipientKeydown}
-            on:blur={onRecipientBlur}
-          />
-          {#if recipientActiveField === 'to' && recipientSuggestions.length > 0}
-            <ul class="addr-suggestions" role="listbox">
-              {#each recipientSuggestions as addr, i}
-                <li role="option" aria-selected={i === recipientSuggestionIdx}>
-                  <button type="button" class:active={i === recipientSuggestionIdx}
-                    on:mousedown={(e) => { e.preventDefault(); applyRecipientSuggestion(addr); }}
-                  >{addr}</button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </div>
-        <div class="compose-security-controls">
-          <button
-            type="button"
-            class="compose-security-toggle"
-            class:active={composeEncrypt}
-            disabled={!composeCanEncrypt || composeSending}
-            title={tl('pgp_composeEncrypt')}
-            aria-label={tl('pgp_composeEncrypt')}
-            aria-pressed={composeEncrypt}
-            on:click={toggleComposeEncrypt}
-          >
-            <UiIcon name="lock" size={16} />
-          </button>
-          <button
-            type="button"
-            class="compose-security-toggle"
-            class:active={composeSign}
-            disabled={!composeCanSign || composeSending}
-            title={tl('pgp_composeSign')}
-            aria-label={tl('pgp_composeSign')}
-            aria-pressed={composeSign}
-            on:click={toggleComposeSign}
-          >
-            <UiIcon name="signature" size={17} />
-          </button>
-        </div>
-        {#if !showComposeCcBcc}
-          <button type="button" class="ccbcc-toggle" on:click={() => { showComposeCcBcc = true; }}>{tl('mail_composeCcBcc')}</button>
-        {/if}
+  <header class="compose-header" data-pad="sm">
+    <h2>{composeMode === 'forward' ? tl('mail_forward') : composeMode === 'replyAll' ? tl('mail_replyAll') : composeMode === 'reply' ? tl('mail_reply') : tl('mail_newMessage')}</h2>
+    <button type="button" commandfor="mail-compose" command="close" aria-label={tl('mail_close')}></button>
+  </header>
+  <form on:submit|preventDefault={sendEmail} class="compose-form" data-layout="stack" data-gap="none" data-grow>
+    {#if identities.length > 1}
+      <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+        <label class="compose-label" for="compose-from">{tl('mail_composeFrom')}</label>
+        <select id="compose-from" class="compose-input" data-grow bind:value={composeIdentityId}>
+          {#each identities as id}
+            <option value={id.identity_id}>{id.name} &lt;{id.email}&gt;</option>
+          {/each}
+        </select>
       </div>
-      {#if showComposeCcBcc}
-        <div class="compose-row">
-          <span class="compose-label">{tl('mail_composeCc')}</span>
-          <div class="compose-input-wrap">
-            <input class="compose-input" bind:value={composeCc} placeholder={tl('mail_composeCcPlaceholder')}
+    {/if}
+    <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+      <label class="compose-label" for="compose-to">{tl('mail_composeTo')}</label>
+          <div class="compose-input-wrap" data-combo data-grow>
+            <input
+              id="compose-to"
+              class="compose-input"
+              role="combobox"
+              autocomplete="off"
+              aria-autocomplete="list"
+              aria-controls="compose-to-list"
+              aria-expanded={recipientActiveField === 'to' && recipientSuggestions.length > 0}
+              bind:value={composeTo}
+              placeholder={tl('mail_composeToPlaceholder')}
+              on:input={(e) => onRecipientInput('to', e.currentTarget.value)}
+              on:keydown={onRecipientKeydown}
+              on:blur={onRecipientBlur}
+            />
+            {#if recipientActiveField === 'to' && recipientSuggestions.length > 0}
+              <div data-menu role="listbox" id="compose-to-list">
+                {#each recipientSuggestions as addr, i}
+                  <div role="option" tabindex="-1" aria-selected={i === recipientSuggestionIdx}
+                    on:mousedown={(e) => { e.preventDefault(); applyRecipientSuggestion(addr); }}
+                  >{addr}</div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+      <button
+        type="button"
+        data-variant="ghost"
+        data-size="sm"
+        data-icon="lock"
+        disabled={!composeCanEncrypt || composeSending}
+        aria-label={tl('pgp_composeEncrypt')}
+        aria-pressed={composeEncrypt}
+        data-tooltip
+        on:click={toggleComposeEncrypt}
+      ></button>
+      <button
+        type="button"
+        data-variant="ghost"
+        data-size="sm"
+        data-icon="signature"
+        disabled={!composeCanSign || composeSending}
+        aria-label={tl('pgp_composeSign')}
+        aria-pressed={composeSign}
+        data-tooltip
+        on:click={toggleComposeSign}
+      ></button>
+      {#if !showComposeCcBcc}
+        <button type="button" class="nowrap" data-variant="ghost" data-size="sm" on:click={() => { showComposeCcBcc = true; }}>{tl('mail_composeCcBcc')}</button>
+      {/if}
+    </div>
+    {#if showComposeCcBcc}
+      <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+        <label class="compose-label" for="compose-cc">{tl('mail_composeCc')}</label>
+          <div class="compose-input-wrap" data-combo data-grow>
+            <input
+              id="compose-cc"
+              class="compose-input"
+              role="combobox"
+              autocomplete="off"
+              aria-autocomplete="list"
+              aria-controls="compose-cc-list"
+              aria-expanded={recipientActiveField === 'cc' && recipientSuggestions.length > 0}
+              bind:value={composeCc}
+              placeholder={tl('mail_composeCcPlaceholder')}
               on:input={(e) => onRecipientInput('cc', e.currentTarget.value)}
               on:keydown={onRecipientKeydown}
               on:blur={onRecipientBlur}
             />
             {#if recipientActiveField === 'cc' && recipientSuggestions.length > 0}
-              <ul class="addr-suggestions" role="listbox">
+              <div data-menu role="listbox" id="compose-cc-list">
                 {#each recipientSuggestions as addr, i}
-                  <li role="option" aria-selected={i === recipientSuggestionIdx}>
-                    <button type="button" class:active={i === recipientSuggestionIdx}
-                      on:mousedown={(e) => { e.preventDefault(); applyRecipientSuggestion(addr); }}
-                    >{addr}</button>
-                  </li>
+                  <div role="option" tabindex="-1" aria-selected={i === recipientSuggestionIdx}
+                    on:mousedown={(e) => { e.preventDefault(); applyRecipientSuggestion(addr); }}
+                  >{addr}</div>
                 {/each}
-              </ul>
+              </div>
             {/if}
           </div>
-        </div>
-        <div class="compose-row">
-          <span class="compose-label">{tl('mail_composeBcc')}</span>
-          <div class="compose-input-wrap">
-            <input class="compose-input" bind:value={composeBcc} placeholder={tl('mail_composeBccPlaceholder')}
+      </div>
+      <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+        <label class="compose-label" for="compose-bcc">{tl('mail_composeBcc')}</label>
+          <div class="compose-input-wrap" data-combo data-grow>
+            <input
+              id="compose-bcc"
+              class="compose-input"
+              role="combobox"
+              autocomplete="off"
+              aria-autocomplete="list"
+              aria-controls="compose-bcc-list"
+              aria-expanded={recipientActiveField === 'bcc' && recipientSuggestions.length > 0}
+              bind:value={composeBcc}
+              placeholder={tl('mail_composeBccPlaceholder')}
               on:input={(e) => onRecipientInput('bcc', e.currentTarget.value)}
               on:keydown={onRecipientKeydown}
               on:blur={onRecipientBlur}
             />
             {#if recipientActiveField === 'bcc' && recipientSuggestions.length > 0}
-              <ul class="addr-suggestions" role="listbox">
+              <div data-menu role="listbox" id="compose-bcc-list">
                 {#each recipientSuggestions as addr, i}
-                  <li role="option" aria-selected={i === recipientSuggestionIdx}>
-                    <button type="button" class:active={i === recipientSuggestionIdx}
-                      on:mousedown={(e) => { e.preventDefault(); applyRecipientSuggestion(addr); }}
-                    >{addr}</button>
-                  </li>
+                  <div role="option" tabindex="-1" aria-selected={i === recipientSuggestionIdx}
+                    on:mousedown={(e) => { e.preventDefault(); applyRecipientSuggestion(addr); }}
+                  >{addr}</div>
                 {/each}
-              </ul>
+              </div>
             {/if}
           </div>
-        </div>
-      {/if}
-      <div class="compose-row">
-        <span class="compose-label">{tl('mail_composeSubject')}</span>
-        <input class="compose-input" bind:value={composeSubject} />
       </div>
-      <div class="compose-body-row">
-        <textarea bind:value={composeBody} rows={composeForwardHtml ? 4 : 10}></textarea>
+    {/if}
+    <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+      <label class="compose-label" for="compose-subject">{tl('mail_composeSubject')}</label>
+      <input id="compose-subject" class="compose-input" data-grow bind:value={composeSubject} />
+    </div>
+    <textarea class="compose-body" data-grow aria-label={tl('mail_newMessage')} bind:value={composeBody} rows={composeForwardHtml ? 4 : 10}></textarea>
+    {#if composeForwardHtml && composeForwardRef}
+      <div class="compose-forward-preview">
+        <MailHtmlFrame
+          srcdoc={prepareEmailHtml(composeForwardHtml, {
+            accountId: composeForwardRef.account_id,
+            mailbox: composeForwardRef.mailbox,
+            uid: composeForwardRef.uid,
+          })}
+          title="Forwarded message"
+          style="height:240px"
+        />
       </div>
-      {#if composeForwardHtml && composeForwardRef}
-        <div class="compose-forward-preview">
-          <MailHtmlFrame
-            srcdoc={prepareEmailHtml(composeForwardHtml, {
-              accountId: composeForwardRef.account_id,
-              mailbox: composeForwardRef.mailbox,
-              uid: composeForwardRef.uid,
-            })}
-            title="Forwarded message"
-            style="height:240px"
-          />
-        </div>
-      {/if}
-      {#if composeAttachments.length > 0}
-        <ul class="compose-attachments">
-          {#each composeAttachments as file, i}
-            <li class="compose-attachment-chip">
-              <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
-              <span class="attachment-name" title={file.name}>{file.name}</span>
-              <span class="attachment-size">{formatFileSize(file.size)}</span>
-              <button type="button" class="attachment-remove" aria-label={tl('mail_removeAttachment')} on:click={() => removeAttachment(i)}>✕</button>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-      {#if composeError}
-        <p class="error compose-error">{composeError}</p>
-      {/if}
-      <input
-        bind:this={composeFileInput}
-        type="file"
-        multiple
-        style="display:none"
-        on:change={(e) => addAttachments(e.currentTarget.files)}
-      />
-      <footer class="compose-footer">
-        <button type="button" class="compose-attach-btn" aria-label={tl('mail_attachFiles')} on:click={openFilePicker}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-          {tl('mail_attach')}
+    {/if}
+    {#if composeAttachments.length > 0}
+      <ul class="compose-attachments" data-layout="row" data-gap="xs" data-pad="sm">
+        {#each composeAttachments as file, i}
+          <li class="mail-attachment-chip" data-icon="paperclip">
+            <span class="mail-attachment-name" data-truncate title={file.name}>{file.name}</span>
+            <span data-muted>{formatFileSize(file.size)}</span>
+            <button type="button" class="mail-attachment-remove" data-variant="ghost" data-icon="x" aria-label={tl('mail_removeAttachment')} on:click={() => removeAttachment(i)}></button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    {#if composeError}
+      <p class="compose-error" data-tone="danger" role="alert">{composeError}</p>
+    {/if}
+    <input
+      bind:this={composeFileInput}
+      type="file"
+      multiple
+      hidden
+      aria-label={tl('mail_attachFiles')}
+      on:change={(e) => addAttachments(e.currentTarget.files)}
+    />
+    <footer class="compose-footer" data-layout="row" data-gap="sm" data-justify="between" data-pad="sm">
+      <button type="button" data-variant="ghost" data-icon="paperclip" on:click={openFilePicker}>{tl('mail_attach')}</button>
+      <div data-layout="row" data-gap="sm">
+        <button type="button" data-variant="secondary" on:click={() => dialog?.close()}>{tl('mail_discard')}</button>
+        <button type="submit" data-icon="send" disabled={composeSending} aria-busy={composeSending}>
+          {composeSending ? tl('mail_sending') : tl('mail_send')}
         </button>
-        <div class="compose-footer-right">
-          <button type="button" class="secondary outline" on:click={() => dialog?.close()}>{tl('mail_discard')}</button>
-          <button type="submit" class="primary" disabled={composeSending}>
-            {composeSending ? tl('mail_sending') : tl('mail_send')}
-          </button>
-        </div>
-      </footer>
-    </form>
-  </article>
+      </div>
+    </footer>
+  </form>
 </dialog>
 
 <style>
   .compose-dialog {
-    width: min(95vw, 44rem);
-    max-width: 95vw;
-    height: clamp(320px, 60dvh, 560px);
-    min-width: 360px;
-    min-height: 280px;
-    max-height: 95dvh;
+    --tm-dialog-width: 44rem;
+    block-size: clamp(320px, 60dvh, 560px);
+    min-inline-size: min(360px, 100% - 1rem);
+    min-block-size: 280px;
     resize: both;
-    padding: 0;
     overflow: hidden;
   }
 
-  .compose-dialog article {
-    padding: 0;
-    margin: 0;
-    overflow: hidden;
-    width: 100%;
-    max-width: 100%;
-    height: 100%;
-    max-height: 100%;
-    display: flex;
-    flex-direction: column;
+  .compose-header,
+  .compose-row,
+  .compose-attachments {
+    border-block-end: 1px solid var(--tm-border);
   }
 
   .compose-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.6rem 1rem;
-    margin: 0 !important;
-    border-bottom: 1px solid var(--pico-muted-border-color);
-    background: var(--pico-card-sectioning-background-color);
+    background: var(--tm-surface);
   }
 
-  .compose-title {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: var(--pico-color);
+  .compose-header h2 {
+    font-size: var(--tm-text-md);
   }
 
   .compose-form {
-    display: flex;
-    flex-direction: column;
-    font-size: 0.9rem;
-    color: var(--pico-color);
-    flex: 1;
-    min-height: 0;
+    min-block-size: 0;
     overflow: hidden;
   }
 
   .compose-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0 1rem;
-    border-bottom: 1px solid var(--pico-muted-border-color);
+    padding-inline: var(--tm-space-md);
+  }
+
+  .compose-row:focus-within {
+    box-shadow: inset 0 -2px 0 var(--tm-accent);
   }
 
   .compose-label {
-    font-size: 0.8rem;
-    color: var(--pico-muted-color);
-    width: 3.5rem;
     flex-shrink: 0;
-    text-align: right;
+    inline-size: 3.5rem;
+    text-align: end;
+    font-size: var(--tm-text-sm);
+    color: var(--tm-text-muted);
+  }
+
+  .nowrap {
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 
   .compose-input-wrap {
-    position: relative;
-    flex: 1;
-    min-width: 0;
-    display: flex;
+    min-inline-size: 0;
+  }
+
+  .compose-input,
+  .compose-body {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    outline: none;
   }
 
   .compose-input {
-    flex: 1;
-    min-width: 0;
-    border: none !important;
-    outline: none !important;
-    box-shadow: none !important;
-    background: transparent !important;
-    padding: 0.45rem 0 !important;
-    margin: 0 !important;
-    font-size: 0.9rem;
-    color: inherit;
+    inline-size: 100%;
+    padding-inline: 0;
   }
 
-  .addr-suggestions {
-    position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
-    margin: 0.125rem 0 0; padding: 0.25rem; list-style: none;
-    background: var(--pico-background-color);
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    box-shadow: 0 0.25rem 0.75rem rgba(0,0,0,0.15);
-  }
-  .addr-suggestions li { list-style: none; padding: 0; margin: 0; }
-  .addr-suggestions button {
-    width: 100%; text-align: left; border: none; background: none; margin: 0;
-    padding: 0.375rem 0.75rem; cursor: pointer; font-size: 0.875rem;
-    border-radius: calc(var(--pico-border-radius, 0.25rem) - 0.125rem);
-    color: var(--pico-color); transition: background 0.1s;
-  }
-  .addr-suggestions button:hover,
-  .addr-suggestions button.active {
-    background: var(--pico-primary-background);
-    color: var(--pico-primary-inverse);
-  }
-
-  .compose-input:focus {
-    border: none !important;
-    box-shadow: none !important;
-  }
-
-  .ccbcc-toggle {
-    font-size: 0.75rem;
-    color: var(--pico-muted-color);
-    background: none;
-    border: none;
-    padding: 0.2rem 0.4rem;
-    cursor: pointer;
-    flex-shrink: 0;
-    margin: 0;
-    line-height: 1;
-  }
-
-  .ccbcc-toggle:hover {
-    color: var(--pico-color);
-    background: var(--pico-secondary-background);
-    border-radius: 0.25rem;
-  }
-
-  .compose-security-controls {
-    display: flex;
-    align-items: center;
-    gap: 0.15rem;
-    flex-shrink: 0;
-  }
-
-  .compose-security-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.7rem;
-    height: 1.7rem;
-    padding: 0;
-    margin: 0;
-    border: none;
-    border-radius: 0.3rem;
-    background: transparent;
-    color: var(--pico-muted-color);
-  }
-
-  .compose-security-toggle:hover:not(:disabled) {
-    color: var(--pico-color);
-    background: var(--pico-secondary-background);
-  }
-
-  .compose-security-toggle.active {
-    color: var(--pico-primary);
-    background: color-mix(in srgb, var(--pico-primary) 15%, transparent);
-  }
-
-  .compose-security-toggle:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  .compose-body-row {
-    padding: 0.25rem 1rem 0;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  .compose-body-row textarea {
-    width: 100%;
-    box-sizing: border-box;
-    border: none !important;
-    outline: none !important;
-    box-shadow: none !important;
-    background: transparent !important;
+  .compose-body {
+    flex-shrink: 1;
+    min-block-size: 4rem;
+    padding: var(--tm-space-sm) var(--tm-space-md);
     resize: none;
-    padding: 0.5rem 0 !important;
-    margin: 0 !important;
-    font-size: 0.9rem;
-    color: var(--pico-color);
-    flex: 1;
-    min-height: 4rem;
-  }
-
-  .compose-body-row textarea:focus {
-    border: none !important;
-    box-shadow: none !important;
   }
 
   .compose-forward-preview {
-    margin: 0 1rem 0.5rem;
-    border-top: 1px solid var(--pico-muted-border-color);
-    padding-top: 0.25rem;
-  }
-
-  .compose-error {
-    margin: 0.25rem 1rem;
-    font-size: 0.85rem;
+    flex-shrink: 0;
+    border-block-start: 1px solid var(--tm-border);
+    padding-inline: var(--tm-space-md);
   }
 
   .compose-attachments {
-    list-style: none;
-    margin: 0;
-    padding: 0.4rem 1rem;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    border-top: 1px solid var(--pico-muted-border-color);
-  }
-
-  .attachment-remove {
-    background: none;
-    border: none;
-    padding: 0 0.1rem;
-    margin: 0;
-    cursor: pointer;
-    color: var(--pico-muted-color);
-    font-size: 0.7rem;
-    line-height: 1;
     flex-shrink: 0;
+    border-block-start: 1px solid var(--tm-border);
   }
 
-  .attachment-remove:hover {
-    color: var(--pico-color);
+  .compose-error {
+    padding: var(--tm-space-xs) var(--tm-space-md);
   }
 
   .compose-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding: 0.6rem 1rem;
-    border-top: 1px solid var(--pico-muted-border-color);
-    background: var(--pico-card-sectioning-background-color);
-    margin: 0;
-  }
-
-  .compose-footer-right {
-    display: flex;
-    gap: 0.5rem;
-  }
-
-  .compose-footer button {
-    margin: 0;
-    padding: 0.4rem 1rem;
-    font-size: 0.85rem;
-  }
-
-  .compose-attach-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    background: none;
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    padding: 0.35rem 0.7rem !important;
-    font-size: 0.8rem;
-    color: var(--pico-muted-color);
-    cursor: pointer;
-  }
-
-  .compose-attach-btn:hover {
-    color: var(--pico-color);
-    border-color: var(--pico-color);
-    background: none;
+    flex-shrink: 0;
+    border-block-start: 1px solid var(--tm-border);
+    background: var(--tm-surface);
   }
 </style>
