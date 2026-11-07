@@ -108,6 +108,7 @@
           class:drag-over={dragOverMailbox === `${acc.account_id}|${mb.name}`}
           data-variant="item"
           data-size="sm"
+          aria-busy={isSyncing ? 'true' : null}
           data-layout="row"
           data-gap="sm"
           data-wrap="none"
@@ -119,9 +120,7 @@
         >
           <FolderIcon kind={folderKind(mb.name)} />
           <span data-truncate data-grow>{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
-          {#if isSyncing}
-            <span class="sync-spinner" role="status" aria-label="Syncing"></span>
-          {:else if item.unread_count > 0}
+          {#if !isSyncing && item.unread_count > 0}
             <span data-badge data-tone="accent">{item.unread_count > 999 ? '999+' : item.unread_count}</span>
           {/if}
         </button>
@@ -203,19 +202,6 @@
     align-items: start;
   }
 
-  .sync-spinner {
-    flex-shrink: 0;
-    inline-size: 0.75rem;
-    block-size: 0.75rem;
-    border: 2px solid var(--tm-border-strong);
-    border-block-start-color: var(--tm-accent);
-    border-radius: var(--tm-radius-full);
-    animation: sidebar-spin 0.7s linear infinite;
-  }
-
-  @keyframes sidebar-spin {
-    to { rotate: 360deg; }
-  }
 
   .resize-handle {
     inline-size: 3px;

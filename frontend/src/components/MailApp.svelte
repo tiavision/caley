@@ -2959,8 +2959,6 @@
 
   .meta-primary {
     min-inline-size: 0;
-    justify-content: start;
-    text-align: start;
     color: var(--tm-text-muted);
     font-weight: 400;
   }
