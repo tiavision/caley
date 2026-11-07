@@ -12,7 +12,7 @@ export default defineConfig({
   plugins: [
     svelte(),
     // temper check on all markup and CSS (errors fail the build); serves the Lucide icons the markup names.
-    temper({ paths: ['src', 'index.html', 'calendar', 'contacts', 'mail', 'search', 'settings'].map((p) => resolve(root, p)), icons: { lucide: true } }),
+    temper({ paths: ['src', 'index.html', 'calendar', 'contacts', 'mail', 'search', 'settings'].map((p) => resolve(root, p)), icons: { lucide: true }, prune: true }),
     paraglideVitePlugin({
       project: './project.inlang',
       outdir: './src/paraglide',
