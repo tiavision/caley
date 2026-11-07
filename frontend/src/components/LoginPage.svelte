@@ -78,107 +78,52 @@
   }
 </script>
 
-<div class="login-form">
-  <div class="login-header">
-    <h2>{tl('login_heading')}</h2>
-    <span class="locale-group">
-      🌐
-      <select
-        class="locale-picker"
-        aria-label={tl('settings_language')}
-        bind:value={selectedLocale}
-        onchange={onLocaleChange}
-      >
-        {#each localeOptions as opt}
-          <option value={opt.value}>{opt.label}</option>
-        {/each}
-      </select>
-    </span>
+<div data-layout="stack" data-gap="lg">
+  <div data-layout="row" data-gap="sm" data-wrap="none">
+    <h2 data-grow>{tl('login_heading')}</h2>
+    <span data-icon="globe" data-muted></span>
+    <select
+      data-size="sm"
+      aria-label={tl('settings_language')}
+      bind:value={selectedLocale}
+      onchange={onLocaleChange}
+    >
+      {#each localeOptions as opt}
+        <option value={opt.value}>{opt.label}</option>
+      {/each}
+    </select>
   </div>
 
   {#if loading}
     <p aria-busy="true">{tl('nav_loading')}</p>
   {:else}
-    <p>{tl('login_subtitle')}</p>
-    <form onsubmit={(e) => { e.preventDefault(); onSubmit(); }}>
+    <p data-muted>{tl('login_subtitle')}</p>
+    <form data-layout="stack" data-gap="md" onsubmit={(e) => { e.preventDefault(); onSubmit(); }}>
       <label>
-        <span>{tl('settings_baseUrl')}</span>
+        {tl('settings_baseUrl')}
         <input type="url" placeholder={tl('settings_baseUrlPlaceholder')} bind:value={caldavBaseUrl} required />
       </label>
 
       <label>
-        <span>{tl('settings_username')}</span>
-        <input type="text" placeholder={tl('settings_usernamePlaceholder')} bind:value={caldavUsername} required />
+        {tl('settings_username')}
+        <input type="text" autocomplete="username" placeholder={tl('settings_usernamePlaceholder')} bind:value={caldavUsername} required />
       </label>
 
       <label>
-        <span>{tl('settings_password')}</span>
-        <input type="password" placeholder={tl('settings_passwordPlaceholder')} bind:value={caldavPassword} required />
+        {tl('settings_password')}
+        <input type="password" autocomplete="current-password" placeholder={tl('settings_passwordPlaceholder')} bind:value={caldavPassword} required />
       </label>
 
       {#if errorMsg}
-        <p class="error-msg">{errorMsg}</p>
+        <p data-callout data-tone="danger" role="alert">{errorMsg}</p>
       {/if}
 
       <button type="submit" disabled={saving} aria-busy={saving}>{tl('login_submit')}</button>
     </form>
 
     {#if oidcEnabled}
-      <div class="oidc-divider"><span>{tl('login_or')}</span></div>
-      <a class="oidc-btn" href="/auth/oidc" role="button" onclick={markAuthReturnPending}>{tl('login_oidc_button')}</a>
+      <p data-divider>{tl('login_or')}</p>
+      <a href="/auth/oidc" role="button" data-variant="outline" onclick={markAuthReturnPending}>{tl('login_oidc_button')}</a>
     {/if}
   {/if}
 </div>
-
-<style>
-  .login-form {
-    max-width: 28rem;
-    margin: 3rem auto;
-  }
-
-  .login-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-
-    h2 {
-      margin: 0;
-      flex: 1;
-    }
-  }
-
-  .locale-group {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-
-  .error-msg {
-    color: var(--pico-del-color);
-  }
-
-  .oidc-divider {
-    display: flex;
-    align-items: center;
-    text-align: center;
-    color: var(--pico-muted-color);
-    margin: 1.25rem 0;
-    gap: 0.75rem;
-  }
-  .oidc-divider::before,
-  .oidc-divider::after {
-    content: '';
-    flex: 1;
-    border-bottom: 1px solid var(--pico-muted-border-color);
-  }
-
-  .oidc-btn {
-    display: block;
-    width: 100%;
-    text-align: center;
-    --pico-background-color: transparent;
-    --pico-color: var(--pico-primary);
-    --pico-border-color: var(--pico-primary);
-  }
-</style>

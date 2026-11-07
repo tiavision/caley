@@ -10,6 +10,8 @@ const root = import.meta.dirname;
 // Remove the list (check everything) once the last page has moved.
 const temperPaths: string[] = [
   'src/styles/app.scss',
+  'index.html',
+  'src/components/LoginPage.svelte',
 ];
 
 export default defineConfig({
