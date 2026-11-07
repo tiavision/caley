@@ -6,19 +6,13 @@ import temper from '@tiaforge-ui/temper/vite';
 
 const root = import.meta.dirname;
 
-// Files already moved from Pico to temper; `temper check` runs on these during dev and build.
-// Remove the list (check everything) once the last page has moved.
-const temperPaths: string[] = [
-  'src/styles/app.scss',
-  'index.html',
-  'src/components/LoginPage.svelte',
-];
 
 export default defineConfig({
   appType: 'mpa',
   plugins: [
     svelte(),
-    temper({ paths: temperPaths.map((p) => resolve(root, p)), icons: { lucide: true } }),
+    // temper check on all markup and CSS (errors fail the build); serves the Lucide icons the markup names.
+    temper({ paths: ['src', 'index.html', 'calendar', 'contacts', 'mail', 'search', 'settings'].map((p) => resolve(root, p)), icons: { lucide: true } }),
     paraglideVitePlugin({
       project: './project.inlang',
       outdir: './src/paraglide',
