@@ -4,8 +4,6 @@
   import { apiFetch } from '../lib/api.ts';
   import { getLocale, makeTl } from '../lib/i18n.ts';
   import { type NewMailNotification, showNewMailNotification } from '../lib/mail-notifications.ts';
-  import SelectDropdown from './SelectDropdown.svelte';
-  import UiIcon from './UiIcon.svelte';
   import ImportDialog from './ImportDialog.svelte';
   import MailComposeDialog from './mail/MailComposeDialog.svelte';
   import MailAccountDialog from './mail/MailAccountDialog.svelte';
@@ -490,8 +488,7 @@
   // Drag & drop state
   let draggedMessage: Message | null = null;
   let dragOverMailbox: string | null = null;
-  let actionsEl: HTMLDivElement;
-  let actionsMenuPos = { top: 0, right: 0 };
+  let actionsMenuEl: HTMLDivElement | null = null;
   let attachmentsExpanded = false;
   let imagesNoticeDismissed = false;
   let detailOverlayVisible = false;
@@ -664,7 +661,6 @@
     window.removeEventListener('mousemove', handleResizeMove);
     window.removeEventListener('mouseup', stopResize);
     window.removeEventListener('keydown', handleMailKeydown);
-    window.removeEventListener('click', handleWindowClick);
     document.removeEventListener('visibilitychange', clearPgpContentWhenHidden);
     window.removeEventListener('pagehide', clearPgpContent);
     removeFilterListeners();
@@ -2058,27 +2054,11 @@
     document.body.style.userSelect = '';
   }
 
-  // ── Actions dropdown ─────────────────────────────────────────────────────
+  // ── Actions menu (popover) ───────────────────────────────────────────────
 
-  function toggleActions(e: MouseEvent) {
-    e.stopPropagation();
-    actionsOpen = !actionsOpen;
-    if (actionsOpen) {
-      setTimeout(() => window.addEventListener('click', handleWindowClick), 0);
-    } else {
-      moveSubmenuOpen = false;
-      window.removeEventListener('click', handleWindowClick);
-    }
-  }
-
-  function handleWindowClick(e: MouseEvent) {
-    const target = e.target as Node;
-    if (!actionsEl?.contains(target)) {
-      actionsOpen = false;
-      moveSubmenuOpen = false;
-      window.removeEventListener('click', handleWindowClick);
-    }
-  }
+  // The menu is a light-dismiss popover; its toggle event keeps actionsOpen in sync, and setting
+  // actionsOpen = false anywhere closes it.
+  $: if (!actionsOpen && actionsMenuEl?.matches(':popover-open')) actionsMenuEl.hidePopover();
 
   $: sidebarAccountSections = accounts.map(account => {
     const collapsed = collapsedAccountIds.has(account.account_id);
@@ -2171,498 +2151,498 @@
 </script>
 
 
-<div class="mail-page" class:standalone>
-  <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
-  <div class="mail-layout" class:standalone style="grid-template-columns: {layoutColumns}">
-    {#if !standalone}
-    <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
-    <MailSidebar
-      {tl}
-      {isPhone}
-      bind:sidebarOpen
-      {virtualFolders}
-      {selectedFolderId}
-      {folderUnreadCounts}
-      {sidebarAccountSections}
-      {selectedAccountId}
-      {selectedMailbox}
-      {syncingMailboxes}
-      {FOLDER_NAMES}
-      {sidebarWidth}
-      bind:draggedMessage
-      bind:dragOverMailbox
-      onSelectVirtualFolder={selectVirtualFolder}
-      onSelectMailbox={selectMailbox}
-      onToggleCollapsed={toggleAccountCollapsed}
-      onRemoveAccount={removeAccount}
-      onMoveMessage={moveMessage}
-      onStartResize={startResize}
-      onResizeWithKeyboard={resizeWithKeyboard}
-      onEditFolder={(f) => folderDialog?.openEdit(f)}
-      onDeleteFolder={(f) => folderDialog?.deleteFolder(f)}
-      onOpenAddAccount={() => accountDialog?.openAdd()}
-      onOpenEditAccount={(acc) => accountDialog?.openEdit(acc)}
-      onOpenIdentities={(id) => accountDialog?.openIdentities(id)}
-      onOpenCreateFolder={() => folderDialog?.openCreate()}
-    />
+<div class="mail-layout" class:standalone data-grow style="grid-template-columns: {layoutColumns}">
+  {#if !standalone}
+  <!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
+  <MailSidebar
+    {tl}
+    {isPhone}
+    bind:sidebarOpen
+    {virtualFolders}
+    {selectedFolderId}
+    {folderUnreadCounts}
+    {sidebarAccountSections}
+    {selectedAccountId}
+    {selectedMailbox}
+    {syncingMailboxes}
+    {FOLDER_NAMES}
+    {sidebarWidth}
+    bind:draggedMessage
+    bind:dragOverMailbox
+    onSelectVirtualFolder={selectVirtualFolder}
+    onSelectMailbox={selectMailbox}
+    onToggleCollapsed={toggleAccountCollapsed}
+    onRemoveAccount={removeAccount}
+    onMoveMessage={moveMessage}
+    onStartResize={startResize}
+    onResizeWithKeyboard={resizeWithKeyboard}
+    onEditFolder={(f) => folderDialog?.openEdit(f)}
+    onDeleteFolder={(f) => folderDialog?.deleteFolder(f)}
+    onOpenAddAccount={() => accountDialog?.openAdd()}
+    onOpenEditAccount={(acc) => accountDialog?.openEdit(acc)}
+    onOpenIdentities={(id) => accountDialog?.openIdentities(id)}
+    onOpenCreateFolder={() => folderDialog?.openCreate()}
+  />
 
-    <!-- ── Message list ────────────────────────────────────────────────────── -->
-    <MailMessageList
-      {tl}
-      {standalone}
-      {isPhone}
-      bind:sidebarOpen
-      {selectedFolderId}
-      {selectedMailbox}
-      {selectedAccountId}
-      {virtualFolders}
-      {FOLDER_NAMES}
-      {accounts}
-      {messages}
-      {totalMessages}
-      {currentPage}
-      {messagesLoading}
-      {searching}
-      bind:searchQuery
-      {showEmptyTrash}
-      {selectedMessage}
-      bind:listCursor
-      {markedMessageKeys}
-      {selectedMessages}
-      {filterAddrActive}
-      {filterDateActive}
-      {filterUnreadOnly}
-      bind:filterAddrOpen
-      bind:filterDateOpen
-      bind:filterAddrs
-      bind:filterDateFrom
-      bind:filterDateTo
-      bind:addrFilterInput
-      {contactSuggestions}
-      {addrDbSuggestions}
-      bind:addrFilterEl
-      bind:addrPopoverEl
-      {addrPopoverStyle}
-      bind:dateFilterEl
-      bind:datePopoverEl
-      {datePopoverStyle}
-      bind:draggedMessage
-      bind:dragOverMailbox
-      {hasPrev}
-      {hasNext}
-      {pageStart}
-      {pageEnd}
-      {totalPages}
-      bind:pageInputActive
-      bind:pageInputValue
-      {listWidth}
-      bind:listScrollEl
-      bind:pageInputEl
-      onSearchInput={onSearchInput}
-      onToggleAddrFilter={toggleAddrFilter}
-      onToggleDateFilter={toggleDateFilter}
-      onToggleUnreadFilter={toggleUnreadFilter}
-      onAddrInput={onAddrInput}
-      onRunSearch={runSearch}
-      onMessageRowClick={handleMessageRowClick}
-      {registerMessageRow}
-      onFirstPage={firstPage}
-      onPrevPage={prevPage}
-      onNextPage={nextPage}
-      onLastPage={lastPage}
-      onActivatePageInput={activatePageInput}
-      onConfirmPageInput={confirmPageInput}
-      onCancelPageInput={cancelPageInput}
-      onStartResize={startResize}
-      onResizeWithKeyboard={resizeWithKeyboard}
-      onDragStart={(msg, e) => { draggedMessage = msg; if (e.dataTransfer) e.dataTransfer.effectAllowed = "move"; }}
-      onDragEnd={() => { draggedMessage = null; dragOverMailbox = null; }}
-      onEmptyTrash={openEmptyTrashDialog}
-    />
-    {/if}
+  <!-- ── Message list ────────────────────────────────────────────────────── -->
+  <MailMessageList
+    {tl}
+    {standalone}
+    {isPhone}
+    bind:sidebarOpen
+    {selectedFolderId}
+    {selectedMailbox}
+    {selectedAccountId}
+    {virtualFolders}
+    {FOLDER_NAMES}
+    {accounts}
+    {messages}
+    {totalMessages}
+    {currentPage}
+    {messagesLoading}
+    {searching}
+    bind:searchQuery
+    {showEmptyTrash}
+    {selectedMessage}
+    bind:listCursor
+    {markedMessageKeys}
+    {selectedMessages}
+    {filterAddrActive}
+    {filterDateActive}
+    {filterUnreadOnly}
+    bind:filterAddrOpen
+    bind:filterDateOpen
+    bind:filterAddrs
+    bind:filterDateFrom
+    bind:filterDateTo
+    bind:addrFilterInput
+    {contactSuggestions}
+    {addrDbSuggestions}
+    bind:addrFilterEl
+    bind:addrPopoverEl
+    {addrPopoverStyle}
+    bind:dateFilterEl
+    bind:datePopoverEl
+    {datePopoverStyle}
+    bind:draggedMessage
+    bind:dragOverMailbox
+    {hasPrev}
+    {hasNext}
+    {pageStart}
+    {pageEnd}
+    {totalPages}
+    bind:pageInputActive
+    bind:pageInputValue
+    {listWidth}
+    bind:listScrollEl
+    bind:pageInputEl
+    onSearchInput={onSearchInput}
+    onToggleAddrFilter={toggleAddrFilter}
+    onToggleDateFilter={toggleDateFilter}
+    onToggleUnreadFilter={toggleUnreadFilter}
+    onAddrInput={onAddrInput}
+    onRunSearch={runSearch}
+    onMessageRowClick={handleMessageRowClick}
+    {registerMessageRow}
+    onFirstPage={firstPage}
+    onPrevPage={prevPage}
+    onNextPage={nextPage}
+    onLastPage={lastPage}
+    onActivatePageInput={activatePageInput}
+    onConfirmPageInput={confirmPageInput}
+    onCancelPageInput={cancelPageInput}
+    onStartResize={startResize}
+    onResizeWithKeyboard={resizeWithKeyboard}
+    onDragStart={(msg, e) => { draggedMessage = msg; if (e.dataTransfer) e.dataTransfer.effectAllowed = "move"; }}
+    onDragEnd={() => { draggedMessage = null; dragOverMailbox = null; }}
+    onEmptyTrash={openEmptyTrashDialog}
+  />
+  {/if}
 
-    <!-- ── Message detail ────────────────────────────────────────────────────── -->
-    <section
-      class="message-detail"
-      class:standalone
-      class:is-open={!standalone && usesDetailOverlay && (selectedMessages.length > 0 || !!selectedMessage) && detailOverlayVisible}
-      bind:this={detailEl}
-      tabindex="-1"
-      aria-label={tl('nav_mail')}
-    >
-      {#if !standalone && selectedMessages.length > 0}
-        <div class="bulk-selection-header">
-          {#if usesDetailOverlay}
-            <button class="detail-close-btn" aria-label={tl('mail_back')} on:click={clearMarkedSelection}>←</button>
+  <!-- ── Message detail ────────────────────────────────────────────────────── -->
+  <section
+    class="message-detail"
+    class:standalone
+    class:is-open={!standalone && usesDetailOverlay && (selectedMessages.length > 0 || !!selectedMessage) && detailOverlayVisible}
+    data-layout="stack"
+    data-gap="none"
+    bind:this={detailEl}
+    tabindex="-1"
+    aria-label={tl('nav_mail')}
+  >
+    {#if !standalone && selectedMessages.length > 0}
+      <div class="detail-header" data-layout="row" data-gap="sm" data-wrap="none" data-pad="sm">
+        {#if usesDetailOverlay}
+          <button type="button" data-variant="ghost" data-icon="arrow-left" aria-label={tl('mail_back')} on:click={clearMarkedSelection}></button>
+        {/if}
+        <h2 class="detail-subject" data-grow>{tl('mail_selectedCount', { n: selectedMessages.length })}</h2>
+        <button type="button" data-variant="outline" data-size="sm" on:click={clearMarkedSelection} disabled={bulkActionBusy}>
+          {tl('mail_clearSelection')}
+        </button>
+      </div>
+      <div data-layout="stack" data-gap="md" data-pad="md" data-scroll="y" aria-busy={bulkActionBusy}>
+        {#if bulkActionError}<p data-callout data-tone="danger" role="alert">{bulkActionError}</p>{/if}
+        <div class="bulk-menu" data-menu data-self="start">
+          <button type="button" data-icon="mail-open" on:click={() => applyBulkFlags('\\Seen', true)} disabled={bulkActionBusy}>
+            {tl('mail_markRead')}
+          </button>
+          <button type="button" data-icon="mail" on:click={() => applyBulkFlags('\\Seen', false)} disabled={bulkActionBusy}>
+            {tl('mail_markUnread')}
+          </button>
+          <button type="button" data-icon="star" on:click={() => applyBulkFlags('\\Flagged', true)} disabled={bulkActionBusy}>
+            {tl('mail_flag')}
+          </button>
+          <button type="button" data-icon="star-off" on:click={() => applyBulkFlags('\\Flagged', false)} disabled={bulkActionBusy}>
+            {tl('mail_unflag')}
+          </button>
+          <hr />
+          {#if canBulkArchive}
+            <button type="button" data-icon="archive" on:click={() => applyBulkMove(msg => archiveMailboxFor(msg))} disabled={bulkActionBusy}>
+              {tl('mail_archive')}
+            </button>
           {/if}
-          <h2>{tl('mail_selectedCount', { n: selectedMessages.length })}</h2>
-          <button class="bulk-clear-btn" on:click={clearMarkedSelection} disabled={bulkActionBusy}>
-            {tl('mail_clearSelection')}
+          {#if bulkMoveDestinations.length > 0}
+            <button type="button" data-icon="folder-input" aria-expanded={bulkMoveOpen} on:click={() => bulkMoveOpen = !bulkMoveOpen} disabled={bulkActionBusy}>
+              <span data-grow>{tl('mail_moveToFolder')}</span>
+              <span class="caret" data-icon="chevron-down" aria-hidden="true"></span>
+            </button>
+          {/if}
+          {#if canBulkArchive || bulkMoveDestinations.length > 0}<hr />{/if}
+          <button type="button" data-icon="trash-2" data-tone="danger" on:click={applyBulkDelete} disabled={bulkActionBusy}>
+            {tl('mail_delete')}
           </button>
         </div>
-        <div class="bulk-selection-body" aria-busy={bulkActionBusy}>
-          {#if bulkActionError}<p class="bulk-action-error">{bulkActionError}</p>{/if}
-          <div class="bulk-actions">
-            <button on:click={() => applyBulkFlags('\\Seen', true)} disabled={bulkActionBusy}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2 4 12 13 22 4"/></svg>
-              {tl('mail_markRead')}
-            </button>
-            <button on:click={() => applyBulkFlags('\\Seen', false)} disabled={bulkActionBusy}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12c-2.5 4-5.8 6-10 6s-7.5-2-10-6c2.5-4 5.8-6 10-6s7.5 2 10 6Z"/><circle cx="12" cy="12" r="3"/></svg>
-              {tl('mail_markUnread')}
-            </button>
-            <button on:click={() => applyBulkFlags('\\Flagged', true)} disabled={bulkActionBusy}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.1 8.5 22 9.3 17 14.1 18.3 21 12 17.6 5.7 21 7 14.1 2 9.3 8.9 8.5 12 2"/></svg>
-              {tl('mail_flag')}
-            </button>
-            <button on:click={() => applyBulkFlags('\\Flagged', false)} disabled={bulkActionBusy}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.1 8.5 22 9.3 17 14.1 18.3 21 12 17.6 5.7 21 7 14.1 2 9.3 8.9 8.5 12 2"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
-              {tl('mail_unflag')}
-            </button>
-            {#if canBulkArchive}
-              <button class="bulk-section-start" on:click={() => applyBulkMove(msg => archiveMailboxFor(msg))} disabled={bulkActionBusy}>
-                <FolderIcon kind="archive" />
-                {tl('mail_archive')}
+        {#if bulkMoveOpen && bulkMoveDestinations.length > 0}
+          <div class="bulk-menu" data-menu data-self="start" role="group" aria-label={tl('mail_moveToFolder')}>
+            {#each bulkMoveDestinations as mailbox}
+              <button type="button" on:click={() => applyBulkMove(() => mailbox.name)} disabled={bulkActionBusy}>
+                <FolderIcon kind={folderKind(mailbox.name)} />
+                <span data-truncate>{FOLDER_NAMES[folderKind(mailbox.name)] || mailbox.name}</span>
               </button>
-            {/if}
-            {#if bulkMoveDestinations.length > 0}
-              <button class="bulk-move-toggle" class:bulk-section-start={!canBulkArchive} on:click={() => bulkMoveOpen = !bulkMoveOpen} disabled={bulkActionBusy}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                {tl('mail_moveToFolder')}
-                <span class="move-caret">{bulkMoveOpen ? '▴' : '▾'}</span>
-              </button>
-            {/if}
-            <button class="bulk-delete-btn bulk-section-start" on:click={applyBulkDelete} disabled={bulkActionBusy}>
-              <UiIcon name="trash" size={14} strokeWidth={2.2} />
-              {tl('mail_delete')}
-            </button>
+            {/each}
           </div>
-          {#if bulkMoveOpen && bulkMoveDestinations.length > 0}
-            <div class="bulk-destinations" aria-label={tl('mail_moveToFolder')}>
-              {#each bulkMoveDestinations as mailbox}
-                <button on:click={() => applyBulkMove(() => mailbox.name)} disabled={bulkActionBusy}>
-                  <FolderIcon kind={folderKind(mailbox.name)} />
-                  <span>{FOLDER_NAMES[folderKind(mailbox.name)] || mailbox.name}</span>
-                </button>
-              {/each}
-            </div>
-          {/if}
-        </div>
-      {:else if selectedMessage}
-        <div class="detail-header">
-          <div class="detail-subject-row" class:stacked={detailHeaderStacked} use:observeDetailHeader>
-            {#if !standalone && usesDetailOverlay}<button class="detail-close-btn" aria-label={tl('mail_back')} on:click={returnToListFromReader}>←</button>{/if}
-            <div class="detail-subject-line" bind:this={detailSubjectLineEl}>
-              <span class="detail-subject">{pgpSubject || selectedMessage.subject || tl('mail_noSubject')}</span>
-            </div>
-            <div class="detail-controls" bind:this={detailControlsEl}>
-              <button
-                class="star-btn"
-                class:flagged={selectedMessage.is_flagged}
-                on:click={() => setFlag(selectedMessage!, '\\Flagged', !selectedMessage!.is_flagged)}
-                aria-label={selectedMessage.is_flagged ? tl('mail_unflag') : tl('mail_flag')}
-                title={selectedMessage.is_flagged ? tl('mail_unflag') : tl('mail_flag')}
-              >★</button>
-              <button class="inline-action-btn" on:click={() => composeDialog?.open({ mode: 'reply', replyTo: selectedMessage!, parsedText, parsedHtml })} aria-label={tl('mail_reply')} title={tl('mail_reply')}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+        {/if}
+      </div>
+    {:else if selectedMessage}
+      <div class="detail-header" data-pad="sm">
+        <div class="detail-subject-row" class:stacked={detailHeaderStacked} use:observeDetailHeader>
+          {#if !standalone && usesDetailOverlay}<button type="button" class="detail-close-btn" data-variant="ghost" data-icon="arrow-left" aria-label={tl('mail_back')} on:click={returnToListFromReader}></button>{/if}
+          <div class="detail-subject-line" bind:this={detailSubjectLineEl}>
+            <h2 class="detail-subject">{pgpSubject || selectedMessage.subject || tl('mail_noSubject')}</h2>
+          </div>
+          <div class="detail-controls" data-layout="row" data-gap="xs" data-wrap="none" bind:this={detailControlsEl}>
+            <button
+              type="button"
+              class="star-btn"
+              class:flagged={selectedMessage.is_flagged}
+              data-variant="ghost"
+              data-icon="star"
+              on:click={() => setFlag(selectedMessage!, '\\Flagged', !selectedMessage!.is_flagged)}
+              aria-label={selectedMessage.is_flagged ? tl('mail_unflag') : tl('mail_flag')}
+              data-tooltip
+            ></button>
+            <button type="button" data-variant="ghost" data-icon="reply" on:click={() => composeDialog?.open({ mode: 'reply', replyTo: selectedMessage!, parsedText, parsedHtml })} aria-label={tl('mail_reply')} data-tooltip></button>
+            {#if usesDetailOverlay}
+              <button type="button" popovertarget="mail-actions-menu" data-variant="ghost" data-icon="ellipsis-vertical" aria-label={tl('mail_messageActions')}></button>
+            {:else}
+              <button type="button" popovertarget="mail-actions-menu" data-variant="outline" data-size="sm" aria-label={tl('mail_messageActions')}>{tl('mail_actions')}</button>
+            {/if}
+            <div
+              popover
+              id="mail-actions-menu"
+              data-menu
+              role="menu"
+              bind:this={actionsMenuEl}
+              on:toggle={(e) => { actionsOpen = e.newState === 'open'; if (!actionsOpen) moveSubmenuOpen = false; }}
+            >
+              <button type="button" role="menuitem" data-icon="reply-all" on:click={() => { actionsOpen = false; composeDialog?.open({ mode: 'replyAll', replyTo: selectedMessage!, parsedText, parsedHtml }); }}>
+                {tl('mail_replyAll')}
               </button>
-              <div class="actions-wrapper" bind:this={actionsEl}>
-                <button class="actions-toggle" on:click={toggleActions} aria-label={tl('mail_messageActions')}>{#if usesDetailOverlay}⋮{:else}{tl('mail_actions')} <span class="actions-caret">▾</span>{/if}</button>
-                {#if actionsOpen}
-                  <div class="actions-menu" role="menu">
-                  <button role="menuitem" on:click={() => { actionsOpen = false; composeDialog?.open({ mode: 'replyAll', replyTo: selectedMessage!, parsedText, parsedHtml }); }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="8 14 3 9 8 4"/><polyline points="14 14 9 9 14 4"/><path d="M21 20v-7a4 4 0 0 0-4-4H3"/></svg>
-                    {tl('mail_replyAll')}
-                  </button>
-                  <button role="menuitem" on:click={() => { actionsOpen = false; void openForward(selectedMessage!); }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg>
-                    {tl('mail_forward')}
-                  </button>
-                  <div class="menu-separator"></div>
-                  <button role="menuitem" on:click={() => { actionsOpen = false; setFlag(selectedMessage!, '\\Seen', !selectedMessage!.is_read); }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2 4 12 13 22 4"/></svg>
-                    {selectedMessage.is_read ? tl('mail_markUnread') : tl('mail_markRead')}
-                  </button>
-                  {#if canToggleBodyView}
-                    {#if !effectiveMessageEncrypted && emailOrigins.length > 0}
-                      <button role="menuitem" on:click={() => { actionsOpen = false; openOriginsForEmail(); }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>{tl('mail_imageSourcesEmail')}</button>
-                    {/if}
-
-                    <div class="menu-separator"></div>
-                    <button role="menuitem" class:menu-item-active={viewMode === 'html'} on:click={() => { viewMode = 'html'; actionsOpen = false; }}>{tl('mail_viewAsHtml')}</button>
-                    <button role="menuitem" class:menu-item-active={viewMode === 'text'} on:click={() => { viewMode = 'text'; actionsOpen = false; }}>{tl('mail_viewAsText')}</button>
-                  {/if}
-                  <div class="menu-separator"></div>
-                  {#if archiveMailboxFor(selectedMessage)}
-                    <button role="menuitem" on:click={() => { actionsOpen = false; archiveMessage(selectedMessage!); }}>
-                      <FolderIcon kind="archive" />
-                      {tl('mail_archive')}
-                    </button>
-                  {/if}
-                  <button role="menuitem" class="move-to-folder-btn" on:click|stopPropagation={() => moveSubmenuOpen = !moveSubmenuOpen}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                    {tl('mail_moveToFolder')}
-                    <span class="move-caret">{moveSubmenuOpen ? '▴' : '▾'}</span>
-                  </button>
-                  {#if moveSubmenuOpen}
-                    <div class="move-submenu" role="menu">
-                      {#each (mailboxesByAccount[selectedMessage.account_id] || []).filter(mb => mb.subscribed && mb.name !== selectedMessage.mailbox) as mb}
-                        <button role="menuitem" on:click={() => { actionsOpen = false; moveSubmenuOpen = false; moveMessage(selectedMessage!, mb.name); }}>
-                          <FolderIcon kind={folderKind(mb.name)} />
-                          <span>{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
-                        </button>
-                      {/each}
-                    </div>
-                  {/if}
-                  <div class="menu-separator"></div>
-                  <button role="menuitem" class="menu-item-danger" on:click={() => { actionsOpen = false; deleteMessage(selectedMessage!); }}>
-                    <UiIcon name="trash" size={14} strokeWidth={2.2} />
-                    {tl('mail_delete')}
-                  </button>
-                  </div>
+              <button type="button" role="menuitem" data-icon="forward" on:click={() => { actionsOpen = false; void openForward(selectedMessage!); }}>
+                {tl('mail_forward')}
+              </button>
+              <hr />
+              <button type="button" role="menuitem" data-icon="mail" on:click={() => { actionsOpen = false; setFlag(selectedMessage!, '\\Seen', !selectedMessage!.is_read); }}>
+                {selectedMessage.is_read ? tl('mail_markUnread') : tl('mail_markRead')}
+              </button>
+              {#if canToggleBodyView}
+                {#if !effectiveMessageEncrypted && emailOrigins.length > 0}
+                  <button type="button" role="menuitem" data-icon="image" on:click={() => { actionsOpen = false; openOriginsForEmail(); }}>{tl('mail_imageSourcesEmail')}</button>
                 {/if}
-              </div>
-              {#if !standalone}
-                <button class="inline-action-btn" on:click={() => openPopout(selectedMessage!)} aria-label={tl('mail_popout')} title={tl('mail_popout')}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h7"/></svg>
+                <hr />
+                <button type="button" role="menuitemradio" aria-checked={viewMode === 'html'} on:click={() => { viewMode = 'html'; actionsOpen = false; }}>
+                  <span data-icon="check" class:unchecked={viewMode !== 'html'} aria-hidden="true"></span>{tl('mail_viewAsHtml')}
+                </button>
+                <button type="button" role="menuitemradio" aria-checked={viewMode === 'text'} on:click={() => { viewMode = 'text'; actionsOpen = false; }}>
+                  <span data-icon="check" class:unchecked={viewMode !== 'text'} aria-hidden="true"></span>{tl('mail_viewAsText')}
                 </button>
               {/if}
-            </div>
-          </div>
-        </div>
-        {#if messageLoading}
-          <div class="loading">{tl('mail_loading')}</div>
-        {:else}
-          <div class="detail-meta">
-            <div class="meta-primary-row">
-              <button type="button" class="meta-primary" aria-expanded={metaExpanded}
-                on:click={() => metaExpanded = !metaExpanded}>
-                <span class="meta-label">{primaryMetaLabel}:</span>
-                <span class="meta-value">{primaryMetaValue}</span>
-                <span class="meta-toggle" aria-hidden="true">{metaExpanded ? '▲' : '▼'}</span>
+              <hr />
+              {#if archiveMailboxFor(selectedMessage)}
+                <button type="button" role="menuitem" data-icon="archive" on:click={() => { actionsOpen = false; archiveMessage(selectedMessage!); }}>
+                  {tl('mail_archive')}
+                </button>
+              {/if}
+              <button type="button" role="menuitem" data-icon="folder-input" aria-expanded={moveSubmenuOpen} on:click|stopPropagation={() => moveSubmenuOpen = !moveSubmenuOpen}>
+                <span data-grow>{tl('mail_moveToFolder')}</span>
+                <span class="caret" data-icon="chevron-down" aria-hidden="true"></span>
               </button>
-              {#if pgpIconBadges.length > 0}
-                <span class="pgp-security-icons">
-                  {#each pgpIconBadges as badge}
-                    <span
-                      class="pgp-security-icon pgp-security-icon-{badge}"
-                      title={pgpBadgeLabel(badge)}
-                      aria-label={pgpBadgeLabel(badge)}
-                      role="img"
-                    >
-                      {#if badge === 'encrypted'}
-                        <UiIcon name="lock" size={16} />
-                      {:else if badge === 'signed'}
-                        <UiIcon name="signature" size={17} />
-                      {:else}
-                        <UiIcon name="verified" size={16} />
-                      {/if}
-                    </span>
+              {#if moveSubmenuOpen}
+                <div class="move-submenu" role="group" aria-label={tl('mail_moveToFolder')} data-layout="stack" data-gap="none" data-scroll="y">
+                  {#each (mailboxesByAccount[selectedMessage.account_id] || []).filter(mb => mb.subscribed && mb.name !== selectedMessage.mailbox) as mb}
+                    <button type="button" role="menuitem" on:click={() => { actionsOpen = false; moveSubmenuOpen = false; moveMessage(selectedMessage!, mb.name); }}>
+                      <FolderIcon kind={folderKind(mb.name)} />
+                      <span data-truncate>{FOLDER_NAMES[folderKind(mb.name)] || mb.name}</span>
+                    </button>
                   {/each}
-                </span>
+                </div>
               {/if}
-              {#if threadMessages.length > 1 || hasThreadEvents}
-                <button
-                  class="inline-action-btn thread-trigger"
-                  on:click={() => threadDialog?.show()}
-                  title={tl('mail_threads')}
-                  aria-label={tl('mail_threads')}
-                >
-                  <UiIcon name="tree" size={16} strokeWidth={2.2} />
-                </button>
-              {/if}
+              <hr />
+              <button type="button" role="menuitem" data-icon="trash-2" data-tone="danger" on:click={() => { actionsOpen = false; deleteMessage(selectedMessage!); }}>
+                {tl('mail_delete')}
+              </button>
             </div>
-            {#if metaExpanded}
-              {#if isSentFolder}<div><strong>{tl('mail_metaFrom')}:</strong> {selectedMessage.from || ''}</div>{/if}
-              {#if !isSentFolder}<div><strong>{tl('mail_metaTo')}:</strong> {selectedMessage.to.join(', ')}</div>{/if}
-              {#if selectedMessage.cc.length > 0}
-                <div><strong>{tl('mail_metaCc')}:</strong> {selectedMessage.cc.join(', ')}</div>
-              {/if}
-              <div><strong>{tl('mail_metaDate')}:</strong> {selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</div>
+            {#if !standalone}
+              <button type="button" data-variant="ghost" data-icon="external-link" on:click={() => openPopout(selectedMessage!)} aria-label={tl('mail_popout')} data-tooltip></button>
             {/if}
           </div>
-          {#if visibleServerAttachments.length > 0}
-            <div class="attachments">
-              <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-                {visibleServerAttachments.length === 1 ? tl('mail_attachment1') : tl('mail_attachmentsN', { n: visibleServerAttachments.length })}
-                <span class="attachments-caret">{attachmentsExpanded ? '▲' : '▼'}</span>
-              </button>
-              {#if attachmentsExpanded}
-                <div class="attachments-list">
-                  {#each visibleServerAttachments as att}
-                    <div class="pgp-attachment-row">
-                      <a
-                        class="compose-attachment-chip attachment-chip-dl"
-                        href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
-                        download={canPreviewAttachment(att) ? undefined : att.filename}
-                        target={canPreviewAttachment(att) ? '_blank' : undefined}
-                        rel={canPreviewAttachment(att) ? 'noopener' : undefined}
-                      >
-                        <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
-                        <span class="attachment-name" title={att.filename}>{att.filename}</span>
-                        <span class="attachment-size">{humanSize(att.size)}</span>
-                      </a>
-                      {#if pgpImportablePublicKeyAttachments.has(att.filename)}
-                        <button
-                          class="pgp-import-public-btn"
-                          on:click={() => importMessagePublicKey(att)}
-                          disabled={pgpPublicKeyImporting === att.filename}
-                          aria-busy={pgpPublicKeyImporting === att.filename}
-                          title={tl('pgp_importPublicKeyButton')}
-                          aria-label={tl('pgp_importPublicKeyButton')}
-                        >
-                          <UiIcon name="import" />
-                        </button>
-                      {/if}
-                      {#if isIcsAttachment(att)}
-                        <button
-                          class="pgp-import-public-btn"
-                          on:click={() => openIcsImport(att)}
-                          disabled={icsImportingAttachment === att.filename}
-                          aria-busy={icsImportingAttachment === att.filename}
-                          title={tl('cal_import')}
-                          aria-label={tl('cal_import')}
-                        >
-                          <UiIcon name="import" />
-                        </button>
-                      {/if}
-                    </div>
-                  {/each}
-                </div>
+        </div>
+      </div>
+      {#if messageLoading}
+        <p class="detail-status" data-muted aria-busy="true">{tl('mail_loading')}</p>
+      {:else}
+        <div class="detail-meta" data-layout="stack" data-gap="xs" data-pad="sm">
+          <div data-layout="row" data-gap="xs" data-wrap="none">
+            <button type="button" class="meta-primary" data-variant="ghost" data-size="sm" data-layout="row" data-gap="xs" data-wrap="none" data-justify="start" data-grow aria-expanded={metaExpanded}
+              on:click={() => metaExpanded = !metaExpanded}>
+              <strong>{primaryMetaLabel}:</strong>
+              <span data-truncate data-grow>{primaryMetaValue}</span>
+              <span class="caret" data-icon="chevron-down" aria-hidden="true"></span>
+            </button>
+            {#if pgpIconBadges.length > 0}
+              <span data-layout="row" data-gap="xs" data-wrap="none">
+                {#each pgpIconBadges as badge}
+                  {#if badge === 'encrypted'}
+                    <span data-badge data-tone="accent" role="img" title={pgpBadgeLabel(badge)} aria-label={pgpBadgeLabel(badge)}><span data-icon="lock"></span></span>
+                  {:else if badge === 'signed'}
+                    <span data-badge data-tone="accent" role="img" title={pgpBadgeLabel(badge)} aria-label={pgpBadgeLabel(badge)}><span data-icon="signature"></span></span>
+                  {:else}
+                    <span data-badge data-tone="success" role="img" title={pgpBadgeLabel(badge)} aria-label={pgpBadgeLabel(badge)}><span data-icon="badge-check"></span></span>
+                  {/if}
+                {/each}
+              </span>
+            {/if}
+            {#if threadMessages.length > 1 || hasThreadEvents}
+              <button
+                type="button"
+                data-variant="ghost"
+                data-size="sm"
+                data-icon="list-tree"
+                on:click={() => threadDialog?.show()}
+                aria-label={tl('mail_threads')}
+                data-tooltip
+              ></button>
+            {/if}
+          </div>
+          {#if metaExpanded}
+            <dl class="meta-details" data-pairs>
+              {#if isSentFolder}<dt>{tl('mail_metaFrom')}</dt><dd>{selectedMessage.from || ''}</dd>{/if}
+              {#if !isSentFolder}<dt>{tl('mail_metaTo')}</dt><dd>{selectedMessage.to.join(', ')}</dd>{/if}
+              {#if selectedMessage.cc.length > 0}
+                <dt>{tl('mail_metaCc')}</dt><dd>{selectedMessage.cc.join(', ')}</dd>
               {/if}
-            </div>
+              <dt>{tl('mail_metaDate')}</dt><dd>{selectedMessage.sent_at ? new Date(selectedMessage.sent_at * 1000).toLocaleString() : ''}</dd>
+            </dl>
           {/if}
-          {#if effectiveMessageEncrypted && pgpAttachments.length > 0}
-            <div class="attachments">
-              <button class="attachments-toggle" on:click={() => attachmentsExpanded = !attachmentsExpanded}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-                {pgpAttachments.length === 1 ? tl('mail_attachment1') : tl('mail_attachmentsN', { n: pgpAttachments.length })}
-                <span class="attachments-caret">{attachmentsExpanded ? '▲' : '▼'}</span>
-              </button>
-              {#if attachmentsExpanded}
-                <div class="attachments-list">
-                  {#each pgpAttachments as att}
-                    <div class="pgp-attachment-row">
-                      <a
-                        class="compose-attachment-chip attachment-chip-dl"
-                        href={att.url}
-                        download={canPreviewAttachment(att) ? undefined : att.filename}
-                        target={canPreviewAttachment(att) ? '_blank' : undefined}
-                        rel={canPreviewAttachment(att) ? 'noopener' : undefined}
-                      >
-                        <span class="attachment-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
-                        <span class="attachment-name" title={att.filename}>{att.filename}</span>
-                        <span class="attachment-size">{humanSize(att.size)}</span>
-                      </a>
-                      {#if pgpImportablePublicKeyAttachments.has(att.filename)}
-                        <button
-                          class="pgp-import-public-btn"
-                          on:click={() => importMessagePublicKey(att, att.data)}
-                          disabled={pgpPublicKeyImporting === att.filename}
-                          aria-busy={pgpPublicKeyImporting === att.filename}
-                          title={tl('pgp_importPublicKeyButton')}
-                          aria-label={tl('pgp_importPublicKeyButton')}
-                        >
-                          <UiIcon name="import" />
-                        </button>
-                      {/if}
-                      {#if isIcsAttachment(att)}
-                        <button
-                          class="pgp-import-public-btn"
-                          on:click={() => openIcsImport(att, att.data)}
-                          disabled={icsImportingAttachment === att.filename}
-                          aria-busy={icsImportingAttachment === att.filename}
-                          title={tl('cal_import')}
-                          aria-label={tl('cal_import')}
-                        >
-                          <UiIcon name="import" />
-                        </button>
-                      {/if}
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          {/if}
-          <div class="detail-body" bind:this={detailBodyEl}>
-            {#if pgpTextBadges.length > 0}
-              <div class="pgp-badges">
-                {#each pgpTextBadges as badge}
-                  <span class="pgp-badge pgp-badge-{badge}">{pgpBadgeLabel(badge)}</span>
+        </div>
+        {#if visibleServerAttachments.length > 0}
+          <div class="attachments" data-layout="stack" data-gap="xs" data-pad="sm">
+            <button type="button" data-variant="ghost" data-size="sm" data-icon="paperclip" data-self="start" aria-expanded={attachmentsExpanded} on:click={() => attachmentsExpanded = !attachmentsExpanded}>
+              {visibleServerAttachments.length === 1 ? tl('mail_attachment1') : tl('mail_attachmentsN', { n: visibleServerAttachments.length })}
+              <span class="caret" data-icon="chevron-down" aria-hidden="true"></span>
+            </button>
+            {#if attachmentsExpanded}
+              <div class="attachments-list" data-layout="row" data-gap="xs" data-scroll="y">
+                {#each visibleServerAttachments as att}
+                  <span data-layout="row" data-gap="none" data-wrap="none">
+                    <a
+                      class="mail-attachment-chip"
+                      data-icon="paperclip"
+                      href="/api/email/attachment?account_id={encodeURIComponent(selectedMessage.account_id)}&mailbox={encodeURIComponent(selectedMessage.mailbox)}&uid={selectedMessage.uid}&filename={encodeURIComponent(att.filename)}"
+                      download={canPreviewAttachment(att) ? undefined : att.filename}
+                      target={canPreviewAttachment(att) ? '_blank' : undefined}
+                      rel={canPreviewAttachment(att) ? 'noopener' : undefined}
+                    >
+                      <span class="mail-attachment-name" data-truncate title={att.filename}>{att.filename}</span>
+                      <span data-muted>{humanSize(att.size)}</span>
+                    </a>
+                    {#if pgpImportablePublicKeyAttachments.has(att.filename)}
+                      <button
+                        type="button"
+                        data-variant="ghost"
+                        data-size="sm"
+                        data-icon="import"
+                        on:click={() => importMessagePublicKey(att)}
+                        disabled={pgpPublicKeyImporting === att.filename}
+                        aria-busy={pgpPublicKeyImporting === att.filename}
+                        aria-label={tl('pgp_importPublicKeyButton')}
+                        data-tooltip
+                      ></button>
+                    {/if}
+                    {#if isIcsAttachment(att)}
+                      <button
+                        type="button"
+                        data-variant="ghost"
+                        data-size="sm"
+                        data-icon="calendar-plus"
+                        on:click={() => openIcsImport(att)}
+                        disabled={icsImportingAttachment === att.filename}
+                        aria-busy={icsImportingAttachment === att.filename}
+                        aria-label={tl('cal_import')}
+                        data-tooltip
+                      ></button>
+                    {/if}
+                  </span>
                 {/each}
               </div>
             {/if}
-            {#if pgpPublicKeyImportError}<p class="pgp-error">{pgpPublicKeyImportError}</p>{/if}
-            {#if pgpPublicKeyImportSuccess}<p class="pgp-success">{pgpPublicKeyImportSuccess}</p>{/if}
-            {#if viewMode === 'html' && htmlHasValue}
-              {#if effectiveMessageEncrypted}
-                <!-- Decrypted HTML: sandboxed iframe WITHOUT allow-same-origin (inline blob images) -->
-                {#key iframeKey}
-                  <iframe
-                    bind:this={iframeEl}
-                    on:load={fitIframeToContent}
-                    sandbox="allow-popups allow-popups-to-escape-sandbox"
-                    srcdoc={renderedHtml}
-                    title={tl('nav_mail')}
-                    class="html-body"
-                  ></iframe>
-                {/key}
-              {:else}
-                {#if blockedOrigins.length > 0 && !imagesNoticeDismissed}
-                  <div class="images-notice">
-                    <span>{tl('mail_imagesBlocked')}</span>
-                    {#each blockedOrigins as origin}
-                      <span class="origin-split-btn">
-                        <button class="origin-split-allow" on:click={() => allowOrigin(origin)}>{tl('mail_allowOrigin', { origin })}</button>
-                        <button class="origin-split-block" on:click={() => blockOriginSilently(origin)} title={tl('mail_blockSilently')}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg></button>
-                      </span>
-                    {/each}
-                    <button class="dismiss-notice-btn" on:click={() => imagesNoticeDismissed = true} aria-label={tl('mail_dismiss')}>×</button>
-                  </div>
-                {/if}
-                {#key iframeKey}
-                  <MailHtmlFrame
-                    bind:element={iframeEl}
-                    on:load={fitIframeToContent}
-                    scrolling={usesDetailOverlay ? 'no' : undefined}
-                    srcdoc={renderedHtml}
-                    title={tl('nav_mail')}
-                  />
-                {/key}
-              {/if}
-            {:else if parsedText}
-              <pre class="body-text">{#each bodyTextSegments as seg}{#if 'href' in seg}<a href={seg.href} target="_blank" rel="noopener noreferrer">{seg.text}</a>{:else}{seg.text}{/if}{/each}</pre>
-            {:else if effectiveMessageEncrypted}
-              {#if pgpDecryptError}
-                <p class="pgp-error">{pgpDecryptError}</p>
-              {:else if pgpDecrypting}
-                <p aria-busy="true">{tl('pgp_decrypting')}</p>
-              {:else}
-                <div class="pgp-unlock-prompt">
-                  <p>{tl('pgp_unlockToRead')}</p>
-                  {#if pgpUnlockError}<p class="pgp-error">{pgpUnlockError}</p>{/if}
-                  {#if pgpKeyUnlocked}
-                    <button class="pgp-decrypt-btn" on:click={() => pgpDecrypt(selectedMessage!)} disabled={pgpDecrypting}>
-                      {pgpDecrypting ? tl('pgp_decrypting') : tl('pgp_decryptButton')}
-                    </button>
-                  {:else}
-                    <button class="pgp-decrypt-btn" on:click={() => pgpUnlock()} disabled={pgpUnlocking} aria-busy={pgpUnlocking}>
-                      {pgpUnlocking ? tl('pgp_unlocking') : tl('pgp_unlockVaultButton')}
-                    </button>
-                  {/if}
-                </div>
-              {/if}
-            {:else}
-              <div class="loading">{tl('mail_loadingBody')}</div>
+          </div>
+        {/if}
+        {#if effectiveMessageEncrypted && pgpAttachments.length > 0}
+          <div class="attachments" data-layout="stack" data-gap="xs" data-pad="sm">
+            <button type="button" data-variant="ghost" data-size="sm" data-icon="paperclip" data-self="start" aria-expanded={attachmentsExpanded} on:click={() => attachmentsExpanded = !attachmentsExpanded}>
+              {pgpAttachments.length === 1 ? tl('mail_attachment1') : tl('mail_attachmentsN', { n: pgpAttachments.length })}
+              <span class="caret" data-icon="chevron-down" aria-hidden="true"></span>
+            </button>
+            {#if attachmentsExpanded}
+              <div class="attachments-list" data-layout="row" data-gap="xs" data-scroll="y">
+                {#each pgpAttachments as att}
+                  <span data-layout="row" data-gap="none" data-wrap="none">
+                    <a
+                      class="mail-attachment-chip"
+                      data-icon="paperclip"
+                      href={att.url}
+                      download={canPreviewAttachment(att) ? undefined : att.filename}
+                      target={canPreviewAttachment(att) ? '_blank' : undefined}
+                      rel={canPreviewAttachment(att) ? 'noopener' : undefined}
+                    >
+                      <span class="mail-attachment-name" data-truncate title={att.filename}>{att.filename}</span>
+                      <span data-muted>{humanSize(att.size)}</span>
+                    </a>
+                    {#if pgpImportablePublicKeyAttachments.has(att.filename)}
+                      <button
+                        type="button"
+                        data-variant="ghost"
+                        data-size="sm"
+                        data-icon="import"
+                        on:click={() => importMessagePublicKey(att, att.data)}
+                        disabled={pgpPublicKeyImporting === att.filename}
+                        aria-busy={pgpPublicKeyImporting === att.filename}
+                        aria-label={tl('pgp_importPublicKeyButton')}
+                        data-tooltip
+                      ></button>
+                    {/if}
+                    {#if isIcsAttachment(att)}
+                      <button
+                        type="button"
+                        data-variant="ghost"
+                        data-size="sm"
+                        data-icon="calendar-plus"
+                        on:click={() => openIcsImport(att, att.data)}
+                        disabled={icsImportingAttachment === att.filename}
+                        aria-busy={icsImportingAttachment === att.filename}
+                        aria-label={tl('cal_import')}
+                        data-tooltip
+                      ></button>
+                    {/if}
+                  </span>
+                {/each}
+              </div>
             {/if}
           </div>
         {/if}
-      {:else}
-        <div class="empty">{standalone && standaloneUnavailable ? tl('mail_messageUnavailable') : tl('mail_selectMessage')}</div>
+        <div class="detail-body" data-layout="stack" data-gap="sm" bind:this={detailBodyEl}>
+          {#if pgpTextBadges.length > 0 || pgpPublicKeyImportError || pgpPublicKeyImportSuccess}
+            <div data-layout="stack" data-gap="xs" data-pad="sm">
+              {#if pgpTextBadges.length > 0}
+                <div data-layout="row" data-gap="xs">
+                  {#each pgpTextBadges as badge}
+                    <span data-badge data-tone={badge === 'verification_failed' || badge === 'decrypt_failed' ? 'danger' : 'neutral'}>{pgpBadgeLabel(badge)}</span>
+                  {/each}
+                </div>
+              {/if}
+              {#if pgpPublicKeyImportError}<p data-tone="danger" role="alert">{pgpPublicKeyImportError}</p>{/if}
+              {#if pgpPublicKeyImportSuccess}<p data-tone="success" role="status">{pgpPublicKeyImportSuccess}</p>{/if}
+            </div>
+          {/if}
+          {#if viewMode === 'html' && htmlHasValue}
+            {#if effectiveMessageEncrypted}
+              <!-- Decrypted HTML: sandboxed iframe WITHOUT allow-same-origin (inline blob images) -->
+              {#key iframeKey}
+                <iframe
+                  bind:this={iframeEl}
+                  on:load={fitIframeToContent}
+                  sandbox="allow-popups allow-popups-to-escape-sandbox"
+                  srcdoc={renderedHtml}
+                  title={tl('nav_mail')}
+                  class="html-body"
+                ></iframe>
+              {/key}
+            {:else}
+              {#if blockedOrigins.length > 0 && !imagesNoticeDismissed}
+                <div class="images-notice" data-callout data-layout="row" data-gap="sm">
+                  <span data-icon="image" aria-hidden="true"></span>
+                  <span data-grow>{tl('mail_imagesBlocked')}</span>
+                  {#each blockedOrigins as origin}
+                    <span data-layout="row" data-gap="none" data-wrap="none">
+                      <button type="button" class="split-start" data-variant="outline" data-tone="accent" data-size="sm" on:click={() => allowOrigin(origin)}>{tl('mail_allowOrigin', { origin })}</button>
+                      <button type="button" class="split-end" data-variant="outline" data-tone="danger" data-size="sm" data-icon="ban" on:click={() => blockOriginSilently(origin)} aria-label={tl('mail_blockSilently')} data-tooltip></button>
+                    </span>
+                  {/each}
+                  <button type="button" data-variant="ghost" data-size="sm" data-icon="x" on:click={() => imagesNoticeDismissed = true} aria-label={tl('mail_dismiss')}></button>
+                </div>
+              {/if}
+              {#key iframeKey}
+                <MailHtmlFrame
+                  bind:element={iframeEl}
+                  on:load={fitIframeToContent}
+                  scrolling={usesDetailOverlay ? 'no' : undefined}
+                  srcdoc={renderedHtml}
+                  title={tl('nav_mail')}
+                />
+              {/key}
+            {/if}
+          {:else if parsedText}
+            <pre class="body-text">{#each bodyTextSegments as seg}{#if 'href' in seg}<a href={seg.href} target="_blank" rel="noopener noreferrer">{seg.text}</a>{:else}{seg.text}{/if}{/each}</pre>
+          {:else if effectiveMessageEncrypted}
+            {#if pgpDecryptError}
+              <p data-callout data-tone="danger" role="alert">{pgpDecryptError}</p>
+            {:else if pgpDecrypting}
+              <p class="detail-status" aria-busy="true">{tl('pgp_decrypting')}</p>
+            {:else}
+              <div data-layout="stack" data-gap="sm" data-align="center" data-pad="lg">
+                <p>{tl('pgp_unlockToRead')}</p>
+                {#if pgpUnlockError}<p data-tone="danger" role="alert">{pgpUnlockError}</p>{/if}
+                {#if pgpKeyUnlocked}
+                  <button type="button" data-icon="lock-open" on:click={() => pgpDecrypt(selectedMessage!)} disabled={pgpDecrypting} aria-busy={pgpDecrypting}>
+                    {pgpDecrypting ? tl('pgp_decrypting') : tl('pgp_decryptButton')}
+                  </button>
+                {:else}
+                  <button type="button" data-icon="lock-open" on:click={() => pgpUnlock()} disabled={pgpUnlocking} aria-busy={pgpUnlocking}>
+                    {pgpUnlocking ? tl('pgp_unlocking') : tl('pgp_unlockVaultButton')}
+                  </button>
+                {/if}
+              </div>
+            {/if}
+          {:else}
+            <p class="detail-status" data-muted aria-busy="true">{tl('mail_loadingBody')}</p>
+          {/if}
+        </div>
       {/if}
-    </section>
-  </div>
+    {:else}
+      <p class="detail-status" data-muted>{standalone && standaloneUnavailable ? tl('mail_messageUnavailable') : tl('mail_selectMessage')}</p>
+    {/if}
+  </section>
 </div>
 
 <ImportDialog
@@ -2675,59 +2655,56 @@
 
 <!-- ── Empty trash dialog ─────────────────────────────────────────────────── -->
 <dialog
+  id="mail-empty-trash"
   bind:this={emptyTrashDialog}
-  class="empty-trash-dialog"
-  on:click={(e) => { if (e.target === e.currentTarget) closeEmptyTrashDialog(); }}
+  closedby="any"
   on:cancel={(e) => { if (emptyTrashBusy) e.preventDefault(); }}
 >
-  <article>
-    <header>
-      <h3>{tl('mail_emptyTrash')}</h3>
-      <button class="close-btn" aria-label={tl('mail_close')} on:click={closeEmptyTrashDialog} disabled={emptyTrashBusy}></button>
-    </header>
-    <div class="empty-trash-body">
-      <p>{tl('mail_emptyTrashPrompt')}</p>
-      <div class="empty-trash-options" role="radiogroup" aria-label={tl('mail_emptyTrashOlderThan')}>
-        <label>
-          <input type="radio" bind:group={emptyTrashChoice} value="7" disabled={emptyTrashBusy} />
-          <span>{tl('mail_emptyTrash7')}</span>
-        </label>
-        <label>
-          <input type="radio" bind:group={emptyTrashChoice} value="30" disabled={emptyTrashBusy} />
-          <span>{tl('mail_emptyTrash30')}</span>
-        </label>
-        <label>
-          <input type="radio" bind:group={emptyTrashChoice} value="90" disabled={emptyTrashBusy} />
-          <span>{tl('mail_emptyTrash90')}</span>
-        </label>
-        <label class="empty-trash-custom">
-          <input type="radio" bind:group={emptyTrashChoice} value="custom" disabled={emptyTrashBusy} />
-          <span>{tl('mail_emptyTrashCustom')}</span>
-          <input
-            type="number"
-            min="1"
-            max="3650"
-            step="1"
-            bind:value={emptyTrashCustomDays}
-            disabled={emptyTrashBusy || emptyTrashChoice !== 'custom'}
-            aria-label={tl('mail_emptyTrashCustomDays')}
-          />
-        </label>
-      </div>
-      {#if emptyTrashChoice === 'custom' && !emptyTrashDaysValid}
-        <p class="empty-trash-error">{tl('mail_emptyTrashInvalidDays')}</p>
-      {:else if emptyTrashError}
-        <p class="empty-trash-error">{emptyTrashError}</p>
-      {/if}
-    </div>
-    <footer>
-      <button class="secondary" on:click={closeEmptyTrashDialog} disabled={emptyTrashBusy}>{tl('mail_cancel')}</button>
-      <button class="empty-trash-confirm" on:click={confirmEmptyTrash} disabled={emptyTrashBusy || !emptyTrashDaysValid}>
-        <UiIcon name="trash" size={15} strokeWidth={2.2} />
-        {emptyTrashBusy ? tl('mail_emptyTrashDeleting') : tl('mail_emptyTrashConfirm')}
-      </button>
-    </footer>
-  </article>
+  <header>
+    <h2>{tl('mail_emptyTrash')}</h2>
+    <button type="button" commandfor="mail-empty-trash" command="close" aria-label={tl('mail_close')} disabled={emptyTrashBusy}></button>
+  </header>
+  <p data-muted>{tl('mail_emptyTrashPrompt')}</p>
+  <div data-list role="radiogroup" aria-label={tl('mail_emptyTrashOlderThan')}>
+    <label>
+      <input type="radio" bind:group={emptyTrashChoice} value="7" disabled={emptyTrashBusy} />
+      {tl('mail_emptyTrash7')}
+    </label>
+    <label>
+      <input type="radio" bind:group={emptyTrashChoice} value="30" disabled={emptyTrashBusy} />
+      {tl('mail_emptyTrash30')}
+    </label>
+    <label>
+      <input type="radio" bind:group={emptyTrashChoice} value="90" disabled={emptyTrashBusy} />
+      {tl('mail_emptyTrash90')}
+    </label>
+    <label data-layout="row" data-gap="sm" data-wrap="none">
+      <input type="radio" bind:group={emptyTrashChoice} value="custom" disabled={emptyTrashBusy} />
+      <span data-grow>{tl('mail_emptyTrashCustom')}</span>
+      <input
+        class="trash-days"
+        type="number"
+        data-size="sm"
+        min="1"
+        max="3650"
+        step="1"
+        bind:value={emptyTrashCustomDays}
+        disabled={emptyTrashBusy || emptyTrashChoice !== 'custom'}
+        aria-label={tl('mail_emptyTrashCustomDays')}
+      />
+    </label>
+  </div>
+  {#if emptyTrashChoice === 'custom' && !emptyTrashDaysValid}
+    <p data-tone="danger" role="alert">{tl('mail_emptyTrashInvalidDays')}</p>
+  {:else if emptyTrashError}
+    <p data-tone="danger" role="alert">{emptyTrashError}</p>
+  {/if}
+  <footer>
+    <button type="button" data-variant="secondary" on:click={closeEmptyTrashDialog} disabled={emptyTrashBusy}>{tl('mail_cancel')}</button>
+    <button type="button" data-tone="danger" data-icon="trash-2" on:click={confirmEmptyTrash} disabled={emptyTrashBusy || !emptyTrashDaysValid} aria-busy={emptyTrashBusy}>
+      {emptyTrashBusy ? tl('mail_emptyTrashDeleting') : tl('mail_emptyTrashConfirm')}
+    </button>
+  </footer>
 </dialog>
 
 <!-- ── Event detail (for events imported from emails) ─────────────────── -->
@@ -2760,84 +2737,76 @@
 <!-- ── Image origins trigger button ───────────────────────────────────────── -->
 {#if !standalone}
 <button
+  type="button"
   class="origins-trigger"
+  data-variant="secondary"
+  data-icon="image"
   on:click={openOriginsGlobal}
-  title={tl('mail_manageImageSources')}
   aria-label={tl('mail_manageImageSources')}
+  data-tooltip
 >
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
   {#if imageOrigins.length + blacklistOrigins.length > 0}
-    <span class="origins-badge">{imageOrigins.length + blacklistOrigins.length}</span>
+    <span>{imageOrigins.length + blacklistOrigins.length}</span>
   {/if}
 </button>
 {/if}
 
 <!-- ── Image origins dialog ────────────────────────────────────────────────── -->
-<dialog
-  bind:this={originsDialog}
-  class="origins-dialog"
-  on:click={(e) => { if (e.target === e.currentTarget) originsDialog?.close(); }}
->
-  <article>
-    <header>
-      <span>{originsEmailOnly ? tl('mail_imageSourcesThisEmail') : tl('mail_imageSources')}</span>
-      <button class="close-btn" aria-label={tl('mail_close')} on:click={() => originsDialog?.close()}></button>
-    </header>
-    <div class="origins-filter-wrap">
-      <input type="search" class="origins-filter" placeholder={tl('mail_originsFilter')} bind:value={originsFilter} />
-    </div>
-    <div class="origins-sections">
-      {#if originsEmailOnly}
-        <section class="origins-section">
-          <h6>{tl('mail_originsBlocked')}</h6>
-          {#if blockedOrigins.filter(o => !originsFilter || o.includes(originsFilter)).length === 0}
-            <p class="origins-empty">{originsFilter ? tl('mail_originsNoMatches') : tl('mail_originsNoneBlockedEmail')}</p>
-          {:else}
-            <ul class="origins-list">
-              {#each blockedOrigins.filter(o => !originsFilter || o.includes(originsFilter)) as origin}
-                <li>
-                  <span>{origin}</span>
-                  <button class="allow-btn" on:click={() => allowOrigin(origin)}>{tl('mail_originsAllow')}</button>
-                  <button class="icon-btn delete-btn" on:click={() => blockOriginSilently(origin)} title={tl('mail_blockSilently')}>×</button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </section>
+<dialog id="mail-origins" bind:this={originsDialog} closedby="any">
+  <header>
+    <h2>{originsEmailOnly ? tl('mail_imageSourcesThisEmail') : tl('mail_imageSources')}</h2>
+    <button type="button" commandfor="mail-origins" command="close" aria-label={tl('mail_close')}></button>
+  </header>
+  <input type="search" placeholder={tl('mail_originsFilter')} aria-label={tl('mail_originsFilter')} bind:value={originsFilter} />
+  {#if originsEmailOnly}
+    <section data-layout="stack" data-gap="xs">
+      <h3 data-caption>{tl('mail_originsBlocked')}</h3>
+      {#if blockedOrigins.filter(o => !originsFilter || o.includes(originsFilter)).length === 0}
+        <p data-muted>{originsFilter ? tl('mail_originsNoMatches') : tl('mail_originsNoneBlockedEmail')}</p>
+      {:else}
+        <ul data-list>
+          {#each blockedOrigins.filter(o => !originsFilter || o.includes(originsFilter)) as origin}
+            <li data-layout="row" data-gap="sm" data-wrap="none" data-pad="xs">
+              <span data-truncate data-grow>{origin}</span>
+              <button type="button" data-variant="outline" data-tone="accent" data-size="sm" on:click={() => allowOrigin(origin)}>{tl('mail_originsAllow')}</button>
+              <button type="button" data-variant="ghost" data-size="sm" data-icon="ban" on:click={() => blockOriginSilently(origin)} aria-label={tl('mail_blockSilently')} data-tooltip></button>
+            </li>
+          {/each}
+        </ul>
       {/if}
-      <section class="origins-section">
-        <h6>{tl('mail_originsAllowed')}</h6>
-        {#if (originsEmailOnly ? allowedEmailOrigins : imageOrigins).filter(o => !originsFilter || o.includes(originsFilter)).length === 0}
-          <p class="origins-empty">{originsFilter ? tl('mail_originsNoMatches') : tl('mail_originsNoneYet')}</p>
-        {:else}
-          <ul class="origins-list">
-            {#each (originsEmailOnly ? allowedEmailOrigins : imageOrigins).filter(o => !originsFilter || o.includes(originsFilter)) as origin}
-              <li>
-                <span>{origin}</span>
-                <button class="icon-btn delete-btn" on:click={() => revokeOrigin(origin)} title={tl('mail_removeAttachment')}>×</button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </section>
-      <section class="origins-section">
-        <h6>{tl('mail_originsIgnored')}</h6>
-        {#if (originsEmailOnly ? silentEmailOrigins : blacklistOrigins).filter(o => !originsFilter || o.includes(originsFilter)).length === 0}
-          <p class="origins-empty">{originsFilter ? tl('mail_originsNoMatches') : tl('mail_originsNoneYet')}</p>
-        {:else}
-          <ul class="origins-list">
-            {#each (originsEmailOnly ? silentEmailOrigins : blacklistOrigins).filter(o => !originsFilter || o.includes(originsFilter)) as origin}
-              <li>
-                <span>{origin}</span>
-                <button class="allow-btn" on:click={() => promoteFromBlacklist(origin)} title={tl('mail_originsAllow')}>{tl('mail_originsAllow')}</button>
-                <button class="icon-btn delete-btn" on:click={() => unblockOrigin(origin)} title={tl('mail_removeAttachment')}>×</button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </section>
-    </div>
-  </article>
+    </section>
+  {/if}
+  <section data-layout="stack" data-gap="xs">
+    <h3 data-caption>{tl('mail_originsAllowed')}</h3>
+    {#if (originsEmailOnly ? allowedEmailOrigins : imageOrigins).filter(o => !originsFilter || o.includes(originsFilter)).length === 0}
+      <p data-muted>{originsFilter ? tl('mail_originsNoMatches') : tl('mail_originsNoneYet')}</p>
+    {:else}
+      <ul data-list>
+        {#each (originsEmailOnly ? allowedEmailOrigins : imageOrigins).filter(o => !originsFilter || o.includes(originsFilter)) as origin}
+          <li data-layout="row" data-gap="sm" data-wrap="none" data-pad="xs">
+            <span data-truncate data-grow>{origin}</span>
+            <button type="button" data-variant="ghost" data-size="sm" data-icon="x" on:click={() => revokeOrigin(origin)} aria-label={tl('mail_removeAttachment')} data-tooltip></button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
+  <section data-layout="stack" data-gap="xs">
+    <h3 data-caption>{tl('mail_originsIgnored')}</h3>
+    {#if (originsEmailOnly ? silentEmailOrigins : blacklistOrigins).filter(o => !originsFilter || o.includes(originsFilter)).length === 0}
+      <p data-muted>{originsFilter ? tl('mail_originsNoMatches') : tl('mail_originsNoneYet')}</p>
+    {:else}
+      <ul data-list>
+        {#each (originsEmailOnly ? silentEmailOrigins : blacklistOrigins).filter(o => !originsFilter || o.includes(originsFilter)) as origin}
+          <li data-layout="row" data-gap="sm" data-wrap="none" data-pad="xs">
+            <span data-truncate data-grow>{origin}</span>
+            <button type="button" data-variant="outline" data-tone="accent" data-size="sm" on:click={() => promoteFromBlacklist(origin)}>{tl('mail_originsAllow')}</button>
+            <button type="button" data-variant="ghost" data-size="sm" data-icon="x" on:click={() => unblockOrigin(origin)} aria-label={tl('mail_removeAttachment')} data-tooltip></button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
 </dialog>
 
 {#if !standalone}
@@ -2866,58 +2835,25 @@
 />
 
 <!-- ── FAB ────────────────────────────────────────────────────────────────── -->
-<button class="fab" on:click={() => composeDialog?.open()} aria-label={tl('mail_newMessage')}>
-  <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-  </svg>
-</button>
+<button type="button" data-fab data-icon="plus" on:click={() => composeDialog?.open()} aria-label={tl('mail_newMessage')}></button>
 {/if}
 
 <style>
-  .mail-page {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-  }
-
   .mail-layout {
     display: grid;
+    min-block-size: 0;
     overflow: hidden;
   }
 
   .mail-layout.standalone {
     display: flex;
-    flex: 1;
-    min-height: 0;
-  }
-
-  .resize-handle {
-    cursor: col-resize;
-    background: var(--pico-muted-border-color, #ddd);
-    border: none;
-    border-radius: 0;
-    margin: 0;
-    padding: 0;
-    min-width: 3px;
-    transition: background 0.12s;
-    position: relative;
-    z-index: 1;
-    width: 3px;
-  }
-
-  .resize-handle:hover,
-  .resize-handle:focus-visible {
-    background: var(--pico-primary, #0172ad);
   }
 
   /* Message detail */
   .message-detail {
-    display: flex;
-    flex-direction: column;
+    min-inline-size: 0;
     overflow: hidden;
-    margin-bottom: 0;
+    background: var(--tm-surface);
   }
 
   .message-detail:focus {
@@ -2925,135 +2861,37 @@
   }
 
   .message-detail.standalone {
-    display: flex;
     flex: 1;
-    min-height: 0;
-    background: var(--pico-card-background-color, white);
-  }
-
-  .bulk-selection-header {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
-  }
-
-  .bulk-selection-header h2 {
-    flex: 1;
-    margin: 0;
-    font-size: 1.05rem;
-  }
-
-  .bulk-clear-btn {
-    padding: 0.3rem 0.65rem;
-    margin: 0;
-    width: auto;
-    font-size: 0.82rem;
-    background: none;
-    border: 1px solid var(--pico-muted-border-color, #ddd);
-    color: inherit;
-  }
-
-  .bulk-selection-body {
-    padding: 1rem;
-    overflow-y: auto;
-  }
-
-  .bulk-actions {
-    width: min(250px, 100%);
-    overflow: hidden;
-    border: 1px solid var(--pico-muted-border-color, #ddd);
-    border-radius: 6px;
-    background: var(--pico-background-color, white);
-  }
-
-  .bulk-actions button,
-  .bulk-destinations button {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    width: 100%;
-    margin: 0;
-    padding: 0.45rem 0.9rem;
-    border: none;
-    border-radius: 0;
-    background: none;
-    color: inherit;
-    text-align: left;
-    font-size: 0.85rem;
-    font-weight: normal;
-    white-space: nowrap;
-  }
-
-  .bulk-actions button:hover:not(:disabled),
-  .bulk-destinations button:hover:not(:disabled) {
-    background: var(--pico-muted-border-color, #f5f5f5);
-  }
-
-  .bulk-actions button:disabled,
-  .bulk-destinations button:disabled {
-    opacity: 0.55;
-  }
-
-  .bulk-actions .bulk-section-start {
-    border-top: 1px solid var(--pico-muted-border-color, #eee);
-  }
-
-  .bulk-move-toggle .move-caret {
-    margin-left: auto;
-  }
-
-  .bulk-delete-btn {
-    color: var(--pico-del-color, #c0392b) !important;
-  }
-
-  .bulk-destinations {
-    width: min(250px, 100%);
-    margin-top: 0.65rem;
-    overflow: hidden;
-    border: 1px solid var(--pico-muted-border-color, #ddd);
-    border-radius: 6px;
-    background: var(--pico-card-background-color, #fafafa);
-  }
-
-  .bulk-action-error {
-    color: var(--pico-del-color, #c0392b);
-    margin: 0 0 0.75rem;
+    min-block-size: 0;
   }
 
   .detail-header {
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
     flex-shrink: 0;
+    border-block-end: 1px solid var(--tm-border);
   }
 
   .detail-subject-row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--tm-space-sm);
   }
 
   .detail-controls {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-left: auto;
+    margin-inline-start: auto;
     flex-shrink: 0;
   }
 
   .detail-subject-line {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
     flex: 1;
-    min-width: 0;
+    min-inline-size: 0;
   }
 
   .detail-subject-row.stacked {
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: 0.35rem;
+    gap: var(--tm-space-xs);
     align-items: center;
   }
 
@@ -3065,14 +2903,21 @@
   .detail-subject-row.stacked .detail-controls {
     grid-column: 2;
     grid-row: 1;
-    width: auto;
     justify-content: flex-end;
   }
 
   .detail-subject-row.stacked .detail-subject-line {
     grid-column: 1 / -1;
     grid-row: 2;
-    width: 100%;
+  }
+
+  .detail-subject {
+    flex: 1;
+    min-inline-size: 0;
+    font-size: var(--tm-text-md);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .detail-subject-row.stacked .detail-subject {
@@ -3080,674 +2925,123 @@
     overflow-wrap: anywhere;
   }
 
-  .detail-close-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 1.2rem;
-    line-height: 1;
-    padding: 0.1rem 0.35rem;
-    color: var(--pico-muted-color, #888);
-    flex-shrink: 0;
-  }
-
-  .detail-close-btn:hover {
-    color: var(--pico-color, #333);
-  }
-
-  .detail-subject {
-    flex: 1;
-    min-width: 0;
-    font-size: 1.05rem;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-  }
-
-  .actions-wrapper {
-    position: relative;
-    flex-shrink: 0;
-  }
-
-  .actions-toggle {
-    background: none;
-    border: 1px solid var(--pico-muted-border-color, #ccc);
-    border-radius: 4px;
-    cursor: pointer;
-    padding: 0.25rem 0.65rem;
-    font-size: 0.8rem;
-    font-weight: 500;
-    line-height: 1.4;
-    color: inherit;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    white-space: nowrap;
-  }
-
-  .actions-toggle:hover {
-    background: var(--pico-muted-border-color, #f0f0f0);
-  }
-
-  .actions-caret {
-    font-size: 0.7rem;
-    opacity: 0.7;
-  }
-
-  .actions-menu {
-    position: absolute;
-    right: 0;
-    top: calc(100% + 4px);
-    background: var(--pico-background-color, white);
-    border: 1px solid var(--pico-muted-border-color, #ddd);
-    border-radius: 6px;
-    box-shadow: 0 4px 16px rgba(0,0,0,.14);
-    z-index: 200;
-    min-width: 175px;
-    overflow: hidden;
-  }
-
-  .inline-action-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0.15rem 0.25rem;
-    line-height: 1;
-    color: var(--pico-muted-color, #bbb);
-    flex-shrink: 0;
-    transition: color 0.15s;
-  }
-
-  .inline-action-btn:hover {
-    color: var(--pico-color, #333);
-  }
-
-  .star-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 1.1rem;
-    padding: 0.1rem 0.25rem;
-    line-height: 1;
-    color: var(--pico-muted-color, #bbb);
-    flex-shrink: 0;
-    transition: color 0.15s;
-  }
-
   .star-btn.flagged {
-    color: #f5a623;
+    color: var(--tm-warning);
   }
 
-  .star-btn:hover {
-    color: #f5a623;
+  .bulk-menu {
+    inline-size: min(16rem, 100%);
   }
 
-  .actions-menu button {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    width: 100%;
-    text-align: left;
-    padding: 0.45rem 0.9rem;
-    border: none;
-    background: none;
-    cursor: pointer;
-    font-size: 0.85rem;
-    color: inherit;
-    white-space: nowrap;
+  .caret {
+    transition: rotate var(--tm-duration) var(--tm-ease);
   }
 
-  .actions-menu button:hover {
-    background: var(--pico-muted-border-color, #f5f5f5);
+  [aria-expanded='true'] > .caret {
+    rotate: 180deg;
   }
 
-  .menu-separator {
-    height: 1px;
-    background: var(--pico-muted-border-color, #eee);
-    margin: 0.2rem 0;
-  }
-
-  .menu-item-danger {
-    color: var(--pico-del-color, #c0392b) !important;
-  }
-
-  .menu-item-active::before {
-    content: '✓ ';
-  }
-
-  .move-to-folder-btn {
-    justify-content: space-between !important;
-  }
-
-  .move-to-folder-btn > :first-child {
-    margin-right: 0.25rem;
-  }
-
-  .move-caret {
-    margin-left: auto;
-    font-size: 0.75rem;
-    color: var(--pico-muted-color, #888);
+  .unchecked {
+    visibility: hidden;
   }
 
   .move-submenu {
-    max-height: 180px;
-    overflow-y: auto;
-    border-top: 1px solid var(--pico-muted-border-color, #eee);
-    border-bottom: 1px solid var(--pico-muted-border-color, #eee);
-    background: var(--pico-card-background-color, #fafafa);
-  }
-
-  .move-submenu button {
-    padding-left: 1.4rem !important;
-    font-size: 0.82rem !important;
+    max-block-size: 11rem;
+    padding-inline-start: var(--tm-space-md);
   }
 
   .detail-meta {
-    padding: 0.5rem 1rem;
-    border-bottom: 1px solid var(--pico-muted-border-color, #eee);
-    font-size: 0.82rem;
-    color: var(--pico-muted-color, #555);
     flex-shrink: 0;
-  }
-
-  .detail-meta div {
-    margin-bottom: 0.1rem;
-  }
-
-  .meta-primary-row {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
+    border-block-end: 1px solid var(--tm-border);
+    font-size: var(--tm-text-sm);
+    color: var(--tm-text-muted);
   }
 
   .meta-primary {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    cursor: pointer;
-    flex: 1;
-    min-width: 0;
-    margin: 0;
-    padding: 0;
-    border: none;
-    background: none;
-    color: inherit;
-    font: inherit;
-    text-align: left;
+    min-inline-size: 0;
+    justify-content: start;
+    text-align: start;
+    color: var(--tm-text-muted);
+    font-weight: 400;
   }
 
-  .meta-label {
+  .meta-primary strong {
     font-weight: 600;
-    flex-shrink: 0;
   }
 
-  .meta-value {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .meta-toggle {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 0.65rem;
-    color: var(--pico-muted-color, #aaa);
-    padding: 0.1rem 0.2rem;
-    flex-shrink: 0;
-    line-height: 1;
-  }
-
-  .pgp-security-icons {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.15rem;
-    flex-shrink: 0;
-  }
-
-  .pgp-security-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.7rem;
-    height: 1.7rem;
-    border-radius: 0.3rem;
-    color: var(--pico-primary);
-    background: color-mix(in srgb, var(--pico-primary) 15%, transparent);
-  }
-
-  .pgp-security-icon-verified {
-    color: var(--pico-ins-color);
-    background: color-mix(in srgb, var(--pico-ins-color) 20%, transparent);
-  }
-
-  .thread-trigger {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .thread-trigger:hover {
-    color: var(--pico-color, #333);
-  }
-
-  .meta-toggle:hover {
-    color: var(--pico-color, inherit);
+  .meta-details {
+    padding-inline: var(--tm-space-sm);
   }
 
   .attachments {
-    padding: 0.4rem 1rem;
-    border-bottom: 1px solid var(--pico-muted-border-color, #eee);
     flex-shrink: 0;
-  }
-
-  .attachments-toggle {
-    background: none !important;
-    border: none !important;
-    box-shadow: none !important;
-    cursor: pointer;
-    padding: 0 !important;
-    margin: 0 !important;
-    font-size: 0.82rem !important;
-    color: var(--pico-muted-color, #666) !important;
-    display: inline-flex !important;
-    align-items: center;
-    gap: 0.3rem;
-    width: auto !important;
-    min-width: unset !important;
-  }
-
-  .attachments-toggle:hover {
-    color: var(--pico-color, #333) !important;
-  }
-
-  .attachments-caret {
-    font-size: 0.65rem;
-    opacity: 0.7;
+    border-block-end: 1px solid var(--tm-border);
   }
 
   .attachments-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    margin-top: 0.4rem;
-    max-height: 10rem;
-    overflow-y: auto;
-  }
-
-  .attachment-chip-dl {
-    text-decoration: none;
-    color: inherit;
-  }
-
-  .attachment-chip-dl:hover {
-    background: var(--pico-card-background-color);
-    color: inherit;
-  }
-
-  .pgp-attachment-row {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-
-  .pgp-import-public-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    margin: 0;
-    padding: 0.25rem;
-    width: 1.7rem;
-    height: 1.7rem;
-    background: none;
-    border: none;
-    color: var(--pico-muted-color);
-  }
-
-  .pgp-import-public-btn:hover:not(:disabled) {
-    background: none;
-    color: var(--pico-color);
-  }
-
-  .pgp-import-public-btn:disabled {
-    opacity: 0.45;
+    max-block-size: 10rem;
   }
 
   .detail-body {
     flex: 1;
+    min-block-size: 0;
     overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    border-radius: var(--pico-border-radius);
   }
 
   .body-text {
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: inherit;
-    font-size: 0.88rem;
-    line-height: 1.6;
     margin: 0;
-    padding: 0.5rem 0.75rem;
-    background: var(--pico-card-background-color, #fafafa);
-    border-radius: var(--pico-border-radius, 4px);
+    padding: var(--tm-space-sm) var(--tm-space-md);
+    background: none;
+    border: 0;
+    font-family: inherit;
+    font-size: var(--tm-text-sm);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   .images-notice {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.8rem;
-    background: var(--pico-card-background-color, #f9f9f9);
-    border: 1px solid var(--pico-muted-border-color, #ccc);
-    border-radius: 4px;
-    padding: 0.5rem 0.75rem;
-    margin-bottom: 0.75rem;
-    color: var(--pico-muted-color, #666);
+    font-size: var(--tm-text-sm);
   }
 
-  .dismiss-notice-btn {
-    background: none !important;
-    border: none !important;
-    box-shadow: none !important;
-    cursor: pointer;
-    padding: 0 0.1rem !important;
-    margin: 0 0 0 auto !important;
-    font-size: 1.1rem !important;
-    line-height: 1;
-    color: var(--pico-muted-color, #aaa) !important;
-    width: auto !important;
-    min-width: unset !important;
-    display: inline-flex !important;
-    align-items: center;
+  .split-start {
+    border-start-end-radius: 0;
+    border-end-end-radius: 0;
   }
 
-  .dismiss-notice-btn:hover {
-    color: var(--pico-color, #333) !important;
-  }
-
-  .allow-btn {
-    padding: 0.2rem 0.6rem;
-    font-size: 0.78rem;
-    border: 1px solid var(--pico-primary, #0172ad);
-    border-radius: 3px;
-    background: none;
-    color: var(--pico-primary, #0172ad);
-    cursor: pointer;
-  }
-
-  .allow-btn:hover {
-    background: var(--pico-primary, #0172ad);
-    color: white;
-  }
-
-  .origin-split-btn {
-    display: inline-flex;
-    border: 1px solid var(--pico-primary, #0172ad);
-    border-radius: 3px;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-
-  .origin-split-allow {
-    padding: 0.2rem 0.6rem;
-    font-size: 0.78rem;
-    background: none;
-    border: none;
-    color: var(--pico-primary, #0172ad);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .origin-split-allow:hover {
-    background: var(--pico-primary, #0172ad);
-    color: white;
-  }
-
-  .origin-split-block {
-    padding: 0.2rem 0.4rem;
-    background: none;
-    border: none;
-    border-left: 1px solid color-mix(in srgb, var(--pico-del-color, #c0392b) 40%, transparent);
-    color: var(--pico-del-color, #c0392b);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-  }
-
-  .origin-split-block:hover {
-    background: var(--pico-del-color, #c0392b);
-    color: white;
+  .split-end {
+    border-start-start-radius: 0;
+    border-end-start-radius: 0;
+    border-inline-start-width: 0;
   }
 
   .html-body {
-    width: 100%;
-    border: none;
+    inline-size: 100%;
+    border: 0;
     flex: 1;
-    min-height: 0;
+    min-block-size: 0;
   }
 
-  :global(.mail-html-frame) {
+  .detail-body :global(.mail-html-frame) {
     flex: 1;
-    min-height: 0;
+    min-block-size: 0;
+  }
+
+  .detail-status {
+    padding: var(--tm-space-xl) var(--tm-space-md);
+    text-align: center;
   }
 
   .origins-trigger {
     position: fixed;
-    bottom: 2.75rem;
-    right: 6.5rem;
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.35rem 0.6rem;
-    background: var(--pico-background-color, white);
-    border-radius: 6px;
-    font-size: 0.78rem;
-    cursor: pointer;
+    inset-block-end: 2.25rem;
+    inset-inline-end: 6rem;
     z-index: 50;
-    box-shadow: 0 0.25rem 1rem rgba(0,0,0,0.25);
+    box-shadow: var(--tm-shadow-lg);
   }
 
-  .origins-trigger:hover {
-    color: var(--pico-color, #333);
-    border-color: var(--pico-primary, #0172ad);
-  }
-
-  .origins-badge {
-    font-size: 0.7rem;
-  }
-
-  .origins-dialog {
-    width: 480px;
-    max-width: 95vw;
-  }
-
-  .empty-trash-dialog {
-    width: 420px;
-    max-width: 95vw;
-  }
-
-  .empty-trash-dialog article {
-    margin: 0;
-  }
-
-  .empty-trash-dialog header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--pico-muted-border-color, #eee);
-  }
-
-  .empty-trash-dialog header h3 {
-    margin: 0;
-    font-size: 1rem;
-  }
-
-  .empty-trash-body {
-    padding: 1rem;
-  }
-
-  .empty-trash-body p {
-    margin: 0 0 0.75rem;
-    font-size: 0.9rem;
-    color: var(--pico-muted-color, #666);
-  }
-
-  .empty-trash-options {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-  }
-
-  .empty-trash-options label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin: 0;
-    padding: 0.45rem 0.55rem;
-    border: 1px solid var(--pico-muted-border-color, #ddd);
-    border-radius: var(--pico-border-radius, 4px);
-    font-size: 0.9rem;
-  }
-
-  .empty-trash-options input[type="radio"] {
-    margin: 0;
-  }
-
-  .empty-trash-custom input[type="number"] {
-    width: 5.5rem;
-    margin: 0 0 0 auto;
-    height: 2rem;
-    padding: 0.25rem 0.45rem;
-    font-size: 0.85rem;
-  }
-
-  .empty-trash-error {
-    margin: 0.75rem 0 0 !important;
-    color: var(--pico-del-color, #c0392b) !important;
-  }
-
-  .empty-trash-dialog footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.5rem;
-    padding: 0.75rem 1rem;
-    border-top: 1px solid var(--pico-muted-border-color, #eee);
-  }
-
-  .empty-trash-dialog footer button {
-    margin: 0;
-  }
-
-  .empty-trash-confirm {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    background: var(--pico-del-color, #c0392b);
-    border-color: var(--pico-del-color, #c0392b);
-    color: #fff;
-  }
-
-  .origins-dialog article {
-    margin: 0;
-  }
-
-  .origins-dialog header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--pico-muted-border-color, #eee);
-    font-weight: 500;
-  }
-
-  .origins-filter-wrap {
-    padding: 0.6rem 1rem 0;
-  }
-
-  .origins-filter {
-    width: 100%;
-    margin: 0;
-  }
-
-  .origins-sections {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    padding: 0 1rem 1rem;
-  }
-
-  .origins-section h6 {
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--pico-muted-color, #888);
-    margin: 1rem 0 0.4rem;
-  }
-
-  .origins-empty {
-    font-size: 0.82rem;
-    color: var(--pico-muted-color, #aaa);
-    margin: 0;
-  }
-
-  .origins-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-  }
-
-  .origins-list li {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.25rem 0;
-    font-size: 0.84rem;
-  }
-
-  .origins-list li span {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  /* Shared */
-  .loading,
-  .empty {
-    padding: 2rem 1rem;
-    text-align: center;
-    color: var(--pico-muted-color, #888);
-    font-size: 0.9rem;
-  }
-  .fab {
-    position: fixed;
-    bottom: 2rem;
-    right: 2rem;
-    z-index: 20;
-    width: 3.5rem;
-    height: 3.5rem;
-    border-radius: 50%;
-    border: none;
-    background: var(--pico-primary-background);
-    color: var(--pico-primary-inverse);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 0.25rem 1rem rgba(0,0,0,0.25);
-    transition: transform 0.15s, box-shadow 0.15s;
-  }
-
-  .fab:hover {
-    transform: scale(1.05);
-    box-shadow: 0 0.35rem 1.25rem rgba(0,0,0,0.3);
+  .trash-days {
+    inline-size: 6rem;
   }
 
   /* Responsive */
@@ -3761,21 +3055,17 @@
       position: fixed;
       inset: 0;
       z-index: 101;
-      background: var(--pico-card-background-color, white);
       overflow-y: auto;
-      box-shadow: inset 0 3px 12px rgba(0,0,0,0.08);
     }
 
     .message-detail.standalone {
       display: flex;
       position: static;
       overflow-y: auto;
-      box-shadow: none;
     }
 
     .message-detail.is-open .detail-header {
-      background: var(--pico-card-sectioning-background-color);
-      border-bottom: 1px solid var(--pico-muted-border-color, #ddd);
+      background: var(--tm-surface-raised);
     }
 
     .detail-body {
@@ -3784,24 +3074,8 @@
     }
 
     .html-body,
-    :global(.mail-html-frame) {
+    .detail-body :global(.mail-html-frame) {
       flex: none;
-    }
-
-    .mail-layout {
-      display: grid;
-      flex: 1;
-      min-height: 0;
-    }
-
-    .fab {
-      bottom: 1.5rem;
-      right: 1.5rem;
-    }
-
-    .origins-trigger {
-      bottom: 2.25rem;
-      right: 5.5rem;
     }
   }
 
@@ -3810,60 +3084,5 @@
       position: relative;
       display: flex;
     }
-
-    .resize-handle {
-      display: none;
-    }
-
-  }
-
-  @media (min-width: 1024px) {
-    .mail-layout {
-      flex: 1;
-      min-height: 0;
-    }
-  }
-
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-
-  .pgp-badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-    margin-bottom: 0.75rem;
-  }
-
-  .pgp-badge {
-    font-size: 0.7rem;
-    padding: 0.15rem 0.45rem;
-    border-radius: 1rem;
-    font-weight: 600;
-    background: var(--pico-muted-border-color);
-    color: var(--pico-color);
-  }
-
-  .pgp-badge-verification_failed,
-  .pgp-badge-decrypt_failed { background: color-mix(in srgb, var(--pico-del-color) 15%, transparent); color: var(--pico-del-color); }
-
-  .pgp-unlock-prompt {
-    padding: 1.5rem;
-    text-align: center;
-  }
-
-  .pgp-decrypt-btn {
-    margin-top: 0.5rem;
-  }
-
-  .pgp-error {
-    color: var(--pico-del-color);
-    font-size: 0.875rem;
-    margin: 0.25rem 0;
-  }
-
-  .pgp-success {
-    color: var(--pico-ins-color);
-    font-size: 0.875rem;
-    margin: 0.25rem 0;
   }
 </style>
