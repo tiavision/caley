@@ -46,7 +46,7 @@
     <button type="button" data-variant="ghost" data-icon="plus" aria-label={tl('event_new')} onclick={handleNewEvent}></button>
     <button type="button" commandfor="day-events" command="close" aria-label={tl('cal_month_close')}></button>
   </header>
-  <div data-layout="stack" data-gap="xs" data-grow data-scroll="y">
+  <div data-list data-grow data-scroll="y">
     {#each events as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
       <button
         type="button"
