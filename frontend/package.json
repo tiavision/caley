@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@inlang/paraglide-js": "^2.24.1",
-    "@picocss/pico": "^2.1.1",
     "@tiaforge-ui/temper": "^0.1.0",
     "dompurify": "^3.4.17",
     "openpgp": "^6.3.1",

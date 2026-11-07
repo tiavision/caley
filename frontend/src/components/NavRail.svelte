@@ -1,6 +1,5 @@
 <script lang="ts">
-  // Navigation rail for pages on temper (app.css): a direct child of <body data-shell>, a drawer
-  // (popover) below 48rem. Pages still on Pico use NavSidebar.svelte.
+  // Navigation rail (temper app.css): a direct child of <body data-shell>, a drawer (popover) below 48rem.
   import { onMount, onDestroy } from 'svelte';
   import { initI18n, getLocale, makeTl } from '../lib/i18n.ts';
   import { getUser, type UserInfo } from '../lib/user.ts';

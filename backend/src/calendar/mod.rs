@@ -21,7 +21,7 @@ pub use import::{
     preview_ics_import, search_events,
 };
 
-pub(super) const NEUTRAL_DOT_COLOR: &str = "var(--pico-muted-color)";
+pub(super) const NEUTRAL_DOT_COLOR: &str = "var(--tm-text-muted)";
 
 // ── JSON response types ────────────────────────────────────────────────────────
 

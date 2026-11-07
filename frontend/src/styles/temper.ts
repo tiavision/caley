@@ -1,4 +1,4 @@
-// Styles for pages that have moved to temper. Pages still on Pico import main.scss instead.
+// App styles: temper modules, the Lucide icons the markup uses, and app-specific rules.
 import '@tiaforge-ui/temper/core.css';
 import '@tiaforge-ui/temper/app.css';
 import '@tiaforge-ui/temper/menu.css';

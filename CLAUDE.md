@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The repository is a two-package monorepo with independent frontend and backend tooling:
 
 - **`backend/`** — Rust 2024 Axum binary. Handles auth, CalDAV/CardDAV/IMAP/SMTP clients, SQLite persistence, encryption, sync tasks, SSE, and static frontend serving.
-- **`frontend/`** — Vite + Svelte 5 static multi-page app. Pico CSS + Sass, compile-time i18n via `@inlang/paraglide-js`.
+- **`frontend/`** — Vite + Svelte 5 static multi-page app. temper CSS (`@tiaforge-ui/temper`, `data-*` attributes) + Sass for app-specific rules, compile-time i18n via `@inlang/paraglide-js`.
 
 There is no root-level package manager or Cargo workspace.
 
@@ -212,7 +212,10 @@ Encryption/settings:
 ### Frontend Notes
 
 - Svelte 5 with TypeScript strict mode.
-- Styling uses Pico CSS and `sass-embedded`.
+- Styling uses temper (`@tiaforge-ui/temper` 0.1.0): semantic HTML plus `data-*` variants, light/dark automatic. The reference is `node_modules/@tiaforge-ui/temper/llms-full.txt`. Entry styles: `src/styles/temper.ts` (temper modules, `virtual:temper-icons.css`, `app.scss`). Scoped CSS only for app-specific parts, with `--tm-*` tokens, no hard-coded colors or outer margins.
+- Icons are `data-icon="<lucide name>"`; the temper Vite plugin emits only names that appear as static strings in the markup.
+- The Vite plugin runs `temper check` on every build (errors fail it). Check rendered pages with `npx temper-inspect <url> --sheet <dir>`.
+- Pages use `<body data-shell="fixed">`; `initRail()` (`src/main/nav.ts`) mounts `NavRail.svelte` as a direct child of body, and `NavToggle.svelte` opens it as a drawer on narrow screens.
 - i18n messages live in `frontend/messages/`.
 - `vite.config.ts` proxies `/api`, `/auth`, and `/logout` to `http://localhost:3000`.
 - The dev server defaults to Vite's port, usually `localhost:5173`.
