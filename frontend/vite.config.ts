@@ -2,13 +2,21 @@ import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { resolve } from 'path';
+import temper from '@tiaforge-ui/temper/vite';
 
 const root = import.meta.dirname;
+
+// Files already moved from Pico to temper; `temper check` runs on these during dev and build.
+// Remove the list (check everything) once the last page has moved.
+const temperPaths: string[] = [
+  'src/styles/app.scss',
+];
 
 export default defineConfig({
   appType: 'mpa',
   plugins: [
     svelte(),
+    temper({ paths: temperPaths.map((p) => resolve(root, p)), icons: { lucide: true } }),
     paraglideVitePlugin({
       project: './project.inlang',
       outdir: './src/paraglide',
