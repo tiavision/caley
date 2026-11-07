@@ -18,7 +18,7 @@
   export async function open(c: ContactJson) {
     selectedContact = c;
     await tick();
-    dialog?.showModal();
+    if (!dialog?.open) dialog?.showModal();
   }
 
   export function close() {
@@ -72,229 +72,93 @@
   }
 </script>
 
-<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
 <dialog
   bind:this={dialog}
   id="contact-detail"
-  onclick={(e) => { if (e.target === e.currentTarget) close(); }}
+  closedby="any"
   onclose={close}
-  oncancel={(e) => { e.preventDefault(); close(); }}
 >
-  <article>
-    <header>
-      <h3>{selectedContact?.fn_name || ''}</h3>
-      <div class="header-actions">
-        {#if selectedContact}
-          <ShareMenu contact={selectedContact} {locale} />
-          <button
-            class="edit-btn"
-            title={tl('contacts_edit')}
-            onclick={() => onedit(selectedContact!)}
-          >&#9998;</button>
-        {/if}
-        <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={close}></button>
-      </div>
-    </header>
+  <header>
+    <h2>{selectedContact?.fn_name || ''}</h2>
+    <div data-layout="row" data-gap="xs" data-wrap="none">
+      {#if selectedContact}
+        <ShareMenu contact={selectedContact} {locale} />
+        <button
+          type="button"
+          data-icon="pencil"
+          data-variant="ghost"
+          aria-label={tl('contacts_edit')}
+          data-tooltip
+          onclick={() => onedit(selectedContact!)}
+        ></button>
+      {/if}
+      <button type="button" commandfor="contact-detail" command="close" aria-label={tl('weekly_aria_close')}></button>
+    </div>
+  </header>
 
-    {#if selectedContact}
-      <div class="contact-detail-body">
-        <div class="detail-avatar-wrap">
-          <div class="detail-avatar">
-            {#if selectedContact.has_photo}
-              <img class="avatar-photo" src="/api/contact/photo?account_id={encodeURIComponent(selectedContact.account_id)}&uid={encodeURIComponent(selectedContact.uid)}&addressbook_href={encodeURIComponent(selectedContact.addressbook_href)}" alt="" />
-            {:else}
-              {(selectedContact.fn_name[0] ?? '?').toUpperCase()}
-            {/if}
-          </div>
-        </div>
+  {#if selectedContact}
+    <span data-avatar data-self="center" style="--tm-avatar-size: 4rem">
+      {#if selectedContact.has_photo}
+        <img src="/api/contact/photo?account_id={encodeURIComponent(selectedContact.account_id)}&uid={encodeURIComponent(selectedContact.uid)}&addressbook_href={encodeURIComponent(selectedContact.addressbook_href)}" alt="" />
+      {:else}
+        {(selectedContact.fn_name[0] ?? '?').toUpperCase()}
+      {/if}
+    </span>
 
-        {#if selectedContact.org}
-          <div class="detail-row">
-            <span class="detail-label">{tl('contacts_org')}</span>
-            <span>{selectedContact.org}</span>
-          </div>
-        {/if}
+    <dl data-pairs>
+      {#if selectedContact.org}
+        <dt>{tl('contacts_org')}</dt>
+        <dd>{selectedContact.org}</dd>
+      {/if}
 
-        {#if selectedContact.emails.length > 0}
-          <div class="detail-row">
-            <span class="detail-label">{tl('contacts_email')}</span>
-            <div class="detail-links">
-              {#each selectedContact.emails as entry}
-                <div class="typed-entry">
-                  <span class="type-chip">{tl(`contacts_type_${entry.type_label}`)}</span>
-                  <a href="mailto:{entry.value}">{entry.value}</a>
-                </div>
-              {/each}
-            </div>
-          </div>
-        {/if}
+      {#if selectedContact.emails.length > 0}
+        <dt>{tl('contacts_email')}</dt>
+        <dd data-layout="stack" data-gap="xs">
+          {#each selectedContact.emails as entry}
+            <span data-layout="row" data-gap="sm" data-wrap="none">
+              <span data-badge>{tl(`contacts_type_${entry.type_label}`)}</span>
+              <a href="mailto:{entry.value}" data-truncate>{entry.value}</a>
+            </span>
+          {/each}
+        </dd>
+      {/if}
 
-        {#if selectedContact.phones.length > 0}
-          <div class="detail-row">
-            <span class="detail-label">{tl('contacts_phone')}</span>
-            <div class="detail-links">
-              {#each selectedContact.phones as entry}
-                <div class="typed-entry">
-                  <span class="type-chip">{tl(`contacts_type_${entry.type_label}`)}</span>
-                  <a href="tel:{entry.value}">{entry.value}</a>
-                </div>
-              {/each}
-            </div>
-          </div>
-        {/if}
+      {#if selectedContact.phones.length > 0}
+        <dt>{tl('contacts_phone')}</dt>
+        <dd data-layout="stack" data-gap="xs">
+          {#each selectedContact.phones as entry}
+            <span data-layout="row" data-gap="sm" data-wrap="none">
+              <span data-badge>{tl(`contacts_type_${entry.type_label}`)}</span>
+              <a href="tel:{entry.value}">{entry.value}</a>
+            </span>
+          {/each}
+        </dd>
+      {/if}
 
-        {#if selectedContact.addresses.length > 0}
-          <div class="detail-row">
-            <span class="detail-label">{tl('contacts_address')}</span>
-            <div class="detail-links">
-              {#each selectedContact.addresses as addr}
-                <div class="typed-entry">
-                  <span class="type-chip">{tl(`contacts_type_${addr.type_label}`)}</span>
-                  <a href="geo:0,0?q={encodeURIComponent(addressQuery(addr))}" onclick={(e) => openMap(e, addressQuery(addr))} class="address-text" rel="noopener noreferrer">
-                    {#if addr.street}{addr.street}<br />{/if}
-                    {#if addr.city || addr.region || addr.postal}{addr.city}{addr.region ? (addr.city ? ', ' : '') + addr.region : ''}{addr.postal ? ' ' + addr.postal : ''}<br />{/if}
-                    {#if addr.country}{addr.country}{/if}
-                  </a>
-                </div>
-              {/each}
-            </div>
-          </div>
-        {/if}
+      {#if selectedContact.addresses.length > 0}
+        <dt>{tl('contacts_address')}</dt>
+        <dd data-layout="stack" data-gap="sm">
+          {#each selectedContact.addresses as addr}
+            <span data-layout="row" data-gap="sm" data-wrap="none" data-align="start">
+              <span data-badge>{tl(`contacts_type_${addr.type_label}`)}</span>
+              <a href="geo:0,0?q={encodeURIComponent(addressQuery(addr))}" onclick={(e) => openMap(e, addressQuery(addr))} rel="noopener noreferrer">
+                {#if addr.street}{addr.street}<br />{/if}
+                {#if addr.city || addr.region || addr.postal}{addr.city}{addr.region ? (addr.city ? ', ' : '') + addr.region : ''}{addr.postal ? ' ' + addr.postal : ''}<br />{/if}
+                {#if addr.country}{addr.country}{/if}
+              </a>
+            </span>
+          {/each}
+        </dd>
+      {/if}
 
-        {#if addressbooks.length > 1}
-          <div class="detail-row">
-            <span class="detail-label">{tl('contacts_addressbook')}</span>
-            <span>{getAddressbookName(selectedContact.account_id, selectedContact.addressbook_href)}</span>
-          </div>
-        {/if}
+      {#if addressbooks.length > 1}
+        <dt>{tl('contacts_addressbook')}</dt>
+        <dd>{getAddressbookName(selectedContact.account_id, selectedContact.addressbook_href)}</dd>
+      {/if}
+    </dl>
 
-        <div class="detail-actions">
-          <button class="secondary outline" onclick={() => deleteContact(selectedContact!)}>{tl('contacts_delete')}</button>
-        </div>
-      </div>
-    {/if}
-  </article>
+    <footer>
+      <button type="button" data-variant="outline" data-tone="danger" data-icon="trash-2" onclick={() => deleteContact(selectedContact!)}>{tl('contacts_delete')}</button>
+    </footer>
+  {/if}
 </dialog>
-
-<style>
-  .header-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-  }
-
-  .edit-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 1rem;
-    color: var(--pico-muted-color);
-    padding: 0.25rem;
-    line-height: 1;
-    transition: color 0.15s;
-    margin-bottom: 0;
-    width: auto;
-  }
-
-  .edit-btn:hover {
-    color: var(--pico-primary);
-  }
-
-  .detail-avatar-wrap {
-    display: flex;
-    justify-content: center;
-    margin-bottom: 0.25rem;
-  }
-
-  .detail-avatar {
-    width: 4rem;
-    height: 4rem;
-    border-radius: 50%;
-    background: var(--pico-primary);
-    color: var(--pico-primary-inverse);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.6rem;
-    font-weight: 600;
-    overflow: hidden;
-  }
-
-  .avatar-photo {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
-
-  .contact-detail-body {
-    margin-top: 0.75rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .detail-row {
-    display: flex;
-    flex-direction: column;
-    gap: 0.125rem;
-  }
-
-  .detail-label {
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--pico-muted-color, #666);
-    font-weight: 600;
-  }
-
-  .detail-links {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-  }
-
-  .detail-links a {
-    font-size: 0.95rem;
-    color: var(--pico-primary);
-    text-decoration: none;
-  }
-
-  .detail-links a:hover {
-    text-decoration: underline;
-  }
-
-  .typed-entry {
-    display: flex;
-    align-items: baseline;
-    gap: 0.4rem;
-  }
-
-  .type-chip {
-    font-size: 0.7rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--pico-muted-color, #666);
-    background: var(--pico-muted-background-color);
-    border-radius: 0.25rem;
-    padding: 0.05rem 0.35rem;
-    flex-shrink: 0;
-    line-height: 1.4;
-  }
-
-  .address-text {
-    font-size: 0.9rem;
-    line-height: 1.5;
-  }
-
-  .detail-actions {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
-  }
-
-  .detail-actions button {
-    margin-bottom: 0;
-  }
-</style>

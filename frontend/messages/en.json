@@ -171,6 +171,7 @@
   "contacts_filterplaceholder": "Filter contacts…",
   "contacts_address": "Address",
   "contacts_addAddress": "Add address",
+  "contacts_remove": "Remove",
   "contacts_street": "Street",
   "contacts_city": "City",
   "contacts_region": "Region",

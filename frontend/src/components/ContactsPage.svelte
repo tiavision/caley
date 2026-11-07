@@ -7,6 +7,7 @@
   import ShareMenu from './ShareMenu.svelte';
   import ContactDetailDialog from './contacts/ContactDetailDialog.svelte';
   import ContactFormDialog from './contacts/ContactFormDialog.svelte';
+  import NavToggle from './NavToggle.svelte';
 
   let locale = 'en';
   $: tl = makeTl(locale);
@@ -21,7 +22,6 @@
 
   let filterText = '';
   let selectedAddressbookHrefs = new Set<string>();
-  let abDropdownOpen = false;
   let mapUrl = 'https://www.openstreetmap.org/search?query={q}';
 
   let sseSource: EventSource | null = null;
@@ -157,12 +157,6 @@
     selectedAddressbookHrefs = selectedAddressbookHrefs;
   }
 
-  function handleWindowClick(e: MouseEvent) {
-    if (abDropdownOpen && !(e.target as Element).closest('.ab-dropdown')) {
-      abDropdownOpen = false;
-    }
-  }
-
   function handleKeydown(e: KeyboardEvent) {
     if (formDialog?.isOpen()) return;
     const target = e.target as HTMLElement;
@@ -177,106 +171,95 @@
   }
 </script>
 
-<svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} />
+<svelte:window onkeydown={handleKeydown} />
 
-<div class="contacts-page">
-  <div class="contacts-toolbar">
-    <h2>{tl('contacts_heading')}</h2>
-    <div class="contacts-filters">
-      {#if addressbooks.length > 1}
-        <div class="ab-dropdown">
-          <button
-            type="button"
-            class="ab-dropdown-btn"
-            onclick={() => abDropdownOpen = !abDropdownOpen}
-          >
-            {abBtnLabel} <span class="dropdown-arrow" aria-hidden="true">▾</span>
-          </button>
-          {#if abDropdownOpen}
-            <ul class="ab-dropdown-list">
-              {#each addressbooks as ab (ab.account_id + ab.href)}
-                <li>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={selectedAddressbookHrefs.has(abKey(ab))}
-                      onchange={() => toggleAddressbook(abKey(ab))}
-                    />
-                    {ab.name}
-                  </label>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </div>
-      {/if}
-      <input
-        type="search"
-        class="contacts-filter-input"
-        bind:value={filterText}
-        placeholder={tl('contacts_filterplaceholder')}
-      />
-    </div>
+<div data-layout="stack" data-gap="lg" data-pad="lg">
+  <div data-layout="row" data-gap="sm">
+    <NavToggle />
+    <h1>{tl('contacts_heading')}</h1>
+    <input
+      type="search"
+      data-grow
+      style="--tm-grow-basis: 12rem"
+      bind:value={filterText}
+      placeholder={tl('contacts_filterplaceholder')}
+      aria-label={tl('contacts_filterplaceholder')}
+    />
+    {#if addressbooks.length > 1}
+      <button type="button" popovertarget="ab-menu" data-variant="outline">{abBtnLabel}</button>
+      <div popover id="ab-menu" data-menu>
+        {#each addressbooks as ab (ab.account_id + ab.href)}
+          <label>
+            <input
+              type="checkbox"
+              checked={selectedAddressbookHrefs.has(abKey(ab))}
+              onchange={() => toggleAddressbook(abKey(ab))}
+            />
+            {ab.name}
+          </label>
+        {/each}
+      </div>
+    {/if}
   </div>
 
   {#if loading}
-    <p class="contacts-status">{tl('weekly_loading')}</p>
+    <p aria-busy="true">{tl('weekly_loading')}</p>
   {:else if errorMsg}
-    <p class="contacts-status form-error">{errorMsg}</p>
+    <div data-callout data-tone="danger" role="alert">{errorMsg}</div>
   {:else if filteredContacts.length === 0}
-    <p class="contacts-status">{tl('contacts_noContacts')}</p>
+    <p data-muted>{tl('contacts_noContacts')}</p>
   {:else}
-    <div class="contacts-groups">
-      {#each grouped as group (group.letter)}
-        <div class="contact-group">
-          <div class="contact-group-letter">{group.letter}</div>
-          <div class="contact-cards">
-              {#each group.items as contact (contact.account_id + contact.uid + contact.addressbook_href)}
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <div
-                class="contact-card"
-                role="button"
-                tabindex="0"
+    {#each grouped as group (group.letter)}
+      <section data-layout="stack" data-gap="sm">
+        <h2 data-caption>{group.letter}</h2>
+        <div data-layout="grid" data-gap="sm" style="--tm-min: 10rem">
+          {#each group.items as contact (contact.account_id + contact.uid + contact.addressbook_href)}
+            <article data-layout="stack" data-gap="xs" data-align="center">
+              <span data-avatar>
+                {#if contact.has_photo}
+                  <img src="/api/contact/photo?account_id={encodeURIComponent(contact.account_id)}&uid={encodeURIComponent(contact.uid)}&addressbook_href={encodeURIComponent(contact.addressbook_href)}" alt="" />
+                {:else}
+                  {(contact.fn_name[0] ?? '?').toUpperCase()}
+                {/if}
+              </span>
+              <button
+                type="button"
+                data-stretch
+                data-variant="link"
+                data-truncate
+                commandfor="contact-detail"
+                command="show-modal"
                 onclick={() => detailDialog?.open(contact)}
-                onkeydown={(e) => e.key === 'Enter' && detailDialog?.open(contact)}
-              >
-                <div class="card-avatar">
-                  {#if contact.has_photo}
-                    <img class="avatar-photo" src="/api/contact/photo?account_id={encodeURIComponent(contact.account_id)}&uid={encodeURIComponent(contact.uid)}&addressbook_href={encodeURIComponent(contact.addressbook_href)}" alt="" />
-                  {:else}
-                    {(contact.fn_name[0] ?? '?').toUpperCase()}
-                  {/if}
-                </div>
-                <div class="card-body">
-                  <span class="card-name">{contact.fn_name || '—'}</span>
-                  {#if contact.emails[0]}
-                    <a href="mailto:{contact.emails[0].value}" class="card-link card-email" onclick={(e) => e.stopPropagation()}>{contact.emails[0].value}</a>
-                  {/if}
-                  {#if contact.phones[0]}
-                    <a href="tel:{contact.phones[0].value}" class="card-link card-phone" onclick={(e) => e.stopPropagation()}>{contact.phones[0].value}</a>
-                  {/if}
-                  {#if contact.org}
-                    <span class="card-org">{contact.org}</span>
-                  {/if}
-                  {#if addressbooks.length > 1}
-                    <span class="card-ab">{getAddressbookName(contact.account_id, contact.addressbook_href)}</span>
-                  {/if}
-                </div>
-              </div>
-            {/each}
-          </div>
+              ><strong>{contact.fn_name || '—'}</strong></button>
+              {#if contact.emails[0]}
+                <small data-truncate><a href="mailto:{contact.emails[0].value}">{contact.emails[0].value}</a></small>
+              {/if}
+              {#if contact.phones[0]}
+                <small data-truncate><a href="tel:{contact.phones[0].value}">{contact.phones[0].value}</a></small>
+              {/if}
+              {#if contact.org}
+                <small data-muted data-truncate>{contact.org}</small>
+              {/if}
+              {#if addressbooks.length > 1}
+                <small data-muted data-truncate>{getAddressbookName(contact.account_id, contact.addressbook_href)}</small>
+              {/if}
+            </article>
+          {/each}
         </div>
-      {/each}
-    </div>
+      </section>
+    {/each}
   {/if}
 </div>
 
-<!-- FAB: new contact -->
-<button class="contacts-fab" onclick={() => formDialog?.openNew()} aria-label={tl('contacts_new')}>
-  <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-  </svg>
-</button>
+<button
+  type="button"
+  data-fab
+  data-icon="plus"
+  aria-label={tl('contacts_new')}
+  commandfor="contact-form"
+  command="show-modal"
+  onclick={() => formDialog?.openNew()}
+></button>
 
 <!-- Detail dialog -->
 <ContactDetailDialog
@@ -296,272 +279,3 @@
   {addressbooks}
   onsaved={async (saved) => { await detailDialog?.open(saved); }}
 />
-
-<style>
-  .contacts-page {
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  /* Toolbar */
-  .contacts-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    margin-bottom: 1.25rem;
-    flex-wrap: wrap;
-  }
-
-  .contacts-toolbar h2 {
-    margin: 0;
-    flex-shrink: 0;
-  }
-
-  .contacts-filters {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    margin-left: auto;
-    padding-right: 1rem;
-  }
-
-  .contacts-filter-input {
-    margin-bottom: 0;
-    font-size: 0.85em;
-    width: 16rem;
-    max-width: 100%;
-  }
-
-  /* Addressbook dropdown — mirrors .cal-dropdown in SearchPage */
-  .ab-dropdown {
-    position: relative;
-  }
-
-  .ab-dropdown-btn {
-    opacity: 0.65;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.85em;
-    width: auto;
-    margin-bottom: 0;
-    cursor: pointer;
-    background: var(--pico-form-element-background-color);
-    border: var(--pico-border-width) solid var(--pico-form-element-border-color);
-    box-shadow: none;
-    color: var(--pico-form-element-color);
-    line-height: var(--pico-line-height);
-  }
-
-  .dropdown-arrow {
-    font-size: 0.7em;
-    opacity: 0.6;
-    line-height: 1;
-  }
-
-  .ab-dropdown-list {
-    position: absolute;
-    top: calc(100% + 0.25rem);
-    left: 0;
-    z-index: 100;
-    background: var(--pico-card-background-color);
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    padding: 0.25rem 0;
-    margin: 0;
-    min-width: 12rem;
-    max-height: 16rem;
-    overflow-y: auto;
-    box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.12);
-    list-style: none;
-  }
-
-  .ab-dropdown-list li {
-    list-style: none;
-  }
-
-  .ab-dropdown-list label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.35rem 0.75rem;
-    cursor: pointer;
-    margin-bottom: 0;
-    font-size: 0.9em;
-    white-space: nowrap;
-  }
-
-  .ab-dropdown-list label:hover {
-    background: var(--pico-muted-background-color);
-  }
-
-  .ab-dropdown-list input[type="checkbox"] {
-    margin-bottom: 0;
-    cursor: pointer;
-  }
-
-  /* Status messages */
-  .contacts-status {
-    opacity: 0.6;
-    font-size: 0.9em;
-    padding: 0.5rem 0;
-  }
-
-  /* Contact groups */
-  .contacts-groups {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .contact-group-letter {
-    font-size: 0.75rem;
-    font-weight: 700;
-    opacity: 0.45;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    padding: 0.4rem 0 0.25rem;
-    border-bottom: 1px solid var(--pico-muted-border-color);
-    margin-bottom: 0.5rem;
-  }
-
-  /* Card grid */
-  .contact-cards {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    padding-bottom: 0.75rem;
-  }
-
-  /* Individual card */
-  .contact-card {
-    width: 210px;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 1rem 0.75rem 0.85rem;
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    background: var(--pico-card-background-color);
-    cursor: pointer;
-    text-align: center;
-    transition: border-color 0.15s, box-shadow 0.15s;
-  }
-
-  .contact-card:hover {
-    border-color: var(--pico-primary);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  }
-
-  .card-avatar {
-    width: 2.75rem;
-    height: 2.75rem;
-    border-radius: 50%;
-    background: var(--pico-primary);
-    color: var(--pico-primary-inverse);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.1rem;
-    font-weight: 600;
-    flex-shrink: 0;
-    margin-bottom: 0.15rem;
-    overflow: hidden;
-  }
-
-  .card-body {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.1rem;
-    min-width: 0;
-    width: 100%;
-  }
-
-  .card-name {
-    font-weight: 600;
-    font-size: 0.9rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-  }
-
-  .card-link {
-    font-size: 0.75rem;
-    opacity: 0.7;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-    text-decoration: none;
-    color: var(--pico-primary);
-  }
-
-  .card-link:hover {
-    text-decoration: underline;
-    opacity: 1;
-  }
-
-  .card-org {
-    font-size: 0.75rem;
-    opacity: 0.6;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-  }
-
-  .card-ab {
-    font-size: 0.7rem;
-    opacity: 0.45;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-    margin-top: 0.15rem;
-  }
-
-  /* FAB */
-  .contacts-fab {
-    position: fixed;
-    bottom: 1.5rem;
-    right: 1.5rem;
-    width: 3.25rem;
-    height: 3.25rem;
-    border-radius: 50%;
-    background: var(--pico-primary);
-    color: var(--pico-primary-inverse);
-    border: none;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-    z-index: 100;
-    margin-bottom: 0;
-    padding: 0;
-  }
-
-  .contacts-fab:hover {
-    background: var(--pico-primary-hover);
-  }
-
-  /* Mobile */
-  @media (max-width: 480px) {
-    .contacts-filter-input {
-      width: 100%;
-    }
-
-    .contacts-filters {
-      width: 100%;
-    }
-
-    .contact-card {
-      width: calc(50% - 0.375rem);
-    }
-  }
-</style>
