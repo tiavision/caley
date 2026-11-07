@@ -46,19 +46,22 @@
     <button type="button" data-variant="ghost" data-icon="plus" aria-label={tl('event_new')} onclick={handleNewEvent}></button>
     <button type="button" commandfor="day-events" command="close" aria-label={tl('cal_month_close')}></button>
   </header>
-  <div data-list data-grow data-scroll="y">
-    {#each events as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
-      <button
-        type="button"
-        data-variant="item"
-        data-size="sm"
-        data-bar
-        style={event.color ? `--tm-tone: ${event.color}` : null}
-        onclick={() => handleEventClick(event)}
-      >
-        <small data-muted>{eventTimeLabel(event)}</small>
-        <span data-clamp="2">{event.summary}</span>
-      </button>
-    {/each}
+  <!-- the wrapper scrolls, so the list keeps its natural height (rows of a scrolling flex list would shrink) -->
+  <div data-scroll="y">
+    <div data-list>
+      {#each events as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
+        <button
+          type="button"
+          data-variant="item"
+          data-size="sm"
+          data-bar
+          style={event.color ? `--tm-tone: ${event.color}` : null}
+          onclick={() => handleEventClick(event)}
+        >
+          <small data-muted>{eventTimeLabel(event)}</small>
+          <span data-clamp="2">{event.summary}</span>
+        </button>
+      {/each}
+    </div>
   </div>
 </dialog>

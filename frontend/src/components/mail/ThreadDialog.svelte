@@ -99,11 +99,14 @@
     <h2>{tl('mail_threadsHeading')}</h2>
     <button type="button" commandfor="thread-dialog" command="close" aria-label={tl('mail_close')}></button>
   </header>
-  <ul class="tree" data-layout="stack" data-gap="xs" data-grow data-scroll="y" aria-label={tl('mail_threadsHeading')}>
-    {#key eventsRenderKey}
-      {@render threadBranch(threadTree)}
-    {/key}
-  </ul>
+  <!-- the wrapper scrolls, so a short thread does not get a minimum height and long ones keep full-height rows -->
+  <div data-scroll="y">
+    <ul class="tree" data-layout="stack" data-gap="xs" aria-label={tl('mail_threadsHeading')}>
+      {#key eventsRenderKey}
+        {@render threadBranch(threadTree)}
+      {/key}
+    </ul>
+  </div>
 </dialog>
 
 <style>
