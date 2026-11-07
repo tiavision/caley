@@ -38,80 +38,27 @@
     close();
     onNewEvent(selectedDate);
   }
-
-  function handleBackdropClick(e: MouseEvent) {
-    if (e.target === dialogEl) close();
-  }
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-<dialog bind:this={dialogEl} onclick={handleBackdropClick}>
-  <!-- article + header: picked up by global `dialog article { padding }` and
-       `dialog article header { flex; space-between; margin-bottom }` in main.scss,
-       making this look identical to EventDetail -->
-  <article class="day-events-article">
-    <header>
-      <h3>{dateLabel}</h3>
-      <button class="new-event-btn" aria-label={tl('event_new')} title={tl('event_new')} onclick={handleNewEvent}>
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
+<dialog bind:this={dialogEl} id="day-events" closedby="any" data-layout="stack">
+  <header data-layout="row" data-gap="xs" data-wrap="none">
+    <h2 data-grow>{dateLabel}</h2>
+    <button type="button" data-variant="ghost" data-icon="plus" aria-label={tl('event_new')} onclick={handleNewEvent}></button>
+    <button type="button" commandfor="day-events" command="close" aria-label={tl('cal_month_close')}></button>
+  </header>
+  <div data-layout="stack" data-gap="xs" data-grow data-scroll="y">
+    {#each events as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
+      <button
+        type="button"
+        data-variant="item"
+        data-size="sm"
+        data-bar
+        style={event.color ? `--tm-tone: ${event.color}` : null}
+        onclick={() => handleEventClick(event)}
+      >
+        <small data-muted>{eventTimeLabel(event)}</small>
+        <span data-clamp="2">{event.summary}</span>
       </button>
-      <button class="close-btn" aria-label={tl('cal_month_close')} onclick={close}></button>
-    </header>
-    <div class="day-dialog-events">
-      {#each events as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <article
-          class="appointment event-trigger"
-          style="border-left: 3px solid {event.color}"
-          tabindex="0"
-          onclick={() => handleEventClick(event)}
-          onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleEventClick(event); } }}
-        >
-          <div class="appt-content">
-            <span class="appt-time">{eventTimeLabel(event)}</span> · {event.summary}
-          </div>
-        </article>
-      {/each}
-    </div>
-  </article>
+    {/each}
+  </div>
 </dialog>
-
-<style>
-  dialog {
-    max-height: 80svh;
-    overflow: hidden;
-  }
-  dialog::backdrop {
-    background: rgba(0,0,0,0.4);
-  }
-
-  /* Flex column so the header stays pinned and events scroll beneath it.
-     The global `dialog article { padding: 1.25rem }` already provides spacing. */
-  .day-events-article {
-    display: flex;
-    flex-direction: column;
-    /* box-sizing lets max-height account for the 1.25rem padding on all sides */
-    box-sizing: border-box;
-    max-height: 80svh;
-    overflow: hidden;
-  }
-
-  .new-event-btn {
-    background: none; border: none; cursor: pointer; padding: 0.25rem;
-    display: flex; align-items: center; justify-content: center;
-    color: var(--pico-primary);
-  }
-
-  /* Scrollable events list — overflow-x:hidden stops the box-shadow on
-     appointment chips (which extends 1px outside the element) from causing
-     a horizontal scrollbar */
-  .day-dialog-events {
-    overflow-x: hidden;
-    overflow-y: auto;
-    flex: 1;
-    min-height: 0;
-  }
-</style>

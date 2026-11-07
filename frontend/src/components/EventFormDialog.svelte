@@ -450,318 +450,252 @@
   }
 </script>
 
-<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
-<dialog
-  bind:this={formDialogEl}
-  id="event-form"
-  onclick={(e) => { if (e.target === e.currentTarget) formDialogEl?.close(); }}
->
-  <article>
-    <header>
-      <h3>{formMode === 'edit' ? tl('event_edit') : tl('event_create')}</h3>
-      <button class="close-btn" aria-label={tl('weekly_aria_close')} onclick={() => formDialogEl?.close()}></button>
-    </header>
+<dialog bind:this={formDialogEl} id="event-form" closedby="any">
+  <header>
+    <h2>{formMode === 'edit' ? tl('event_edit') : tl('event_create')}</h2>
+    <button type="button" commandfor="event-form" command="close" aria-label={tl('weekly_aria_close')}></button>
+  </header>
 
-    {#if formError}
-      <div class="form-error">{formError}</div>
-    {/if}
+  {#if formError}
+    <div data-callout data-tone="danger" role="alert">{formError}</div>
+  {/if}
 
-    <form onsubmit={(e) => { e.preventDefault(); submitEventForm(); }}>
-      <label>
-        <span>{tl('event_summary')}</span>
-        <div class="summary-wrap">
-          <input
-            type="text" bind:value={fSummary} bind:this={summaryInputEl} required
-            oninput={onSummaryInput}
-            onkeydown={onSummaryKeydown}
-            onblur={onSummaryBlur}
-          />
-          {#if timeSuggestions.length > 0}
-            <ul class="time-suggestions" role="listbox">
-              {#each timeSuggestions as s, i}
-                <li role="option" aria-selected={i === timeSuggestionIdx}>
-                  <button
-                    type="button"
-                    class:active={i === timeSuggestionIdx}
-                    onmousedown={(e) => { e.preventDefault(); applyTimeSuggestion(s); }}
-                  >{s.label}</button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-          {#if daySuggestions.length > 0}
-            <ul class="time-suggestions" role="listbox">
-              {#each daySuggestions as s, i}
-                <li role="option" aria-selected={i === daySuggestionIdx}>
-                  <button
-                    type="button"
-                    class:active={i === daySuggestionIdx}
-                    onmousedown={(e) => { e.preventDefault(); applyDaySuggestion(s); }}
-                  >{s.label}</button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </div>
-      </label>
-
-      <div class="event-datetime-group">
-        <div class="datetime-header">
-          <label>
-            <span>{tl('event_date')}</span>
-            <input type="date" bind:value={fDate} required />
-          </label>
-          <label class="all-day-label">
-            <input type="checkbox" bind:checked={fIsAllDay} />
-            <span>{tl('event_allDay')}</span>
-          </label>
-        </div>
-        {#if !fIsAllDay}
-          <div class="time-fields">
-            <label>
-              <span>{tl('event_startTime')}</span>
-              <input type="time" bind:value={fStartTime} onchange={autoFillEndTime} />
-            </label>
-            <label>
-              <span>{tl('event_endTime')}</span>
-              <input type="time" bind:value={fEndTime} />
-            </label>
+  <form data-layout="stack" data-gap="md" onsubmit={(e) => { e.preventDefault(); submitEventForm(); }}>
+    <label>
+      {tl('event_summary')}
+      <div data-combo>
+        <input
+          type="text" bind:value={fSummary} bind:this={summaryInputEl} required
+          role="combobox"
+          aria-autocomplete="list"
+          aria-controls="event-summary-suggestions"
+          aria-expanded={timeSuggestions.length > 0 || daySuggestions.length > 0}
+          oninput={onSummaryInput}
+          onkeydown={onSummaryKeydown}
+          onblur={onSummaryBlur}
+        />
+        {#if timeSuggestions.length > 0}
+          <div data-menu role="listbox" id="event-summary-suggestions">
+            {#each timeSuggestions as s, i}
+              <div role="option" tabindex="-1" aria-selected={i === timeSuggestionIdx}
+                onmousedown={(e) => { e.preventDefault(); applyTimeSuggestion(s); }}
+              >{s.label}</div>
+            {/each}
+          </div>
+        {:else if daySuggestions.length > 0}
+          <div data-menu role="listbox" id="event-summary-suggestions">
+            {#each daySuggestions as s, i}
+              <div role="option" tabindex="-1" aria-selected={i === daySuggestionIdx}
+                onmousedown={(e) => { e.preventDefault(); applyDaySuggestion(s); }}
+              >{s.label}</div>
+            {/each}
           </div>
         {/if}
       </div>
+    </label>
 
-      <label>
-        <span>{tl('event_location')}</span>
-        <input type="text" bind:value={fLocation} />
+    <div data-layout="row" data-gap="md" data-align="end">
+      <label data-grow>
+        {tl('event_date')}
+        <input type="date" bind:value={fDate} required />
       </label>
-
-      <label>
-        <span>{tl('event_description')}</span>
-        <textarea bind:value={fDescription} rows="3"></textarea>
+      <label data-layout="row" data-gap="sm" data-wrap="none">
+        <input type="checkbox" role="switch" bind:checked={fIsAllDay} />
+        {tl('event_allDay')}
       </label>
-
-      <!-- Alarms -->
-      <fieldset class="alarm-section">
-        <legend>{tl('event_reminder')}</legend>
-        <ul class="alarm-list">
-          {#each formAlarms as alarm, i}
-            <li class="alarm-row">
-              {#if alarm.direction !== 'absolute'}
-                <div class="alarm-relative-fields">
-                  <input
-                    type="number" min="1" value={alarm.value} style="width:4rem;margin-bottom:0"
-                    oninput={(e) => { formAlarms[i] = { ...alarm, value: (e.target as HTMLInputElement).value }; formAlarms = formAlarms; }}
-                  />
-                  <select
-                    value={alarm.unit} style="margin-bottom:0"
-                    onchange={(e) => { formAlarms[i] = { ...alarm, unit: (e.target as HTMLSelectElement).value }; formAlarms = formAlarms; }}
-                  >
-                    <option value="1">{tl('event_reminderMin')}</option>
-                    <option value="60">{tl('event_reminderHours')}</option>
-                    <option value="1440">{tl('event_reminderDays')}</option>
-                  </select>
-                </div>
-              {:else}
-                <div class="alarm-absolute-fields">
-                  <input
-                    type="datetime-local" value={datetimeForInput(alarm.datetime)} style="margin-bottom:0"
-                    onchange={(e) => { formAlarms[i] = { ...alarm, datetime: (e.target as HTMLInputElement).value }; formAlarms = formAlarms; }}
-                  />
-                </div>
-              {/if}
-              <select
-                class="alarm-direction" value={alarm.direction} style="margin-bottom:0"
-                onchange={(e) => { formAlarms[i] = { ...alarm, direction: (e.target as HTMLSelectElement).value }; formAlarms = formAlarms; }}
-              >
-                <option value="before-start">{tl('event_reminderBeforeStart')}</option>
-                <option value="before-end">{tl('event_reminderBeforeEnd')}</option>
-                <option value="after-start">{tl('event_reminderAfterStart')}</option>
-                <option value="after-end">{tl('event_reminderAfterEnd')}</option>
-                <option value="absolute">{tl('event_reminderAtTime')}</option>
-              </select>
-              <button type="button" class="alarm-remove outline" aria-label="Remove" onclick={() => { formAlarms = formAlarms.filter((_, j) => j !== i); }}>×</button>
-            </li>
-          {/each}
-        </ul>
-        <button type="button" class="outline small" onclick={() => { formAlarms = [...formAlarms, { direction: 'before-start', value: '15', unit: '1', datetime: '' }]; }}>
-          {tl('event_reminderAdd')}
-        </button>
-      </fieldset>
-
-      <!-- Attendees -->
-      <fieldset class="alarm-section">
-        <legend>{tl('event_attendees')}</legend>
-        <ul class="alarm-list">
-          {#each formAttendees as att, i}
-            <li class="alarm-row attendee-row">
-              <div class="attendee-input-wrap" style="flex:1">
-                <input
-                  type="text"
-                  placeholder={tl('event_attendeeName')}
-                  value={att.cn}
-                  style="margin-bottom:0;width:100%"
-                  oninput={(e) => { const v = (e.target as HTMLInputElement).value; formAttendees[i] = { ...att, cn: v }; formAttendees = formAttendees; onAttendeeInput(i, v); }}
-                  onkeydown={onAttendeeKeydown}
-                  onblur={onAttendeeBlur}
-                />
-                {#if attendeeSuggestionRow === i && attendeeSuggestions.length > 0}
-                  <ul class="time-suggestions" role="listbox">
-                    {#each attendeeSuggestions as s, si}
-                      <li role="option" aria-selected={si === attendeeSuggestionIdx}>
-                        <button type="button" class:active={si === attendeeSuggestionIdx}
-                          onmousedown={(e) => { e.preventDefault(); applyAttendeeSuggestion(s); }}
-                        >{s.fn_name ? `${s.fn_name} <${s.email}>` : s.email}</button>
-                      </li>
-                    {/each}
-                  </ul>
-                {/if}
-              </div>
-              <div class="attendee-input-wrap" style="flex:2">
-                <input
-                  type="email"
-                  placeholder={tl('event_attendeeEmail')}
-                  value={att.email}
-                  style="margin-bottom:0;width:100%"
-                  oninput={(e) => { const v = (e.target as HTMLInputElement).value; formAttendees[i] = { ...att, email: v }; formAttendees = formAttendees; onAttendeeInput(i, v); }}
-                  onkeydown={onAttendeeKeydown}
-                  onblur={onAttendeeBlur}
-                />
-                {#if attendeeSuggestionRow === i && attendeeSuggestions.length > 0}
-                  <ul class="time-suggestions" role="listbox">
-                    {#each attendeeSuggestions as s, si}
-                      <li role="option" aria-selected={si === attendeeSuggestionIdx}>
-                        <button type="button" class:active={si === attendeeSuggestionIdx}
-                          onmousedown={(e) => { e.preventDefault(); applyAttendeeSuggestion(s); }}
-                        >{s.fn_name ? `${s.fn_name} <${s.email}>` : s.email}</button>
-                      </li>
-                    {/each}
-                  </ul>
-                {/if}
-              </div>
-              <select
-                class="attendee-partstat-select"
-                value={att.partstat}
-                style="margin-bottom:0"
-                onchange={(e) => { formAttendees[i] = { ...att, partstat: (e.target as HTMLSelectElement).value as PartStat }; formAttendees = formAttendees; }}
-              >
-                <option value="NEEDS-ACTION">{tl('event_attendeeStatusNeedsAction')}</option>
-                <option value="ACCEPTED">{tl('event_attendeeStatusAccepted')}</option>
-                <option value="DECLINED">{tl('event_attendeeStatusDeclined')}</option>
-                <option value="TENTATIVE">{tl('event_attendeeStatusTentative')}</option>
-              </select>
-              <button type="button" class="alarm-remove outline" aria-label={tl('event_attendeeRemove')}
-                onclick={() => { formAttendees = formAttendees.filter((_, j) => j !== i); }}>×</button>
-            </li>
-          {/each}
-        </ul>
-        <button type="button" class="outline small"
-          onclick={() => { formAttendees = [...formAttendees, { cn: '', email: '', partstat: 'NEEDS-ACTION' as PartStat }]; }}>
-          {tl('event_attendeeAdd')}
-        </button>
-      </fieldset>
-
-      <!-- Recurrence -->
-      <RecurrenceBuilder
-        {tl}
-        {formScope}
-        bind:fFreq
-        bind:fInterval
-        bind:fByDay
-        bind:fMonthlyMode
-        bind:fMonthday
-        bind:fSetpos
-        bind:fSetposDay
-        bind:fEndType
-        bind:fCount
-        bind:fUntil
-      />
-
-      <label>
-        <span>{tl('event_calendar')}</span>
-        <select
-          value={`${fAccountId}\0${fCalendarHref}`}
-          disabled={formScope === 'this_instance'}
-          onchange={(e) => {
-            const [accountId, href] = (e.target as HTMLSelectElement).value.split('\0');
-            fAccountId = accountId;
-            fCalendarHref = href;
-            localStorage.setItem('defaultCalendar', `${fAccountId}\0${fCalendarHref}`);
-          }}
-        >
-          {#each calendarGroups as group (group.account_id)}
-            <optgroup label={group.label}>
-              {#each calendars.filter(c => c.account_id === group.account_id) as cal (cal.account_id + cal.href)}
-                <option value={`${cal.account_id}\0${cal.href}`}>{cal.name}</option>
-              {/each}
-            </optgroup>
-          {/each}
-        </select>
-      </label>
-
-      <div class="event-form-actions">
-        <button type="submit" disabled={formSaving}>{tl('event_save')}</button>
-        <button type="button" class="secondary" disabled={formSaving} onclick={() => formDialogEl?.close()}>{tl('event_cancel')}</button>
-        {#if formMode === 'edit'}
-          <button type="button" class="contrast outline" disabled={formSaving} onclick={deleteEvent}>{tl('event_delete')}</button>
-        {/if}
+    </div>
+    {#if !fIsAllDay}
+      <div data-layout="grid" data-gap="sm" style="--tm-min: 9rem">
+        <label>
+          {tl('event_startTime')}
+          <input type="time" bind:value={fStartTime} onchange={autoFillEndTime} />
+        </label>
+        <label>
+          {tl('event_endTime')}
+          <input type="time" bind:value={fEndTime} />
+        </label>
       </div>
-    </form>
-  </article>
+    {/if}
+
+    <label>
+      {tl('event_location')}
+      <input type="text" bind:value={fLocation} />
+    </label>
+
+    <label>
+      {tl('event_description')}
+      <textarea bind:value={fDescription} rows="3"></textarea>
+    </label>
+
+    <!-- Alarms -->
+    <fieldset data-layout="stack" data-gap="sm">
+      <legend>{tl('event_reminder')}</legend>
+      {#each formAlarms as alarm, i}
+        <div data-layout="row" data-gap="sm">
+          {#if alarm.direction !== 'absolute'}
+            <input
+              type="number" min="1" value={alarm.value} class="num" aria-label={tl('event_reminder')}
+              oninput={(e) => { formAlarms[i] = { ...alarm, value: (e.target as HTMLInputElement).value }; formAlarms = formAlarms; }}
+            />
+            <select
+              value={alarm.unit} class="unit" aria-label={tl('event_reminder')}
+              onchange={(e) => { formAlarms[i] = { ...alarm, unit: (e.target as HTMLSelectElement).value }; formAlarms = formAlarms; }}
+            >
+              <option value="1">{tl('event_reminderMin')}</option>
+              <option value="60">{tl('event_reminderHours')}</option>
+              <option value="1440">{tl('event_reminderDays')}</option>
+            </select>
+          {:else}
+            <input
+              type="datetime-local" value={datetimeForInput(alarm.datetime)} data-grow aria-label={tl('event_reminder')}
+              onchange={(e) => { formAlarms[i] = { ...alarm, datetime: (e.target as HTMLInputElement).value }; formAlarms = formAlarms; }}
+            />
+          {/if}
+          <select
+            value={alarm.direction} data-grow aria-label={tl('event_reminder')}
+            onchange={(e) => { formAlarms[i] = { ...alarm, direction: (e.target as HTMLSelectElement).value }; formAlarms = formAlarms; }}
+          >
+            <option value="before-start">{tl('event_reminderBeforeStart')}</option>
+            <option value="before-end">{tl('event_reminderBeforeEnd')}</option>
+            <option value="after-start">{tl('event_reminderAfterStart')}</option>
+            <option value="after-end">{tl('event_reminderAfterEnd')}</option>
+            <option value="absolute">{tl('event_reminderAtTime')}</option>
+          </select>
+          <button type="button" data-variant="ghost" data-icon="x" aria-label={tl('event_reminderRemove')} onclick={() => { formAlarms = formAlarms.filter((_, j) => j !== i); }}></button>
+        </div>
+      {/each}
+      <button type="button" data-variant="secondary" data-size="sm" data-icon="plus" data-self="start" onclick={() => { formAlarms = [...formAlarms, { direction: 'before-start', value: '15', unit: '1', datetime: '' }]; }}>
+        {tl('event_reminderAdd')}
+      </button>
+    </fieldset>
+
+    <!-- Attendees -->
+    <fieldset data-layout="stack" data-gap="sm">
+      <legend>{tl('event_attendees')}</legend>
+      {#each formAttendees as att, i}
+        <div data-layout="row" data-gap="sm" style="--tm-grow-basis: 6rem">
+          <div data-combo data-grow>
+            <input
+              type="text"
+              placeholder={tl('event_attendeeName')}
+              aria-label={tl('event_attendeeName')}
+              value={att.cn}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-controls="attendee-suggestions-{i}-name"
+              aria-expanded={attendeeSuggestionRow === i && attendeeSuggestions.length > 0}
+              oninput={(e) => { const v = (e.target as HTMLInputElement).value; formAttendees[i] = { ...att, cn: v }; formAttendees = formAttendees; onAttendeeInput(i, v); }}
+              onkeydown={onAttendeeKeydown}
+              onblur={onAttendeeBlur}
+            />
+            {#if attendeeSuggestionRow === i && attendeeSuggestions.length > 0}
+              <div data-menu role="listbox" id="attendee-suggestions-{i}-name">
+                {#each attendeeSuggestions as s, si}
+                  <div role="option" tabindex="-1" aria-selected={si === attendeeSuggestionIdx}
+                    onmousedown={(e) => { e.preventDefault(); applyAttendeeSuggestion(s); }}
+                  >{s.fn_name ? `${s.fn_name} <${s.email}>` : s.email}</div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+          <div data-combo data-grow class="email">
+            <input
+              type="email"
+              placeholder={tl('event_attendeeEmail')}
+              aria-label={tl('event_attendeeEmail')}
+              value={att.email}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-controls="attendee-suggestions-{i}-email"
+              aria-expanded={attendeeSuggestionRow === i && attendeeSuggestions.length > 0}
+              oninput={(e) => { const v = (e.target as HTMLInputElement).value; formAttendees[i] = { ...att, email: v }; formAttendees = formAttendees; onAttendeeInput(i, v); }}
+              onkeydown={onAttendeeKeydown}
+              onblur={onAttendeeBlur}
+            />
+            {#if attendeeSuggestionRow === i && attendeeSuggestions.length > 0}
+              <div data-menu role="listbox" id="attendee-suggestions-{i}-email">
+                {#each attendeeSuggestions as s, si}
+                  <div role="option" tabindex="-1" aria-selected={si === attendeeSuggestionIdx}
+                    onmousedown={(e) => { e.preventDefault(); applyAttendeeSuggestion(s); }}
+                  >{s.fn_name ? `${s.fn_name} <${s.email}>` : s.email}</div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+          <select
+            class="partstat"
+            value={att.partstat}
+            aria-label={tl('event_attendees')}
+            onchange={(e) => { formAttendees[i] = { ...att, partstat: (e.target as HTMLSelectElement).value as PartStat }; formAttendees = formAttendees; }}
+          >
+            <option value="NEEDS-ACTION">{tl('event_attendeeStatusNeedsAction')}</option>
+            <option value="ACCEPTED">{tl('event_attendeeStatusAccepted')}</option>
+            <option value="DECLINED">{tl('event_attendeeStatusDeclined')}</option>
+            <option value="TENTATIVE">{tl('event_attendeeStatusTentative')}</option>
+          </select>
+          <button type="button" data-variant="ghost" data-icon="x" aria-label={tl('event_attendeeRemove')}
+            onclick={() => { formAttendees = formAttendees.filter((_, j) => j !== i); }}></button>
+        </div>
+      {/each}
+      <button type="button" data-variant="secondary" data-size="sm" data-icon="plus" data-self="start"
+        onclick={() => { formAttendees = [...formAttendees, { cn: '', email: '', partstat: 'NEEDS-ACTION' as PartStat }]; }}>
+        {tl('event_attendeeAdd')}
+      </button>
+    </fieldset>
+
+    <!-- Recurrence -->
+    <RecurrenceBuilder
+      {tl}
+      {formScope}
+      bind:fFreq
+      bind:fInterval
+      bind:fByDay
+      bind:fMonthlyMode
+      bind:fMonthday
+      bind:fSetpos
+      bind:fSetposDay
+      bind:fEndType
+      bind:fCount
+      bind:fUntil
+    />
+
+    <label>
+      {tl('event_calendar')}
+      <select
+        value={`${fAccountId}\0${fCalendarHref}`}
+        disabled={formScope === 'this_instance'}
+        onchange={(e) => {
+          const [accountId, href] = (e.target as HTMLSelectElement).value.split('\0');
+          fAccountId = accountId;
+          fCalendarHref = href;
+          localStorage.setItem('defaultCalendar', `${fAccountId}\0${fCalendarHref}`);
+        }}
+      >
+        {#each calendarGroups as group (group.account_id)}
+          <optgroup label={group.label}>
+            {#each calendars.filter(c => c.account_id === group.account_id) as cal (cal.account_id + cal.href)}
+              <option value={`${cal.account_id}\0${cal.href}`}>{cal.name}</option>
+            {/each}
+          </optgroup>
+        {/each}
+      </select>
+    </label>
+
+    <footer data-layout="row" data-gap="sm">
+      {#if formMode === 'edit'}
+        <button type="button" data-variant="ghost" data-tone="danger" data-icon="trash-2" disabled={formSaving} onclick={deleteEvent}>{tl('event_delete')}</button>
+        <span data-grow></span>
+      {/if}
+      <button type="button" data-variant="ghost" disabled={formSaving} commandfor="event-form" command="close">{tl('event_cancel')}</button>
+      <button type="submit" disabled={formSaving} aria-busy={formSaving}>{tl('event_save')}</button>
+    </footer>
+  </form>
 </dialog>
 
 <style>
-  /* Event form */
-  .summary-wrap { position: relative; }
-  .time-suggestions {
-    position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
-    margin: 0.125rem 0 0; padding: 0.25rem; list-style: none;
-    background: var(--pico-background-color);
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    box-shadow: 0 0.25rem 0.75rem rgba(0,0,0,0.15);
-  }
-  .time-suggestions li { list-style: none; padding: 0; margin: 0; }
-  .time-suggestions button {
-    width: 100%; text-align: left; border: none; background: none; margin: 0;
-    padding: 0.375rem 0.75rem; cursor: pointer; font-size: 0.875rem;
-    border-radius: calc(var(--pico-border-radius, 0.25rem) - 0.125rem);
-    color: var(--pico-color); transition: background 0.1s;
-  }
-  .time-suggestions button:hover,
-  .time-suggestions button.active {
-    background: var(--pico-primary-background);
-    color: var(--pico-primary-inverse);
-  }
-
-  :global(#event-form form label) { display: flex; flex-direction: column; gap: 0.125rem; margin-bottom: 0.75rem; }
-  :global(#event-form form label.all-day-label) { flex-direction: row; align-items: center; gap: 0.5rem; }
-  :global(#event-form input:not([type=checkbox],[type=radio])),
-  :global(#event-form select),
-  :global(#event-form textarea) { margin-bottom: 0; }
-
-  .event-datetime-group { border-left: 3px solid var(--pico-primary-background); padding-left: 0.75rem; margin-bottom: 0.75rem; }
-  .datetime-header { display: flex; align-items: flex-end; gap: 1rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
-  .datetime-header label:first-child { flex: 1; }
-  .event-datetime-group label { margin-bottom: 0 !important; }
-  .time-fields { display: flex; gap: 0.75rem; }
-  .time-fields label { flex: 1; }
-
-  .form-error { color: var(--pico-del-color); font-size: 0.875rem; margin-bottom: 0.75rem; }
-
-  .event-form-actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
-  .event-form-actions :global(.contrast.outline) { margin-left: auto; }
-
-  /* Alarms */
-  .alarm-section { border: none; border-left: 3px solid var(--pico-primary-background); padding: 0 0 0 0.75rem; margin: 0 0 0.75rem; }
-  .alarm-list { list-style: none; padding: 0; margin: 0 0 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
-  .alarm-row { display: flex; align-items: center; gap: 0.5rem; }
-  .attendee-row { flex-wrap: nowrap; }
-  .attendee-input-wrap { position: relative; min-width: 0; }
-  .attendee-input-wrap input { width: 100%; }
-  :global(.attendee-partstat-select) { flex: 0 0 auto; width: 7.5rem; margin-bottom: 0 !important; padding-left: 0.4rem; padding-right: 0.4rem; }
-  .alarm-relative-fields { display: flex; align-items: center; gap: 0.25rem; }
-  .alarm-absolute-fields { flex: 1; }
-  :global(.alarm-direction) { flex: 1 1 0; min-width: 0; margin-bottom: 0 !important; }
-  :global(.alarm-remove) { font-size: 1rem; line-height: 1; margin-bottom: 0 !important; margin-left: auto; }
-
+  /* Narrow number inputs and selects beside growing fields in the reminder and attendee rows. */
+  .num { inline-size: 5rem; }
+  .unit { inline-size: 7rem; }
+  .partstat { inline-size: 7.5rem; flex-shrink: 0; }
+  .email { flex-grow: 2; }
 </style>

@@ -41,7 +41,7 @@
       const dateStr = cell.dataset.date!;
       const container = cell.querySelector<HTMLElement>('.cell-events');
       if (!container) continue;
-      const chips = Array.from(container.querySelectorAll<HTMLElement>('.month-appointment'));
+      const chips = Array.from(container.querySelectorAll<HTMLElement>('.event-trigger'));
       if (!chips.length) continue;
 
       const available = container.clientHeight;
@@ -100,20 +100,22 @@
 
 <div class="month-view">
   <!-- Day-of-week header -->
-  <div class="month-dow-header">
+  <div class="dow" data-layout="grid" data-cols="7" data-gap="none" aria-hidden="true">
     {#each DOW_KEYS as key}
-      <div class="month-dow-label">{tl(key)}</div>
+      <span data-caption>{tl(key)}</span>
     {/each}
   </div>
 
   <!-- Calendar grid -->
   {#if monthGrid}
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
       class="month-grid"
+      data-layout="grid"
+      data-cols="7"
+      data-gap="none"
       bind:this={gridEl}
       style="--row-count: {rowCount}"
-      role="grid"
+      role="group"
       aria-label={monthGrid.month_name + ' ' + monthGrid.year}
     >
       {#each monthGrid.days as cell (cell.date_str)}
@@ -123,37 +125,41 @@
         {@const hidden = events.length - visibleEvents.length}
         {@const isToday = cell.date_str === todayStr}
 
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <div
           class="month-cell"
           class:other-month={!cell.is_current_month}
-          class:today={isToday}
           class:has-events={events.length > 0}
+          data-layout="stack"
+          data-gap="xs"
           data-date={cell.date_str}
-          role="gridcell"
           onclick={() => { if (isMobile && events.length > 0) onMoreClick(cell.date_str, events); }}
         >
-          <span class="cell-day-num" class:today-num={isToday}>{cell.day_number}</span>
+          <span class="day-num" data-self="end" aria-current={isToday ? 'date' : null}>{cell.day_number}</span>
 
-          <div class="cell-events">
+          <div class="cell-events" data-layout="stack" data-gap="none" data-grow>
             {#each visibleEvents as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
-              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-              <article
-                class="appointment month-appointment event-trigger"
-                style="border-left: 3px solid {event.color}"
+              <button
+                type="button"
+                class="event-trigger"
+                data-variant="item"
+                data-size="sm"
+                data-bar
+                style={event.color ? `--tm-tone: ${event.color}` : null}
                 tabindex="-1"
                 onclick={(e) => { if (!isMobile) { e.stopPropagation(); onEventClick(event); } }}
-                onkeydown={(e) => { if (!isMobile && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onEventClick(event); } }}
               >
-                <div class="appt-content month-appt-content">
-                  {event.summary}
-                </div>
-              </article>
+                <span class="chip-text">{event.summary}</span>
+              </button>
             {/each}
 
             {#if hidden > 0}
               <button
-                class="more-btn"
+                type="button"
+                data-variant="link"
+                data-size="sm"
+                data-tone="neutral"
+                data-self="start"
                 onclick={(e) => { e.stopPropagation(); onMoreClick(cell.date_str, events); }}
               >
                 +{hidden}
@@ -167,134 +173,66 @@
 </div>
 
 <style>
+  /* Month grid: hairline-ruled cells that share the pane height; temper has no ruled grid. */
   .month-view {
     display: flex;
     flex-direction: column;
-    height: 100%;
-    min-height: 0;
+    block-size: 100%;
+    min-block-size: 0;
   }
-
-  /* Day-of-week header */
-  .month-dow-header {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    border-bottom: var(--pico-border-width) solid var(--pico-muted-border-color);
+  .dow {
     flex-shrink: 0;
-  }
-  .month-dow-label {
     text-align: center;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--pico-muted-color);
-    padding: 0.3rem 0;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
+    border-block-end: 1px solid var(--tm-border);
   }
-
-  /* Grid */
   .month-grid {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    grid-template-rows: repeat(var(--row-count), 1fr);
+    grid-template-rows: repeat(var(--row-count), minmax(0, 1fr));
     flex: 1;
-    min-height: 0;
-    border-left: var(--pico-border-width) solid var(--pico-muted-border-color);
-    border-bottom: var(--pico-border-width) solid var(--pico-muted-border-color);
+    min-block-size: 0;
+    border-inline-start: 1px solid var(--tm-border);
+    border-block-end: 1px solid var(--tm-border);
   }
-
-  /* Cell */
   .month-cell {
-    border-right: var(--pico-border-width) solid var(--pico-muted-border-color);
-    border-top: var(--pico-border-width) solid var(--pico-muted-border-color);
-    padding: 0.2rem 0.15rem 0.15rem;
+    min-block-size: 0;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    transition: background 0.1s;
+    padding: var(--tm-space-xs) 2px 2px;
+    border-inline-end: 1px solid var(--tm-border);
+    border-block-start: 1px solid var(--tm-border);
   }
-  .month-cell.other-month {
-    opacity: 0.45;
-  }
-  .month-cell.today {
-    border-top: 2px solid var(--pico-primary-background);
-  }
+  .month-cell.other-month { opacity: 0.45; }
 
-  @media (max-width: 959px) {
-    .month-cell { padding-left: 0; padding-right: 0; }
-    .month-cell.has-events { cursor: pointer; }
-    .month-cell.has-events:hover { background: var(--pico-card-background-color, rgba(0,0,0,0.02)); }
-  }
-  @media (prefers-color-scheme: dark) {
-    .month-cell.has-events:hover { background: rgba(255,255,255,0.03); }
-  }
-
-  /* Day number */
-  .cell-day-num {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--pico-muted-color);
-    line-height: 1.4;
+  /* Day number; today gets a filled accent circle. */
+  .day-num {
     flex-shrink: 0;
-    align-self: flex-end;
-    min-width: 1.4em;
+    min-inline-size: 1.5em;
+    border-radius: var(--tm-radius-full);
+    font-size: var(--tm-text-xs);
+    font-weight: 500;
+    line-height: 1.5;
     text-align: center;
-    border-radius: 999px;
-    padding: 0 0.15em;
-    margin-bottom: 0.1rem;
+    color: var(--tm-text-muted);
   }
-  .cell-day-num.today-num {
-    background: var(--pico-primary-background);
-    color: var(--pico-primary-inverse);
+  .day-num[aria-current='date'] {
+    --tm-tone: var(--tm-accent);
+    background: var(--tm-tone);
+    color: var(--tm-tone-on);
     font-weight: 700;
   }
 
-  /* Events area */
-  .cell-events {
-    flex: 1;
-    min-height: 0;
+  .cell-events { overflow: hidden; }
+  .cell-events > :global(*) { flex-shrink: 0; }
+  /* Two lines at most, cut without ellipsis (chips are narrow). */
+  .chip-text {
+    max-block-size: 2.8em;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-  }
-
-  /* Compact month event chips */
-  :global(.month-appointment) {
-    margin: 0 !important;
-    padding: 0.05rem 0.15rem !important;
-    flex-shrink: 0;
-  }
-  @media (max-width: 959px) {
-    :global(article.appointment.month-appointment) {
-      border-left-width: 2px !important;
-      padding: 0.25rem 0.15rem !important;
-      margin-bottom: 0.3rem !important;
-    }
-  }
-  /* Override weekly-view line-clamp: plain cut, break-all, no ellipsis */
-  :global(.month-appointment .month-appt-content) {
-    display: block !important;
-    -webkit-line-clamp: unset !important;
-    overflow: hidden !important;
-    max-height: 2.8em !important; /* 2 lines × line-height 1.4 */
+    font-size: var(--tm-text-xs);
     word-break: break-all;
-    font-size: 0.8em;
   }
 
-  /* "+N more" button */
-  .more-btn {
-    background: none;
-    border: none;
-    padding: 0.05rem 0.15rem;
-    margin: 0;
-    font-size: 0.75em;
-    color: var(--pico-muted-color);
-    cursor: pointer;
-    text-align: left;
-    border-radius: 3px;
-    line-height: 1.4;
-    flex-shrink: 0;
+  @media (width < 60rem) {
+    .month-cell { padding-inline: 0; }
+    .month-cell.has-events { cursor: pointer; }
+    .month-cell.has-events:hover { background: var(--tm-fill); }
   }
-  .more-btn:hover { color: var(--pico-primary-background); }
 </style>

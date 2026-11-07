@@ -61,140 +61,88 @@
   }
 </script>
 
-<article class="card contrast">
+<div class="picker" data-layout="stack" data-gap="sm" data-pad="xs">
   {#if monthGrid}
-    <div style="position:relative">
-      <header>
-        <hgroup>
-          <h2>
-            <button
-              class="nav-btn"
-              aria-label={tl('cal_aria_prevMonth')}
-              onclick={() => onnavigateToMonth?.(monthGrid.prev_month)}
-            ><span class="arrow">‹</span></button>
+    <div data-layout="row" data-gap="xs" data-wrap="none">
+      <button
+        type="button"
+        data-variant="ghost"
+        data-size="sm"
+        data-icon="chevron-left"
+        aria-label={tl('cal_aria_prevMonth')}
+        onclick={() => onnavigateToMonth?.(monthGrid.prev_month)}
+      ></button>
+      <select
+        data-size="sm"
+        data-grow
+        aria-label={tl('cal_aria_month')}
+        value={gridMonthNum}
+        onchange={(e) => onSelectChange('month', +(e.target as HTMLSelectElement).value)}
+      >
+        {#each monthNames as name, i}
+          <option value={i + 1}>{name}</option>
+        {/each}
+      </select>
+      <select
+        data-size="sm"
+        aria-label={tl('cal_aria_year')}
+        value={gridYear}
+        onchange={(e) => onSelectChange('year', +(e.target as HTMLSelectElement).value)}
+      >
+        {#each yearRange as y}
+          <option value={y}>{y}</option>
+        {/each}
+      </select>
+      <button
+        type="button"
+        data-variant="ghost"
+        data-size="sm"
+        data-icon="chevron-right"
+        aria-label={tl('cal_aria_nextMonth')}
+        onclick={() => onnavigateToMonth?.(monthGrid.next_month)}
+      ></button>
+    </div>
 
-            <span class="month-picker">
-              <select
-                aria-label={tl('cal_aria_month')}
-                value={gridMonthNum}
-                onchange={(e) => onSelectChange('month', +(e.target as HTMLSelectElement).value)}
-              >
-                {#each monthNames as name, i}
-                  <option value={i + 1}>{name}</option>
-                {/each}
-              </select>
-              <select
-                aria-label={tl('cal_aria_year')}
-                value={gridYear}
-                onchange={(e) => onSelectChange('year', +(e.target as HTMLSelectElement).value)}
-              >
-                {#each yearRange as y}
-                  <option value={y}>{y}</option>
-                {/each}
-              </select>
+    <div data-layout="grid" data-cols="7" data-gap="xs">
+      {#each dayOfWeekShort as dayLabel}
+        <span class="dow" data-caption aria-hidden="true">{dayLabel}</span>
+      {/each}
+      {#each monthGrid.days as day (day.date_str)}
+        {#if day.is_current_month}
+          <button
+            type="button"
+            class="date"
+            data-variant="ghost"
+            data-size="sm"
+            data-layout="stack"
+            data-gap="none"
+            data-align="center"
+            aria-pressed={selectedWeekDates.has(day.date_str)}
+            data-date={day.date_str}
+            onclick={() => onselectDay?.(day.date_str)}
+          >
+            <span aria-current={day.date_str === todayStr ? 'date' : null}>{day.day_number}</span>
+            <span class="dots" aria-hidden="true">
+              {#each day.event_colors.slice(0, 3) as color}
+                <span class="dot" style="--tm-tone: {color}"></span>
+              {/each}
             </span>
-
-            <button
-              class="nav-btn"
-              aria-label={tl('cal_aria_nextMonth')}
-              onclick={() => onnavigateToMonth?.(monthGrid.next_month)}
-            ><span class="arrow">›</span></button>
-          </h2>
-        </hgroup>
-      </header>
-
-      <div class="date-grid">
-        {#each dayOfWeekShort as dayLabel}
-          <div class="date-header">{dayLabel}</div>
-        {/each}
-      </div>
-
-      <div class="date-grid" role="grid">
-        {#each monthGrid.days as day (day.date_str)}
-          {#if day.is_current_month}
-            <div
-              class="date-cell"
-              class:selected-week={selectedWeekDates.has(day.date_str)}
-              class:is-today={day.date_str === todayStr}
-              data-date={day.date_str}
-              role="gridcell"
-              tabindex="0"
-              onclick={() => onselectDay?.(day.date_str)}
-              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onselectDay?.(day.date_str); } }}
-            >
-              <span class="day-number">{day.day_number}</span>
-              {#if day.event_colors.length > 0}
-                <div class="event-dots">
-                  {#each day.event_colors.slice(0, 3) as color}
-                    <span class="event-dot" style="background:{color}"></span>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          {:else}
-            <div class="date-cell empty"></div>
-          {/if}
-        {/each}
-      </div>
+          </button>
+        {:else}
+          <span></span>
+        {/if}
+      {/each}
     </div>
   {:else}
-    <div class="calendar-loading">{tl('cal_loadingCalendar')}</div>
+    <p data-muted aria-busy="true">{tl('cal_loadingCalendar')}</p>
   {/if}
-</article>
+</div>
 
 <style>
-  hgroup h2 {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    margin: 0 0 0.5rem;
-    font-size: 0.9rem;
-  }
-  .month-picker { display: inline-flex; align-items: baseline; gap: 0.25rem; white-space: nowrap; flex: 1; justify-content: center; }
-  .month-picker select {
-    cursor: pointer;
-    padding: 0.15rem 1.25rem 0.15rem 0.4rem;
-    line-height: 1.4;
-    margin: 0;
-  }
-  .month-picker select:last-of-type { max-width: 7rem; }
-
-  .date-grid {
-    display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-  }
-  .date-header {
-    text-align: center;
-    font-size: 0.75rem;
-    color: var(--pico-muted-color);
-    padding: 0.25rem 0;
-    font-weight: 600;
-    text-transform: uppercase;
-  }
-  .date-cell {
-    border-bottom: var(--pico-border-width) solid var(--pico-muted-border-color);
-    border-right: var(--pico-border-width) solid var(--pico-muted-border-color);
-    aspect-ratio: 1;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 0.875rem;
-  }
-  .date-cell:nth-child(7n) { border-right: none; }
-  .date-cell:nth-last-child(-n+7) { border-bottom: none; }
-  .date-cell.selected-week {
-    background: var(--pico-primary-background);
-    color: var(--pico-primary-inverse);
-    font-weight: 600;
-  }
-  .date-cell.empty { background: transparent; cursor: default; }
-  .date-cell.is-today .day-number {
-    font-weight: 900;
-  }
-  .event-dots { position: absolute; bottom: 0.3rem; left: 0; right: 0; display: flex; justify-content: center; gap: 3px; }
-  .event-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
-  .calendar-loading { padding: 2rem; text-align: center; font-style: italic; color: var(--pico-muted-color); }
+  .picker { inline-size: min(18rem, 100vw - 2rem); }
+  .dow { text-align: center; }
+  .date { padding-inline: 0; }
+  /* Up to three calendar-colored dots under the day number. */
+  .dots { display: flex; gap: 3px; block-size: 6px; }
+  .dot { inline-size: 6px; block-size: 6px; border-radius: 50%; background: var(--tm-tone); }
 </style>
