@@ -248,119 +248,103 @@
 </script>
 
 <!-- ── Identity management dialog ────────────────────────────────────────── -->
-<dialog
-  bind:this={identityDialog}
-  on:click={(e) => { if (e.target === e.currentTarget) identityDialog?.close(); }}
-  on:cancel={(e) => { e.preventDefault(); identityDialog?.close(); }}
->
-  <article>
-    <header>
-      <h3>{tl('mail_identities')}</h3>
-      <div class="header-actions">
-        <button class="close-btn" aria-label={tl('mail_close')} on:click={() => identityDialog?.close()}></button>
-      </div>
-    </header>
-    <div class="identity-list">
+<dialog id="mail-identities" bind:this={identityDialog} closedby="any">
+  <header>
+    <h2>{tl('mail_identities')}</h2>
+    <button type="button" commandfor="mail-identities" command="close" aria-label={tl('mail_close')}></button>
+  </header>
+  {#if identities.some(i => i.account_id === identityAccountId)}
+    <ul data-list>
       {#each identities.filter(i => i.account_id === identityAccountId) as id}
-        <div class="identity-row">
-          <div class="identity-info">
-            <span class="identity-name">{id.name}</span>
-            <span class="identity-email">&lt;{id.email}&gt;</span>
-            {#if id.is_default}<span class="identity-default-badge">{tl('mail_identityDefault')}</span>{/if}
-          </div>
-          <div class="identity-actions">
-            {#if !id.is_default}
-              <button class="icon-btn" disabled={identityMode !== 'idle'} on:click={() => setDefaultIdentity(id)} title={tl('mail_identitySetDefault')}>★</button>
-            {/if}
-            <button class="icon-btn" disabled={identityMode !== 'idle'} on:click={() => openEditIdentity(id)} title={tl('mail_update')}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-            </button>
-            {#if !id.is_default}
-              <button class="icon-btn delete-btn" disabled={identityMode !== 'idle'} on:click={() => deleteIdentity(id)} title={tl('mail_removeAttachment')}>×</button>
-            {/if}
-          </div>
-        </div>
+        <li data-layout="row" data-gap="xs" data-wrap="none" data-pad="xs">
+          <span data-layout="row" data-gap="xs" data-wrap="none" data-grow>
+            <strong data-truncate>{id.name}</strong>
+            <small data-muted data-truncate>&lt;{id.email}&gt;</small>
+            {#if id.is_default}<span data-badge data-tone="accent">{tl('mail_identityDefault')}</span>{/if}
+          </span>
+          {#if !id.is_default}
+            <button type="button" data-variant="ghost" data-size="sm" data-icon="star" disabled={identityMode !== 'idle'} on:click={() => setDefaultIdentity(id)} aria-label={tl('mail_identitySetDefault')} data-tooltip></button>
+          {/if}
+          <button type="button" data-variant="ghost" data-size="sm" data-icon="pencil" disabled={identityMode !== 'idle'} on:click={() => openEditIdentity(id)} aria-label={tl('mail_update')} data-tooltip></button>
+          {#if !id.is_default}
+            <button type="button" data-variant="ghost" data-size="sm" data-icon="x" disabled={identityMode !== 'idle'} on:click={() => deleteIdentity(id)} aria-label={tl('mail_removeAttachment')} data-tooltip></button>
+          {/if}
+        </li>
       {/each}
+    </ul>
+  {/if}
+  {#if identityMode === 'idle'}
+    <div data-layout="row">
+      <button type="button" data-variant="link" data-icon="plus" on:click={() => { identityMode = 'add'; identityForm = emptyIdentityForm(); identityForm.account_id = identityAccountId; }}>{tl('mail_addIdentity')}</button>
     </div>
-    {#if identityMode === 'idle'}
-      <button class="link-btn identity-add-btn" on:click={() => { identityMode = 'add'; identityForm = emptyIdentityForm(); identityForm.account_id = identityAccountId; }}>+ {tl('mail_addIdentity')}</button>
-    {:else}
-      <form on:submit|preventDefault={saveIdentity} class="identity-form">
-        <label>
-          {tl('mail_name')}
-          <input bind:value={identityForm.name} placeholder={tl('mail_namePlaceholder')} required />
-        </label>
-        <label>
-          {tl('mail_emailAddress')}
-          <input type="email" bind:value={identityForm.email} placeholder={tl('mail_aliasPlaceholder')} required />
-        </label>
-        {#if identityError}
-          <p class="error">{identityError}</p>
-        {/if}
-        <footer>
-          <button type="button" class="secondary outline" on:click={cancelIdentityForm}>{tl('mail_cancel')}</button>
-          <button type="submit" class="primary" disabled={identitySaving}>
-            {identitySaving ? tl('mail_saving') : (identityMode === 'edit' ? tl('mail_update') : tl('mail_add'))}
-          </button>
-        </footer>
-      </form>
-    {/if}
-  </article>
+  {:else}
+    <form data-layout="stack" data-gap="md" on:submit|preventDefault={saveIdentity}>
+      <label>
+        {tl('mail_name')}
+        <input bind:value={identityForm.name} placeholder={tl('mail_namePlaceholder')} required />
+      </label>
+      <label>
+        {tl('mail_emailAddress')}
+        <input type="email" bind:value={identityForm.email} placeholder={tl('mail_aliasPlaceholder')} required />
+      </label>
+      {#if identityError}
+        <p data-callout data-tone="danger" role="alert">{identityError}</p>
+      {/if}
+      <footer>
+        <button type="button" data-variant="secondary" on:click={cancelIdentityForm}>{tl('mail_cancel')}</button>
+        <button type="submit" disabled={identitySaving} aria-busy={identitySaving}>
+          {identitySaving ? tl('mail_saving') : (identityMode === 'edit' ? tl('mail_update') : tl('mail_add'))}
+        </button>
+      </footer>
+    </form>
+  {/if}
 </dialog>
 
 <!-- ── Account form dialog ───────────────────────────────────────────────── -->
-<dialog
-  bind:this={accountDialog}
-  on:click={(e) => { if (e.target === e.currentTarget) accountDialog?.close(); }}
-  on:cancel={(e) => { e.preventDefault(); accountDialog?.close(); }}
->
-  <article>
-    <header>
-      <h3>
-        {accountForm.account_id ? tl('mail_editAccountHeading') : tl('mail_addAccountHeading')}
-        {#if accountForm.account_id}
-          <a class="header-icon-link" href={`/api/email/export?account_id=${accountForm.account_id}`} download title={tl('mail_exportAccount')}><svg width="1.2rem" height="1.2rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a>
-        {/if}
-      </h3>
-      <div class="header-actions">
-        <button class="close-btn" aria-label={tl('mail_close')} on:click={() => accountDialog?.close()}></button>
-      </div>
-    </header>
+<dialog id="mail-account" bind:this={accountDialog} closedby="any">
+  <header>
+    <h2>{accountForm.account_id ? tl('mail_editAccountHeading') : tl('mail_addAccountHeading')}</h2>
+    {#if accountForm.account_id}
+      <a href={`/api/email/export?account_id=${accountForm.account_id}`} download role="button" data-variant="ghost" data-icon="download" aria-label={tl('mail_exportAccount')} data-tooltip></a>
+    {/if}
+    <button type="button" commandfor="mail-account" command="close" aria-label={tl('mail_close')}></button>
+  </header>
 
-    {#if accountStep === 'basic'}
-      <form on:submit|preventDefault={continueSetup}>
-        <label>
-          {tl('mail_yourName')}
-          <input bind:value={accountForm.sender_name} placeholder={tl('mail_namePlaceholder')} required />
-        </label>
-        <label>
-          {tl('mail_emailAddress')}
-          <input type="email" bind:value={accountForm.username} placeholder={tl('mail_emailPlaceholder')} required />
-        </label>
-        {#if autodiscovering}
-          <p class="hint">{tl('mail_detectingSettings')}</p>
-        {/if}
-        {#if autodiscoverError}
-          <p class="error">{autodiscoverError}</p>
-        {/if}
-        <footer>
-          <button type="button" class="secondary outline" on:click={() => accountDialog?.close()}>{tl('mail_cancel')}</button>
-          <button type="submit" class="primary" disabled={autodiscovering}>{tl('mail_continue')}</button>
-        </footer>
-      </form>
-    {:else}
-      <form on:submit|preventDefault={saveAccount}>
-        {#if autodiscoverResult?.provider_name}
-          <p class="hint">{tl('mail_settingsDetected', { provider: autodiscoverResult.provider_name })}</p>
-        {:else if !accountForm.account_id}
-          <p class="hint">{tl('mail_enterServerDetails')}</p>
-        {/if}
-        <label>
-          {tl('mail_password')}
-          <input type="password" bind:value={accountForm.password} placeholder={accountForm.account_id ? tl('mail_passwordPlaceholderKeep') : ''} autocomplete="current-password" />
-        </label>
-        <details bind:open={showAdvanced}>
-          <summary>{tl('mail_advancedSettings')}</summary>
+  {#if accountStep === 'basic'}
+    <form data-layout="stack" data-gap="md" on:submit|preventDefault={continueSetup}>
+      <label>
+        {tl('mail_yourName')}
+        <input bind:value={accountForm.sender_name} placeholder={tl('mail_namePlaceholder')} required />
+      </label>
+      <label>
+        {tl('mail_emailAddress')}
+        <input type="email" bind:value={accountForm.username} placeholder={tl('mail_emailPlaceholder')} required />
+      </label>
+      {#if autodiscovering}
+        <p data-muted aria-busy="true">{tl('mail_detectingSettings')}</p>
+      {/if}
+      {#if autodiscoverError}
+        <p data-callout data-tone="danger" role="alert">{autodiscoverError}</p>
+      {/if}
+      <footer>
+        <button type="button" data-variant="secondary" commandfor="mail-account" command="close">{tl('mail_cancel')}</button>
+        <button type="submit" disabled={autodiscovering} aria-busy={autodiscovering}>{tl('mail_continue')}</button>
+      </footer>
+    </form>
+  {:else}
+    <form data-layout="stack" data-gap="md" on:submit|preventDefault={saveAccount}>
+      {#if autodiscoverResult?.provider_name}
+        <p data-muted>{tl('mail_settingsDetected', { provider: autodiscoverResult.provider_name })}</p>
+      {:else if !accountForm.account_id}
+        <p data-muted>{tl('mail_enterServerDetails')}</p>
+      {/if}
+      <label>
+        {tl('mail_password')}
+        <input type="password" bind:value={accountForm.password} placeholder={accountForm.account_id ? tl('mail_passwordPlaceholderKeep') : ''} autocomplete="current-password" />
+      </label>
+      <details bind:open={showAdvanced}>
+        <summary>{tl('mail_advancedSettings')}</summary>
+        <div data-layout="stack" data-gap="md">
           <label>
             {tl('mail_displayName')}
             <input bind:value={accountForm.display_name} placeholder={tl('mail_displayNamePlaceholder')} />
@@ -369,133 +353,44 @@
             {tl('mail_usernameEmail')}
             <input bind:value={accountForm.username} placeholder={tl('mail_emailPlaceholder')} />
           </label>
+          <div data-layout="grid" data-gap="sm" style="--tm-min: 9rem">
+            <label>
+              {tl('mail_imapHost')}
+              <input bind:value={accountForm.host} placeholder={tl('mail_imapHostPlaceholder')} required />
+            </label>
+            <label>
+              {tl('mail_imapPort')}
+              <input type="number" bind:value={accountForm.port} required />
+            </label>
+          </div>
           <label>
-            {tl('mail_imapHost')}
-            <input bind:value={accountForm.host} placeholder={tl('mail_imapHostPlaceholder')} required />
-          </label>
-          <label>
-            {tl('mail_imapPort')}
-            <input type="number" bind:value={accountForm.port} required />
-          </label>
-          <label class="checkbox-label">
             <input type="checkbox" bind:checked={accountForm.use_tls} /> {tl('mail_useTls')}
           </label>
-          <label>
-            {tl('mail_smtpHost')}
-            <input bind:value={accountForm.smtp_host} placeholder={tl('mail_smtpHostPlaceholder')} />
-          </label>
-          <label>
-            {tl('mail_smtpPort')}
-            <input type="number" bind:value={accountForm.smtp_port} />
-          </label>
-        </details>
-        {#if accountError}
-          <p class="error">{accountError}</p>
+          <div data-layout="grid" data-gap="sm" style="--tm-min: 9rem">
+            <label>
+              {tl('mail_smtpHost')}
+              <input bind:value={accountForm.smtp_host} placeholder={tl('mail_smtpHostPlaceholder')} />
+            </label>
+            <label>
+              {tl('mail_smtpPort')}
+              <input type="number" bind:value={accountForm.smtp_port} />
+            </label>
+          </div>
+        </div>
+      </details>
+      {#if accountError}
+        <p data-callout data-tone="danger" role="alert">{accountError}</p>
+      {/if}
+      <footer>
+        {#if !accountForm.account_id}
+          <button type="button" data-variant="secondary" on:click={() => { accountStep = 'basic'; accountError = ''; }}>{tl('mail_back')}</button>
+        {:else}
+          <button type="button" data-variant="secondary" commandfor="mail-account" command="close">{tl('mail_cancel')}</button>
         {/if}
-        <footer>
-          {#if !accountForm.account_id}
-            <button type="button" class="secondary outline" on:click={() => { accountStep = 'basic'; accountError = ''; }}>{tl('mail_back')}</button>
-          {:else}
-            <button type="button" class="secondary outline" on:click={() => accountDialog?.close()}>{tl('mail_cancel')}</button>
-          {/if}
-          <button type="submit" class="primary" disabled={accountSaving}>
-            {accountSaving ? tl('mail_testingConnection') : tl('mail_save')}
-          </button>
-        </footer>
-      </form>
-    {/if}
-  </article>
+        <button type="submit" disabled={accountSaving} aria-busy={accountSaving}>
+          {accountSaving ? tl('mail_testingConnection') : tl('mail_save')}
+        </button>
+      </footer>
+    </form>
+  {/if}
 </dialog>
-
-<style>
-  .identity-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    margin-bottom: 1rem;
-  }
-
-  .identity-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem 0.5rem;
-    border-radius: 4px;
-    background: var(--pico-card-sectioning-background-color, rgba(0,0,0,0.03));
-  }
-
-  .identity-info {
-    flex: 1;
-    display: flex;
-    align-items: baseline;
-    gap: 0.4rem;
-    overflow: hidden;
-  }
-
-  .identity-name {
-    font-weight: 500;
-    white-space: nowrap;
-  }
-
-  .identity-email {
-    font-size: 0.8rem;
-    color: var(--pico-muted-color, #888);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .identity-default-badge {
-    font-size: 0.7rem;
-    padding: 0.1rem 0.4rem;
-    border-radius: 3px;
-    background: var(--pico-primary-background, #1095c1);
-    color: var(--pico-primary-inverse, #fff);
-    white-space: nowrap;
-  }
-
-  .identity-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    flex-shrink: 0;
-  }
-
-  .identity-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-top: 0.75rem;
-  }
-
-  .identity-add-btn {
-    margin-top: 0.5rem;
-  }
-
-  .link-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--pico-primary, #0172ad);
-    font-size: 0.8rem;
-    text-align: left;
-    padding: 0;
-  }
-
-  .header-icon-link {
-    color: var(--pico-muted-color);
-    display: inline-flex;
-    margin-left: 0.4rem;
-    vertical-align: middle;
-  }
-
-  .header-icon-link:hover {
-    color: var(--pico-color);
-  }
-
-  .header-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-  }
-</style>

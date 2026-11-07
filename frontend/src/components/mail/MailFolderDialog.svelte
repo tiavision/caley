@@ -99,29 +99,23 @@
   }
 </script>
 
-<dialog
-  bind:this={dialog}
-  on:click={(e) => { if (e.target === e.currentTarget) dialog?.close(); }}
-  on:cancel={(e) => { e.preventDefault(); dialog?.close(); }}
->
-  <article>
-    <header>
-      <h3>{editingFolder ? tl('mail_editVirtualFolder') : tl('mail_createVirtualFolder')}</h3>
-      <div class="header-actions">
-        <button class="close-btn" aria-label={tl('mail_close')} on:click={() => dialog?.close()}></button>
-      </div>
-    </header>
-    <form on:submit|preventDefault={saveVirtualFolder}>
-      <label>
-        {tl('mail_name')}
-        <input bind:value={folderName} placeholder={tl('mail_folderNamePlaceholder')} />
-      </label>
-      <p class="folder-mailbox-label">{tl('mail_mailboxesToInclude')}</p>
-      <div class="folder-mailbox-list">
+<dialog id="mail-folder" bind:this={dialog} closedby="any">
+  <header>
+    <h2>{editingFolder ? tl('mail_editVirtualFolder') : tl('mail_createVirtualFolder')}</h2>
+    <button type="button" commandfor="mail-folder" command="close" aria-label={tl('mail_close')}></button>
+  </header>
+  <form data-layout="stack" data-gap="md" on:submit|preventDefault={saveVirtualFolder}>
+    <label>
+      {tl('mail_name')}
+      <input bind:value={folderName} placeholder={tl('mail_folderNamePlaceholder')} />
+    </label>
+    <fieldset data-layout="stack" data-gap="xs">
+      <legend>{tl('mail_mailboxesToInclude')}</legend>
+      <div class="folder-mailbox-list" data-layout="stack" data-gap="sm" data-pad="sm" data-scroll="y">
         {#each accounts as acc}
           {#if (mailboxesByAccount[acc.account_id] || []).filter(mb => mb.subscribed).length > 0}
-            <div class="folder-account-group">
-              <h4>{acc.display_name}</h4>
+            <div data-layout="stack" data-gap="xs">
+              <span data-caption>{acc.display_name}</span>
               {#each (mailboxesByAccount[acc.account_id] || []).filter(mb => mb.subscribed) as mb}
                 {@const key = `${acc.account_id}::${mb.name}`}
                 <label>
@@ -141,70 +135,32 @@
           {/if}
         {/each}
         {#if accounts.length === 0}
-          <p class="muted">{tl('mail_noEmailAccounts')}</p>
+          <p data-muted>{tl('mail_noEmailAccounts')}</p>
         {/if}
       </div>
-      <p class="folder-hint">{tl('mail_allMailboxesHint')}</p>
-      <div class="folder-filters">
-        <label>
-          <input type="checkbox" bind:checked={folderOnlyFlagged} />
-          {tl('mail_onlyFlagged')}
-        </label>
-        <label>
-          <input type="checkbox" bind:checked={folderOnlyAttachments} />
-          {tl('mail_onlyWithAttachments')}
-        </label>
-      </div>
-      <footer>
-        <button type="button" class="secondary outline" on:click={() => dialog?.close()}>{tl('mail_cancel')}</button>
-        <button type="submit" class="primary" disabled={folderSaving}>{editingFolder ? tl('mail_save') : tl('mail_create')}</button>
-      </footer>
-    </form>
-  </article>
+      <small data-muted>{tl('mail_allMailboxesHint')}</small>
+    </fieldset>
+    <div data-layout="stack" data-gap="xs">
+      <label>
+        <input type="checkbox" bind:checked={folderOnlyFlagged} />
+        {tl('mail_onlyFlagged')}
+      </label>
+      <label>
+        <input type="checkbox" bind:checked={folderOnlyAttachments} />
+        {tl('mail_onlyWithAttachments')}
+      </label>
+    </div>
+    <footer>
+      <button type="button" data-variant="secondary" commandfor="mail-folder" command="close">{tl('mail_cancel')}</button>
+      <button type="submit" disabled={folderSaving} aria-busy={folderSaving}>{editingFolder ? tl('mail_save') : tl('mail_create')}</button>
+    </footer>
+  </form>
 </dialog>
 
 <style>
-  .folder-mailbox-label {
-    font-size: 0.875rem;
-    font-weight: 500;
-    margin: 1rem 0 0.25rem;
-  }
-
   .folder-mailbox-list {
-    max-height: 14rem;
-    overflow-y: auto;
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: 4px;
-    padding: 0.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-
-  .folder-account-group h4 {
-    font-size: 0.8rem;
-    margin: 0 0 0.25rem;
-    color: var(--pico-muted-color);
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-  }
-
-  .folder-hint {
-    font-size: 0.8rem;
-    color: var(--pico-muted-color);
-    margin: 0.5rem 0;
-  }
-
-  .folder-filters {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    margin-top: 0.5rem;
-  }
-
-  .header-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
+    max-block-size: 14rem;
+    border: 1px solid var(--tm-border);
+    border-radius: var(--tm-radius);
   }
 </style>
