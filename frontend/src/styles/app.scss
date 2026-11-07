@@ -1,1 +1,32 @@
 // App-wide rules on top of temper. Use temper tokens (--tm-*), never hard-coded colors.
+
+// Mail: attachment chip (message reader and compose dialog). temper has no chip/tag component.
+.mail-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tm-space-xs);
+  max-inline-size: 18rem;
+  min-block-size: 1.75rem;
+  padding-inline: var(--tm-space-sm);
+  border: 1px solid var(--tm-border);
+  border-radius: var(--tm-radius-full);
+  background: var(--tm-fill);
+  color: var(--tm-text);
+  font-size: var(--tm-text-xs);
+  text-decoration: none;
+}
+
+a.mail-attachment-chip:hover {
+  border-color: var(--tm-border-strong);
+  color: var(--tm-text);
+}
+
+.mail-attachment-name {
+  max-inline-size: 10rem;
+}
+
+.mail-attachment-remove {
+  inline-size: 1.25rem;
+  block-size: 1.25rem;
+  min-block-size: 0;
+}

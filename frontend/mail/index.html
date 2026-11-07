@@ -12,10 +12,9 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <title>Caley - Mail</title>
   </head>
-  <body>
-    <div id="nav"></div>
-    <main class="container-fluid">
-      <div id="app"></div>
+  <body data-shell="fixed">
+    <main data-layout="stack" data-gap="none">
+      <div id="app" data-layout="stack" data-gap="none" data-density="compact" data-grow></div>
     </main>
     <script type="module" src="/src/main/mail.ts"></script>
   </body>
