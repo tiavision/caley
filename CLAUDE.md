@@ -214,7 +214,7 @@ Encryption/settings:
 - Svelte 5 with TypeScript strict mode.
 - Styling uses temper (`@tiaforge-ui/temper` 0.1.0): semantic HTML plus `data-*` variants, light/dark automatic. The reference is `node_modules/@tiaforge-ui/temper/llms-full.txt`. Entry styles: `src/styles/temper.ts` (temper modules, `virtual:temper-icons.css`, `app.scss`). Scoped CSS only for app-specific parts, with `--tm-*` tokens, no hard-coded colors or outer margins.
 - Icons are `data-icon="<lucide name>"`; the temper Vite plugin emits only names that appear as static strings in the markup.
-- The Vite plugin runs `temper check` on every build (errors fail it). Check rendered pages with `npx temper-inspect <url> --sheet <dir>`.
+- The Vite plugin runs `temper check` on every build (errors fail it). Check rendered pages with `npm run inspect` (dev server running, backend in demo mode): it logs in and runs temper-inspect on every page; add `-- --sheet <dir>` for screenshots or `-- /mail/` for one page.
 - Pages use `<body data-shell="fixed">`; `initRail()` (`src/main/nav.ts`) mounts `NavRail.svelte` as a direct child of body, and `NavToggle.svelte` opens it as a drawer on narrow screens.
 - i18n messages live in `frontend/messages/`.
 - `vite.config.ts` proxies `/api`, `/auth`, and `/logout` to `http://localhost:3000`.
@@ -260,6 +260,7 @@ npm run dev
 npm run build
 npm run preview
 npm test
+npm run inspect   # temper-inspect on every page, logged in (needs the dev server and a DEMO_MODE backend)
 ```
 
 No root-level commands are configured.
