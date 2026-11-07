@@ -4,6 +4,7 @@
   import EventColorDot from './EventColorDot.svelte';
   import EventDetail from './EventDetail.svelte';
   import EventFormDialog from './EventFormDialog.svelte';
+  import NavToggle from './NavToggle.svelte';
   import type { EventJson, CalendarJson, CalDavAccountJson } from '../types/calendar.ts';
   import { dateFromEventValue } from '../lib/format.ts';
   import { apiFetch } from '../lib/api.ts';
@@ -23,7 +24,6 @@
   let accounts: CalDavAccountJson[] = [];
   let selectedHrefs = new Set<string>();
   let calendarsLoaded = false;
-  let calDropdownOpen = false;
 
   let eventDetail: EventDetail;
   let formDialog: EventFormDialog;
@@ -59,12 +59,6 @@
     if (selectedHrefs.has(key)) selectedHrefs.delete(key);
     else selectedHrefs.add(key);
     selectedHrefs = selectedHrefs;
-  }
-
-  function handleWindowClick(e: MouseEvent) {
-    if (calDropdownOpen && !(e.target as Element).closest('.cal-dropdown')) {
-      calDropdownOpen = false;
-    }
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -123,97 +117,87 @@
   }
 </script>
 
-<svelte:window onclick={handleWindowClick} onkeydown={handleKeydown} />
+<svelte:window onkeydown={handleKeydown} />
 
-<div class="search-page">
-<div class="page-header">
-  <h2>{tl('search_heading')}</h2>
-</div>
-
-<div class="filter-row">
-  <div class="cal-dropdown">
-    <button
-      type="button"
-      class="cal-dropdown-btn"
-      onclick={() => calDropdownOpen = !calDropdownOpen}
-    >
-      {calBtnLabel} <span class="dropdown-arrow" aria-hidden="true">▾</span>
-    </button>
-    {#if calDropdownOpen}
-      <ul class="cal-dropdown-list">
-        {#each calendars as cal (cal.account_id + cal.href)}
-          <li>
-            <label>
-              <input
-                type="checkbox"
-                checked={selectedHrefs.has(calendarKey(cal))}
-                onchange={() => toggleCalendar(calendarKey(cal))}
-              />
-              <EventColorDot color={cal.color} />
-              {cal.name}
-            </label>
-          </li>
-        {/each}
-      </ul>
-    {/if}
+<div data-layout="stack" data-gap="md" data-pad="lg">
+  <div data-layout="row" data-gap="sm" data-wrap="none">
+    <NavToggle />
+    <h2>{tl('search_heading')}</h2>
   </div>
 
-  <div class="date-range">
-    <label class="date-label">
-      {tl('search_from')}
-      <input type="date" bind:value={start} />
+  <div data-layout="row" data-gap="sm">
+    <button type="button" popovertarget="search-calendars" data-variant="outline" data-size="sm">{calBtnLabel}</button>
+    <div popover id="search-calendars" data-menu>
+      {#each calendars as cal (cal.account_id + cal.href)}
+        <label>
+          <input
+            type="checkbox"
+            checked={selectedHrefs.has(calendarKey(cal))}
+            onchange={() => toggleCalendar(calendarKey(cal))}
+          />
+          <EventColorDot color={cal.color} />
+          {cal.name}
+        </label>
+      {/each}
+    </div>
+
+    <label data-layout="row" data-gap="xs">
+      <small data-muted>{tl('search_from')}</small>
+      <input type="date" data-size="sm" bind:value={start} />
     </label>
-    <label class="date-label">
-      {tl('search_to')}
-      <input type="date" bind:value={end} />
+    <label data-layout="row" data-gap="xs">
+      <small data-muted>{tl('search_to')}</small>
+      <input type="date" data-size="sm" bind:value={end} />
     </label>
   </div>
-</div>
 
-<form onsubmit={(e) => { e.preventDefault(); doSearch(); }} class="search-form">
-  <div class="search-row">
+  <form data-layout="row" data-gap="sm" data-wrap="none" onsubmit={(e) => { e.preventDefault(); doSearch(); }}>
     <input
       type="search"
+      data-grow
       bind:value={query}
       placeholder={tl('search_placeholder')}
-      class="search-input"
+      aria-label={tl('search_placeholder')}
       autofocus
     />
-    <button type="submit">{tl('search_submit')}</button>
-  </div>
-</form>
+    <button type="submit" data-icon="search">{tl('search_submit')}</button>
+  </form>
 
-{#if loading}
-  <p aria-live="polite">{tl('search_loading')}</p>
-{:else if errorMsg}
-  <p class="form-error" aria-live="polite">{errorMsg}</p>
-{:else if searched && results.length === 0}
-  <p aria-live="polite">{tl('search_noResults')}</p>
-{:else if results.length > 0}
-  <ul class="search-results" aria-live="polite">
-    {#each results as item (`${item.account_id}\0${item.calendar_href}\0${item.uid}\0${item.dtstart}`)}
-      <li>
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <button type="button" class="search-result" onclick={() => eventDetail.open(item)}>
-          <EventColorDot color={item.color} />
-          <div class="result-body">
-            <span class="result-summary">{item.summary}</span>
-            <span class="result-meta">
+  {#if loading}
+    <p aria-busy="true" aria-live="polite">{tl('search_loading')}</p>
+  {:else if errorMsg}
+    <p data-tone="danger" aria-live="polite">{errorMsg}</p>
+  {:else if searched && results.length === 0}
+    <p data-muted aria-live="polite">{tl('search_noResults')}</p>
+  {:else if results.length > 0}
+    <ul data-layout="stack" data-gap="xs" aria-live="polite">
+      {#each results as item (`${item.account_id}\0${item.calendar_href}\0${item.uid}\0${item.dtstart}`)}
+        <li>
+          <button
+            type="button"
+            data-variant="item"
+            data-layout="stack"
+            data-gap="none"
+            data-bar={item.color ? '' : null}
+            style:--tm-tone={item.color || null}
+            onclick={() => eventDetail.open(item)}
+          >
+            <strong>{item.summary}</strong>
+            <small data-muted>
               {formatDate(item.dtstart)}
               {#if item.location} · {item.location}{/if}
-            </span>
+            </small>
             {#if item.description}
-              <span class="result-desc">{item.description}</span>
+              <small data-muted data-truncate>{item.description}</small>
             {/if}
             {#if calendarName(item.account_id, item.calendar_href)}
-              <span class="result-calendar">{calendarName(item.account_id, item.calendar_href)}</span>
+              <small data-caption>{calendarName(item.account_id, item.calendar_href)}</small>
             {/if}
-          </div>
-        </button>
-      </li>
-    {/each}
-  </ul>
-{/if}
+          </button>
+        </li>
+      {/each}
+    </ul>
+  {/if}
 </div>
 
 <EventDetail
@@ -232,208 +216,3 @@
   onsaved={() => doSearch()}
   ondeleted={() => doSearch()}
 />
-
-<style>
-  .search-page {
-    box-sizing: border-box;
-    width: 100%;
-  }
-
-  .page-header {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
-  }
-  .page-header h2 { margin: 0; }
-
-  .filter-row {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-    width: 100%;
-    margin-bottom: 0.75rem;
-  }
-
-  .date-label {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.8em;
-    margin-bottom: 0;
-    white-space: nowrap;
-  }
-
-  .date-range {
-    display: flex;
-    gap: 0.75rem;
-    align-items: center;
-    flex-shrink: 0;
-  }
-
-  .date-label input[type="date"] {
-    margin-bottom: 0;
-    font-size: 0.85em;
-    opacity: 0.65;
-    padding: var(--pico-form-element-spacing-vertical) var(--pico-form-element-spacing-horizontal) !important;
-  }
-
-  .cal-dropdown {
-    position: relative;
-  }
-
-  .cal-dropdown-btn {
-    opacity: 0.65;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.85em;
-    width: auto;
-    margin-bottom: 0;
-    cursor: pointer;
-    background: var(--pico-form-element-background-color);
-    border: var(--pico-border-width) solid var(--pico-form-element-border-color);
-    box-shadow: none;
-    color: var(--pico-form-element-color);
-    line-height: var(--pico-line-height);
-  }
-
-  .dropdown-arrow {
-    font-size: 0.7em;
-    opacity: 0.6;
-    line-height: 1;
-  }
-
-  .cal-dropdown-list {
-    position: absolute;
-    top: calc(100% + 0.25rem);
-    left: 0;
-    z-index: 100;
-    background: var(--pico-card-background-color);
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    padding: 0.25rem 0;
-    margin: 0;
-    min-width: 12rem;
-    max-height: 16rem;
-    overflow-y: auto;
-    box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.12);
-    list-style: none;
-  }
-
-  .cal-dropdown-list li {
-    list-style: none;
-  }
-
-  .cal-dropdown-list label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.35rem 0.75rem;
-    cursor: pointer;
-    margin-bottom: 0;
-    font-size: 0.9em;
-    white-space: nowrap;
-  }
-
-  .cal-dropdown-list label:hover {
-    background: var(--pico-muted-background-color);
-  }
-
-  .cal-dropdown-list input[type="checkbox"] {
-    margin-bottom: 0;
-    cursor: pointer;
-  }
-
-  .search-form {
-    width: 100%;
-    margin-bottom: 1.5rem;
-  }
-
-  .search-row {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-  }
-
-  .search-input {
-    flex: 1;
-    min-width: 0;
-    margin-bottom: 0;
-  }
-
-  .search-row button {
-    width: auto;
-    flex-shrink: 0;
-    margin-bottom: 0;
-  }
-
-  .search-results {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .search-results li {
-    list-style: none;
-  }
-
-  .search-result :global(.dot) {
-    margin-top: 0.5rem;
-  }
-
-  .search-result {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.6rem;
-    padding: 0.6rem 0.75rem;
-    border-radius: var(--pico-border-radius);
-    text-decoration: none;
-    color: inherit;
-    border: 1px solid var(--pico-muted-border-color);
-    background: none;
-    width: 100%;
-    text-align: left;
-    cursor: pointer;
-    font-size: inherit;
-    line-height: inherit;
-  }
-
-  .search-result:hover {
-    background: var(--pico-card-background-color);
-    border-color: var(--pico-primary);
-  }
-
-  .result-body {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    min-width: 0;
-  }
-
-  .result-summary {
-    font-weight: 600;
-  }
-
-  .result-meta {
-    font-size: 0.85em;
-    opacity: 0.75;
-  }
-
-  .result-desc {
-    font-size: 0.85em;
-    opacity: 0.7;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .result-calendar {
-    font-size: 0.8em;
-    opacity: 0.6;
-  }
-</style>
