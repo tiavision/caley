@@ -30,3 +30,6 @@ export interface ContactRemovedEvent {
 // Event partials, search and calendar pages.
 export type { EventJson, CalendarJson, CalDavAccountJson, SourceEmailJson, MessageEventGroupJson } from './types/calendar.ts';
 export type { EventDraft, SearchQuery } from './lib/events.ts';
+
+// ICS import dialog (CalDavAccountJson is exported with the event types above).
+export type { ImportDraft } from './lib/import.ts';

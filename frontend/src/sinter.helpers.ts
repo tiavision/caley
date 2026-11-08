@@ -65,3 +65,6 @@ export {
   sameSearch,
   searchSources,
 } from './lib/events.ts';
+
+// ICS import dialog (partials/import-dialog.html).
+export { calendarValue, importEventDate } from './lib/import.ts';

@@ -5,3 +5,5 @@
 export * as notify from './actions/notify.ts';
 export * as share from './actions/share.ts';
 export * as maps from './actions/maps.ts';
+// Settings: ICS import dialog (partials/import-dialog.html).
+export * as ics from './actions/ics.ts';

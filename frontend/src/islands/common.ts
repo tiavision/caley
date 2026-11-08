@@ -21,3 +21,19 @@ customElements.define('mail-notifier', class extends HTMLElement {
     this.#off = null;
   }
 });
+
+/**
+ * `<close-after ms="1500">`: closes the dialog it is in after that delay (sinter expressions have no timers).
+ * Render it with `data-sn-if` when the dialog is done, e.g. the import dialog's success message.
+ */
+customElements.define('close-after', class extends HTMLElement {
+  #timer: ReturnType<typeof setTimeout> | undefined;
+
+  connectedCallback() {
+    this.#timer = setTimeout(() => this.closest('dialog')?.close(), Number(this.getAttribute('ms') ?? 0));
+  }
+
+  disconnectedCallback() {
+    clearTimeout(this.#timer);
+  }
+});
