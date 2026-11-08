@@ -1,5 +1,4 @@
 import { defineConfig } from 'vite';
-import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
@@ -13,9 +12,7 @@ export default defineConfig({
   appType: 'mpa',
   plugins: [
     // Every HTML entry is compiled by sinter (partials/, src/sinter.{config,helpers,actions,types}.ts).
-    // Pages not migrated yet still mount their Svelte app into #app from their entry script.
     sinter({ typecheck: true }),
-    svelte(),
     // temper check on all markup and CSS (errors fail the build); serves the Lucide icons the markup names.
     // Only existing paths: temper stops the build on a missing one (partials/ arrives with the sinter pages).
     temper({ paths: ['src', 'partials', 'index.html', 'calendar', 'contacts', 'mail', 'search', 'settings'].map((p) => resolve(root, p)).filter(existsSync), icons: { lucide: true }, prune: true }),
@@ -23,8 +20,9 @@ export default defineConfig({
       project: './project.inlang',
       outdir: './src/paraglide',
     }),
-    // Pages render in JS: make the entry script render-blocking so a cross-document view transition
-    // (app.scss) captures the mounted page, not an empty <main>. Vite drops the attribute from the source tag.
+    // sinter renders the <template data-sn-if/for> parts (the nav rail among them) in JS when the page module runs:
+    // make the entry script render-blocking so a cross-document view transition (app.scss) captures the rendered
+    // page, not the bare markup. Vite drops the attribute from the source tag.
     {
       name: 'caley-render-blocking-entry',
       transformIndexHtml: {

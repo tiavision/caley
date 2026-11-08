@@ -39,7 +39,7 @@ a.mail-attachment-chip:hover {
 
 // Page transitions: cross-document view transitions between the app pages (same-origin navigations).
 // The rail keeps its place and cross-fades (only aria-current changes); <main> fades with a short lift.
-// Entry scripts carry blocking="render" so the new page is captured after Svelte has mounted.
+// Entry scripts carry blocking="render" (vite.config.ts) so the new page is captured after sinter has rendered it.
 @view-transition {
   navigation: auto;
 }
