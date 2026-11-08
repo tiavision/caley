@@ -631,3 +631,8 @@ mail-frame {
     display: none;
   }
 }
+
+// A wrapper that only scopes state (the default calendar of the import dialog).
+.mail-contents {
+  display: contents;
+}

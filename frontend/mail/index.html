@@ -26,6 +26,8 @@
           wiped: false,
           compose: /** @type {ComposeDraft|null} */ (null),
           imp: /** @type {ImportDraft|null} */ (null),
+          detail: /** @type {EventJson|null} */ (null),
+          threadRef: /** @type {ThreadRef|null} */ (null),
           composeError: '',
           sending: false,
           rcpt: { field: '', token: '' },
@@ -55,6 +57,9 @@
     <main data-layout="stack" data-gap="none"
           data-sn-state="{ view: /** @type {MailView} */ ({ account_id: null, mailbox: null, folder_id: null }), collapsed: /** @type {string[]} */ ([]) }"
           data-sn-persist="mail">
+      <!-- defaultCal: the calendar the import dialog preselects and remembers (shared with the calendar pages' event form). -->
+      <div class="mail-contents" data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
+           data-sn-on-ics-imported="$event.detail.errors === 0 && (defaultCal = $event.detail.calendar)">
       <!-- List state: q the search (qInput while typing), filter the search filters, marked the keys of the rows
            selected for a bulk action (anchor: the last one toggled), cursor the key of the row with the focus ring,
            dragged the message being dragged to a mailbox. -->
@@ -88,7 +93,14 @@
              list: searching ? results : messages,
              bulk: bulkOf(list, marked, mailboxes),
              addressBook: contactAddresses(contacts ?? []),
+             threadNodes: threadRef && !threadRef.current ? (otherThread ?? []) : (thread ?? []),
+             threadEventGroups: threadRef && !threadRef.current ? (otherThreadEvents ?? []) : (threadEvents ?? []),
+             threadLoading: threadRef && !threadRef.current ? $meta.otherThread.loading || $meta.otherThreadEvents.loading : $meta.thread.loading || $meta.threadEvents.loading,
+             threadLinks: false,
+             eventThreads: true,
            }"
+           data-sn-on-thread-message="close('thread-dialog'); open = refOf($event.detail); detailOpen = true; wiped = false; marked = []"
+           data-sn-on-event-threads="threadRef = threadOfEmail($event.detail.email, $event.detail.event); showModal('thread-dialog')"
            data-sn-on-mail-patched="patch('messages', /** @type {Message} */ ($event.detail.ref), $event.detail.fields); patch('results', /** @type {Message} */ ($event.detail.ref), $event.detail.fields); refresh('unread')"
            data-sn-on-mail-removed="remove('messages', /** @type {Message} */ ($event.detail.ref)); remove('results', /** @type {Message} */ ($event.detail.ref)); marked = []; refresh('unread')"
            data-sn-on-keydown="key = rowKey($event) ? 'row-' + rowKey($event) : mailShortcut($event, bulk.messages.length, false);
@@ -531,8 +543,13 @@
         </dialog>
 
         <sn-include src="../partials/mail-origins.html"></sn-include>
+        <!-- TODO(sn-resource then): "send by email" from the calendar/contacts share menu leaves a draft in
+             sessionStorage.caley_compose (src/lib/share.ts); open it once the page has loaded:
+             <sn-resource name="pending" call="mail.pendingCompose()" then="$result && (compose = composeDraft('new', null, identities, '', null, $result.files, $result.subject), showModal('mail-compose'))"></sn-resource> -->
         <sn-include src="../partials/mail-compose.html"></sn-include>
         <sn-include src="../partials/import-dialog.html"></sn-include>
+        <sn-include src="../partials/thread-dialog.html"></sn-include>
+        <sn-include src="../partials/event-detail.html"></sn-include>
         <sn-include src="../partials/mail-account.html"></sn-include>
         <sn-include src="../partials/mail-folder.html"></sn-include>
 
@@ -544,6 +561,7 @@
         <button type="button" data-fab data-icon="plus" commandfor="mail-compose" command="show-modal"
                 data-sn-on-click="compose = composeDraft('new', null, identities); needContacts = true"
                 data-sn-attr="{'aria-label': m.mail_newMessage()}"></button>
+      </div>
       </div>
     </main>
     <script type="module" src="/src/main/mail.ts"></script>

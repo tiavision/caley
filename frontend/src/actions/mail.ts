@@ -16,9 +16,6 @@ import { unlock as webauthnUnlock } from '../lib/pgp/webauthn.ts';
 import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
 import { buildProtectedMime, parseEnvelopeAddresses } from '../lib/pgp/compose.ts';
 import * as m from '../paraglide/messages/_index.js';
-import { draft as icsImportDraft } from './ics.ts';
-import type { CalDavAccountJson } from '../types/calendar.ts';
-import type { ImportDraft } from '../lib/import.ts';
 
 // ── Reading ───────────────────────────────────────────────────────────────────
 
@@ -233,16 +230,14 @@ export async function importKey(msg: MessageRef, filename: string): Promise<stri
   }
 }
 
-/** The import dialog's draft for a calendar attachment (partials/import-dialog.html, src/actions/ics.ts). */
-export async function icsDraft(msg: MessageRef, filename: string, contentType: string, accounts: CalDavAccountJson[]): Promise<ImportDraft> {
-  let file: File;
+/** A calendar attachment as a File, for the import dialog (partials/import-dialog.html). */
+export async function icsFile(msg: MessageRef, filename: string, contentType: string): Promise<File> {
   try {
     const data = decryptedData.get(filename) ?? await bytes(attachmentUrl(msg, filename));
-    file = new File([data as BlobPart], filename, { type: contentType || 'text/calendar' });
+    return new File([data as BlobPart], filename, { type: contentType || 'text/calendar' });
   } catch {
     throw new Error(m.cal_importError());
   }
-  return icsImportDraft(accounts, file, { account_id: msg.account_id, mailbox: msg.mailbox, uid: msg.uid });
 }
 
 /** Opens the message in its own window (/mail/view/). */

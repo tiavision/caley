@@ -12,6 +12,9 @@ import compose from '../partials/mail-compose.html?raw';
 import account from '../partials/mail-account.html?raw';
 import folder from '../partials/mail-folder.html?raw';
 import importDialog from '../partials/import-dialog.html?raw';
+import threadDialog from '../partials/thread-dialog.html?raw';
+import eventDetail from '../partials/event-detail.html?raw';
+import shareMenu from '../partials/share-menu.html?raw';
 import source from './index.html?raw';
 import type { Message } from '../src/lib/mail.ts';
 
@@ -21,6 +24,7 @@ const files = {
   './nav.html': nav, './nav-toggle.html': navToggle, './mail-reader.html': reader, './mail-reader-data.html': readerData,
   './mail-folder-icon.html': folderIcon, './mail-origins.html': origins, './mail-compose.html': compose,
   './mail-account.html': account, './mail-folder.html': folder, './import-dialog.html': importDialog,
+  './thread-dialog.html': threadDialog, './event-detail.html': eventDetail, './share-menu.html': shareMenu,
 };
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
@@ -69,7 +73,9 @@ async function show(routes: Record<string, RouteResponse> = {}) {
   });
   const stream = mockStream();
   const actions = {
-    ics: { draft: () => null, preview: async () => [], run: async () => ({ imported: 0, errors: 0 }) },
+    ics: { preview: async () => [], run: async () => ({ imported: 0, errors: 0, calendar: '' }) },
+    share: { native: () => false, send: async () => {}, download: async () => {}, email: async () => {} },
+    maps: { open: async () => {} },
     notify: { status: () => ({ supported: false, permission: 'default', enabled: false }), toggle: async (s: unknown) => s },
     mail: {
       open: async (ref: { uid: number }) => { opened.push(ref); return { ...(current.find((m) => m.uid === ref.uid) ?? inbox[0]), is_read: true }; },
@@ -81,7 +87,7 @@ async function show(routes: Record<string, RouteResponse> = {}) {
       composeKeys: async () => ({ keys: [], vault: [], unlocked: [] }),
       send: async () => null,
       forwardFiles: async () => ({ files: [], html: '', preview: '' }),
-      popout: () => {}, unlock: async () => true, importKey: async () => '', icsDraft: async (_m: unknown, filename: string) => ({ file: new File(['x'], filename), filename }),
+      popout: () => {}, unlock: async () => true, importKey: async () => '', icsFile: async (_m: unknown, filename: string) => new File(['x'], filename),
       promoteOrigin: async () => null, saveFolder: async () => null,
     },
   };
@@ -185,4 +191,25 @@ test('a calendar attachment opens the import dialog with its draft', async () =>
   root.querySelector<HTMLButtonElement>('.attachments button[data-icon="calendar-plus"]')!.click();
   await settle();
   expect(root.querySelector<HTMLDialogElement>('#import-ics')!.open).toBe(true);
+});
+
+test('the thread button opens the conversation; a message in it opens in the reader', async () => {
+  const { root, settle } = await show({
+    'GET /api/email/thread': { messages: [
+      { uid: 1, account_id: 'work', mailbox: 'INBOX', message_id: '<1@x>', parent_message_id: null, from: 'Sender 1 <s1@x>', subject: 'First', sent_at: 1, is_read: true },
+      { uid: 2, account_id: 'work', mailbox: 'INBOX', message_id: '<2@x>', parent_message_id: '<1@x>', from: 'Sender 2 <s2@x>', subject: 'Second', sent_at: 2, is_read: true },
+    ] },
+  });
+  rows(root)[2].click();
+  await settle();
+  root.querySelector<HTMLButtonElement>('.reader button[data-icon="list-tree"]')!.click();
+  await settle();
+  const dialog = root.querySelector<HTMLDialogElement>('#thread-dialog')!;
+  expect(dialog.open).toBe(true);
+  const links = [...dialog.querySelectorAll<HTMLAnchorElement>('a')];
+  expect(links.map((a) => a.getAttribute('aria-current'))).toEqual(['true', null]);
+  links[1].click();
+  await settle();
+  expect(dialog.open).toBe(false);
+  expect(root.querySelector('.reader .detail-subject')!.textContent).toBe('Second');
 });

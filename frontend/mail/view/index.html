@@ -23,6 +23,8 @@
           wiped: false,
           compose: /** @type {ComposeDraft|null} */ (null),
           imp: /** @type {ImportDraft|null} */ (null),
+          detail: /** @type {EventJson|null} */ (null),
+          threadRef: /** @type {ThreadRef|null} */ (null),
           composeError: '',
           sending: false,
           rcpt: { field: '', token: '' },
@@ -30,6 +32,7 @@
           origins: { only: false, q: '' },
           key: '',
         }">
+    <sn-resource name="user" src="/api/user" type="User"></sn-resource>
     <sn-resource name="mailboxes" src="/api/email/mailboxes?account_id={open.account_id}" when="open" items="mailboxes" key="account_id,name" type="Mailbox[]"></sn-resource>
     <sn-resource name="identities" src="/api/email/identities" items="identities" key="identity_id" type="Identity[]"></sn-resource>
     <sn-resource name="contacts" src="/api/contacts" items="contacts" when="needContacts" type="ContactAddresses[]"></sn-resource>
@@ -49,7 +52,19 @@
           <sn-event name="calendars_changed" resource="caldavAccounts" op="refetch"></sn-event>
     </sn-sync>
     <mail-hidden-watch hidden data-sn-on-page-hidden="wiped = true"></mail-hidden-watch>
-    <main data-layout="stack" data-gap="none">
+    <main data-layout="stack" data-gap="none"
+          data-sn-let="{
+             threadNodes: threadRef && !threadRef.current ? (otherThread ?? []) : (thread ?? []),
+             threadEventGroups: threadRef && !threadRef.current ? (otherThreadEvents ?? []) : (threadEvents ?? []),
+             threadLoading: threadRef && !threadRef.current ? $meta.otherThread.loading || $meta.otherThreadEvents.loading : $meta.thread.loading || $meta.threadEvents.loading,
+             threadLinks: false,
+             eventThreads: true,
+           }"
+          data-sn-on-thread-message="close('thread-dialog'); open = refOf($event.detail); detailOpen = true; wiped = false"
+           data-sn-on-event-threads="threadRef = threadOfEmail($event.detail.email, $event.detail.event); showModal('thread-dialog')">
+      <!-- defaultCal: the calendar the import dialog preselects and remembers (shared with the calendar pages' event form). -->
+      <div class="mail-contents" data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
+           data-sn-on-ics-imported="$event.detail.errors === 0 && (defaultCal = $event.detail.calendar)">
       <div class="mail-layout standalone" data-density="compact" data-grow>
         <section class="message-detail standalone" data-layout="stack" data-gap="none" tabindex="-1" autofocus
                  data-sn-attr="{'aria-label': m.nav_mail()}"
@@ -62,7 +77,10 @@
       </div>
       <sn-include src="../../partials/mail-origins.html"></sn-include>
       <sn-include src="../../partials/mail-compose.html"></sn-include>
-        <sn-include src="../../partials/import-dialog.html"></sn-include>
+      <sn-include src="../../partials/import-dialog.html"></sn-include>
+      <sn-include src="../../partials/thread-dialog.html"></sn-include>
+      <sn-include src="../../partials/event-detail.html"></sn-include>
+      </div>
     </main>
     <script type="module" src="/src/main/mail-view.ts"></script>
   </body>

@@ -1,10 +1,15 @@
 <!-- The reader's resources (partials/mail-reader.html), included once at page level where the page state declares
-     `open` (MessageRef|null) and `wiped` (decrypted content dropped while the page was hidden). -->
+     `open` (MessageRef|null), `threadRef` (ThreadRef|null, partials/thread-dialog.html) and `wiped` (decrypted content dropped while the page was hidden). -->
+<!-- TODO(sn-resource then): mail.open marks an unread message read on the server; with `then` on the resource,
+     load it with src="/api/email/message?…" and send the flag from markup (data-sn-patch on a mark-read element). -->
 <sn-resource name="message" call="mail.open(open)" when="open" type="Message"></sn-resource>
 <sn-resource name="body" call="mail.body(open)" when="open && !wiped"></sn-resource>
 <sn-resource name="thread" src="/api/email/thread?account_id={open.account_id}&mailbox={open.mailbox}&uid={open.uid}" when="open" items="messages" type="MailThreadNode[]"></sn-resource>
 <sn-resource name="threadEvents" src="/api/email/thread-events?account_id={open.account_id}&mailbox={open.mailbox}&uid={open.uid}" when="open" type="MessageEventGroupJson[]"></sn-resource>
 <sn-resource name="allowedOrigins" src="/api/email/image-origins" type="ImageOrigins"></sn-resource>
 <sn-resource name="ignoredOrigins" src="/api/email/image-blacklist" type="ImageOrigins"></sn-resource>
+<!-- The thread of a message an event came from (event detail → threads), when it is not the open one. -->
+<sn-resource name="otherThread" src="/api/email/thread?account_id={threadRef.account_id}&mailbox={threadRef.mailbox}&uid={threadRef.uid}" when="threadRef && !threadRef.current" items="messages" type="MailThreadNode[]"></sn-resource>
+<sn-resource name="otherThreadEvents" src="/api/email/thread-events?account_id={threadRef.account_id}&mailbox={threadRef.mailbox}&uid={threadRef.uid}" when="threadRef && !threadRef.current" type="MessageEventGroupJson[]"></sn-resource>
 <!-- Calendars for importing a calendar attachment (partials/import-dialog.html). -->
 <sn-resource name="caldavAccounts" src="/api/caldav/accounts" items="accounts" key="account_id" type="CalDavAccountJson[]"></sn-resource>
