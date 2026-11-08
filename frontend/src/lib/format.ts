@@ -1,4 +1,4 @@
-import { m } from '../paraglide/messages.js';
+import { m } from '@tiaforge-ui/sinter/messages';
 import type { AlarmFields, EventJson, RecurrenceInfo, PartStat } from '../types/calendar.ts';
 
 export const PARTSTAT_KEYS: Record<PartStat, string> = {
@@ -174,6 +174,6 @@ export function formatAlarm(alarm: AlarmFields): string {
   if (abs % 1440 === 0) { const n = abs / 1440; vs = n + ' ' + (n === 1 ? m.event_reminderDay() : m.event_reminderDays()); }
   else if (abs % 60 === 0) { const n = abs / 60; vs = n + ' ' + (n === 1 ? m.event_reminderHour() : m.event_reminderHours()); }
   else vs = abs + ' ' + m.event_reminderMin();
-  const amap: Record<string, string> = { 'before-start': 'event_reminderBeforeStart', 'after-start': 'event_reminderAfterStart', 'before-end': 'event_reminderBeforeEnd', 'after-end': 'event_reminderAfterEnd' };
-  return vs + ' ' + (m as Record<string, Function>)[amap[alarm.direction] || 'event_reminderBeforeStart']();
+  const when: Record<string, () => string> = { 'after-start': () => m.event_reminderAfterStart(), 'before-end': () => m.event_reminderBeforeEnd(), 'after-end': () => m.event_reminderAfterEnd() };
+  return vs + ' ' + (when[alarm.direction] ?? (() => m.event_reminderBeforeStart()))();
 }

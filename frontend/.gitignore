@@ -1,4 +1,4 @@
-src/paraglide/
+src/sinter.messages.d.ts
 dist/
 node_modules/
 .sinter/

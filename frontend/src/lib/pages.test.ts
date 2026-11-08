@@ -1,3 +1,4 @@
+import '../test-messages.ts';
 // The small helpers the pages' handlers apply (`x = fn(…)`): calendar, search, contacts, create-calendar dialog.
 import { describe, expect, test } from 'vitest';
 import { farStep, inWeek, swipeStep } from './calendar.ts';

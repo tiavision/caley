@@ -1,3 +1,4 @@
+import { messages } from '../src/test-messages.ts';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { configure } from '@tiaforge-ui/sinter';
 import { render, mockRequests, mockStream, memoryStorage, type RouteResponse } from '@tiaforge-ui/sinter/testing';
@@ -74,7 +75,7 @@ async function show(routes: Record<string, RouteResponse> = {}, storage = memory
     maps: { open: async () => {} },
   };
   const r = await render(page, {
-    requests, actions, helpers, now: NOW, storage, locale: 'en', streams: { '/api/events/stream': stream },
+    messages, requests, actions, helpers, now: NOW, storage, locale: 'en', streams: { '/api/events/stream': stream },
     files: { './nav.html': nav, './nav-toggle.html': navToggle, './share-menu.html': shareMenu, './event-detail.html': eventDetail, './event-form.html': eventForm, './thread-dialog.html': threadDialog },
   });
   await r.settle();

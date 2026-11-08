@@ -1,3 +1,5 @@
+import { m } from '@tiaforge-ui/sinter/messages';
+
 export interface NewMailNotification {
   account_id: string;
   uid: number;
@@ -18,14 +20,11 @@ export function mailNotificationsEnabled(): boolean {
     localStorage.getItem(mailNotificationsStorageKey) === '1';
 }
 
-export function showNewMailNotification(
-  mail: NewMailNotification,
-  tl: (key: string) => string,
-): void {
+export function showNewMailNotification(mail: NewMailNotification): void {
   if (!mailNotificationsEnabled()) return;
 
-  const notification = new Notification(tl('mail_notificationTitle'), {
-    body: `${mail.from || tl('mail_unknownSender')}\n${mail.subject || tl('mail_noSubject')}`,
+  const notification = new Notification(m.mail_notificationTitle(), {
+    body: `${mail.from || m.mail_unknownSender()}\n${mail.subject || m.mail_noSubject()}`,
     icon: '/icons/icon-192x192.png',
     tag: `${mail.account_id}|${mail.mailbox}|${mail.uid}`,
   });

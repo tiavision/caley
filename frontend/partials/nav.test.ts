@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import { render, mockRequests, mockStream, memoryStorage } from '@tiaforge-ui/sinter/testing';
-import * as m from '../src/paraglide/messages/_index.js';
+import { m } from '@tiaforge-ui/sinter/messages';
+import { messages } from '../src/test-messages.ts';
 import nav from './nav.html?raw';
 import navToggle from './nav-toggle.html?raw';
 import type { NotificationStatus } from '../src/actions/notify.ts';
@@ -25,7 +26,7 @@ async function show(here: string, options: { status?: NotificationStatus; storag
   const requests = mockRequests({ 'GET /api/user': options.userResponse ?? user });
   const actions = { notify: notify(options.status ?? { supported: true, permission: 'default', enabled: false }) };
   const r = await render(page(here), {
-    requests, actions, helpers: { m }, storage: options.storage, files: { './nav.html': nav, './nav-toggle.html': navToggle },
+    requests, actions, messages, storage: options.storage, files: { './nav.html': nav, './nav-toggle.html': navToggle },
     streams: { '/api/events/stream': mockStream() },
   });
   await r.settle();

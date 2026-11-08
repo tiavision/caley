@@ -1,5 +1,5 @@
 // Contacts page helpers (sinter helpers, so all pure): filtering, grouping, display and the form draft.
-import { m } from '../paraglide/messages.js';
+import { m } from '@tiaforge-ui/sinter/messages';
 import type { AddressbookJson, AddressEntry, ContactJson, TypedEntry } from '../types/calendar.ts';
 
 /** Identity of an address book, as the contacts filter stores it. */

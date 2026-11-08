@@ -1,11 +1,11 @@
 // Pure helpers for the event partials (partials/event-detail.html, partials/event-form.html) and the
 // calendar and search pages. Exported to templates through src/sinter.helpers.ts; nothing here touches
 // the DOM, storage or the network.
-import { m } from '../paraglide/messages.js';
+import { m } from '@tiaforge-ui/sinter/messages';
 import type {
   AlarmFields, AttendeeFields, CalDavAccountJson, CalendarJson, ContactJson, EventJson, PartStat, RecurrenceInfo,
 } from '../types/calendar.ts';
-import { dateFromEventValue, localDateIso, partstatKey } from './format.ts';
+import { dateFromEventValue, localDateIso } from './format.ts';
 
 // ── Calendars ───────────────────────────────────────────────────────────────
 
@@ -58,7 +58,13 @@ export function partstatTone(partstat: PartStat): Tone {
 }
 
 export function partstatLabel(partstat: PartStat): string {
-  return (m as unknown as Record<string, () => string>)[partstatKey(partstat)]!();
+  // messages by name, so the page's language file holds what it uses
+  switch (partstat) {
+    case 'ACCEPTED': return m.event_attendeeStatusAccepted();
+    case 'DECLINED': return m.event_attendeeStatusDeclined();
+    case 'TENTATIVE': return m.event_attendeeStatusTentative();
+    default: return m.event_attendeeStatusNeedsAction();
+  }
 }
 
 export function attendeeLabel(a: Pick<AttendeeFields, 'cn' | 'email'>): string {

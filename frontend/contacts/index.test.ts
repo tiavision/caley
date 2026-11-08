@@ -3,7 +3,8 @@ import { configure } from '@tiaforge-ui/sinter';
 import { render, mockRequests, mockStream, type RouteResponse } from '@tiaforge-ui/sinter/testing';
 import * as helpers from '../src/sinter.helpers.ts';
 import '../src/islands/common.ts';                 // data-shortcut keys
-import * as m from '../src/paraglide/messages/_index.js';
+import { m } from '@tiaforge-ui/sinter/messages';
+import { messages } from '../src/test-messages.ts';
 import nav from '../partials/nav.html?raw';
 import navToggle from '../partials/nav-toggle.html?raw';
 import shareMenu from '../partials/share-menu.html?raw';
@@ -49,7 +50,7 @@ async function show(routes: Record<string, RouteResponse> = {}, books = [book('/
     maps: { open: async (...args: unknown[]) => { calls.push(['maps.open', args.slice(0, 2)]); } },
   };
   const r = await render(page, {
-    requests, actions, helpers, streams: { '/api/events/stream': stream },
+    messages, requests, actions, helpers, streams: { '/api/events/stream': stream },
     files: { './nav.html': nav, './nav-toggle.html': navToggle, './share-menu.html': shareMenu },
   });
   await r.settle();

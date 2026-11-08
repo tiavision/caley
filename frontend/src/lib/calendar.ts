@@ -1,6 +1,6 @@
 // Pure helpers for the calendar page (calendar/index.html): dates as YYYY-MM-DD strings in the viewer's zone,
 // months as YYYY-MM. Exported to templates through src/sinter.helpers.ts.
-import { m } from '../paraglide/messages.js';
+import { m } from '@tiaforge-ui/sinter/messages';
 import type { DayEventsJson, EventJson, MonthGridJson } from '../types/calendar.ts';
 import { localDateIso } from './format.ts';
 import { eventKey } from './events.ts';

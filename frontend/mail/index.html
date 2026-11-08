@@ -482,7 +482,7 @@
                   </template>
                   <template data-sn-if="bulk.canArchive || bulk.targets.length > 0"><hr></template>
                   <button type="button" data-icon="trash-2" data-tone="danger" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
-                          data-sn-confirm="bulk.inTrash ? m.mail_bulkDeleteConfirm({n: bulk.messages.length}) : null"
+                          data-sn-confirm="bulk.inTrash ? m.mail_bulkDeleteConfirm() : null"
                           data-sn-call="mail.bulk('delete', bulk.messages, {})"
                           data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results', 'unread')"
                           data-sn-text="m.mail_delete()"></button>

@@ -1,9 +1,8 @@
-// sinter helpers: pure functions templates call by name (`eventTimeLabel(ev)`), plus the `m` namespace of
-// paraglide messages (`m.nav_mail()`, `m.login_error()`). The page module imports only what a page uses.
-// sinter's built-in date(), time(), datetime(), relative(), number() and bytes() need no export here; they
-// format with $locale, which src/sinter.config.ts connects to paraglide (src/lib/i18n.ts).
+// sinter helpers: pure functions templates call by name (`eventTimeLabel(ev)`). The page module imports only what
+// a page uses. Messages (`m.nav_mail()`) are sinter's own, from messages/{locale}.json (project.inlang); TS code
+// imports `m` from '@tiaforge-ui/sinter/messages'. sinter's built-in date(), time(), datetime(), relative(),
+// number() and bytes() need no export here; they format with $locale, the language sinter picked.
 // Add a page's formatting helpers here (or re-export them from a module next to the page); keep them pure.
-export * as m from './paraglide/messages/_index.js';
 
 export {
   partstatKey,

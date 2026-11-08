@@ -15,7 +15,7 @@ import { decryptPrivateKeys, eraseBytes, localActiveDevice, readVault, rememberL
 import { unlock as webauthnUnlock } from '../lib/pgp/webauthn.ts';
 import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
 import { buildProtectedMime, parseEnvelopeAddresses } from '../lib/pgp/compose.ts';
-import * as m from '../paraglide/messages/_index.js';
+import { m } from '@tiaforge-ui/sinter/messages';
 
 // ── Reading ───────────────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 // Settings page helpers (settings/index.html, partials/pgp-settings.html): pure, exported to templates through
 // src/sinter.helpers.ts.
-import { m } from '../paraglide/messages.js';
+import { m } from '@tiaforge-ui/sinter/messages';
 import type { CalDavAccountJson } from '../types/calendar.ts';
 
 /** The CalDAV account dialog (POST /api/caldav/account); account_id '' adds one. */

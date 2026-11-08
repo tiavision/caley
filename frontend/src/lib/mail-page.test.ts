@@ -1,3 +1,4 @@
+import '../test-messages.ts';
 // The mail page's state helpers (src/lib/mail.ts "Page state", keys) and the settings helpers they sit next to.
 import { describe, expect, test } from 'vitest';
 import {

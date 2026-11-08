@@ -1,3 +1,4 @@
+import '../test-messages.ts';
 import { describe, expect, it } from 'vitest';
 import { formatEventTimes, eventStartDate, localDateIso, eventTimeLabel } from './format.ts';
 import type { EventJson } from '../types/calendar.ts';

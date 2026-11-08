@@ -1,6 +1,6 @@
 // Mail page helpers (mail/index.html, mail/view/index.html, partials/mail-*.html): pure functions the templates
 // call by name through src/sinter.helpers.ts. Types of the mail API and the page's state live here too.
-import * as m from '../paraglide/messages/_index.js';
+import { m } from '@tiaforge-ui/sinter/messages';
 import {
   canPreviewAttachment,
   folderKind,

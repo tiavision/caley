@@ -44,7 +44,7 @@ import { parsePublicKey, listPublicKeys, type StoredPublicKey } from '../lib/pgp
 import { openVault, addKey as sessionAddKey, removeKey as sessionRemoveKey, getWrappingKey, getKeys, lock as sessionLock, isUnlocked } from '../lib/pgp/session.ts';
 import { apiFetch } from '../lib/api.ts';
 import { downloadFile } from '../lib/share.ts';
-import * as m from '../paraglide/messages/_index.js';
+import { m } from '@tiaforge-ui/sinter/messages';
 
 /** A device (passkey) of the vault, as the page lists it. */
 export interface VaultDeviceView {

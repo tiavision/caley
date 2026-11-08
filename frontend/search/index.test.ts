@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { configure } from '@tiaforge-ui/sinter';
+import { messages } from '../src/test-messages.ts';
 import { render, mockRequests, mockStream, type RouteResponse } from '@tiaforge-ui/sinter/testing';
 import * as helpers from '../src/sinter.helpers.ts';
 import nav from '../partials/nav.html?raw';
@@ -53,7 +54,7 @@ async function show(routes: Record<string, RouteResponse> = {}) {
     maps: { open: async () => {} },
   };
   const r = await render(page, {
-    requests, actions, helpers, streams: { '/api/events/stream': mockStream() },
+    messages, requests, actions, helpers, streams: { '/api/events/stream': mockStream() },
     files: { './nav.html': nav, './nav-toggle.html': navToggle, './share-menu.html': shareMenu, './event-detail.html': eventDetail, './event-form.html': eventForm },
   });
   await r.settle();

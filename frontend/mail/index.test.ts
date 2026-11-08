@@ -1,3 +1,5 @@
+import { m } from '@tiaforge-ui/sinter/messages';
+import { messages } from '../src/test-messages.ts';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { configure } from '@tiaforge-ui/sinter';
 import { render, mockRequests, mockStream, type RouteResponse } from '@tiaforge-ui/sinter/testing';
@@ -94,7 +96,7 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
       pendingCompose: () => { pendingCalls++; const p = pending; pending = null; return p; },
     },
   };
-  const r = await render(page, { requests, actions, helpers, files, streams: { '/api/events/stream': stream } });
+  const r = await render(page, { messages, requests, actions, helpers, files, streams: { '/api/events/stream': stream } });
   await r.settle();
   return { ...r, requests, stream, opened, pendingCalls: () => pendingCalls };
 }
@@ -119,7 +121,7 @@ test('shows the first inbox with its unread count, then opens a message in the r
   expect(rows(root)[0].getAttribute('aria-current')).toBe('true');
   expect(marks()).toEqual([{ account_id: 'work', mailbox: 'INBOX', uid: 3, flags: ['\\Seen'], set: true }]);
 
-  expect(root.querySelector('#mail-actions-menu button[data-icon="mail"]')!.textContent).toBe(helpers.m.mail_markUnread());   // the reader shows it read
+  expect(root.querySelector('#mail-actions-menu button[data-icon="mail"]')!.textContent).toBe(m.mail_markUnread());   // the reader shows it read
   rows(root)[1].click();                                          // a read message is not marked
   await settle();
   expect(marks()).toHaveLength(1);
@@ -205,7 +207,7 @@ test('the reader\'s star and read toggles stay on success, in the reader and the
   root.querySelector<HTMLButtonElement>('#mail-actions-menu button[data-icon="mail"]')!.click();
   await settle();
   expect(patched()).toEqual({ account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Seen'], set: false });
-  expect(root.querySelector('#mail-actions-menu button[data-icon="mail"]')!.textContent).toBe(helpers.m.mail_markRead());
+  expect(root.querySelector('#mail-actions-menu button[data-icon="mail"]')!.textContent).toBe(m.mail_markRead());
   expect(rows(root)[1].classList.contains('unread')).toBe(true);
 });
 
@@ -271,7 +273,7 @@ test('removing the open virtual folder drops it and goes back to the inbox', asy
   [...root.querySelectorAll<HTMLButtonElement>('.sidebar-item')].find((b) => b.textContent!.includes('followup-Folder'))!.click();
   await settle();
   expect(root.querySelector('.message-list-header h2')!.textContent).toBe('followup-Folder');
-  root.querySelector<HTMLButtonElement>(`button[aria-label="${helpers.m.mail_removeAttachment()}"][data-icon="x"]`)!.click();
+  root.querySelector<HTMLButtonElement>(`button[aria-label="${m.mail_removeAttachment()}"][data-icon="x"]`)!.click();
   await settle();
   expect(folderItems(root)).toEqual([]);
   expect(root.querySelector('.message-list-header h2')!.textContent).toBe('Inbox');
@@ -279,7 +281,7 @@ test('removing the open virtual folder drops it and goes back to the inbox', asy
 
 test('a failed folder removal brings it back', async () => {
   const { root, settle } = await show({ 'GET /api/email/folders': { folders: [folderRow] }, 'DELETE /api/email/folder': { status: 500 } });
-  root.querySelector<HTMLButtonElement>(`button[aria-label="${helpers.m.mail_removeAttachment()}"][data-icon="x"]`)!.click();
+  root.querySelector<HTMLButtonElement>(`button[aria-label="${m.mail_removeAttachment()}"][data-icon="x"]`)!.click();
   await settle();
   expect(folderItems(root)).toEqual(['followup-Folder']);
 });

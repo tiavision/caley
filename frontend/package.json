@@ -10,7 +10,6 @@
     "inspect": "vite build && node scripts/inspect.mjs"
   },
   "dependencies": {
-    "@inlang/paraglide-js": "^2.24.1",
     "@tiaforge-ui/sinter": "file:../../tiaforge-ui-sinter-0.6.0.tgz",
     "@tiaforge-ui/temper": "^0.1.5",
     "dompurify": "^3.4.17",

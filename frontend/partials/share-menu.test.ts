@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import { render, mockRequests } from '@tiaforge-ui/sinter/testing';
-import * as m from '../src/paraglide/messages/_index.js';
+import { m } from '@tiaforge-ui/sinter/messages';
+import { messages } from '../src/test-messages.ts';
 import { contactShare, eventShare, type ShareItem } from '../src/lib/share.ts';
 import shareMenu from './share-menu.html?raw';
 
@@ -24,7 +25,7 @@ function actions(nativeShare: boolean, log: Array<[string, ShareItem]>) {
 async function show(nativeShare: boolean, item: ShareItem) {
   const log: Array<[string, ShareItem]> = [];
   const html = page.replace('<div data-sn-state="{ item: null }"', `<div data-sn-state="{ item: ${JSON.stringify(item).replace(/"/g, "'")} }"`);
-  const r = await render(html, { requests: mockRequests({}), actions: actions(nativeShare, log), helpers: { m }, files: { './share-menu.html': shareMenu } });
+  const r = await render(html, { requests: mockRequests({}), actions: actions(nativeShare, log), messages, files: { './share-menu.html': shareMenu } });
   await r.settle();
   return { ...r, log };
 }

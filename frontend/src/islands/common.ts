@@ -1,6 +1,5 @@
 // Islands shared by every page (imported by src/sinter.config.ts): browser work sinter expressions cannot do.
 import { instance } from '@tiaforge-ui/sinter';
-import { getLocale, makeTl } from '../lib/i18n.ts';
 import { type NewMailNotification, showNewMailNotification } from '../lib/mail-notifications.ts';
 import { shortcutMatches, typingTarget } from '../lib/shortcuts.ts';
 
@@ -13,7 +12,7 @@ customElements.define('mail-notifier', class extends HTMLElement {
 
   connectedCallback() {
     this.#off = instance(document).on('new_email', (mail) => {
-      showNewMailNotification(mail as NewMailNotification, makeTl(getLocale()));
+      showNewMailNotification(mail as NewMailNotification);
     });
   }
 

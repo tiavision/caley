@@ -1,5 +1,5 @@
 // ICS import (partials/import-dialog.html): the dialog's draft and pure formatting. The work is in src/actions/ics.ts.
-import { m } from '../paraglide/messages.js';
+import { m } from '@tiaforge-ui/sinter/messages';
 import type { CalDavAccountJson, CalendarJson } from '../types/calendar.ts';
 
 /** The calendar select's value for "new calendar". */

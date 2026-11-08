@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import { render, mockRequests } from '@tiaforge-ui/sinter/testing';
-import * as m from '../src/paraglide/messages/_index.js';
+import { m } from '@tiaforge-ui/sinter/messages';
+import { messages } from '../src/test-messages.ts';
 import { calendarValue, importEventDate, importDraft, importSummary } from '../src/lib/import.ts';
 import * as ics from '../src/actions/ics.ts';
 import '../src/islands/common.ts';                 // <close-after>
@@ -35,7 +36,7 @@ async function show() {
     ics,
     attachment: { open: (a: typeof accounts) => ics.draft(a as never, new File(['x'], 'invite.ics'), { account_id: 'mail', mailbox: 'INBOX', uid: 7 }) },
   };
-  const r = await render(page, { requests, actions, helpers: { m, calendarValue, importEventDate, importDraft, importSummary }, files: { './import-dialog.html': importDialog } });
+  const r = await render(page, { requests, actions, helpers: { calendarValue, importEventDate, importDraft, importSummary }, messages, files: { './import-dialog.html': importDialog } });
   await r.settle();
   return { ...r, requests };
 }

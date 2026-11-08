@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import { render, mockRequests, memoryStorage, type RouteResponse } from '@tiaforge-ui/sinter/testing';
-import * as m from './src/paraglide/messages/_index.js';
+import { m } from '@tiaforge-ui/sinter/messages';
+import { messages } from './src/test-messages.ts';
 import page from './index.html?raw';
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
@@ -11,7 +12,7 @@ async function show(routes: Record<string, RouteResponse> = {}, storage?: Storag
     'GET /api/auth/config': { oidc_enabled: false },
     ...routes,
   });
-  const r = await render(page, { requests, helpers: { m }, storage });
+  const r = await render(page, { requests, messages, storage });
   await r.settle();
   return { ...r, requests };
 }
@@ -38,7 +39,7 @@ test('signed out: the form, without single sign-on', async () => {
 
 test('loading until both answers are in', async () => {
   const requests = mockRequests({ 'GET /api/user': null, 'GET /api/auth/config': { oidc_enabled: true } });
-  const { root, flush, settle } = await render(page, { requests, helpers: { m } });
+  const { root, flush, settle } = await render(page, { requests, messages });
   await flush();
   expect(root.querySelector('p[aria-busy=true]')!.textContent).toBe('Loading...');
   expect(root.querySelector('form')).toBeNull();
