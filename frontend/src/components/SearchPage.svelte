@@ -119,7 +119,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div data-layout="stack" data-gap="md" data-pad="lg">
+<div data-layout="stack" data-gap="md" data-pad="sm">
   <div data-layout="row" data-gap="sm" data-wrap="none">
     <NavToggle />
     <h2>{tl('search_heading')}</h2>

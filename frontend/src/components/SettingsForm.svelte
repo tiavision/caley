@@ -169,7 +169,7 @@
   }
 </script>
 
-<div data-layout="center" data-gap="lg" data-pad="lg" style="--tm-measure: 40rem">
+<div class="settings" data-layout="center" data-gap="lg" data-pad="sm" style="--tm-measure: 40rem">
   <div data-layout="row" data-gap="sm">
     <NavToggle />
     <h2 data-grow style="--tm-grow-basis: 12rem">{tl('settings_heading')}</h2>
@@ -337,3 +337,12 @@
   {locale}
   onimported={fetchCalendars}
 />
+
+<style>
+  /* temper's data-layout="center" keeps at least md side padding; match the sm page padding of the other
+     pages so the nav toggle sits in the same place on phones. */
+  .settings {
+    max-inline-size: calc(var(--tm-measure) + 2 * var(--tm-space-sm));
+    padding-inline: var(--tm-space-sm);
+  }
+</style>
