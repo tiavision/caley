@@ -1,10 +1,13 @@
 // sinter app configuration, imported by every page before it mounts.
 import { configure, onUnauthorized } from '@tiaforge-ui/sinter';
 import { getLocale, setLocale } from './lib/i18n.ts';
+import { initLanguage } from './lib/language.ts';
 import { rememberCurrentAppUrl } from './lib/return-url.ts';
 import './islands/common.ts';
 
-// The language was picked before the first paint (src/sinter.early.ts).
+// The language: the same pick as the early file's (src/sinter.early.ts), applied to the page bundle's own copy of
+// paraglide, as the early file is bundled on its own and shares no module instance with the page.
+initLanguage();
 
 configure({
   request: [

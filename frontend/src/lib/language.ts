@@ -1,6 +1,7 @@
-// The interface language, picked once per page before anything renders (src/sinter.early.ts runs it in the
-// page's early chunk): the stored choice (localStorage `locale`, set in Settings), else the browser's, else English.
-// Kept apart from i18n.ts so the early chunk loads paraglide's runtime only, not every message.
+// The interface language: the stored choice (localStorage `locale`, set in Settings), else the browser's, else
+// English. One function, run twice per page: by src/sinter.early.ts in the early file before the first paint,
+// and by src/sinter.config.ts in the page bundle (each has its own copy of paraglide's runtime; same inputs,
+// same pick). Kept apart from i18n.ts so the early file holds paraglide's runtime only, not every message.
 import { baseLocale, isLocale, setLocale } from '../paraglide/runtime.js';
 
 export function pickLanguage(): string {
