@@ -46,8 +46,9 @@ if (!HTMLElement.prototype.hidePopover) HTMLElement.prototype.hidePopover = func
 beforeEach(() => { localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'] }); });
 afterEach(() => configure({ confirm: null as never, urlSchemes: [] }));
 
-async function show(routes: Record<string, RouteResponse> = {}) {
+async function show(routes: Record<string, RouteResponse> = {}, pending: { subject: string; files: File[] } | null = null) {
   const opened: unknown[] = [];
+  let pendingCalls = 0;
   const listed = routes['GET /api/email/messages'];
   const current: Message[] = listed && typeof listed === 'object' && 'messages' in listed ? (listed as { messages: Message[] }).messages : inbox;
   const requests = mockRequests({
@@ -89,11 +90,12 @@ async function show(routes: Record<string, RouteResponse> = {}) {
       forwardFiles: async () => ({ files: [], html: '', preview: '' }),
       popout: () => {}, unlock: async () => true, importKey: async () => '', icsFile: async (_m: unknown, filename: string) => new File(['x'], filename),
       promoteOrigin: async () => null, saveFolder: async () => null,
+      pendingCompose: () => { pendingCalls++; const p = pending; pending = null; return p; },
     },
   };
   const r = await render(page, { requests, actions, helpers, files, streams: { '/api/events/stream': stream } });
   await r.settle();
-  return { ...r, requests, stream, opened };
+  return { ...r, requests, stream, opened, pendingCalls: () => pendingCalls };
 }
 
 const rows = (root: HTMLElement) => [...root.querySelectorAll<HTMLButtonElement>('.message-row')];
@@ -177,6 +179,33 @@ test('reply opens the compose dialog with the quoted message, and sends it', asy
   expect(root.querySelector<HTMLTextAreaElement>('.compose-body')!.value).toContain('> body 1');
   root.querySelector<HTMLFormElement>('.compose-form')!.requestSubmit();
   await settle();
+  expect(root.querySelector<HTMLDialogElement>('#mail-compose')!.open).toBe(false);
+});
+
+test('a draft shared from another page opens compose once, from the default identity, with its attachment', async () => {
+  const card = new File(['BEGIN:VCARD'], 'followup-ada.vcf', { type: 'text/vcard' });
+  const { root, settle, requests, pendingCalls } = await show({ 'GET /api/email/identities': { identities: [
+    { identity_id: 'i1', account_id: 'work', name: 'Me', email: 'me@x', is_default: false, sort_order: 0 },
+    { identity_id: 'i2', account_id: 'work', name: 'Also me', email: 'also@x', is_default: true, sort_order: 1 },
+  ] } }, { subject: 'followup-Ada', files: [card] });
+  const dialog = root.querySelector<HTMLDialogElement>('#mail-compose')!;
+  expect(dialog.open).toBe(true);
+  expect(root.querySelector<HTMLInputElement>('#compose-subject')!.value).toBe('followup-Ada');
+  expect(root.querySelector('.compose-attachments')!.textContent).toContain('followup-ada.vcf');
+  expect(root.querySelector<HTMLSelectElement>('#compose-from')!.value).toBe('i2');
+  expect(requests.calls.some((c) => c.url === '/api/contacts')).toBe(true);
+  expect(pendingCalls()).toBe(1);
+
+  // It is taken once: closing compose does not bring it back.
+  dialog.close();
+  await settle();
+  expect(pendingCalls()).toBe(1);
+  expect(dialog.open).toBe(false);
+});
+
+test('without a shared draft, compose stays closed', async () => {
+  const { root, pendingCalls } = await show();
+  expect(pendingCalls()).toBe(1);
   expect(root.querySelector<HTMLDialogElement>('#mail-compose')!.open).toBe(false);
 });
 

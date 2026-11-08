@@ -1,7 +1,7 @@
 <!-- The reader's resources (partials/mail-reader.html), included once at page level where the page state declares
      `open` (MessageRef|null), `threadRef` (ThreadRef|null, partials/thread-dialog.html) and `wiped` (decrypted content dropped while the page was hidden). -->
-<!-- TODO(sn-resource then): mail.open marks an unread message read on the server; with `then` on the resource,
-     load it with src="/api/email/message?…" and send the flag from markup (data-sn-patch on a mark-read element). -->
+<!-- TODO(sn-resource then): mail.open marks an unread message read on the server. Moving that into a `then` on the body
+     resource needs a way for a resource's `then` to send a request (it may not call actions, SN203, and has no element to emit from). -->
 <sn-resource name="message" call="mail.open(open)" when="open" type="Message"></sn-resource>
 <sn-resource name="body" call="mail.body(open)" when="open && !wiped"></sn-resource>
 <sn-resource name="thread" src="/api/email/thread?account_id={open.account_id}&mailbox={open.mailbox}&uid={open.uid}" when="open" items="messages" type="MailThreadNode[]"></sn-resource>

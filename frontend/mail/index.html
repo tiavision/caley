@@ -543,9 +543,10 @@
         </dialog>
 
         <sn-include src="../partials/mail-origins.html"></sn-include>
-        <!-- TODO(sn-resource then): "send by email" from the calendar/contacts share menu leaves a draft in
-             sessionStorage.caley_compose (src/lib/share.ts); open it once the page has loaded:
-             <sn-resource name="pending" call="mail.pendingCompose()" then="$result && (compose = composeDraft('new', null, identities, '', null, $result.files, $result.subject), showModal('mail-compose'))"></sn-resource> -->
+        <!-- "Send by email" from the calendar/contacts share menu leaves a draft in sessionStorage.caley_compose
+             (src/lib/share.ts); mail.pendingCompose() takes it once, after the identities have loaded (the draft's sender). -->
+        <sn-resource name="pending" call="mail.pendingCompose()" when="!!$meta.identities.loadedAt"
+                     then="$result && (compose = composeDraft('new', null, identities, '', null, $result.files, $result.subject), needContacts = true, showModal('mail-compose'))"></sn-resource>
         <sn-include src="../partials/mail-compose.html"></sn-include>
         <sn-include src="../partials/import-dialog.html"></sn-include>
         <sn-include src="../partials/thread-dialog.html"></sn-include>
