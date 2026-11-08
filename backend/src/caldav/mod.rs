@@ -19,6 +19,23 @@ pub use parsing::preview_events_from_raw_ical;
 pub(crate) use parsing::{extract_ctag_and_token, extract_hrefs, resolve_url, unescape_ical_text};
 pub use types::{Alarm, Attendee, Calendar, Event, PartStat, RecurrenceInfo, SyncResult};
 
+/// URL path segment for a new calendar: the lowercased name with non-alphanumerics
+/// replaced by `-`, plus a random suffix so repeated names don't collide.
+fn calendar_slug(name: &str) -> String {
+    let raw_slug: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect();
+    let raw_slug = raw_slug.trim_matches('-').to_string();
+    let suffix = &Uuid::new_v4().to_string()[..8];
+    if raw_slug.is_empty() {
+        suffix.to_string()
+    } else {
+        format!("{raw_slug}-{suffix}")
+    }
+}
+
 #[derive(Clone)]
 pub struct CalDavClient {
     client: Client,
@@ -544,7 +561,8 @@ impl CalDavClient {
 
     pub async fn create_calendar(&self, name: &str, color: Option<&str>) -> anyhow::Result<String> {
         if self.demo_mode {
-            anyhow::bail!("Cannot create calendars in demo mode");
+            // Demo mode: no MKCALENDAR; the caller caches the calendar locally.
+            return Ok(format!("/calendars/demo/{}/", calendar_slug(name)));
         }
         let start = self.start_url().await;
         let home_sets = self.discover_calendar_home_sets(&start).await?;
@@ -552,19 +570,7 @@ impl CalDavClient {
             .into_iter()
             .next()
             .ok_or_else(|| anyhow::anyhow!("No calendar-home-set found"))?;
-
-        let raw_slug: String = name
-            .to_lowercase()
-            .chars()
-            .map(|c| if c.is_alphanumeric() { c } else { '-' })
-            .collect();
-        let raw_slug = raw_slug.trim_matches('-').to_string();
-        let suffix = &Uuid::new_v4().to_string()[..8];
-        let slug = if raw_slug.is_empty() {
-            suffix.to_string()
-        } else {
-            format!("{raw_slug}-{suffix}")
-        };
+        let slug = calendar_slug(name);
 
         let calendar_url = format!("{}/{}/", home.trim_end_matches('/'), slug);
 
@@ -612,5 +618,42 @@ impl CalDavClient {
                 bail!("MKCALENDAR returned {s}: {text}")
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod demo_tests {
+    use super::*;
+
+    /// `reqwest::Client::new()` needs the rustls provider that `main` installs.
+    fn demo_client() -> CalDavClient {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        CalDavClient::demo()
+    }
+
+    #[test]
+    fn calendar_slug_sanitizes_and_suffixes() {
+        let slug = calendar_slug("Side Project!");
+        let (base, suffix) = slug.rsplit_once('-').unwrap();
+        assert_eq!(base, "side-project");
+        assert_eq!(suffix.len(), 8);
+        assert_eq!(calendar_slug("!!!").len(), 8);
+        assert_ne!(calendar_slug("Work"), calendar_slug("Work"));
+    }
+
+    #[tokio::test]
+    async fn demo_writes_are_stubbed() {
+        let client = demo_client();
+        let href = client
+            .create_calendar("Side Project", Some("#123456"))
+            .await
+            .expect("demo create_calendar must succeed without MKCALENDAR");
+        assert!(href.starts_with("/calendars/demo/side-project-"), "{href}");
+        assert!(href.ends_with('/'));
+        client
+            .put_event(&href, "uid-1", "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
+            .await
+            .unwrap();
+        client.delete_event(&href, "uid-1").await.unwrap();
     }
 }

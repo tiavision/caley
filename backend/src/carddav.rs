@@ -486,6 +486,10 @@ pub async fn put_contact(
     raw_vcard: &str,
     is_new: bool,
 ) -> anyhow::Result<Option<String>> {
+    if client.demo_mode {
+        // Demo mode: no CardDAV server; the caller updates the local cache only.
+        return Ok(None);
+    }
     let mut url = contact_href.to_string();
     for _ in 0..5 {
         let mut headers = HeaderMap::new();
@@ -530,6 +534,9 @@ pub async fn put_contact(
 }
 
 pub async fn delete_contact(client: &CalDavClient, contact_href: &str) -> anyhow::Result<()> {
+    if client.demo_mode {
+        return Ok(());
+    }
     let mut url = contact_href.to_string();
     for _ in 0..5 {
         let resp = client
@@ -965,4 +972,39 @@ fn normalize_crlf(s: &str) -> String {
 /// Derive the contact href from addressbook href and uid.
 pub fn contact_href(addressbook_href: &str, uid: &str) -> String {
     format!("{}/{}.vcf", addressbook_href.trim_end_matches('/'), uid)
+}
+
+#[cfg(test)]
+mod demo_tests {
+    use super::*;
+
+    /// `reqwest::Client::new()` needs the rustls provider that `main` installs.
+    fn demo_client() -> CalDavClient {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        CalDavClient::demo()
+    }
+
+    // The demo client has no base URL, so any real HTTP request would fail;
+    // these succeeding proves demo mode never touches the network.
+    #[tokio::test]
+    async fn demo_put_contact_is_stubbed() {
+        let client = demo_client();
+        let etag = put_contact(
+            &client,
+            "/addressbooks/demo/contacts/x.vcf",
+            "BEGIN:VCARD\r\nEND:VCARD\r\n",
+            true,
+        )
+        .await
+        .expect("demo put_contact must not hit the network");
+        assert_eq!(etag, None);
+    }
+
+    #[tokio::test]
+    async fn demo_delete_contact_is_stubbed() {
+        let client = demo_client();
+        delete_contact(&client, "/addressbooks/demo/contacts/x.vcf")
+            .await
+            .expect("demo delete_contact must not hit the network");
+    }
 }

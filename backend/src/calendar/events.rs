@@ -151,27 +151,14 @@ pub async fn save_event(
     };
 
     if scope == "this_instance" {
-        let raw_ical = if state.demo_mode {
-            match sqlx::query_scalar::<_, String>(
-                "SELECT raw_ical FROM cached_events WHERE account_id = ? AND calendar_href = ? AND uid = ? LIMIT 1",
-            )
-            .bind(&account_id)
-            .bind(&calendar_href)
-            .bind(&uid)
-            .fetch_optional(&state.db)
+        let raw_ical = match fetch_event_ical(&state, &client, &account_id, &calendar_href, &uid)
             .await
-            {
-                Ok(Some(s)) => s,
-                _ => return (StatusCode::NOT_FOUND, "Event not found").into_response(),
-            }
-        } else {
-            match client.get_event(&calendar_href, &uid).await {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("Failed to fetch event for override: {e}");
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read event")
-                        .into_response();
-                }
+        {
+            Ok(Some(s)) => s,
+            Ok(None) => return (StatusCode::NOT_FOUND, "Event not found").into_response(),
+            Err(e) => {
+                eprintln!("Failed to fetch event for override: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read event").into_response();
             }
         };
         let orig_dt = original_dtstart.unwrap_or("");
@@ -255,11 +242,15 @@ pub async fn save_event(
             _ => None,
         };
         let ical = if is_edit {
-            let original = original_client
-                .as_ref()
-                .unwrap_or(&client)
-                .get_event(fetch_href, &uid)
-                .await;
+            let original = fetch_event_ical(
+                &state,
+                original_client.as_ref().unwrap_or(&client),
+                original_account_id.as_deref().unwrap_or(&account_id),
+                fetch_href,
+                &uid,
+            )
+            .await
+            .and_then(|o| o.ok_or_else(|| anyhow::anyhow!("event not in cache")));
             match original {
                 Ok(orig_ical) => {
                     match update_vcalendar_event(
@@ -428,22 +419,10 @@ pub async fn delete_event(
     };
 
     if scope == "this_instance" && !original_dtstart.is_empty() {
-        let raw_ical = if state.demo_mode {
-            match sqlx::query_scalar::<_, String>(
-                "SELECT raw_ical FROM cached_events WHERE account_id = ? AND calendar_href = ? AND uid = ? LIMIT 1",
-            )
-            .bind(&account_id)
-            .bind(&calendar_href)
-            .bind(&uid)
-            .fetch_optional(&state.db)
-            .await
-            {
+        let raw_ical =
+            match fetch_event_ical(&state, &client, &account_id, &calendar_href, &uid).await {
                 Ok(Some(s)) => s,
-                _ => return (StatusCode::NOT_FOUND, "Event not found").into_response(),
-            }
-        } else {
-            match client.get_event(&calendar_href, &uid).await {
-                Ok(s) => s,
+                Ok(None) => return (StatusCode::NOT_FOUND, "Event not found").into_response(),
                 Err(e) => {
                     eprintln!("Failed to GET event for instance delete: {e}");
                     return (
@@ -452,8 +431,7 @@ pub async fn delete_event(
                     )
                         .into_response();
                 }
-            }
-        };
+            };
         let tz_ref = if tz.is_empty() { "UTC" } else { &tz };
         let modified = add_exdate(&raw_ical, &original_dtstart, tz_ref);
         return match client.put_event(&calendar_href, &uid, &modified).await {
@@ -510,6 +488,29 @@ pub async fn delete_event(
                 .into_response()
         }
     }
+}
+
+/// Current iCalendar data of an event. Demo mode has no CalDAV server, so the
+/// local cache is the source of truth there; `Ok(None)` means not cached.
+async fn fetch_event_ical(
+    state: &AppState,
+    client: &CalDavClient,
+    account_id: &str,
+    calendar_href: &str,
+    uid: &str,
+) -> anyhow::Result<Option<String>> {
+    if state.demo_mode {
+        let raw = sqlx::query_scalar::<_, String>(
+            "SELECT raw_ical FROM cached_events WHERE account_id = ? AND calendar_href = ? AND uid = ? LIMIT 1",
+        )
+        .bind(account_id)
+        .bind(calendar_href)
+        .bind(uid)
+        .fetch_optional(&state.db)
+        .await?;
+        return Ok(raw);
+    }
+    client.get_event(calendar_href, uid).await.map(Some)
 }
 
 pub(super) async fn optimistic_upsert(
