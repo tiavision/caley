@@ -53,7 +53,6 @@
         <button
           type="button"
           data-variant="item"
-          data-size="sm"
           data-bar
           style={event.color ? `--tm-tone: ${event.color}` : null}
           onclick={() => handleEventClick(event)}

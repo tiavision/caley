@@ -170,7 +170,7 @@
   {:else if results.length > 0}
     <ul data-list aria-live="polite">
       {#each results as item (`${item.account_id}\0${item.calendar_href}\0${item.uid}\0${item.dtstart}`)}
-        <li data-pad="none">
+        <li data-pad="xs">
           <button
             type="button"
             data-variant="item"
