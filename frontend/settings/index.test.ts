@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { configure } from '@tiaforge-ui/sinter';
 import { render, mockRequests, mockStream, memoryStorage, type RouteResponse } from '@tiaforge-ui/sinter/testing';
-import { calendarValue, importEventDate, importDraft } from '../src/lib/import.ts';
+import { calendarValue, importEventDate, importDraft, importSummary } from '../src/lib/import.ts';
+import { caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText } from '../src/lib/settings.ts';
 import { newCalendarDraft, newCalendarBody } from '../src/lib/events.ts';
 import * as m from '../src/paraglide/messages/_index.js';
 import * as ics from '../src/actions/ics.ts';
@@ -22,7 +23,7 @@ const files = {
 };
 
 // The helpers the page and its partials use (not the whole helpers module: other pages' helpers load more).
-const helpers = { m, calendarValue, importEventDate, importDraft, newCalendarDraft, newCalendarBody };
+const helpers = { m, calendarValue, importEventDate, importDraft, importSummary, newCalendarDraft, newCalendarBody, caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText };
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
 const cal = (href: string, name: string, extra: object = {}) => ({ account_id: 'acc', href, name, color: '#ff0000', is_active: true, ...extra });

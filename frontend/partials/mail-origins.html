@@ -4,7 +4,7 @@
         data-sn-let="{
           allowed: allowedOrigins?.origins ?? [],
           ignored: ignoredOrigins?.origins ?? [],
-          inMail: bodyOrigins(body?.origins ?? [], allowedOrigins?.origins ?? [], ignoredOrigins?.origins ?? []),
+          inMail: bodyOrigins(body?.origins ?? [], allowed, ignored),
         }">
   <header>
     <h2 data-sn-text="origins.only ? m.mail_imageSourcesThisEmail() : m.mail_imageSources()"></h2>

@@ -30,7 +30,7 @@
   <form data-layout="stack" data-gap="md"
         data-sn-call="ics.run(imp)"
         data-sn-on-submit="imp.error = ''; imp.success = ''"
-        data-sn-then="imp.success = m.cal_importSuccess({n: $result.imported}) + ($result.errors > 0 ? ' · ' + m.cal_importPartial({n: $result.errors}) : ''); imp.done = $result.errors === 0; emit('ics-imported', $result); refresh('caldavAccounts')"
+        data-sn-then="imp.success = importSummary($result); imp.done = $result.errors === 0; emit('ics-imported', $result); refresh('caldavAccounts')"
         data-sn-catch="imp.error = $error.status ? ($error.detail ?? m.cal_importError()) : m.cal_importError(); refresh('caldavAccounts')">
     <label>
       <span data-sn-text="m.cal_importFile()"></span>

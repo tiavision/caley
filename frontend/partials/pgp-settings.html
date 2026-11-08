@@ -281,7 +281,7 @@
       <form data-layout="stack" data-gap="md"
             data-sn-call="pgpVault.readKey(pk.armored, pk.passphrase)" data-sn-on-submit="pkError = ''"
             data-sn-then="pk.fingerprint = $result.fingerprint"
-            data-sn-catch="pkError = ($error.detail ?? '').toLowerCase().includes('argon2') ? m.pgp_importArgon2Error() : m.pgp_importError() + ': ' + ($error.detail ?? $error.message)">
+            data-sn-catch="pkError = keyImportError($error)">
         <label>
           <span data-sn-text="m.pgp_importArmoredKey()"></span>
           <textarea rows="6" placeholder="-----BEGIN PGP PRIVATE KEY BLOCK-----" data-sn-model="pk.armored"></textarea>
@@ -300,7 +300,7 @@
       <form data-layout="stack" data-gap="md"
             data-sn-call="pgpVault.store(pk.label)" data-sn-on-submit="enrollError = ''"
             data-sn-then="upsert('vault', $result); justEnrolled = pk.fingerprint; close()"
-            data-sn-catch="enrollError = $error.detail === 'prf_not_supported' ? m.pgp_enrollNoPrf() : m.pgp_enrollError() + ': ' + ($error.detail ?? $error.message)">
+            data-sn-catch="enrollError = enrollErrorText($error)">
         <p><strong data-sn-text="m.pgp_fingerprint() + ':'"></strong> <code data-sn-text="pk.fingerprint"></code></p>
         <template data-sn-if="!vault?.exists">
           <p data-muted data-sn-text="m.pgp_firstAccessMethodHint()"></p>

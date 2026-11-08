@@ -17,9 +17,7 @@
   <body data-shell="fixed"
         data-sn-state="{
           standalone: true,
-          open: urlRef($url),
-          detailOpen: false,
-          cursor: /** @type {string|null} */ (null),
+          reader: { ref: urlRef($url), shown: false },
           wiped: false,
           compose: /** @type {ComposeDraft|null} */ (null),
           imp: /** @type {ImportDraft|null} */ (null),
@@ -30,8 +28,8 @@
           rcpt: { field: '', token: '' },
           needContacts: false,
           origins: { only: false, q: '' },
-          key: '',
-        }">
+        }"
+        data-sn-let="{ open: reader.ref }">
     <sn-resource name="user" src="/api/user" type="User"></sn-resource>
     <sn-resource name="mailboxes" src="/api/email/mailboxes?account_id={open.account_id}" when="open" items="mailboxes" key="account_id,name" type="Mailbox[]"></sn-resource>
     <sn-resource name="identities" src="/api/email/identities" items="identities" key="identity_id" type="Identity[]"></sn-resource>
@@ -39,28 +37,29 @@
     <sn-include src="../../partials/mail-reader-data.html"></sn-include>
     <sn-sync src="/api/events/stream">
       <sn-event name="emails_refetch" resource="message" op="refetch" type="MailboxEvent"
-                when="open && account_id === open.account_id && mailbox === open.mailbox"></sn-event>
+                when="reader.ref && account_id === reader.ref.account_id && mailbox === reader.ref.mailbox"></sn-event>
       <sn-event name="emails_refetch" resource="body" op="refetch" type="MailboxEvent"
-                when="open && account_id === open.account_id && mailbox === open.mailbox"></sn-event>
+                when="reader.ref && account_id === reader.ref.account_id && mailbox === reader.ref.mailbox"></sn-event>
       <sn-event name="email_updated" resource="message" op="patch" type="EmailUpdatedEvent"
-                when="isRef(open, {account_id, mailbox, uid})"
+                when="isRef(reader.ref, {account_id, mailbox, uid})"
                 set="{flags, is_read: flags.includes('\\Seen'), is_flagged: flags.includes('\\Flagged')}"></sn-event>
-      <sn-event name="email_removed" resource="message" op="remove" type="EmailRemovedEvent" when="isRef(open, {account_id, mailbox, uid})"
-                then="open = null"></sn-event>
-      <sn-event name="mailboxes_changed" resource="mailboxes" op="refetch" type="AccountEvent" when="open && account_id === open.account_id"></sn-event>
+      <sn-event name="email_removed" resource="message" op="remove" type="EmailRemovedEvent" when="isRef(reader.ref, {account_id, mailbox, uid})"
+                then="reader = noReader()"></sn-event>
+      <sn-event name="mailboxes_changed" resource="mailboxes" op="refetch" type="AccountEvent" when="reader.ref && account_id === reader.ref.account_id"></sn-event>
       <sn-event name="accounts_changed" resource="mailboxes" op="refetch"></sn-event>
           <sn-event name="calendars_changed" resource="caldavAccounts" op="refetch"></sn-event>
     </sn-sync>
     <mail-hidden-watch hidden data-sn-on-page-hidden="wiped = true"></mail-hidden-watch>
     <main data-layout="stack" data-gap="none"
           data-sn-let="{
-             threadNodes: threadRef && !threadRef.current ? (otherThread ?? []) : (thread ?? []),
-             threadEventGroups: threadRef && !threadRef.current ? (otherThreadEvents ?? []) : (threadEvents ?? []),
-             threadLoading: threadRef && !threadRef.current ? $meta.otherThread.loading || $meta.otherThreadEvents.loading : $meta.thread.loading || $meta.threadEvents.loading,
+             ownThread: !threadRef || threadRef.current,
+             threadNodes: ownThread ? (thread ?? []) : (otherThread ?? []),
+             threadEventGroups: ownThread ? (threadEvents ?? []) : (otherThreadEvents ?? []),
+             threadLoading: ownThread ? $meta.thread.loading || $meta.threadEvents.loading : $meta.otherThread.loading || $meta.otherThreadEvents.loading,
              threadLinks: false,
              eventThreads: true,
            }"
-          data-sn-on-thread-message="close('thread-dialog'); open = refOf($event.detail); detailOpen = true; wiped = false"
+          data-sn-on-thread-message="reader = readerOn($event.detail); wiped = false"
            data-sn-on-event-threads="threadRef = threadOfEmail($event.detail.email, $event.detail.event); showModal('thread-dialog')">
       <!-- defaultCal: the calendar the import dialog preselects and remembers (shared with the calendar pages' event form). -->
       <div class="mail-contents" data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
@@ -68,10 +67,10 @@
       <div class="mail-layout standalone" data-density="compact" data-grow>
         <section class="message-detail standalone" data-layout="stack" data-gap="none" tabindex="-1" autofocus
                  data-sn-attr="{'aria-label': m.nav_mail()}"
-                 data-sn-on-keydown="key = mailShortcut($event, 0, true);
-                   key && $event.preventDefault();
-                   key === 'scroll' && ($event.key === 'Home' || $event.key === 'End' ? $el.scrollTo({top: $event.key === 'Home' ? 0 : $el.scrollHeight}) : $el.scrollBy({top: readerScroll($event.key, $el.clientHeight, $el.scrollHeight).by ?? 0}));
-                   ['reply', 'replyAll', 'forward', 'archive', 'delete', 'read', 'unread'].includes(key) && (/** @type {HTMLElement|null} */ ($el.querySelector(`[data-shortcut='${key}']`)))?.click()">
+                 data-sn-on-keydown-pageup="$el.scrollTo({top: scrollTopFor($event.key, $el)})"
+                 data-sn-on-keydown-pagedown="$el.scrollTo({top: scrollTopFor($event.key, $el)})"
+                 data-sn-on-keydown-home="$el.scrollTo({top: scrollTopFor($event.key, $el)})"
+                 data-sn-on-keydown-end="$el.scrollTo({top: scrollTopFor($event.key, $el)})">
           <sn-include src="../../partials/mail-reader.html"></sn-include>
         </section>
       </div>

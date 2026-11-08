@@ -1,22 +1,26 @@
 <!-- The message reader, inside .message-detail on /mail/ and /mail/view/ (resources: partials/mail-reader-data.html).
-     Page state it reads: open, standalone, detailOpen, cursor, wiped, compose, needContacts, origins, threadRef, imp, defaultCal; resources
-     message, body, thread, threadEvents, mailboxes, identities, allowedOrigins, ignoredOrigins.
+     Page state it reads: open (the reader's ref), reader (Reader), standalone, wiped, compose, needContacts, origins,
+     threadRef, imp, defaultCal; resources message, body, thread, threadEvents, mailboxes, identities, allowedOrigins,
+     ignoredOrigins.
      Changes to the open message go out as events for the page's list: `mail-patched` {ref, fields} after a flag
-     change, `mail-removed` {ref} after a move or delete; the thread button opens partials/thread-dialog.html (state `threadRef`); calendar attachments open
-     partials/import-dialog.html (state `imp`). -->
+     change, `mail-removed` {ref} after a move or delete, `reader-back` from the overlay's back button; the thread
+     button opens partials/thread-dialog.html (state `threadRef`); calendar attachments open
+     partials/import-dialog.html (state `imp`).
+     Shortcuts (data-shortcut, src/islands/common.ts): r reply, a reply all, f forward, e archive, # delete,
+     Shift+I / Shift+U mark read / unread (on the read toggle, whichever it does). -->
 <template data-sn-if="open && message && isRef(message, open)">
   <template data-sn-for="msg in [message]" data-sn-key="messageKey(msg)">
     <div class="reader" data-layout="stack" data-gap="none" data-grow
          data-sn-state="{ meta: false, attsOpen: false, notice: true, mode: '', moveOpen: false, keyNote: '', keyError: '', unlockError: '', frame: 0 }"
          data-sn-let="{
-           b: body && body.key === messageKey(msg) ? body : null,
+           b: bodyOf(body, msg),
            sent: isSentMailbox(msg.mailbox),
-           encrypted: msg.is_encrypted || !!(body && body.key === messageKey(msg) && body.encrypted),
-           html: body && body.key === messageKey(msg) ? body.html : '',
-           viewMode: mode || (body && body.key === messageKey(msg) ? body.mode : 'text'),
-           imgs: bodyOrigins(body && body.key === messageKey(msg) ? body.origins : [], allowedOrigins?.origins ?? [], ignoredOrigins?.origins ?? []),
+           encrypted: msg.is_encrypted || !!b?.encrypted,
+           html: b?.html ?? '',
+           viewMode: mode || (b?.mode ?? 'text'),
+           imgs: bodyOrigins(b?.origins ?? [], allowedOrigins?.origins ?? [], ignoredOrigins?.origins ?? []),
            archive: archiveMailbox(msg, mailboxes),
-           shown: shownAttachments(msg, msg.is_encrypted || !!(body && body.key === messageKey(msg) && body.encrypted)),
+           shown: shownAttachments(msg, encrypted),
            read: withFlag(msg, '\\Seen', !msg.is_read),
            star: withFlag(msg, '\\Flagged', !msg.is_flagged),
          }">
@@ -24,7 +28,7 @@
         <mail-header-fit class="detail-subject-row">
           <template data-sn-if="!standalone">
             <button type="button" class="detail-close-btn overlay-only" data-variant="ghost" data-icon="arrow-left"
-                    data-sn-on-click="detailOpen = false; cursor = messageKey(msg)" data-sn-attr="{'aria-label': m.mail_back()}"></button>
+                    data-sn-on-click="emit('reader-back')" data-sn-attr="{'aria-label': m.mail_back()}"></button>
           </template>
           <div class="detail-subject-line">
             <h2 class="detail-subject" data-sn-text="b?.subject || msg.subject || m.mail_noSubject()"></h2>
@@ -36,7 +40,7 @@
                     data-sn-patch="/api/email/message/flags" data-sn-body="flagBody(msg, '\\Flagged', !msg.is_flagged)"
                     data-sn-optimistic="patch('message', msg, star)"
                     data-sn-then="emit('mail-patched', {ref: refOf(msg), fields: {flags: msg.flags, is_read: msg.is_read, is_flagged: msg.is_flagged}})"></button>
-            <button type="button" data-variant="ghost" data-icon="reply" data-tooltip data-shortcut="reply" commandfor="mail-compose" command="show-modal"
+            <button type="button" data-variant="ghost" data-icon="reply" data-tooltip data-shortcut="r" commandfor="mail-compose" command="show-modal"
                     data-sn-on-click="compose = composeDraft('reply', msg, identities, b?.text ?? '', b?.html ?? null); needContacts = true"
                     data-sn-attr="{'aria-label': m.mail_reply()}"></button>
             <button type="button" class="overlay-only" popovertarget="mail-actions-menu" data-variant="ghost" data-icon="ellipsis-vertical"
@@ -44,17 +48,18 @@
             <button type="button" class="wide-only" popovertarget="mail-actions-menu" data-variant="outline" data-size="sm"
                     data-sn-attr="{'aria-label': m.mail_messageActions()}" data-sn-text="m.mail_actions()"></button>
             <div popover id="mail-actions-menu" data-menu role="menu" data-sn-on-toggle="$event.newState === 'closed' && (moveOpen = false)">
-              <button type="button" role="menuitem" data-icon="reply-all" data-shortcut="replyAll" commandfor="mail-compose" command="show-modal"
-                      data-sn-on-click="(/** @type {HTMLElement} */ ($el.closest('[popover]'))).hidePopover(); compose = composeDraft('replyAll', msg, identities, b?.text ?? '', b?.html ?? null); needContacts = true"
+              <button type="button" role="menuitem" data-icon="reply-all" data-shortcut="a" commandfor="mail-compose" command="show-modal"
+                      data-sn-on-click="ancestor($el, '[popover]')?.hidePopover(); compose = composeDraft('replyAll', msg, identities, b?.text ?? '', b?.html ?? null); needContacts = true"
                       data-sn-text="m.mail_replyAll()"></button>
-              <button type="button" role="menuitem" data-icon="forward" data-shortcut="forward"
-                      data-sn-on-click="(/** @type {HTMLElement} */ ($el.closest('[popover]'))).hidePopover()"
+              <button type="button" role="menuitem" data-icon="forward" data-shortcut="f"
+                      data-sn-on-click="ancestor($el, '[popover]')?.hidePopover()"
                       data-sn-call="mail.forwardFiles(msg, b?.html ?? '')"
                       data-sn-then="compose = composeDraft('forward', msg, identities, b?.text ?? '', $result.html, $result.files, '', $result.preview); needContacts = true; showModal('mail-compose')"
                       data-sn-text="m.mail_forward()"></button>
               <hr>
               <button type="button" role="menuitem" data-icon="mail"
-                      data-sn-on-click="(/** @type {HTMLElement} */ ($el.closest('[popover]'))).hidePopover()"
+                      data-sn-attr="{'data-shortcut': msg.is_read ? 'shift-u' : 'shift-i'}"
+                      data-sn-on-click="ancestor($el, '[popover]')?.hidePopover()"
                       data-sn-patch="/api/email/message/flags" data-sn-body="flagBody(msg, '\\Seen', !msg.is_read)"
                       data-sn-optimistic="patch('message', msg, read)"
                       data-sn-then="emit('mail-patched', {ref: refOf(msg), fields: {flags: msg.flags, is_read: msg.is_read, is_flagged: msg.is_flagged}})"
@@ -62,24 +67,24 @@
               <template data-sn-if="htmlAddsValue(html)">
                 <template data-sn-if="!encrypted && imgs.all.length > 0">
                   <button type="button" role="menuitem" data-icon="image" commandfor="mail-origins" command="show-modal"
-                          data-sn-on-click="(/** @type {HTMLElement} */ ($el.closest('[popover]'))).hidePopover(); origins = {only: true, q: ''}"
+                          data-sn-on-click="ancestor($el, '[popover]')?.hidePopover(); origins = {only: true, q: ''}"
                           data-sn-text="m.mail_imageSourcesEmail()"></button>
                 </template>
                 <hr>
                 <button type="button" role="menuitemradio" data-sn-attr="{'aria-checked': viewMode === 'html' ? 'true' : 'false'}"
-                        data-sn-on-click="mode = 'html'; (/** @type {HTMLElement} */ ($el.closest('[popover]'))).hidePopover()">
+                        data-sn-on-click="mode = 'html'; ancestor($el, '[popover]')?.hidePopover()">
                   <span data-icon="check" aria-hidden="true" data-sn-class="{unchecked: viewMode !== 'html'}"></span><span data-sn-text="m.mail_viewAsHtml()"></span>
                 </button>
                 <button type="button" role="menuitemradio" data-sn-attr="{'aria-checked': viewMode === 'text' ? 'true' : 'false'}"
-                        data-sn-on-click="mode = 'text'; (/** @type {HTMLElement} */ ($el.closest('[popover]'))).hidePopover()">
+                        data-sn-on-click="mode = 'text'; ancestor($el, '[popover]')?.hidePopover()">
                   <span data-icon="check" aria-hidden="true" data-sn-class="{unchecked: viewMode !== 'text'}"></span><span data-sn-text="m.mail_viewAsText()"></span>
                 </button>
               </template>
               <hr>
               <template data-sn-if="archive">
-                <button type="button" role="menuitem" data-icon="archive" data-shortcut="archive"
+                <button type="button" role="menuitem" data-icon="archive" data-shortcut="e"
                         data-sn-post="/api/email/message/move" data-sn-body="moveBody(msg, archive)"
-                        data-sn-then="emit('mail-removed', {ref: refOf(msg)}); open = null; detailOpen = false"
+                        data-sn-then="emit('mail-removed', {ref: refOf(msg)}); reader = noReader()"
                         data-sn-text="m.mail_archive()"></button>
               </template>
               <button type="button" role="menuitem" data-icon="folder-input" data-sn-attr="{'aria-expanded': moveOpen ? 'true' : 'false'}"
@@ -92,7 +97,7 @@
                   <template data-sn-for="mb in moveTargets(mailboxes, msg.account_id, [msg.mailbox])">
                     <button type="button" role="menuitem" data-sn-let="{ kind: folderKind(mb.name) }"
                             data-sn-post="/api/email/message/move" data-sn-body="moveBody(msg, mb.name)"
-                            data-sn-then="emit('mail-removed', {ref: refOf(msg)}); open = null; detailOpen = false">
+                            data-sn-then="emit('mail-removed', {ref: refOf(msg)}); reader = noReader()">
                       <sn-include src="./mail-folder-icon.html"></sn-include>
                       <span data-truncate data-sn-text="folderName(mb.name)"></span>
                     </button>
@@ -100,19 +105,12 @@
                 </div>
               </template>
               <hr>
-              <button type="button" role="menuitem" data-icon="trash-2" data-tone="danger" data-shortcut="delete"
+              <button type="button" role="menuitem" data-icon="trash-2" data-tone="danger" data-shortcut="#"
                       data-sn-delete="/api/email/message?account_id={msg.account_id}&mailbox={msg.mailbox}&uid={msg.uid}"
                       data-sn-confirm="inTrash(msg) ? m.mail_deleteMessageConfirm() : null"
-                      data-sn-then="emit('mail-removed', {ref: refOf(msg)}); open = null; detailOpen = false"
+                      data-sn-then="emit('mail-removed', {ref: refOf(msg)}); reader = noReader()"
                       data-sn-text="m.mail_delete()"></button>
             </div>
-            <!-- Shift+I / Shift+U: mark read / unread. -->
-            <button type="button" hidden data-shortcut="read"
-                    data-sn-patch="/api/email/message/flags" data-sn-body="flagBody(msg, '\\Seen', true)"
-                    data-sn-then="patch('message', msg, withFlag(msg, '\\Seen', true)); emit('mail-patched', {ref: refOf(msg), fields: withFlag(msg, '\\Seen', true)})"></button>
-            <button type="button" hidden data-shortcut="unread"
-                    data-sn-patch="/api/email/message/flags" data-sn-body="flagBody(msg, '\\Seen', false)"
-                    data-sn-then="patch('message', msg, withFlag(msg, '\\Seen', false)); emit('mail-patched', {ref: refOf(msg), fields: withFlag(msg, '\\Seen', false)})"></button>
             <template data-sn-if="!standalone">
               <button type="button" data-variant="ghost" data-icon="external-link" data-tooltip data-sn-call="mail.popout(msg)"
                       data-sn-attr="{'aria-label': m.mail_popout()}"></button>

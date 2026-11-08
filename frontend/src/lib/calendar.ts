@@ -78,6 +78,11 @@ export function weekNeighbor(days: readonly DayEventsJson[], pos: string, key: s
   return `${c}:${r}`;
 }
 
+/** The chip an arrow key in the week grid moves the focus to ("column:row", see weekNeighbor()), or null. */
+export function weekMove(e: KeyboardEvent, days: readonly DayEventsJson[]): string | null {
+  return weekNeighbor(days, posOf(e), e.key);
+}
+
 /** The "column:row" of every event in the week grid (columns count only days with events), by eventKey. */
 export function weekPositions(days: readonly DayEventsJson[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -92,7 +97,7 @@ export function weekColumnDate(days: readonly DayEventsJson[], pos: string): str
 
 /**
  * Shift+N / Shift+P on the calendar page: how far they move, in days (week view: four weeks) or months (month
- * view: three), else 0. Plain n/p are the buttons' own shortcuts (data-shortcut).
+ * view: three), else 0 (from a dialog or with Ctrl/Alt/Meta). Plain n/p are the buttons' own shortcuts (data-shortcut).
  */
 export function farStep(e: KeyboardEvent, view: string): number {
   const key = e.shiftKey ? shortcutKey(e) : null;

@@ -33,7 +33,6 @@ export {
   draftBody,
   emptyEntry,
   emptyAddress,
-  shortcutKey,
   addressbooksLabel,
 } from './lib/contacts.ts';
 
@@ -75,27 +74,34 @@ export {
 export { threadRows, messageUrl } from './lib/thread.ts';
 
 // ICS import dialog (partials/import-dialog.html).
-export { calendarValue, importEventDate, importDraft } from './lib/import.ts';
+export { calendarValue, importEventDate, importDraft, importSummary } from './lib/import.ts';
+
+// Settings page: the CalDAV account dialog, calendar toggles, encryption tab errors.
+export { caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText } from './lib/settings.ts';
 
 // Mail pages (mail/index.html, mail/view/index.html, partials/mail-*.html).
 export {
   currentView, folderView, mailboxView, sameView, folderName, viewTitle, badgeCount, mailboxKey, sidebarSections, mailTitle,
   toggled, refOf, isRef, urlRef, filterActive, markRange, neighbor, archiveMailbox, archiveTargets, moveTargets, bulkOf,
-  withFlag, flagBody, moveBody, inTrash, emptyTrashDays, validTrashDays, mailShortcut, rowKey, readerScroll, clampWidth,
+  withFlag, flagBody, moveBody, inTrash, emptyTrashDays, validTrashDays, clampWidth,
   keyWidth, isSentMailbox, messageDateTime, shownAttachments, attachmentUrl, attachmentCount, pgpBadgeLabel, isIconBadge,
   bodyOrigins, matching, isThreadCurrent, composeDraft, composeTitle, recipientToken, withRecipient, contactAddresses,
-  recipientHits, senderHits, senderLabel, canSign, canEncrypt, signs, newAccount, editAccount, discovered, accountBody,
+  recipientHits, senderHits, senderLabel, canSign, canEncrypt, signs, newAccount, editAccount, discovered, accountBody, accountUi,
   identityBody, folderDraft, folderBody, subscribed, canPreviewAttachment, folderKind, htmlAddsValue,
   isIcsAttachment, formatDate, humanSize, textSegments, messageKey, senderName,
+  // page state (src/lib/mail.ts "Page state") and the keys without a control of their own
+  bodyOf, readerOn, noReader, inMailbox, noSelection, unmarked, cleared, openedAt, rowClick, opensRow, afterBulk,
+  noSearch, searchActive, addableSender, senderAdded, listStatus, noView, noDrag, canDrop, markedRead, sharedDraft,
+  pageKey, readerScroller, scrollTopFor, siblingRow,
 } from './lib/mail.ts';
 
 // Calendar page.
 export {
-  userTz, addDays, mondayOf, monthOf, addMonths, weekRangeText, dayLabel, dayCollapsed, eventsOn, weekNeighbor,
+  userTz, addDays, mondayOf, monthOf, addMonths, weekRangeText, dayLabel, dayCollapsed, eventsOn, weekMove,
   weekPositions, weekColumnDate, farStep, inWeek, weekdayNames, monthGridHeader, monthNames, pickerYears, monthTitle,
-  pickerMonth, cellEvents, posOf, swipeStep,
+  pickerMonth, cellEvents, swipeStep,
 } from './lib/calendar.ts';
 export { threadOfEmail } from './lib/thread.ts';
 
 // Focus and scroll targets for handlers (typed, no casts).
-export { elementIn } from './lib/dom.ts';
+export { elementIn, ancestor } from './lib/dom.ts';

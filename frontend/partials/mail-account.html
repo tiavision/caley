@@ -1,5 +1,5 @@
-<!-- Mail account and identity dialogs (/mail/). State: acct (AccountForm), acctStep ('basic' | 'details'), discovery
-     (Autodiscovery|null), advanced, acctError, acctBusy; idAccount (the account whose identities are shown), idForm
+<!-- Mail account and identity dialogs (/mail/). State: acct (AccountForm), acctUi (AccountUi: the step, the
+     autodiscovery result, whether the advanced settings are open, the error, busy; set with accountUi()); idAccount (the account whose identities are shown), idForm
      (IdentityForm|null), idError. Resources: accounts, identities, mailboxes. -->
 <dialog id="mail-identities" closedby="any">
   <header>
@@ -72,12 +72,12 @@
     </template>
     <button type="button" commandfor="mail-account" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
   </header>
-  <template data-sn-if="acctStep === 'basic'">
+  <template data-sn-if="acctUi.step === 'basic'">
     <form data-layout="stack" data-gap="md"
           data-sn-get="/api/email/autodiscover?email={acct.username}"
-          data-sn-on-submit="acctBusy = true"
-          data-sn-then="acctBusy = false; discovery = $result; acct = discovered(acct, $result); advanced = !$result?.found; acctStep = 'details'"
-          data-sn-catch="acctBusy = false; discovery = null; acct = discovered(acct, null); advanced = true; acctStep = 'details'">
+          data-sn-on-submit="acctUi.busy = true"
+          data-sn-then="acct = discovered(acct, $result); acctUi = accountUi('details', $result)"
+          data-sn-catch="acct = discovered(acct, null); acctUi = accountUi('details')">
       <label>
         <span data-sn-text="m.mail_yourName()"></span>
         <input required data-sn-model="acct.sender_name" data-sn-attr="{placeholder: m.mail_namePlaceholder()}">
@@ -86,21 +86,21 @@
         <span data-sn-text="m.mail_emailAddress()"></span>
         <input type="email" required data-sn-model="acct.username" data-sn-attr="{placeholder: m.mail_emailPlaceholder()}">
       </label>
-      <template data-sn-if="acctBusy"><p data-muted aria-busy="true" data-sn-text="m.mail_detectingSettings()"></p></template>
+      <template data-sn-if="acctUi.busy"><p data-muted aria-busy="true" data-sn-text="m.mail_detectingSettings()"></p></template>
       <footer>
         <button type="button" data-variant="secondary" commandfor="mail-account" command="close" data-sn-text="m.mail_cancel()"></button>
-        <button type="submit" data-sn-attr="{disabled: acctBusy}" data-sn-text="m.mail_continue()"></button>
+        <button type="submit" data-sn-attr="{disabled: acctUi.busy}" data-sn-text="m.mail_continue()"></button>
       </footer>
     </form>
   </template>
   <template data-sn-else>
     <form data-layout="stack" data-gap="md"
           data-sn-post="/api/email/account" data-sn-body="accountBody(acct)"
-          data-sn-on-submit="acctBusy = true; acctError = ''"
-          data-sn-then="acctBusy = false; close('mail-account'); refresh('accounts'); refresh('identities'); refresh('mailboxes')"
-          data-sn-catch="acctBusy = false; acctError = $error.detail ?? m.mail_saveAccountError()">
-      <template data-sn-if="discovery?.provider_name">
-        <p data-muted data-sn-text="m.mail_settingsDetected({provider: discovery.provider_name})"></p>
+          data-sn-on-submit="acctUi.busy = true; acctUi.error = ''"
+          data-sn-then="close('mail-account'); refresh('accounts'); refresh('identities'); refresh('mailboxes')"
+          data-sn-catch="acctUi.busy = false; acctUi.error = $error.detail ?? m.mail_saveAccountError()">
+      <template data-sn-if="acctUi.discovery?.provider_name">
+        <p data-muted data-sn-text="m.mail_settingsDetected({provider: acctUi.discovery.provider_name})"></p>
       </template>
       <template data-sn-else>
         <template data-sn-if="!acct.account_id"><p data-muted data-sn-text="m.mail_enterServerDetails()"></p></template>
@@ -110,7 +110,7 @@
         <input type="password" autocomplete="current-password" data-sn-model="acct.password"
                data-sn-attr="{placeholder: acct.account_id ? m.mail_passwordPlaceholderKeep() : ''}">
       </label>
-      <details data-sn-attr="{open: advanced}" data-sn-on-toggle="advanced = $el.open">
+      <details data-sn-attr="{open: acctUi.advanced}" data-sn-on-toggle="acctUi.advanced = $el.open">
         <summary data-sn-text="m.mail_advancedSettings()"></summary>
         <div data-layout="stack" data-gap="md">
           <label>
@@ -144,15 +144,15 @@
           </div>
         </div>
       </details>
-      <template data-sn-if="acctError"><p data-callout data-tone="danger" role="alert" data-sn-text="acctError"></p></template>
+      <template data-sn-if="acctUi.error"><p data-callout data-tone="danger" role="alert" data-sn-text="acctUi.error"></p></template>
       <footer>
         <template data-sn-if="!acct.account_id">
-          <button type="button" data-variant="secondary" data-sn-on-click="acctStep = 'basic'; acctError = ''" data-sn-text="m.mail_back()"></button>
+          <button type="button" data-variant="secondary" data-sn-on-click="acctUi.step = 'basic'; acctUi.error = ''" data-sn-text="m.mail_back()"></button>
         </template>
         <template data-sn-else>
           <button type="button" data-variant="secondary" commandfor="mail-account" command="close" data-sn-text="m.mail_cancel()"></button>
         </template>
-        <button type="submit" data-sn-attr="{disabled: acctBusy}" data-sn-text="acctBusy ? m.mail_testingConnection() : m.mail_save()"></button>
+        <button type="submit" data-sn-attr="{disabled: acctUi.busy}" data-sn-text="acctUi.busy ? m.mail_testingConnection() : m.mail_save()"></button>
       </footer>
     </form>
   </template>

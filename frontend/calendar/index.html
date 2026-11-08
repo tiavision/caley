@@ -19,9 +19,8 @@
        dayDate: the day of #day-events; fit: what <month-fit> measured; tx, ty: where a touch started.
        detail, eventDraft, threadRef: partials/event-detail.html, event-form.html, thread-dialog.html.
        Shortcuts: c new event, t today, n/p next/previous week or month (data-shortcut on those buttons, e edit in
-       partials/event-detail.html); N/P four weeks or three months (the keydown below). `cal-step` {detail: days in
+       partials/event-detail.html); Shift+N/P four weeks or three months (key filters below). `cal-step` {detail: days in
        the week view, months in the month view} moves the calendar (N/P and swipes). -->
-  <!-- TODO(sn key filters): data-sn-on-keydown-shift-n / -shift-p -->
   <body data-shell="fixed"
         data-sn-state="{
           here: '/calendar/',
@@ -39,9 +38,8 @@
           eventDraft: /** @type {EventDraft|null} */ (null),
           threadRef: /** @type {ThreadRef|null} */ (null),
         }"
-        data-sn-on-keydown="farStep($event, view) && $event.preventDefault();
-                            farStep($event, view) && emit('cal-step', farStep($event, view));
-                            farStep($event, view) && view === 'week' && $el.querySelector('.pane')?.scrollTo(0, 0)"
+        data-sn-on-keydown-shift-n="farStep($event, view) && emit('cal-step', farStep($event, view)); farStep($event, view) && view === 'week' && $el.querySelector('.pane')?.scrollTo(0, 0)"
+        data-sn-on-keydown-shift-p="farStep($event, view) && emit('cal-step', farStep($event, view)); farStep($event, view) && view === 'week' && $el.querySelector('.pane')?.scrollTo(0, 0)"
         data-sn-on-cal-step="weekStart = view === 'week' ? addDays(weekStart, $event.detail) : weekStart;
                              gridMonth = view === 'week' ? monthOf(weekStart) : addMonths(gridMonth, $event.detail)"
         data-sn-on-event-edit="eventDraft = editEventDraft($event.detail.event, $event.detail.scope); showModal('event-form')"
@@ -170,12 +168,13 @@
 
           <div class="pane" data-grow data-scroll="y">
             <template data-sn-if="view === 'week'">
-              <!-- TODO(sn key filters): data-sn-on-keydown-arrowleft / -arrowright / -arrowup / -arrowdown -->
+              <!-- Arrow keys move between chips; at the edge of the grid they keep their default (they scroll), so one
+                   keydown handler rather than key filters, which always take the key. -->
               <div class="week" data-layout="grid" data-cols="7" data-gap="sm" role="group"
                    data-sn-let="{ pos: weekPositions(weekDays), tabPos: Object.values(weekPositions(weekDays)).includes(focusPos) ? focusPos : '0:0' }"
                    data-sn-attr="{'aria-label': m.weekly_heading(), 'aria-busy': $meta.weekDays.loading ? 'true' : 'false'}"
-                   data-sn-on-keydown="weekNeighbor(weekDays, posOf($event), $event.key) && $event.preventDefault();
-                                       focusPos = weekNeighbor(weekDays, posOf($event), $event.key) ?? focusPos;
+                   data-sn-on-keydown="weekMove($event, weekDays) && $event.preventDefault();
+                                       focusPos = weekMove($event, weekDays) ?? focusPos;
                                        focusDate = $event.defaultPrevented ? weekColumnDate(weekDays, focusPos) : focusDate;
                                        $event.defaultPrevented && elementIn($el, `[data-pos='${focusPos}']`)?.focus()">
                 <template data-sn-for="day in weekDays">

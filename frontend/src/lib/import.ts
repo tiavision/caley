@@ -1,4 +1,5 @@
 // ICS import (partials/import-dialog.html): the dialog's draft and pure formatting. The work is in src/actions/ics.ts.
+import { m } from '../paraglide/messages.js';
 import type { CalDavAccountJson, CalendarJson } from '../types/calendar.ts';
 
 /** The calendar select's value for "new calendar". */
@@ -76,4 +77,9 @@ export function importEventDate(event: Pick<ImportPreviewEvent, 'dtstart' | 'dte
   const start = event.dtstart.replace('T', ' ').slice(0, 16);
   const end = event.dtend ? event.dtend.replace('T', ' ').slice(0, 16) : '';
   return end ? `${start} - ${end}` : start;
+}
+
+/** The import's success line: how many events, and how many failed. */
+export function importSummary(r: { imported: number; errors: number }): string {
+  return m.cal_importSuccess({ n: r.imported }) + (r.errors > 0 ? ` · ${m.cal_importPartial({ n: r.errors })}` : '');
 }

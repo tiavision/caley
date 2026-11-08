@@ -69,7 +69,7 @@
             <div data-layout="row" data-gap="sm">
               <button type="button" data-variant="outline" data-size="sm" data-icon="user-plus"
                       commandfor="caldav-account-dialog" command="show-modal"
-                      data-sn-on-click="draft = { account_id: '', display_name: '', caldav_base_url: '', caldav_username: '', caldav_password: '', has_password: false }; draftError = ''"
+                      data-sn-on-click="draft = caldavDraft(null); draftError = ''"
                       data-sn-text="m.mail_addAccount()"></button>
               <button type="button" data-variant="outline" data-size="sm" data-icon="calendar-plus"
                       commandfor="create-calendar-dialog" command="show-modal" data-sn-text="m.cal_createCalendar()"></button>
@@ -91,7 +91,7 @@
                   <div data-layout="row" data-gap="xs">
                     <button type="button" data-variant="secondary" data-size="sm"
                             commandfor="caldav-account-dialog" command="show-modal"
-                            data-sn-on-click="draft = { account_id: account.account_id, display_name: account.display_name || '', caldav_base_url: account.caldav_base_url || '', caldav_username: account.caldav_username || '', caldav_password: '', has_password: !!account.has_password }; draftError = ''"
+                            data-sn-on-click="draft = caldavDraft(account); draftError = ''"
                             data-sn-text="m.contacts_edit()"></button>
                     <button type="button" data-variant="outline" data-tone="danger" data-size="sm"
                             data-sn-delete="/api/caldav/account?account_id={account.account_id}"
@@ -107,7 +107,7 @@
                       <input type="checkbox" data-sn-attr="{checked: cal.is_active}"
                              data-sn-post="/api/calendar/toggle" data-sn-encoding="form"
                              data-sn-body="{ account_id: cal.account_id, href: cal.href, active: $el.checked }"
-                             data-sn-optimistic="patch('caldavAccounts', account, { calendars: account.calendars.map(c => c.href === cal.href ? { ...c, is_active: $el.checked } : c) })">
+                             data-sn-optimistic="patch('caldavAccounts', account, withCalendarActive(account, cal.href, $el.checked))">
                       <span class="event-color-dot" data-sn-show="cal.color" data-sn-style="{'--tm-tone': cal.color}"></span>
                       <span data-sn-text="cal.name"></span>
                     </label>
@@ -145,7 +145,7 @@
         </header>
         <form data-layout="stack" data-gap="md"
               data-sn-post="/api/caldav/account" data-sn-encoding="form"
-              data-sn-body="{ account_id: draft.account_id || null, display_name: draft.display_name, caldav_base_url: draft.caldav_base_url, caldav_username: draft.caldav_username, caldav_password: draft.caldav_password }"
+              data-sn-body="caldavBody(draft)"
               data-sn-on-submit="draftError = ''"
               data-sn-then="refresh('caldavAccounts'); close()"
               data-sn-catch="draftError = $error.status ? ($error.detail ?? m.event_error()) : m.event_error()">

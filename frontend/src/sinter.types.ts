@@ -37,21 +37,14 @@ export type { ImportDraft } from './lib/import.ts';
 export type { VaultView } from './actions/pgp-vault.ts';
 export type { StoredPublicKey } from './lib/pgp/public-keys.ts';
 
-/** The CalDAV account dialog on the settings page (POST /api/caldav/account); account_id '' adds one. */
-export interface AccountDraft {
-  account_id: string;
-  display_name: string;
-  caldav_base_url: string;
-  caldav_username: string;
-  caldav_password: string;
-  has_password: boolean;
-}
+export type { AccountDraft } from './lib/settings.ts';
 
 // Mail pages (mail/, mail/view/, partials/mail-*.html).
 export type {
   Account, Identity, Mailbox, VirtualFolder, Message, Attachment, MessageRef, MailView, UnreadCounts,
   MailboxEvent, AccountEvent, EmailUpdatedEvent, EmailRemovedEvent, SearchFilter, ComposeDraft, ComposeKeys,
-  ContactAddresses, ImageOrigins, AccountForm, Autodiscovery, IdentityForm, FolderDraft,
+  ContactAddresses, ImageOrigins, AccountForm, Autodiscovery, IdentityForm, FolderDraft, AccountUi,
+  Reader, Selection, MailSearch, Drag,
 } from './lib/mail.ts';
 export type { ReaderBody } from './actions/mail.ts';
 export type { ThreadNode as MailThreadNode } from './lib/mail.ts';

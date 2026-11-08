@@ -7,8 +7,8 @@
        - `threadEventGroups` (MessageEventGroupJson[]): GET /api/email/thread-events of the message;
        - `threadLoading` (boolean): either is loading;
        - `threadRef` (ThreadRef|null, src/lib/thread.ts): what to mark (the current message, the event it came from);
-       - `threadLinks` (boolean): true, message rows are links to the mail page; false, they only emit
-         `thread-message` (detail: the ThreadNode) for the page to open in place;
+       - `threadLinks` (boolean): true, message rows are links to the mail page; false, they close the dialog and
+         emit `thread-message` (detail: the ThreadNode) for the page to open in place;
        - state `detail`: an event row opens it in #event-detail.
      Open it with showModal('thread-dialog'). -->
 <dialog id="thread-dialog" closedby="any" data-layout="stack" style="--tm-dialog-width: 40rem">
@@ -28,7 +28,7 @@
             <template data-sn-if="r.kind === 'message'">
               <a data-variant="item" data-layout="row" data-gap="sm" data-wrap="none"
                  data-sn-attr="{href: messageUrl(r.node), 'aria-current': r.current ? 'true' : null}"
-                 data-sn-on-click="!threadLinks && $event.preventDefault(); emit('thread-message', r.node)">
+                 data-sn-on-click="!threadLinks && $event.preventDefault(); !threadLinks && close(); emit('thread-message', r.node)">
                 <span class="thread-from" data-truncate data-sn-text="r.from || m.mail_unknownSender()"></span>
                 <span data-truncate data-grow data-muted data-sn-text="r.node.subject || m.mail_noSubject()"></span>
                 <small data-muted data-sn-text="r.date"></small>

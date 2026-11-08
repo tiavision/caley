@@ -188,7 +188,7 @@
                 <template data-sn-for="d in weekdays()" data-sn-key="d.code">
                   <button type="button" data-variant="outline" data-size="sm"
                           data-sn-attr="{'aria-pressed': eventDraft.rec.by_day.includes(d.code) ? 'true' : 'false'}"
-                          data-sn-on-click="eventDraft.rec.by_day = eventDraft.rec.by_day.includes(d.code) ? eventDraft.rec.by_day.filter(c => c !== d.code) : [...eventDraft.rec.by_day, d.code]"
+                          data-sn-on-click="eventDraft.rec.by_day = toggled(eventDraft.rec.by_day, d.code)"
                           data-sn-text="d.label"></button>
                 </template>
               </div>

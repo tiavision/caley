@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest';
 import { configure } from '@tiaforge-ui/sinter';
 import { render, mockRequests, mockStream, type RouteResponse } from '@tiaforge-ui/sinter/testing';
 import * as helpers from '../src/sinter.helpers.ts';
+import '../src/islands/common.ts';                 // data-shortcut keys
 import nav from '../partials/nav.html?raw';
 import navToggle from '../partials/nav-toggle.html?raw';
 import reader from '../partials/mail-reader.html?raw';
@@ -196,6 +197,42 @@ test('a failed star toggle is rolled back', async () => {
   expect(rows(root)[1].querySelector('.flag-star')).toBeNull();
 });
 
+test('keyboard: j/k open the neighbours, Ctrl/Shift+Space mark, Escape clears, Shift+U marks unread', async () => {
+  const { root, settle, requests } = await show({ 'PATCH /api/email/message/flags': null });
+  const press = (target: Element, key: string, init: KeyboardEventInit = {}) =>
+    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
+  const subject = () => root.querySelector('.reader .detail-subject')?.textContent;
+  const marked = () => rows(root).filter((x) => x.getAttribute('aria-pressed') === 'true').map((x) => x.querySelector('.subject')!.textContent);
+
+  press(rows(root)[0], 'j');
+  await settle();
+  expect(subject()).toBe('Third');
+  expect(rows(root)[0].classList.contains('cursor')).toBe(true);
+  press(root.querySelector('.reader')!, 'j');                    // in the reader too
+  await settle();
+  expect(subject()).toBe('Second');
+  press(rows(root)[1], 'k');
+  await settle();
+  expect(subject()).toBe('Third');
+
+  press(rows(root)[0], 'U', { shiftKey: true });                 // the read toggle in the actions menu
+  await settle();
+  expect(requests.calls.filter((c) => c.method === 'PATCH').at(-1)!.body).toEqual({ account_id: 'work', mailbox: 'INBOX', uid: 3, flags: ['\\Seen'], set: false });
+
+  rows(root)[1].dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+  press(rows(root)[1], ' ', { code: 'Space', ctrlKey: true });
+  rows(root)[2].dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+  press(rows(root)[2], ' ', { code: 'Space', shiftKey: true });
+  await settle();
+  expect(marked()).toEqual(['Second', 'First']);
+  press(rows(root)[2], 'j');                                      // no j/k while rows are marked
+  await settle();
+  expect(marked()).toEqual(['Second', 'First']);
+  press(rows(root)[2], 'Escape');                                 // "Clear selection"
+  await settle();
+  expect(marked()).toEqual([]);
+});
+
 const folderRow = { folder_id: 'f1', display_name: 'followup-Folder', sort_order: 0, query: '', mailboxes: [] };
 const folderItems = (root: HTMLElement) => [...root.querySelectorAll('.sidebar-item')].map((b) => b.textContent!.trim()).filter((t) => t.startsWith('followup-'));
 
@@ -221,7 +258,7 @@ test('reply opens the compose dialog with the quoted message, and sends it', asy
   const { root, settle } = await show();
   rows(root)[2].click();
   await settle();
-  root.querySelector<HTMLButtonElement>('.reader [data-shortcut="reply"]')!.click();
+  rows(root)[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));   // the reply button's shortcut
   root.querySelector<HTMLDialogElement>('#mail-compose')!.showModal();
   await settle();
   expect(root.querySelector<HTMLInputElement>('#compose-subject')!.value).toBe('Re: First');

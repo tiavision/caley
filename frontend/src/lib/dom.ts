@@ -5,3 +5,8 @@
 export function elementIn(root: ParentNode, selector: string): HTMLElement | null {
   return root.querySelector<HTMLElement>(selector);
 }
+
+/** The closest ancestor of `el` (or `el` itself) matching `selector`, or null, e.g. the menu a button is in. */
+export function ancestor(el: Element, selector: string): HTMLElement | null {
+  return el.closest<HTMLElement>(selector);
+}

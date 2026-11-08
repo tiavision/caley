@@ -50,7 +50,10 @@ export interface SidebarSection { account: Account; collapsed: boolean; unread: 
 
 // ── Views and the sidebar ─────────────────────────────────────────────────────
 
-const noView: MailView = { account_id: null, mailbox: null, folder_id: null };
+/** No view chosen (currentView() shows the first inbox). */
+export function noView(): MailView {
+  return { account_id: null, mailbox: null, folder_id: null };
+}
 
 export function mailboxView(account_id: string, mailbox: string): MailView {
   return { account_id, mailbox, folder_id: null };
@@ -69,10 +72,10 @@ export function currentView(view: MailView, accounts: Account[], mailboxes: Mail
   if (view.account_id && view.mailbox &&
       mailboxes.some((mb) => mb.account_id === view.account_id && mb.name === view.mailbox)) return view;
   const first = accounts[0];
-  if (!first) return noView;
+  if (!first) return noView();
   const own = mailboxes.filter((mb) => mb.account_id === first.account_id);
   const inbox = own.find((mb) => mb.name.toUpperCase() === 'INBOX') ?? own[0];
-  return inbox ? mailboxView(first.account_id, inbox.name) : noView;
+  return inbox ? mailboxView(first.account_id, inbox.name) : noView();
 }
 
 export function sameView(a: MailView, b: MailView): boolean {
@@ -183,6 +186,122 @@ export function neighbor(list: Message[], key: string | null, step: number): Mes
   return list[index + step] ?? null;
 }
 
+// ── Page state ────────────────────────────────────────────────────────────────
+
+/** The message in the reader, and whether its overlay is shown (below 1024px). */
+export interface Reader { ref: MessageRef | null; shown: boolean }
+
+/** The reader on `msg` (its overlay shown), or empty for null. */
+export function readerOn(msg: MessageRef | null): Reader {
+  return { ref: msg && refOf(msg), shown: !!msg };
+}
+
+export function noReader(): Reader {
+  return { ref: null, shown: false };
+}
+
+/** Whether `ref` is a message of the view's mailbox. */
+export function inMailbox(ref: MessageRef | null, view: MailView): boolean {
+  return !!ref && ref.account_id === view.account_id && ref.mailbox === view.mailbox;
+}
+
+/**
+ * The list's selection: `cursor` the key of the row with the focus ring; `keys` the rows marked for a bulk action
+ * (`anchor` the last one marked with Ctrl or a plain click); the bulk menu's `error`, `move` (its folder list is
+ * open) and `busy` (an action runs).
+ */
+export interface Selection { cursor: string | null; keys: string[]; anchor: string | null; error: string; move: boolean; busy: boolean }
+
+export function noSelection(): Selection {
+  return { cursor: null, keys: [], anchor: null, error: '', move: false, busy: false };
+}
+
+/** No rows marked any more (the list changed under them). */
+export function unmarked(sel: Selection): Selection {
+  return { ...sel, keys: [] };
+}
+
+/** The marks and the bulk menu cleared (Escape, "Clear selection"); with `cursor`, the focus ring moves too. */
+export function cleared(sel: Selection, cursor: string | null = sel.cursor): Selection {
+  return { ...sel, cursor, keys: [], anchor: null, error: '', move: false };
+}
+
+/** The cursor on `key` with no rows marked: the message there is open in the reader. */
+export function openedAt(sel: Selection, key: string): Selection {
+  return { ...sel, cursor: key, keys: [] };
+}
+
+type Modifiers = Pick<MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>;
+
+/**
+ * The selection after a click on the row `key` (or Ctrl/Cmd+Space, Shift+Space on it): Ctrl (Cmd) marks or
+ * unmarks it, Shift marks the rows from the anchor; a plain click unmarks all and puts the cursor there (the page
+ * opens the message, see opensRow()).
+ */
+export function rowClick(e: Modifiers, sel: Selection, key: string, list: Message[]): Selection {
+  if (e.ctrlKey || e.metaKey) return { ...sel, keys: toggled(sel.keys, key), anchor: key, error: '', move: false };
+  if (e.shiftKey) return { ...sel, keys: markRange(list, sel.keys, sel.anchor, key), error: '', move: false };
+  return { ...sel, keys: [], anchor: null, error: '', cursor: key };
+}
+
+/** Whether a click on a row opens its message (one without Ctrl, Cmd or Shift). */
+export function opensRow(e: MouseEvent): boolean {
+  return !e.ctrlKey && !e.metaKey && !e.shiftKey;
+}
+
+/** After a bulk action: the messages it failed for stay marked, with the error. */
+export function afterBulk(sel: Selection, failed: string[]): Selection {
+  return { ...sel, busy: false, keys: failed, anchor: failed[0] ?? null, error: failed.length ? m.mail_bulkActionError() : '', move: false };
+}
+
+/** The search box and filters: `input` while typing, `q` the search (debounced), `addrInput`/`addrQ` the sender box. */
+export interface MailSearch { input: string; q: string; filter: SearchFilter; addrInput: string; addrQ: string }
+
+export function noSearch(): MailSearch {
+  return { input: '', q: '', filter: { addrs: [], from: '', to: '', unread: false }, addrInput: '', addrQ: '' };
+}
+
+/** Whether the list shows search results (a query or a filter) instead of the view's messages. */
+export function searchActive(s: MailSearch): boolean {
+  return s.q.trim() !== '' || filterActive(s.filter);
+}
+
+/** The sender typed into the filter box when it is a new one to filter by, else ''. */
+export function addableSender(s: MailSearch): string {
+  const addr = s.addrInput.trim();
+  return addr && !s.filter.addrs.includes(addr) ? addr : '';
+}
+
+/** The search with the typed sender added to the filter (when new), and the sender box emptied. */
+export function senderAdded(s: MailSearch): MailSearch {
+  const addr = addableSender(s);
+  return { ...s, filter: { ...s.filter, addrs: addr ? [...s.filter.addrs, addr] : s.filter.addrs }, addrInput: '', addrQ: '' };
+}
+
+/** The status line of an empty list. */
+export function listStatus(searching: boolean, q: string, accounts: number, view: MailView): string {
+  if (searching) return q.trim() ? m.mail_noResults({ q }) : m.mail_noResultsFiltered();
+  if (!accounts) return m.mail_noAccounts();
+  return !view.account_id && !view.folder_id ? m.mail_selectMailbox() : m.mail_noMessages();
+}
+
+/** The message dragged to a mailbox of the sidebar, and the mailbox under it (its sidebar key). */
+export interface Drag { msg: Message | null; over: string | null }
+
+export function noDrag(): Drag {
+  return { msg: null, over: null };
+}
+
+/** Whether the dragged message can be dropped on `mb`: another mailbox of its account. */
+export function canDrop(msg: Message | null, mb: Mailbox): boolean {
+  return !!msg && msg.account_id === mb.account_id && msg.mailbox !== mb.name;
+}
+
+/** The flags of `msg` once read (for the lists, as the server marks it read when it opens). */
+export function markedRead(msg: { flags: string[] }): Partial<Message> {
+  return withFlag(msg, '\\Seen', true);
+}
+
 /** The archive mailbox to move `msg` to: the account's only subscribed archive folder. */
 export function archiveMailbox(msg: MessageRef | null, mailboxes: Mailbox[]): string | null {
   if (!msg) return null;
@@ -238,55 +357,46 @@ export function validTrashDays(days: number): boolean {
 }
 
 // ── Keyboard ──────────────────────────────────────────────────────────────────
+// Shortcuts with a visible control are `data-shortcut` on it (src/islands/common.ts): r, a, f, e, #, Shift+I/U in
+// the reader, Escape on the bulk menu's "Clear selection". The keys below have no control of their own.
 
 /**
- * The page shortcut a keydown on the mail page asks for, or '' (MailApp's handleMailKeydown):
- * 'clear' (Escape with marked rows), 'next'/'prev' (j/k), 'back' (Escape in the reader), 'scroll' (Page/Home/End
- * in the reader), 'reply', 'replyAll', 'forward', 'archive', 'delete', 'read', 'unread'.
+ * The target of a keydown that is for the page (no field, no open dialog, no modifier but Shift), else null.
+ * Handlers ask again after their own preventDefault(), so a key they took still counts.
  */
-export function mailShortcut(e: KeyboardEvent, marked: number, standalone: boolean): string {
+function pageKeyTarget(e: KeyboardEvent): Element | null {
   const target = e.target instanceof Element ? e.target : null;
-  if (e.defaultPrevented || !target || target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], dialog[open]')) return '';
-  if (target.ownerDocument.querySelector('dialog[open]')) return '';
-  const plain = !e.altKey && !e.ctrlKey && !e.metaKey;
-  if (!standalone && marked > 0 && plain && !e.shiftKey && e.key === 'Escape') return 'clear';
-  if (marked > 0) return '';
-  if (!standalone && plain && !e.shiftKey && (e.key === 'j' || e.key === 'k')) return e.key === 'j' ? 'next' : 'prev';
-  const inReader = !!target.closest('.message-detail');
-  if (inReader && plain) {
-    if (!standalone && !e.shiftKey && e.key === 'Escape') return 'back';
-    if (!e.shiftKey && ['PageUp', 'PageDown', 'Home', 'End'].includes(e.key)) return 'scroll';
-  }
-  if (!plain) return '';
-  if (!e.shiftKey && e.key === 'r') return 'reply';
-  if (!e.shiftKey && e.key === 'a') return 'replyAll';
-  if (!e.shiftKey && e.key === 'f') return 'forward';
-  if (!e.shiftKey && e.key === 'e') return 'archive';
-  if (e.key === '#') return 'delete';
-  if (e.shiftKey && e.key.toLowerCase() === 'i') return 'read';
-  if (e.shiftKey && e.key.toLowerCase() === 'u') return 'unread';
-  return '';
+  if (!target || e.altKey || e.ctrlKey || e.metaKey) return null;
+  if (target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], dialog[open]')) return null;
+  return target.ownerDocument.querySelector('dialog[open]') ? null : target;
 }
 
-/** A list row's own keys (on a focused .message-row, else ''): 'down'/'up' (arrows), 'open' (Enter), 'toggle' (Ctrl/Cmd+Space), 'range' (Shift+Space). */
-export function rowKey(e: KeyboardEvent): string {
-  if (!(e.target instanceof Element) || !e.target.matches('.message-row')) return '';
-  const space = e.code === 'Space' || e.key === ' ';
-  if (e.altKey) return '';
-  if (space && (e.ctrlKey || e.metaKey) && !e.shiftKey) return 'toggle';
-  if (space && e.shiftKey && !e.ctrlKey && !e.metaKey) return 'range';
-  if (e.ctrlKey || e.metaKey || e.shiftKey) return '';
-  if (e.key === 'ArrowDown') return 'down';
-  if (e.key === 'ArrowUp') return 'up';
-  if (e.key === 'Enter') return 'open';
-  return '';
+/**
+ * Whether a key filter on the mail page may take this press: no rows marked, and not from a dialog (the dialogs
+ * sit inside the page; key filters already leave fields alone).
+ */
+export function pageKey(e: KeyboardEvent, marked: number): boolean {
+  return marked === 0 && !!pageKeyTarget(e);
 }
 
-/** How far PageUp/PageDown/Home/End scroll a reader of `height` px: [top, by] (one of them is null). */
-export function readerScroll(key: string, height: number, scrollHeight: number): { top?: number; by?: number } {
-  if (key === 'Home') return { top: 0 };
-  if (key === 'End') return { top: scrollHeight };
-  return { by: height * 0.9 * (key === 'PageDown' ? 1 : -1) };
+/** The reader's part that PageUp/PageDown/Home/End scroll: `.message-detail`, else its `.detail-body`, whichever can. */
+export function readerScroller(detail: Element): HTMLElement | null {
+  return [detail, detail.querySelector('.detail-body')]
+    .find((el): el is HTMLElement => el instanceof HTMLElement && el.scrollHeight > el.clientHeight) ?? null;
+}
+
+/** Where PageUp/PageDown/Home/End scroll `el` to (its new scrollTop): a page is 90% of its height. */
+export function scrollTopFor(key: string, el: HTMLElement | null): number {
+  if (!el) return 0;
+  if (key === 'Home') return 0;
+  if (key === 'End') return el.scrollHeight;
+  return el.scrollTop + el.clientHeight * 0.9 * (key === 'PageDown' ? 1 : -1);
+}
+
+/** The list row after (1) or before (-1) `row`, or null at the end of the page. */
+export function siblingRow(row: Element, step: number): HTMLElement | null {
+  const el = step > 0 ? row.nextElementSibling : row.previousElementSibling;
+  return el instanceof HTMLElement && el.matches('.message-row') ? el : null;
 }
 
 /** The resize handles' widths: [min, max]. */
@@ -301,6 +411,11 @@ export function keyWidth(which: 'sidebar' | 'list', e: KeyboardEvent, width: num
 }
 
 // ── Reader ────────────────────────────────────────────────────────────────────
+
+/** The decrypted/parsed body (mail.body()) when it is the one of `msg`, else null (still loading another one). */
+export function bodyOf<B extends { key: string }>(body: B | null | undefined, msg: Message): B | null {
+  return body && body.key === messageKey(msg) ? body : null;
+}
 
 export function isSentMailbox(mailbox: string | null): boolean {
   return !!mailbox && /sent/i.test(mailbox);
@@ -443,6 +558,11 @@ function replyIdentity(msg: Message, identities: Identity[]): string {
  * A new compose draft (MailComposeDialog.open): `msg` is the message replied to or forwarded, `text`/`html` its
  * shown body; `files` the attachments to start with.
  */
+/** The draft another page shared ("send by email": its subject and attachments), from the default identity. */
+export function sharedDraft(shared: { subject: string; files: File[] }, identities: Identity[]): ComposeDraft {
+  return composeDraft('new', null, identities, '', null, shared.files, shared.subject);
+}
+
 export function composeDraft(mode: ComposeMode, msg: Message | null, identities: Identity[], text = '', html: string | null = null, files: File[] = [], subject = '', preview = ''): ComposeDraft {
   const draft: ComposeDraft = {
     mode: 'new', identity_id: (identities.find((i) => i.is_default) ?? identities[0])?.identity_id ?? '',
@@ -584,6 +704,19 @@ export function editAccount(acc: Account, identities: Identity[]): AccountForm {
     host: acc.host, port: acc.port, username: acc.username, password: '', use_tls: acc.use_tls,
     smtp_host: acc.smtp_host || '', smtp_port: acc.smtp_port || 587,
   };
+}
+
+/** The account dialog around its form: the step, what autodiscovery found, the advanced settings, error, busy. */
+export interface AccountUi {
+  step: 'basic' | 'details'; discovery: Autodiscovery | null; advanced: boolean; error: string; busy: boolean;
+}
+
+/**
+ * The account dialog at a step: 'basic' (name and address, before autodiscovery) or 'details' (the servers),
+ * with the advanced settings open unless autodiscovery found them.
+ */
+export function accountUi(step: 'basic' | 'details', discovery: Autodiscovery | null = null): AccountUi {
+  return { step, discovery, advanced: step === 'details' && !discovery?.found, error: '', busy: false };
 }
 
 /** The form after autodiscovery (`found` fills the servers); the display name defaults to the provider or domain. */
