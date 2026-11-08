@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
+import { existsSync } from 'fs';
 import { resolve } from 'path';
 import temper from '@tiaforge-ui/temper/vite';
 import sinter from '@tiaforge-ui/sinter/vite';
@@ -16,7 +17,8 @@ export default defineConfig({
     sinter({ typecheck: true }),
     svelte(),
     // temper check on all markup and CSS (errors fail the build); serves the Lucide icons the markup names.
-    temper({ paths: ['src', 'partials', 'index.html', 'calendar', 'contacts', 'mail', 'search', 'settings'].map((p) => resolve(root, p)), icons: { lucide: true }, prune: true }),
+    // Only existing paths: temper stops the build on a missing one (partials/ arrives with the sinter pages).
+    temper({ paths: ['src', 'partials', 'index.html', 'calendar', 'contacts', 'mail', 'search', 'settings'].map((p) => resolve(root, p)).filter(existsSync), icons: { lucide: true }, prune: true }),
     paraglideVitePlugin({
       project: './project.inlang',
       outdir: './src/paraglide',
