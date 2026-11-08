@@ -34,6 +34,7 @@ export {
   emptyEntry,
   emptyAddress,
   shortcutKey,
+  addressbooksLabel,
 } from './lib/contacts.ts';
 
 export { geoUrl } from './actions/maps.ts';
@@ -63,6 +64,11 @@ export {
   chosenCalendars,
   searchQuery,
   sameSearch,
+  sameEvent,
+  submittedSearch,
+  calendarsLabel,
+  newCalendarDraft,
+  newCalendarBody,
 } from './lib/events.ts';
 
 // Thread dialog (partials/thread-dialog.html).
@@ -86,7 +92,10 @@ export {
 // Calendar page.
 export {
   userTz, addDays, mondayOf, monthOf, addMonths, weekRangeText, dayLabel, dayCollapsed, eventsOn, weekNeighbor,
-  weekPositions, weekColumnDate, navStep, weekdayNames, monthGridHeader, monthNames, pickerYears, monthTitle,
-  pickerMonth, cellEvents, posOf, swipeDir,
+  weekPositions, weekColumnDate, farStep, inWeek, weekdayNames, monthGridHeader, monthNames, pickerYears, monthTitle,
+  pickerMonth, cellEvents, posOf, swipeStep,
 } from './lib/calendar.ts';
 export { threadOfEmail } from './lib/thread.ts';
+
+// Focus and scroll targets for handlers (typed, no casts).
+export { elementIn } from './lib/dom.ts';

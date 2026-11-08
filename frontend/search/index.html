@@ -39,8 +39,12 @@
         <div data-layout="stack" data-gap="md" data-pad="sm">
           <div data-layout="row" data-gap="sm" data-wrap="none">
             <sn-include src="../partials/nav-toggle.html"></sn-include>
+            <!-- Submitting the search shown again reloads it. -->
             <form data-layout="row" data-gap="sm" data-wrap="none" data-grow
-                  data-sn-on-submit="$event.preventDefault(); q.trim() && (sameSearch(search, searchQuery(q, start, end, chosen)) ? refresh('results') : search = searchQuery(q, start, end, chosen))">
+                  data-sn-let="{ query: searchQuery(q, start, end, chosen) }"
+                  data-sn-on-submit="$event.preventDefault();
+                                     query.q && sameSearch(search, query) && refresh('results');
+                                     search = submittedSearch(search, query)">
               <input type="search" data-grow autofocus data-sn-model="q"
                      data-sn-attr="{placeholder: m.search_placeholder(), 'aria-label': m.search_placeholder()}">
               <button type="submit" data-icon="search" data-sn-text="m.search_submit()"></button>
@@ -49,12 +53,12 @@
 
           <div data-layout="row" data-gap="sm">
             <button type="button" popovertarget="search-calendars" data-variant="outline" data-size="sm"
-                    data-sn-text="!calendars.length || chosen.length === calendars.length ? m.search_calendars() : `${m.search_calendars()} (${chosen.length}/${calendars.length})`"></button>
+                    data-sn-text="calendarsLabel(chosen.length, calendars.length)"></button>
             <div popover id="search-calendars" data-menu>
               <template data-sn-for="cal in calendars">
                 <label>
                   <input type="checkbox" data-sn-attr="{checked: chosen.includes(calendarKey(cal))}"
-                         data-sn-on-change="flipped = flipped.includes(calendarKey(cal)) ? flipped.filter(k => k !== calendarKey(cal)) : [...flipped, calendarKey(cal)]">
+                         data-sn-on-change="flipped = toggled(flipped, calendarKey(cal))">
                   <span class="event-color-dot" data-sn-show="cal.color" data-sn-style="{'--tm-tone': cal.color}"></span>
                   <span data-sn-text="cal.name"></span>
                 </label>

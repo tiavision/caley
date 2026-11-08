@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest';
 import { configure } from '@tiaforge-ui/sinter';
 import { render, mockRequests, mockStream, memoryStorage, type RouteResponse } from '@tiaforge-ui/sinter/testing';
 import * as helpers from '../src/sinter.helpers.ts';
+import '../src/islands/common.ts';                 // data-shortcut keys
 import { threadRows } from '../src/lib/thread.ts';
 import nav from '../partials/nav.html?raw';
 import navToggle from '../partials/nav-toggle.html?raw';
@@ -84,7 +85,7 @@ async function show(routes: Record<string, RouteResponse> = {}, storage = memory
   return { ...r, requests, stream, storage };
 }
 
-const key = (target: Element, k: string) => target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+const key = (target: Element, k: string) => target.dispatchEvent(new KeyboardEvent('keydown', { key: k, shiftKey: k !== k.toLowerCase(), bubbles: true }));
 const range = (root: HTMLElement) => root.querySelector('.cal-range')!.textContent;
 
 test('shows the current week; n, p and t move it', async () => {

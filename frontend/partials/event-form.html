@@ -14,7 +14,8 @@
 
 <dialog id="event-form" closedby="any"
         data-sn-state="{ eventError: '', summaryHints: false, attendeeRow: -1, attendeeQuery: '' }"
-        data-sn-on-toggle="$event.newState === 'open' && (eventError = '', summaryHints = false, attendeeRow = -1, $el.querySelector('input')?.select())">
+        data-sn-on-toggle="$el.open && $el.querySelector('input')?.select()"
+        data-sn-on-close="eventError = ''; summaryHints = false; attendeeRow = -1">
   <header>
     <h2 data-sn-text="eventDraft?.mode === 'edit' ? m.event_edit() : m.event_create()"></h2>
     <button type="button" commandfor="event-form" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>

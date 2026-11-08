@@ -2,8 +2,9 @@
      command="show-modal"; it starts empty each time it opens. The page declares the `caldavAccounts` resource
      (GET /api/caldav/accounts, items="accounts", key="account_id"); it is refreshed when the calendar exists. -->
 <dialog id="create-calendar-dialog" closedby="any" aria-labelledby="create-calendar-title"
-        data-sn-state="{ cal: { name: '', account_id: '', color: '#4a90d9', useColor: false }, calError: '' }"
-        data-sn-on-toggle="$el.open && (cal = { name: '', account_id: caldavAccounts[0]?.account_id ?? '', color: '#4a90d9', useColor: false }, calError = '')">
+        data-sn-state="{ cal: newCalendarDraft([]), calError: '' }"
+        data-sn-on-toggle="$el.open && (cal = newCalendarDraft(caldavAccounts))"
+        data-sn-on-close="calError = ''">
   <header>
     <h2 id="create-calendar-title" data-sn-text="m.cal_createCalendar()"></h2>
     <button type="button" commandfor="create-calendar-dialog" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
@@ -15,7 +16,7 @@
 
   <form data-layout="stack" data-gap="md"
         data-sn-post="/api/calendar" data-sn-encoding="form"
-        data-sn-body="{ name: cal.name.trim(), account_id: cal.account_id, color: cal.useColor && cal.color ? cal.color : null }"
+        data-sn-body="newCalendarBody(cal)"
         data-sn-on-submit="calError = ''"
         data-sn-then="refresh('caldavAccounts'); close()"
         data-sn-catch="calError = $error.status ? ($error.detail ?? m.cal_createCalendarError()) : m.cal_createCalendarError()">

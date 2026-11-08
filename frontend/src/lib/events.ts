@@ -7,6 +7,21 @@ import type {
 } from '../types/calendar.ts';
 import { dateFromEventValue, localDateIso, partstatKey } from './format.ts';
 
+// ── Calendars ───────────────────────────────────────────────────────────────
+
+/** The "Create calendar" dialog (partials/create-calendar-dialog.html). */
+export interface CalendarDraft { name: string; account_id: string; color: string; useColor: boolean }
+
+/** An empty draft in the first account. */
+export function newCalendarDraft(accounts: readonly Pick<CalDavAccountJson, 'account_id'>[]): CalendarDraft {
+  return { name: '', account_id: accounts[0]?.account_id ?? '', color: '#4a90d9', useColor: false };
+}
+
+/** POST /api/calendar (form encoded): the color only when chosen. */
+export function newCalendarBody(d: CalendarDraft): { name: string; account_id: string; color: string | null } {
+  return { name: d.name.trim(), account_id: d.account_id, color: d.useColor && d.color ? d.color : null };
+}
+
 // ── Keys ────────────────────────────────────────────────────────────────────
 
 /** A calendar's identity, as the search `cal` parameter and the form's calendar select carry it. */
@@ -17,6 +32,13 @@ export function calendarKey(c: Pick<CalendarJson, 'account_id' | 'href'>): strin
 /** One occurrence of an event (recurring events repeat uid and differ by dtstart). */
 export function eventKey(ev: Pick<EventJson, 'account_id' | 'calendar_href' | 'uid' | 'dtstart'>): string {
   return `${ev.account_id}\0${ev.calendar_href}\0${ev.uid}\0${ev.dtstart}`;
+}
+
+type EventId = Pick<EventJson, 'account_id' | 'calendar_href' | 'uid'>;
+
+/** Whether `ev` is the event `id` names (every occurrence of a series is). */
+export function sameEvent(ev: EventId | null, id: EventId): boolean {
+  return !!ev && ev.account_id === id.account_id && ev.calendar_href === id.calendar_href && ev.uid === id.uid;
 }
 
 /** The calendar's name for an event, or ''. */
@@ -385,4 +407,14 @@ export function searchQuery(q: string, start: string, end: string, cals: readonl
 
 export function sameSearch(a: SearchQuery | null, b: SearchQuery): boolean {
   return !!a && a.q === b.q && a.start === b.start && a.end === b.end && a.cals.join('\n') === b.cals.join('\n');
+}
+
+/** The search to load after a submit: `next`, unless it is empty or the one already loaded (`search`). */
+export function submittedSearch(search: SearchQuery | null, next: SearchQuery): SearchQuery | null {
+  return !next.q || sameSearch(search, next) ? search : next;
+}
+
+/** The calendar menu's button: "Calendars", with "(chosen/all)" while some are left out. */
+export function calendarsLabel(chosen: number, all: number): string {
+  return !all || chosen === all ? m.search_calendars() : `${m.search_calendars()} (${chosen}/${all})`;
 }

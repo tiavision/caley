@@ -1,4 +1,5 @@
 // Contacts page helpers (sinter helpers, so all pure): filtering, grouping, display and the form draft.
+import { m } from '../paraglide/messages.js';
 import type { AddressbookJson, AddressEntry, ContactJson, TypedEntry } from '../types/calendar.ts';
 
 /** Identity of an address book, as the contacts filter stores it. */
@@ -11,9 +12,16 @@ export function contactAddressbookKey(c: ContactJson): string {
   return `${c.account_id}\n${c.addressbook_href}`;
 }
 
+type ContactId = Pick<ContactJson, 'account_id' | 'uid' | 'addressbook_href'>;
+
 /** Whether two values name the same contact. */
-export function sameContact(a: ContactJson | null | undefined, b: ContactJson | null | undefined): boolean {
+export function sameContact(a: ContactId | null | undefined, b: ContactId | null | undefined): boolean {
   return !!a && !!b && a.account_id === b.account_id && a.uid === b.uid && a.addressbook_href === b.addressbook_href;
+}
+
+/** The address book menu's button: "Address books", with "(shown/all)" while some are hidden. */
+export function addressbooksLabel(shown: number, all: number): string {
+  return shown === all ? m.contacts_addressbooks() : `${m.contacts_addressbooks()} (${shown}/${all})`;
 }
 
 /** Contacts in the shown address books whose name, org, an email or a phone contain `q`. */

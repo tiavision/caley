@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest';
 import { configure } from '@tiaforge-ui/sinter';
 import { render, mockRequests, mockStream, type RouteResponse } from '@tiaforge-ui/sinter/testing';
 import * as helpers from '../src/sinter.helpers.ts';
+import '../src/islands/common.ts';                 // data-shortcut keys
 import * as m from '../src/paraglide/messages/_index.js';
 import nav from '../partials/nav.html?raw';
 import navToggle from '../partials/nav-toggle.html?raw';
@@ -223,11 +224,16 @@ test('the detail dialog closes when another client removes its contact', async (
 test('keyboard: c opens a new contact, e edits the open one', async () => {
   const r = await show();
   const form = r.root.querySelector<HTMLDialogElement>('#contact-form')!;
+  const fab = r.root.querySelector<HTMLButtonElement>('button[data-fab]')!;
+  let clicked = 0;
+  fab.addEventListener('click', () => clicked++);
   document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }));
-  await r.flush();
-  expect(form.open).toBe(true);
+  expect(clicked).toBe(1);                  // the shortcut clicks the button (src/islands/common.ts)
+  await opened(form, r.flush);
   expect(form.querySelector('h2')!.textContent).toBe('New contact');
   form.close();
+  document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true }));
+  expect(clicked).toBe(1);                  // other modifiers: not the shortcut
 
   const detail = await openDetail(r, 'Ada Lovelace');
   detail.querySelector('header')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true }));

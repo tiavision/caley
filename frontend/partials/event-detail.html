@@ -6,13 +6,11 @@
      It emits, from inside the dialog (handle them on an ancestor, e.g. data-sn-on-event-edit on <body>):
        - `event-edit`, detail {event, scope: 'series'|'this_instance'}: the edit button (partials/event-form.html);
        - `event-threads`, detail {email: SourceEmailJson, event}: the threads button (partials/thread-dialog.html).
-     Shortcut: e = edit. Uses partials/share-menu.html (so the page must not include another one). -->
+     Shortcut: e = edit (data-shortcut on the edit button). Uses partials/share-menu.html (so the page must not include another one). -->
 <sn-resource name="eventEmails" type="SourceEmailJson[]" key="account_id,mailbox,uid" when="eventThreads && detail"
              src="/api/calendar/event-emails?cal_account_id={detail.account_id}&calendar_href={detail.calendar_href}&event_uid={detail.uid}"></sn-resource>
 
-<dialog id="event-detail" closedby="any"
-        data-sn-on-keydown="detail && shortcutKey($event, true) === 'e' && ($event.preventDefault(), /** @type {HTMLElement} */ ($el.querySelector('.event-edit')).click())"
-        data-sn-on-close="/** @type {HTMLElement} */ ($el.querySelector('#event-edit-choice')).hidePopover()">
+<dialog id="event-detail" closedby="any" data-sn-on-close="elementIn($el, '#event-edit-choice')?.hidePopover()">
   <header data-layout="row" data-gap="xs" data-align="start">
     <h2 data-grow data-sn-text="detail?.summary || ''"></h2>
     <div data-layout="row" data-gap="xs" data-wrap="none" data-sn-let="{ shareItem: detail ? eventShare(detail) : null }">
@@ -23,11 +21,11 @@
       </template>
       <sn-include src="./share-menu.html"></sn-include>
       <template data-sn-if="detail?.is_recurring">
-        <button type="button" class="event-edit" data-variant="ghost" data-icon="pencil" popovertarget="event-edit-choice"
+        <button type="button" class="event-edit" data-variant="ghost" data-icon="pencil" data-shortcut="e" popovertarget="event-edit-choice"
                 data-sn-attr="{'aria-label': m.event_edit()}"></button>
       </template>
       <template data-sn-else>
-        <button type="button" class="event-edit" data-variant="ghost" data-icon="pencil" data-tooltip
+        <button type="button" class="event-edit" data-variant="ghost" data-icon="pencil" data-shortcut="e" data-tooltip
                 data-sn-attr="{'aria-label': m.event_edit()}"
                 data-sn-on-click="close(); emit('event-edit', {event: detail, scope: 'series'})"></button>
       </template>

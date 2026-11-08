@@ -4,6 +4,7 @@ import { m } from '../paraglide/messages.js';
 import type { DayEventsJson, EventJson, MonthGridJson } from '../types/calendar.ts';
 import { localDateIso } from './format.ts';
 import { eventKey } from './events.ts';
+import { shortcutKey } from './contacts.ts';
 
 function parse(iso: string): Date {
   const [y, mo, d] = iso.split('-').map(Number);
@@ -89,11 +90,19 @@ export function weekColumnDate(days: readonly DayEventsJson[], pos: string): str
   return days.filter((d) => d.events.length > 0)[Number(pos.split(':')[0])]?.date_iso ?? '';
 }
 
-/** Keyboard shortcuts of the calendar page: how far `n`/`p` (`N`/`P`) move, in days (week) or months. */
-export function navStep(key: string | null, view: string): number {
-  const week: Record<string, number> = { n: 7, N: 28, p: -7, P: -28 };
-  const month: Record<string, number> = { n: 1, N: 3, p: -1, P: -3 };
-  return (key ? (view === 'month' ? month : week)[key] : 0) ?? 0;
+/**
+ * Shift+N / Shift+P on the calendar page: how far they move, in days (week view: four weeks) or months (month
+ * view: three), else 0. Plain n/p are the buttons' own shortcuts (data-shortcut).
+ */
+export function farStep(e: KeyboardEvent, view: string): number {
+  const key = e.shiftKey ? shortcutKey(e) : null;
+  const step = key === 'N' ? 1 : key === 'P' ? -1 : 0;
+  return step * (view === 'month' ? 3 : 28);
+}
+
+/** Whether the day `iso` (YYYY-MM-DD) is in the week starting on Monday `weekStart`. */
+export function inWeek(iso: string, weekStart: string): boolean {
+  return iso >= weekStart && iso <= addDays(weekStart, 6);
 }
 
 // ── Month view and picker ───────────────────────────────────────────────────
@@ -138,6 +147,11 @@ export function cellEvents(days: readonly DayEventsJson[], iso: string, fit: Rea
 /** The week grid position ("column:row") of the event chip a key event came from, or ''. */
 export function posOf(e: Event): string {
   return (e.target as HTMLElement | null)?.dataset?.pos ?? '';
+}
+
+/** How far a swipe moves the calendar: a week (in days) or a month back or forward, or 0 for no swipe. */
+export function swipeStep(x: number, y: number, e: TouchEvent, view: string): number {
+  return swipeDir(x, y, e) * (view === 'week' ? 7 : 1);
 }
 
 /** A horizontal swipe from (x, y) to the touch's end: -1 (to the previous), 1 (to the next) or 0. */

@@ -97,7 +97,8 @@
   .month-grid { border-inline-start: 0; }
   .month-cell:nth-child(7n) { border-inline-end: 0; }
   .month-cell { padding-inline: 0; }
-  .month-cell .event-trigger { padding-inline: 2px; }
+  // A tap on a narrow cell opens its day (#day-events), chips included: the chips take no clicks there.
+  .month-cell .event-trigger { padding-inline: 2px; pointer-events: none; }
   .month-cell.has-events { cursor: pointer; }
   .month-cell.has-events:hover { background: var(--tm-fill); }
 }

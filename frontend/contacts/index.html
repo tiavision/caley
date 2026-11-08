@@ -14,7 +14,8 @@
   </head>
   <!-- sel: the contact the detail dialog shows (looked up in `contacts`, so it follows server events);
        draft: the form dialog's ContactDraft (src/lib/contacts.ts); hiddenBooks: addressbookKey()s filtered out.
-       Shortcuts: c = new contact, e = edit the open contact (src/lib/contacts.ts shortcutKey). -->
+       Shortcuts: c = new contact, e = edit the open contact (data-shortcut on those buttons).
+       `contact-saved` {detail: the contact}: the form saved it, the detail dialog shows it. -->
   <body data-shell="fixed"
         data-sn-state="{
           here: '/contacts/',
@@ -25,7 +26,7 @@
           formError: '',
           saving: false,
         }"
-        data-sn-on-keydown="shortcutKey($event) === 'c' && ($event.preventDefault(), draft = newDraft(addressbooks), formError = '', showModal('contact-form'))">
+        data-sn-on-contact-saved="sel = $event.detail; showModal('contact-detail')">
     <sn-include src="../partials/nav.html"></sn-include>
     <sn-resource name="contacts" src="/api/contacts" items="contacts" key="account_id,uid,addressbook_href" order="fn_name" type="ContactJson[]"></sn-resource>
     <sn-resource name="addressbooks" src="/api/contacts" items="addressbooks" key="account_id,href" type="AddressbookJson[]"></sn-resource>
@@ -34,7 +35,7 @@
       <sn-event name="contact_updated" resource="contacts" op="upsert" item="contact" fallback="refetch" type="ContactUpdatedEvent"></sn-event>
       <!-- Removed elsewhere while its detail dialog is open: close the dialog. -->
       <sn-event name="contact_removed" resource="contacts" op="remove" type="ContactRemovedEvent"
-                then="sel?.uid === uid && sel.account_id === account_id && sel.addressbook_href === addressbook_href && (sel = null, close('contact-detail'))"></sn-event>
+                then="sel = sameContact(sel, {account_id, uid, addressbook_href}) ? null : sel; !sel && close('contact-detail')"></sn-event>
       <sn-event name="contacts_refetch" resource="contacts" op="refetch"></sn-event>
       <sn-event name="contacts_refetch" resource="addressbooks" op="refetch"></sn-event>
     </sn-sync>
@@ -55,7 +56,7 @@
                    data-sn-attr="{placeholder: m.contacts_filterplaceholder(), 'aria-label': m.contacts_filterplaceholder()}">
             <template data-sn-if="addressbooks.length > 1">
               <button type="button" popovertarget="ab-menu" data-variant="outline"
-                      data-sn-text="nBooks === addressbooks.length ? m.contacts_addressbooks() : `${m.contacts_addressbooks()} (${nBooks}/${addressbooks.length})`"></button>
+                      data-sn-text="addressbooksLabel(nBooks, addressbooks.length)"></button>
               <div popover id="ab-menu" data-menu>
                 <template data-sn-for="ab in addressbooks">
                   <label>
@@ -113,19 +114,18 @@
           </template>
         </div>
 
-        <button type="button" data-fab data-icon="plus" data-sn-attr="{'aria-label': m.contacts_new()}"
+        <button type="button" data-fab data-icon="plus" data-shortcut="c" data-sn-attr="{'aria-label': m.contacts_new()}"
                 commandfor="contact-form" command="show-modal"
                 data-sn-on-click="draft = newDraft(addressbooks); formError = ''"></button>
 
         <dialog id="contact-detail" closedby="any"
-                data-sn-let="{ c: contacts.find(x => sameContact(x, sel)) }"
-                data-sn-on-keydown="c && shortcutKey($event, true) === 'e' && ($event.preventDefault(), draft = editDraft(c), formError = '', close(), showModal('contact-form'))">
+                data-sn-let="{ c: contacts.find(x => sameContact(x, sel)) }">
           <header>
             <h2 data-sn-text="c?.fn_name || ''"></h2>
             <div data-layout="row" data-gap="xs" data-wrap="none" data-sn-let="{ shareItem: c ? contactShare(c) : null }">
               <sn-include src="../partials/share-menu.html"></sn-include>
               <template data-sn-if="c">
-                <button type="button" data-icon="pencil" data-variant="ghost" data-tooltip
+                <button type="button" data-icon="pencil" data-variant="ghost" data-tooltip data-shortcut="e"
                         data-sn-attr="{'aria-label': m.contacts_edit()}"
                         data-sn-on-click="draft = editDraft(c); formError = ''; close(); showModal('contact-form')"></button>
               </template>
@@ -215,7 +215,7 @@
           <form data-layout="stack" data-gap="md"
                 data-sn-post="/api/contact" data-sn-body="draftBody(draft)"
                 data-sn-on-submit="saving = true; formError = ''"
-                data-sn-then="saving = false; upsert('contacts', $result); sel = $result; close(); showModal('contact-detail')"
+                data-sn-then="saving = false; upsert('contacts', $result); close(); emit('contact-saved', $result)"
                 data-sn-catch="saving = false; formError = m.contacts_error()">
             <template data-sn-if="formError">
               <div data-callout data-tone="danger" role="alert" data-sn-text="formError"></div>
