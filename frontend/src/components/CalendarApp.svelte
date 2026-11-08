@@ -582,21 +582,27 @@
               <button type="button" class="day-add" data-variant="ghost" data-size="sm" data-icon="plus" aria-label={tl('event_new')}
                 onclick={() => { focusedEventDate = day.date_iso; formDialog.openNewEventForm(); }}></button>
             </div>
-            {#each day.events as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
-              <button
-                type="button"
-                class="event-trigger"
-                data-variant="item"
-                data-size="sm"
-                data-bar
-                style={event.color ? `--tm-tone: ${event.color}` : null}
-                tabindex="-1"
-                onclick={() => eventDetail.open(event)}
-              >
-                <small data-muted>{eventTimeLabel(event)}</small>
-                <span data-clamp="2">{event.summary}</span>
-              </button>
-            {/each}
+            {#if day.events.length > 0}
+              <div class="events" data-list>
+                {#each day.events as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
+                  <div data-pad="xs">
+                    <button
+                      type="button"
+                      class="event-trigger"
+                      data-variant="item"
+                      data-size="sm"
+                      data-bar
+                      style={event.color ? `--tm-tone: ${event.color}` : null}
+                      tabindex="-1"
+                      onclick={() => eventDetail.open(event)}
+                    >
+                      <small data-muted>{eventTimeLabel(event)}</small>
+                      <span data-clamp="2">{event.summary}</span>
+                    </button>
+                  </div>
+                {/each}
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -671,7 +677,7 @@
   @media (width < 60rem) {
     .week { grid-template-columns: minmax(0, 1fr); }
     .day.past-empty { display: none; }
-    .day.collapsed .event-trigger { display: none; }
+    .day.collapsed .events { display: none; }
     /* One day per row: full-size event rows instead of the compact chips of the seven columns. */
     .day .event-trigger {
       padding: var(--tm-space-sm) var(--tm-space-md);
