@@ -78,3 +78,27 @@ body[data-shell] > main {
     navigation: none;
   }
 }
+
+// Nav rail (partials/nav.html): the brand link. The logo stays as the mark of the collapsed rail; temper
+// hides the text. Rail links are padded for an 18px icon, so the collapsed brand drops its side padding to
+// fit the 24px logo.
+.nav-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tm-space-sm);
+  font-size: var(--tm-text-lg);
+  font-weight: 700;
+  color: var(--tm-text);
+  text-decoration: none;
+
+  img {
+    flex-shrink: 0;
+    inline-size: 1.5rem;
+    block-size: 1.5rem;
+  }
+}
+
+[data-rail]:has([data-rail-collapse]:checked) .nav-brand {
+  justify-content: center;
+  padding-inline: 0;
+}

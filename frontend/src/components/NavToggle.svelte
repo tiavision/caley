@@ -1,5 +1,5 @@
 <script lang="ts">
-  // ☰ button that opens the NavRail drawer on narrow screens; put it first in a temper page's top row.
+  // ☰ button that opens the nav rail drawer (partials/nav.html) on narrow screens; Svelte pages only; sinter pages include partials/nav-toggle.html.
   import { makeTl, getLocale } from '../lib/i18n.ts';
   const tl = makeTl(getLocale());
 </script>

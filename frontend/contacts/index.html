@@ -12,7 +12,10 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <title>Caley - Contacts</title>
   </head>
-  <body data-shell="fixed">
+  <body data-shell="fixed" data-sn-state="{ here: '/contacts/' }">
+    <sn-include src="../partials/nav.html"></sn-include>
+    <!-- The page's server events. The rail's <mail-notifier> listens here; the page adds its <sn-event>s when it moves to sinter. -->
+    <sn-sync src="/api/events/stream"></sn-sync>
     <main>
       <div id="app" data-density="compact"></div>
     </main>

@@ -2,6 +2,7 @@
 import { configure, onUnauthorized } from '@tiaforge-ui/sinter';
 import { initI18n, getLocale, setLocale } from './lib/i18n.ts';
 import { rememberCurrentAppUrl } from './lib/return-url.ts';
+import './islands/common.ts';
 
 initI18n();
 

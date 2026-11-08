@@ -1,0 +1,44 @@
+<!-- Navigation rail (temper app.css), included by every app page as the first child of
+     <body data-shell="fixed" data-sn-state="{ here: '/<page>/' }">, before <main>. `here` marks the current page.
+     Below 48rem the rail is a popover drawer, opened by partials/nav-toggle.html (or NavToggle.svelte).
+     The `user` resource is the page's: pages read it (map_url, …) instead of declaring their own.
+     New-mail notifications: <mail-notifier> (src/islands/common.ts) shows them from the page's
+     /api/events/stream <sn-sync>, which every page that includes the rail declares (mail shows its own). -->
+<sn-resource name="user" src="/api/user" type="User"></sn-resource>
+<sn-resource name="notifications" call="notify.status()"></sn-resource>
+
+<template data-sn-if="user">
+  <nav data-rail popover id="nav" data-sn-attr="{'aria-label': m.nav_label()}" data-sn-state="{ collapsed: false }">
+    <header>
+      <a href="/" class="nav-brand" data-sn-attr="{'aria-label': m.app_brand()}">
+        <img src="/icons/favicon-48x48.png" alt="">
+        <span data-rail-label data-sn-text="m.app_brand()"></span>
+      </a>
+      <input type="checkbox" data-rail-collapse data-sn-attr="{'aria-label': m.nav_collapse()}"
+             data-sn-model="collapsed" data-sn-persist="nav-collapsed">
+    </header>
+    <a href="/mail/" data-icon="mail" data-sn-attr="{'aria-current': here === '/mail/' ? 'page' : null, 'data-tooltip': m.nav_mail()}"><span data-sn-text="m.nav_mail()"></span></a>
+    <a href="/calendar/" data-icon="calendar" data-sn-attr="{'aria-current': here === '/calendar/' ? 'page' : null, 'data-tooltip': m.nav_calendar()}"><span data-sn-text="m.nav_calendar()"></span></a>
+    <a href="/contacts/" data-icon="users" data-sn-attr="{'aria-current': here === '/contacts/' ? 'page' : null, 'data-tooltip': m.nav_contacts()}"><span data-sn-text="m.nav_contacts()"></span></a>
+    <a href="/search/" data-icon="search" data-sn-attr="{'aria-current': here === '/search/' ? 'page' : null, 'data-tooltip': m.nav_search()}"><span data-sn-text="m.nav_search()"></span></a>
+    <footer>
+      <template data-sn-if="user.display_name">
+        <span data-caption data-rail-label data-truncate data-sn-text="user.display_name"></span>
+      </template>
+      <template data-sn-if="notifications.supported">
+        <button type="button" data-icon="bell"
+                data-sn-call="notify.toggle(notifications)" data-sn-then="upsert('notifications', $result)"
+                data-sn-attr="{
+                  disabled: notifications.permission === 'denied',
+                  'aria-pressed': notifications.enabled ? 'true' : 'false',
+                  'data-tooltip': notifications.permission === 'denied' ? m.mail_notificationsBlocked() : m.mail_notifications(),
+                }"><span data-sn-text="m.mail_notifications()"></span></button>
+      </template>
+      <a href="/settings/" data-icon="settings" data-sn-attr="{'aria-current': here === '/settings/' ? 'page' : null, 'data-tooltip': m.nav_settings()}"><span data-sn-text="m.nav_settings()"></span></a>
+      <a href="/logout" data-icon="log-out" data-sn-attr="{'data-tooltip': m.nav_logout()}"><span data-sn-text="m.nav_logout()"></span></a>
+    </footer>
+    <template data-sn-if="notifications.enabled && here !== '/mail/'">
+      <mail-notifier hidden></mail-notifier>
+    </template>
+  </nav>
+</template>
