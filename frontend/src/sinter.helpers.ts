@@ -70,7 +70,7 @@ export {
 export { threadRows, messageUrl } from './lib/thread.ts';
 
 // ICS import dialog (partials/import-dialog.html).
-export { calendarValue, importEventDate } from './lib/import.ts';
+export { calendarValue, importEventDate, importDraft } from './lib/import.ts';
 
 // Mail pages (mail/index.html, mail/view/index.html, partials/mail-*.html).
 export {

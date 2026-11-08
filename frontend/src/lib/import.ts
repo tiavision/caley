@@ -21,10 +21,11 @@ export interface ImportPreviewEvent {
   location: string;
 }
 
-/** POST /api/import. */
+/** POST /api/import, plus `calendar`: calendarValue() of the calendar the events went to. */
 export interface ImportResult {
   imported: number;
   errors: number;
+  calendar: string;
 }
 
 /** The import dialog's state: `target` is calendarValue() of the chosen calendar or NEW_CALENDAR. */
@@ -40,12 +41,12 @@ export interface ImportDraft {
   done: boolean;
 }
 
-/** The calendar select's option value, and the stored default calendar (same format as EventFormDialog). */
+/** The calendar select's option value, and the remembered default calendar (`defaultCal`, shared with the event form). */
 export function calendarValue(cal: Pick<CalendarJson, 'account_id' | 'href'>): string {
   return `${cal.account_id}\0${cal.href}`;
 }
 
-/** A fresh draft: the remembered default calendar while it is active, else the first active one, else a new one. */
+/** A fresh draft: the remembered default calendar (`defaultCal`) while it is active, else the first active one, else a new one. */
 export function importDraft(
   accounts: CalDavAccountJson[],
   stored: string | null,

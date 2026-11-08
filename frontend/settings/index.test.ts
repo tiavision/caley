@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { configure } from '@tiaforge-ui/sinter';
-import { render, mockRequests, mockStream, type RouteResponse } from '@tiaforge-ui/sinter/testing';
-import { calendarValue, importEventDate } from '../src/lib/import.ts';
+import { render, mockRequests, mockStream, memoryStorage, type RouteResponse } from '@tiaforge-ui/sinter/testing';
+import { calendarValue, importEventDate, importDraft } from '../src/lib/import.ts';
 import * as m from '../src/paraglide/messages/_index.js';
 import * as ics from '../src/actions/ics.ts';
 import '../src/islands/common.ts';                 // <close-after>
@@ -21,7 +21,7 @@ const files = {
 };
 
 // The helpers the page and its partials use (not the whole helpers module: other pages' helpers load more).
-const helpers = { m, calendarValue, importEventDate };
+const helpers = { m, calendarValue, importEventDate, importDraft };
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
 const cal = (href: string, name: string, extra: object = {}) => ({ account_id: 'acc', href, name, color: '#ff0000', is_active: true, ...extra });
@@ -46,7 +46,9 @@ document.addEventListener('click', (e) => {
 });
 
 let confirmAnswer = true;
-beforeEach(() => { confirmAnswer = true; localStorage.clear(); configure({ confirm: () => confirmAnswer }); });
+// localStorage of each render: `sn:event-default-calendar` is the default calendar shared with the event form.
+let storage = memoryStorage();
+beforeEach(() => { confirmAnswer = true; storage = memoryStorage(); configure({ confirm: () => confirmAnswer }); });
 afterEach(() => configure({ confirm: null as never }));
 
 const lockedVault: VaultView = {
@@ -113,7 +115,7 @@ async function show(routes: Record<string, RouteResponse> = {}, vault: VaultView
     pgpVault: pgp.ns,
     pgpKeys: { importPublic: async (armored: string) => ({ fingerprint: 'FFFF', email: armored, armored, is_own: false, source: 'imported', trust: 'trusted' }) },
   };
-  const r = await render(page, { requests, actions, helpers, files, streams: { '/api/events/stream': stream } });
+  const r = await render(page, { requests, actions, helpers, files, storage, streams: { '/api/events/stream': stream } });
   await r.settle();
   return { ...r, requests, stream, pgp };
 }
@@ -246,8 +248,9 @@ test('creates a calendar, with a color when chosen', async () => {
 });
 
 test('imports an ICS file into the remembered calendar, after a preview', async () => {
-  localStorage.setItem('defaultCalendar', 'acc\0/cal/work/');
+  storage.setItem('sn:event-default-calendar', JSON.stringify({ defaultCal: 'acc\0/cal/private/' }));
   const { root, requests, settle } = await show({
+    'GET /api/caldav/accounts': { accounts: [account({ calendars: [cal('/cal/work/', 'Work'), cal('/cal/private/', 'Private')] })] },
     'POST /api/import/preview': [{ uid: 'e1', summary: 'Standup', dtstart: '2026-11-09T09:00', dtend: '2026-11-09T09:15', is_all_day: false, location: 'Room 1' }],
     'POST /api/import': { imported: 1, errors: 0 },
   });
@@ -255,7 +258,8 @@ test('imports an ICS file into the remembered calendar, after a preview', async 
   await settle();
   const dialog = root.querySelector<HTMLDialogElement>('#import-ics')!;
   expect(dialog.open).toBe(true);
-  expect(dialog.querySelector<HTMLSelectElement>('select')!.value).toBe('acc\0/cal/work/');
+  expect(dialog.querySelector<HTMLSelectElement>('select')!.value).toBe('acc\0/cal/private/');   // the event form's default
+  type(dialog.querySelector('select')!, 'acc\0/cal/work/');
 
   const input = dialog.querySelector<HTMLInputElement>('input[type=file]')!;
   expect(input.required).toBe(true);
@@ -274,7 +278,7 @@ test('imports an ICS file into the remembered calendar, after a preview', async 
   const body = multipart(requests.calls.find((c) => c.path === '/api/import')!.body);
   expect([body.account_id, body.calendar_href]).toEqual(['acc', '/cal/work/']);
   expect(dialog.querySelector('[role=status]')!.textContent).toBe(m.cal_importSuccess({ n: 1 }));
-  expect(localStorage.getItem('defaultCalendar')).toBe('acc\0/cal/work/');
+  expect(JSON.parse(storage.getItem('sn:event-default-calendar')!)).toEqual({ defaultCal: 'acc\0/cal/work/' });
   await new Promise((resolve) => setTimeout(resolve, 1600));
   expect(dialog.open).toBe(false);
 });
@@ -297,6 +301,7 @@ test('imports into a new calendar', async () => {
   await settle();
   expect(String(requests.calls.find((c) => c.path === '/api/calendar')!.body)).toBe('account_id=acc&name=Trips');
   expect(multipart(requests.calls.find((c) => c.path === '/api/import')!.body).calendar_href).toBe('/cal/new/');
+  expect(JSON.parse(storage.getItem('sn:event-default-calendar') ?? '{}').defaultCal ?? '').toBe('');   // not remembered after errors
   expect(dialog.querySelector('[role=status]')!.textContent).toBe(`${m.cal_importSuccess({ n: 2 })} · ${m.cal_importPartial({ n: 1 })}`);
   expect(dialog.open).toBe(true);
 });

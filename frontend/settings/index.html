@@ -33,7 +33,9 @@
       <sn-event name="calendars_changed" resource="caldavAccounts" op="refetch"></sn-event>
       <sn-event name="contacts_refetch" resource="caldavAccounts" op="refetch"></sn-event>
     </sn-sync>
-    <main>
+    <!-- defaultCal: the calendar new events and imports go to, shared with the event form (calendar, search). -->
+    <main data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
+          data-sn-on-ics-imported="$event.detail.errors === 0 && (defaultCal = $event.detail.calendar)">
       <div data-density="compact">
       <div class="settings" data-layout="center" data-gap="lg" data-pad="sm" style="--tm-measure: 40rem">
         <div data-layout="row" data-gap="sm">
@@ -72,7 +74,7 @@
               <button type="button" data-variant="outline" data-size="sm" data-icon="calendar-plus"
                       commandfor="create-calendar-dialog" command="show-modal" data-sn-text="m.cal_createCalendar()"></button>
               <button type="button" data-variant="outline" data-size="sm" data-icon="upload"
-                      data-sn-call="ics.draft(caldavAccounts, null, null)" data-sn-then="imp = $result; showModal('import-ics')"
+                      data-sn-on-click="imp = importDraft(caldavAccounts, defaultCal, null, null); showModal('import-ics')"
                       data-sn-text="m.cal_import()"></button>
             </div>
 
