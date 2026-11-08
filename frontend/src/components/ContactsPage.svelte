@@ -176,7 +176,6 @@
 <div data-layout="stack" data-gap="md" data-pad="sm">
   <div data-layout="row" data-gap="sm">
     <NavToggle />
-    <h2>{tl('contacts_heading')}</h2>
     <input
       type="search"
       data-grow

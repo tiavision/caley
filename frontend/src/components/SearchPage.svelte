@@ -122,7 +122,17 @@
 <div data-layout="stack" data-gap="md" data-pad="sm">
   <div data-layout="row" data-gap="sm" data-wrap="none">
     <NavToggle />
-    <h2>{tl('search_heading')}</h2>
+    <form data-layout="row" data-gap="sm" data-wrap="none" data-grow onsubmit={(e) => { e.preventDefault(); doSearch(); }}>
+      <input
+        type="search"
+        data-grow
+        bind:value={query}
+        placeholder={tl('search_placeholder')}
+        aria-label={tl('search_placeholder')}
+        autofocus
+      />
+      <button type="submit" data-icon="search">{tl('search_submit')}</button>
+    </form>
   </div>
 
   <div data-layout="row" data-gap="sm">
@@ -151,18 +161,6 @@
     </label>
   </div>
 
-  <form data-layout="row" data-gap="sm" data-wrap="none" onsubmit={(e) => { e.preventDefault(); doSearch(); }}>
-    <input
-      type="search"
-      data-grow
-      bind:value={query}
-      placeholder={tl('search_placeholder')}
-      aria-label={tl('search_placeholder')}
-      autofocus
-    />
-    <button type="submit" data-icon="search">{tl('search_submit')}</button>
-  </form>
-
   {#if loading}
     <p aria-busy="true" aria-live="polite">{tl('search_loading')}</p>
   {:else if errorMsg}
@@ -170,9 +168,9 @@
   {:else if searched && results.length === 0}
     <p data-muted aria-live="polite">{tl('search_noResults')}</p>
   {:else if results.length > 0}
-    <ul data-layout="stack" data-gap="xs" aria-live="polite">
+    <ul data-list aria-live="polite">
       {#each results as item (`${item.account_id}\0${item.calendar_href}\0${item.uid}\0${item.dtstart}`)}
-        <li>
+        <li data-pad="none">
           <button
             type="button"
             data-variant="item"
