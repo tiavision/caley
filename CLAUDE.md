@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The repository is a two-package monorepo with independent frontend and backend tooling:
 
 - **`backend/`** — Rust 2024 Axum binary. Handles auth, CalDAV/CardDAV/IMAP/SMTP clients, SQLite persistence, encryption, sync tasks, SSE, and static frontend serving.
-- **`frontend/`** — Vite static multi-page app: HTML pages compiled by sinter (`@tiaforge-ui/sinter`), temper CSS (`@tiaforge-ui/temper`, `data-*` attributes) + Sass for app-specific rules, compile-time i18n via `@inlang/paraglide-js`.
+- **`frontend/`** — Vite static multi-page app: HTML pages compiled by sinter (`@tiaforge-ui/sinter`), temper CSS (`@tiaforge-ui/temper`, `data-*` attributes) + Sass for app-specific rules, sinter's built-in messages (inlang message files) for i18n.
 
 There is no root-level package manager or Cargo workspace.
 
@@ -51,6 +51,7 @@ Sessions are stored in SQLite via `tower-sessions-sqlx-store` and expire after 7
 - `crypto.rs`: HKDF-SHA256 key derivation and AES-256-GCM encryption for stored secrets.
 - `search.rs`: `SEARCH_MODE` parsing and FTS query/index text normalization.
 - `sse.rs`: Server-sent events for calendar, contacts, and email updates.
+- `static_files.rs`: serves the frontend build (`STATIC_DIR`) with cache headers: hashed files under `/assets/` (`<name>-<8 char hash>.<ext>`) `public, max-age=31536000, immutable`; HTML pages and unhashed files (favicon, manifest, `icons/`, logo) `no-cache` (revalidated with ETag/Last-Modified), so a deploy reaches the next page load.
 
 ### Configuration
 
@@ -212,9 +213,10 @@ Encryption/settings:
 ### Frontend Notes
 
 - TypeScript strict mode. Pages are plain HTML compiled by sinter (`@tiaforge-ui/sinter`); the reference is `node_modules/@tiaforge-ui/sinter/llms.txt`. Data lives in `<sn-resource>`s, live updates come from `<sn-sync src="/api/events/stream">` + `<sn-event>`, mutations use `data-sn-post/put/patch/delete` with `data-sn-then`/`catch`/`optimistic`, UI state uses `data-sn-state`/`let`/`model`, lists and conditionals use `<template data-sn-for/if>`, dialogs are native `<dialog>`s. Prefer plain HTML/CSS, then sinter directives, then helpers, then actions; islands only for layout measuring, foreign DOM (iframes) or timers.
-- `vite.config.ts`: `sinter({ typecheck: true })` compiles every HTML entry and runs `sinter check` on `vite build` (type errors fail it). Entry scripts are not render-blocking: the first paint (and the frame cross-document view transitions in `app.scss` capture) is the static markup, so keep page chrome such as the nav rail outside `data-sn-if`/`data-sn-for` templates and let sinter fill in text and data when the script runs.
-- `src/sinter.config.ts` (imported by every page): paraglide locale, 401 → remember the URL and go to `/`, `sessionProbe: '/api/user'`, allowed URL schemes, shared islands.
-- `src/sinter.helpers.ts`: pure functions templates call by name, plus `m` (paraglide messages: `m.nav_mail()`). Page tests import it whole, so it and what it re-exports stay light and pure: no openpgp/`lib/pgp/*`, no DOM side effects.
+- `vite.config.ts`: `sinter({ typecheck: true })` compiles every HTML entry and runs `sinter check` on `vite build` (type errors fail it).
+- First paint (sinter's, see its `llms.txt` "First paint" and "Messages"). Each built page loads, in its head: a small classic picker script (`assets/sinter-i18n-<hash>.js`: stored `locale`, else `navigator.languages`, else `en`; sets `<html lang>` and inserts the page's language file `assets/<page>-<locale>-<hash>.js` render-blocking), the page's early file `assets/<page>-early-<hash>.js` (`type="module" blocking="render"`: renders, before the first paint, the bindings outside templates that need no data: nav labels, `aria-current`, persisted state such as `nav-collapsed`), then the page bundle, which is `async` (it does not wait for the stylesheets) and takes the rendered DOM over once the document is parsed and the early file has rendered. So keep page chrome such as the nav rail outside `data-sn-if`/`data-sn-for` templates (inside them it waits for the page bundle), keep helpers that early bindings call light (they are copied into the early file; the build prints each early file's size), and remember that page-bundle code (islands, `src/sinter.config.ts`) may run before the body is parsed: no DOM access at module top level, and an island's `connectedCallback` must not rely on later siblings or its children being parsed.
+- `src/sinter.config.ts` (imported by every page): 401 → remember the URL and go to `/`, `sessionProbe: '/api/user'`, allowed URL schemes, shared islands. sinter is the locale source (no `configure({ locale })`).
+- `src/sinter.helpers.ts`: pure functions templates call by name. Messages are sinter's: `m.key()` in markup, `import { m } from '@tiaforge-ui/sinter/messages'` in TS (typed by the generated `src/sinter.messages.d.ts`; only `m.key`, never `m[key]`). Page tests import the helpers whole, so they and what they re-export stay light and pure: no openpgp/`lib/pgp/*`, no DOM side effects.
 - `src/sinter.actions.ts`: one namespace per module in `src/actions/` (`mail`, `ics`, `pgpVault`, `pgpKeys`, `notify`, `share`, `maps`) for imperative work (crypto, files, MIME), called with `data-sn-call="ns.fn(…)"` or `<sn-resource call>`. Actions return data and never touch the DOM or sinter state.
 - `src/sinter.types.ts`: the types `type="…"` may name; re-export each by name (no `export type *`).
 - `src/islands/`: custom elements, `common.ts` for every page (`<mail-notifier>`, `<close-after>`), `<page>.ts` imported by the page entry. `src/lib/`: shared TS (API, formatting, mail utils and types, PGP, i18n). `partials/`: shared markup included with `<sn-include>` (nav, nav-toggle, event detail/form, thread, import, share menu, mail reader/compose/…). `src/styles/`: `temper.ts` plus per-page Sass.
@@ -224,7 +226,7 @@ Encryption/settings:
 - Styling uses temper (`@tiaforge-ui/temper`): semantic HTML plus `data-*` variants, light/dark automatic. The reference is `node_modules/@tiaforge-ui/temper/llms-full.txt`. App-specific CSS goes in `src/styles/*.scss` with `--tm-*` tokens, no hard-coded colors or outer margins.
 - Icons are `data-icon="<lucide name>"`; the temper Vite plugin emits only names that appear as static strings in the markup.
 - The temper Vite plugin runs `temper check` on every build (errors fail it). Check rendered pages with `npm run inspect` (backend in demo mode on :3000): it builds, logs in and runs temper-inspect on every page of the build the backend serves from `dist`; add `-- --sheet <dir>` for screenshots or `-- /mail/` for one page.
-- i18n messages live in `frontend/messages/`.
+- i18n messages live in `frontend/messages/{locale}.json` (`project.inlang/settings.json`: `en` base, `de`), plain strings with `{param}`s; a missing `de` key falls back to `en` and is reported at build. The language is switched with `$locale = 'de'` (settings), without a reload.
 - `vite.config.ts` proxies `/api`, `/auth`, and `/logout` to `http://localhost:3000`; the dev server is usually `localhost:5173`. After a dependency change restart it with `npx vite --force`.
 - Agents verify against the build, never the Vite dev server (its hot reloads navigate pages mid-check): `npm run build`, then the DEMO_MODE backend on `http://localhost:3000` serves `dist` (WebAuthn works there too, since that origin is `APP_BASE_URL`). Agents working in parallel build into their own `--outDir` and serve it with `npx vite preview --outDir <dir> --port <port>`, which proxies `/api` like the dev server.
 
@@ -313,4 +315,5 @@ The image builds the frontend with Node, builds the Rust backend, and serves the
 - Email sync and calendar/contact sync both use SSE to refresh live UI state.
 - OpenPGP private-key material should remain client-side decrypted only. Backend PGP endpoints store encrypted vault records and public metadata.
 - Security headers in `main.rs` intentionally restrict script/image/frame behavior; update CSP carefully when adding frontend capabilities.
+- Static file caching relies on hashed asset names: never serve unhashed files from `/assets/`, and keep HTML `no-cache`. Open: a tab left open across a deploy can still request an old hashed chunk (a lazy import) that the new build no longer has (404); not handled yet.
 - The app does not terminate TLS. Use a reverse proxy in production and keep `APP_BASE_URL` set to the public HTTPS origin, especially for OIDC and WebAuthn.
