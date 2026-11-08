@@ -386,9 +386,3 @@ export function searchQuery(q: string, start: string, end: string, cals: readonl
 export function sameSearch(a: SearchQuery | null, b: SearchQuery): boolean {
   return !!a && a.q === b.q && a.start === b.start && a.end === b.end && a.cals.join('\n') === b.cals.join('\n');
 }
-
-/** One search request per calendar (`cal` is one calendar); with none chosen, one request without `cal`. */
-export function searchSources(s: SearchQuery | null): Array<{ cal: string | null }> {
-  if (!s) return [];
-  return s.cals.length ? s.cals.map((cal) => ({ cal })) : [{ cal: null }];
-}

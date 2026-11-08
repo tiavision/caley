@@ -30,9 +30,9 @@
         data-sn-on-event-saved="refresh('results')"
         data-sn-on-event-deleted="refresh('results')">
     <sn-include src="../partials/nav.html"></sn-include>
-    <!-- One request per chosen calendar (the API takes one `cal` each); none chosen searches all, as before. -->
-    <sn-resource name="results" each="s in searchSources(search)" when="search"
-                 src="/api/search?q={search.q}&start={search.start || null}&end={search.end || null}&cal={s.cal}"
+    <!-- One request: `cal` repeated for each chosen calendar; none chosen searches all. -->
+    <sn-resource name="results" when="search"
+                 src="/api/search?q={search.q}&start={search.start || null}&end={search.end || null}&cal={search.cals}"
                  key="account_id,calendar_href,uid,dtstart" order="-dtstart" type="EventJson[]"></sn-resource>
     <main data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar">
       <div data-density="compact" data-sn-let="{ eventThreads: false, chosen: chosenCalendars(calendars, flipped) }">

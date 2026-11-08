@@ -41,8 +41,8 @@ async function show(routes: Record<string, RouteResponse> = {}) {
     'GET /api/calendars': calendars,
     'GET /api/caldav/accounts': { accounts: [{ account_id: 'acc', display_name: 'Demo' }] },
     'GET /api/search': (call) => {
-      const cal = new URL(call.url, 'http://x').searchParams.get('cal');
-      return [standup, dinner].filter((e) => !cal || cal === `acc\0${e.calendar_href}`);
+      const cals = new URL(call.url, 'http://x').searchParams.getAll('cal');
+      return [standup, dinner].filter((e) => !cals.length || cals.includes(`acc\0${e.calendar_href}`));
     },
     'GET /api/contacts': { addressbooks: [], contacts: [] },
     ...routes,
@@ -73,12 +73,12 @@ async function search(root: HTMLElement, settle: () => Promise<void>, q: string)
 
 const titles = (root: HTMLElement) => [...root.querySelectorAll('.search-result strong')].map((s) => s.textContent);
 
-test('searches the active calendars, one request each, newest first', async () => {
+test('searches the active calendars in one request, newest first', async () => {
   const { root, settle, requests } = await show();
   expect(root.querySelector('button[popovertarget=search-calendars]')!.textContent).toBe('Calendars (2/3)');
   await search(root, settle, ' din ');
   const urls = requests.calls.filter((c) => c.path === '/api/search').map((c) => c.url);
-  expect(urls).toEqual(['/api/search?q=din&cal=acc%00%2Fcal%2Fwork%2F', '/api/search?q=din&cal=acc%00%2Fcal%2Fhome%2F']);
+  expect(urls).toEqual(['/api/search?q=din&cal=acc%00%2Fcal%2Fwork%2F&cal=acc%00%2Fcal%2Fhome%2F']);
   expect(titles(root)).toEqual(['Dinner', 'Standup']);
   expect(root.querySelector('.search-result small[data-caption]')!.textContent).toBe('Home');
 });
@@ -93,6 +93,18 @@ test('the calendar menu and dates narrow the next search', async () => {
   await search(root, settle, 'dinner');
   expect(requests.calls.at(-1)!.url).toBe('/api/search?q=dinner&start=2026-11-10&cal=acc%00%2Fcal%2Fwork%2F');
   expect(titles(root)).toEqual(['Standup']);
+});
+
+test('with no calendar chosen, the search sends no cal and searches all', async () => {
+  const { root, settle, flush, requests } = await show();
+  const boxes = root.querySelectorAll<HTMLInputElement>('#search-calendars input[type=checkbox]');
+  boxes[0]!.click();
+  boxes[1]!.click();
+  await flush();
+  expect([...boxes].map((b) => b.checked)).toEqual([false, false, false]);
+  await search(root, settle, 'din');
+  expect(requests.calls.filter((c) => c.path === '/api/search').map((c) => c.url)).toEqual(['/api/search?q=din']);
+  expect(titles(root)).toEqual(['Dinner', 'Standup']);
 });
 
 test('a result opens the detail; edit this instance fills the form; saving posts the form and searches again', async () => {
@@ -124,7 +136,7 @@ test('a result opens the detail; edit this instance fills the form; saving posts
   expect(body.get('scope')).toBe('this_instance');
   expect(body.get('calendar_href')).toBe('/cal/work/');
   expect(form.open).toBe(false);
-  expect(requests.calls.slice(before).filter((c) => c.path === '/api/search')).toHaveLength(2); // one per calendar
+  expect(requests.calls.slice(before).filter((c) => c.path === '/api/search')).toHaveLength(1);
 });
 
 test('a refused save shows the server message in the form', async () => {

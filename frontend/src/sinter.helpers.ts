@@ -63,7 +63,6 @@ export {
   chosenCalendars,
   searchQuery,
   sameSearch,
-  searchSources,
 } from './lib/events.ts';
 
 // Thread dialog (partials/thread-dialog.html).
