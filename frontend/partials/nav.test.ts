@@ -45,9 +45,12 @@ test('shows the rail for the signed-in user, with the current page marked', asyn
   expect(root.querySelector('main button[popovertarget="nav"]')!.getAttribute('aria-label')).toBe('Open menu');
 });
 
-test('shows no rail when nobody is signed in', async () => {
+test('the rail does not wait for the user: its links are in the markup, only the name fills in later', async () => {
+  // Signed-out visitors never get here (the server redirects them to /), so the rail is part of the page's first paint.
   const { root } = await show('/calendar/', { userResponse: { status: 401 } });
-  expect(root.querySelector('nav')).toBeNull();
+  const rail = root.querySelector('nav[data-rail]')!;
+  expect(rail.querySelector('a[href="/calendar/"]')!.getAttribute('aria-current')).toBe('page');
+  expect(rail.querySelector('footer [data-caption]')).toBeNull();
 });
 
 test('remembers the collapsed rail across page loads', async () => {
