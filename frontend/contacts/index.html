@@ -29,7 +29,7 @@
     <sn-include src="../partials/nav.html"></sn-include>
     <sn-resource name="contacts" src="/api/contacts" items="contacts" key="account_id,uid,addressbook_href" order="fn_name" type="ContactJson[]"></sn-resource>
     <sn-resource name="addressbooks" src="/api/contacts" items="addressbooks" key="account_id,href" type="AddressbookJson[]"></sn-resource>
-    <!-- The page's server events. The rail's <mail-notifier> listens here too. -->
+    <!-- The page's server events (shares the rail's connection). -->
     <sn-sync src="/api/events/stream">
       <sn-event name="contact_updated" resource="contacts" op="upsert" item="contact" fallback="refetch" type="ContactUpdatedEvent"></sn-event>
       <!-- Removed elsewhere while its detail dialog is open: close the dialog. -->

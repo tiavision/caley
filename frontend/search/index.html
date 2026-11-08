@@ -30,8 +30,6 @@
         data-sn-on-event-saved="refresh('results')"
         data-sn-on-event-deleted="refresh('results')">
     <sn-include src="../partials/nav.html"></sn-include>
-    <!-- The page's server events. The rail's <mail-notifier> listens here. -->
-    <sn-sync src="/api/events/stream"></sn-sync>
     <!-- One request per chosen calendar (the API takes one `cal` each); none chosen searches all, as before. -->
     <sn-resource name="results" each="s in searchSources(search)" when="search"
                  src="/api/search?q={search.q}&start={search.start || null}&end={search.end || null}&cal={s.cal}"

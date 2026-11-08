@@ -132,7 +132,7 @@
                      direction-values="{first: 'forward', prev: 'backward', next: 'forward'}"></sn-resource>
         <sn-resource name="seenAddrs" src="/api/email/suggest-addrs?q={addrQ}" when="addrQ.trim()" items="addrs" type="string[]"></sn-resource>
 
-        <!-- The page's server events. The rail's notifications and <mail-notifier> listen here too. -->
+        <!-- The page's server events (shares the rail's connection). -->
         <sn-sync src="/api/events/stream">
           <sn-event name="emails_refetch" resource="messages" op="refetch" type="MailboxEvent"
                     when="!view.folder_id && (!view.mailbox || (account_id === view.account_id && mailbox === view.mailbox))"></sn-event>

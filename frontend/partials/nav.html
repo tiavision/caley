@@ -1,11 +1,12 @@
 <!-- Navigation rail (temper app.css), included by every app page as the first child of
      <body data-shell="fixed" data-sn-state="{ here: '/<page>/' }">, before <main>. `here` marks the current page.
-     Below 48rem the rail is a popover drawer, opened by partials/nav-toggle.html (or NavToggle.svelte).
+     Below 48rem the rail is a popover drawer, opened by partials/nav-toggle.html.
      The `user` resource is the page's: pages read it (map_url, …) instead of declaring their own.
-     New-mail notifications: <mail-notifier> (src/islands/common.ts) shows them from the page's
-     /api/events/stream <sn-sync>, which every page that includes the rail declares (mail shows its own). -->
+     New-mail notifications: <mail-notifier> (src/islands/common.ts) shows the `new_email` events of the rail's own
+     <sn-sync>; a page's <sn-sync> for the same URL shares its connection. /mail/ shows its own notifications. -->
 <sn-resource name="user" src="/api/user" type="User"></sn-resource>
 <sn-resource name="notifications" call="notify.status()"></sn-resource>
+<sn-sync src="/api/events/stream"></sn-sync>
 
 <template data-sn-if="user">
   <nav data-rail popover id="nav" data-sn-attr="{'aria-label': m.nav_label()}" data-sn-state="{ collapsed: false }">

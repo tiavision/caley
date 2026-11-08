@@ -28,7 +28,7 @@
     <!-- The encryption tab (partials/pgp-settings.html), loaded while it is open. -->
     <sn-resource name="vault" call="pgpVault.status()" when="tab === 'encryption'" type="VaultView"></sn-resource>
     <sn-resource name="publicKeys" src="/api/pgp/keys" key="fingerprint" when="tab === 'encryption'" type="StoredPublicKey[]"></sn-resource>
-    <!-- The page's server events. The rail's <mail-notifier> listens here too. -->
+    <!-- The page's server events (shares the rail's connection). -->
     <sn-sync src="/api/events/stream">
       <sn-event name="calendars_changed" resource="caldavAccounts" op="refetch"></sn-event>
       <sn-event name="contacts_refetch" resource="caldavAccounts" op="refetch"></sn-event>

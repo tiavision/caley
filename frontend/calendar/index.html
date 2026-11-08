@@ -58,7 +58,7 @@
     <sn-resource name="threadEventGroups" when="threadRef" key="account_id,mailbox,uid" type="MessageEventGroupJson[]"
                  src="/api/email/thread-events?account_id={threadRef.account_id}&mailbox={threadRef.mailbox}&uid={threadRef.uid}"></sn-resource>
     <sn-resource name="pickerGrid" when="view === 'month' && pickerAt" src="/api/calendar?month={pickerAt}&tz={userTz()}" type="MonthGridJson"></sn-resource>
-    <!-- The page's server events (the rail's <mail-notifier> listens here too). A changed event can move between
+    <!-- The page's server events (shares the rail's connection). A changed event can move between
          days, so the day lists reload rather than patch one item. -->
     <sn-sync src="/api/events/stream">
       <sn-event name="events_refetch" resource="weekDays" op="refetch"></sn-event>
