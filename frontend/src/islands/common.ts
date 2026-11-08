@@ -68,3 +68,16 @@ function shown(el: HTMLElement): boolean {
 }
 
 document.addEventListener('keydown', clickShortcut);
+
+/**
+ * Page transitions (src/styles/app.scss): on narrow screens the nav rail is a popover drawer, and a tap on one of
+ * its links navigates while it is open. The old page is captured for the cross-document view transition right
+ * after `pageswap`, so the open drawer would be in the snapshot and fade out over the new page, where it is
+ * closed. Hide it here first, without its slide-out transition, so the new page starts with the drawer closed.
+ */
+window.addEventListener('pageswap', () => {
+  const rail = document.querySelector<HTMLElement>('body[data-shell] > nav[data-rail][popover]');
+  if (!rail?.matches(':popover-open')) return;
+  rail.style.transition = 'none';
+  rail.hidePopover();
+});
