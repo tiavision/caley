@@ -81,3 +81,25 @@ window.addEventListener('pageswap', () => {
   rail.style.transition = 'none';
   rail.hidePopover();
 });
+
+/**
+ * Sets data-styled on <html> once every stylesheet in the head has applied; until then src/styles/app.scss disables
+ * transitions. Firefox resolves styles before the head's stylesheets are in, so a transition declared in a sheet
+ * would otherwise run from the user-agent default to the sheet's resting state as the sheet lands (the mail folder
+ * drawer slid closed on every page load). The style flush before the marker keeps the sheet's arrival and the
+ * re-enabled transitions out of the same style update. The page bundle is async, so a sheet may already be in.
+ */
+function markStyled() {
+  const pending = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]'))
+    .filter((link) => !link.sheet)
+    .map((link) => new Promise<void>((resolve) => {
+      link.addEventListener('load', () => resolve(), { once: true });
+      link.addEventListener('error', () => resolve(), { once: true });
+    }));
+  Promise.all(pending).then(() => {
+    void getComputedStyle(document.documentElement).translate;
+    document.documentElement.dataset.styled = '';
+  });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', markStyled);
+else markStyled();

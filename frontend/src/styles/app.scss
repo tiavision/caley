@@ -6,6 +6,17 @@
   flex-shrink: 0;
 }
 
+// No transitions until the page's stylesheets have applied (src/islands/common.ts sets data-styled on <html>
+// once they have). Firefox resolves styles before the stylesheets in the head are in, so an element whose resting
+// state in a late sheet differs from the user-agent default (the mail folder drawer: translate -100%) would
+// otherwise transition into it as the sheet lands, and the first paint shows that slide. Chromium holds the whole
+// rendering update until the sheets are in, so there this changes nothing.
+html:not([data-styled]) *,
+html:not([data-styled]) *::before,
+html:not([data-styled]) *::after {
+  transition: none;
+}
+
 // Mail: attachment chip (message reader and compose dialog). temper has no chip/tag component.
 .mail-attachment-chip {
   display: inline-flex;
