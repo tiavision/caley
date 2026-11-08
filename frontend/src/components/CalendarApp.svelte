@@ -585,14 +585,12 @@
             {#if day.events.length > 0}
               <div class="events" data-list>
                 {#each day.events as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
-                  <div data-pad="xs">
+                  <div data-pad="xs" data-bar style={event.color ? `--tm-tone: ${event.color}` : null}>
                     <button
                       type="button"
                       class="event-trigger"
                       data-variant="item"
                       data-size="sm"
-                      data-bar
-                      style={event.color ? `--tm-tone: ${event.color}` : null}
                       tabindex="-1"
                       onclick={() => eventDetail.open(event)}
                     >

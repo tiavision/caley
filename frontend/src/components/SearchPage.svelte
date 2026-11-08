@@ -170,14 +170,12 @@
   {:else if results.length > 0}
     <ul data-list aria-live="polite">
       {#each results as item (`${item.account_id}\0${item.calendar_href}\0${item.uid}\0${item.dtstart}`)}
-        <li data-pad="xs">
+        <li data-pad="xs" data-bar={item.color ? '' : null} style:--tm-tone={item.color || null}>
           <button
             type="button"
             data-variant="item"
             data-layout="stack"
             data-gap="none"
-            data-bar={item.color ? '' : null}
-            style:--tm-tone={item.color || null}
             onclick={() => eventDetail.open(item)}
           >
             <strong>{item.summary}</strong>
