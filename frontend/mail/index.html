@@ -539,11 +539,8 @@
         <!-- Next to the FAB: the image sources dialog for every message. -->
         <button type="button" class="origins-trigger" data-variant="secondary" data-icon="image" data-tooltip commandfor="mail-origins" command="show-modal"
                 data-sn-on-click="origins = {only: false, q: ''}"
-                data-sn-attr="{'aria-label': m.mail_manageImageSources()}">
-          <template data-sn-if="(allowedOrigins?.origins.length ?? 0) + (ignoredOrigins?.origins.length ?? 0) > 0">
-            <span data-sn-text="allowedOrigins.origins.length + ignoredOrigins.origins.length"></span>
-          </template>
-        </button>
+                data-sn-attr="{'aria-label': m.mail_manageImageSources()}"
+                data-sn-text="(allowedOrigins?.origins.length ?? 0) + (ignoredOrigins?.origins.length ?? 0) || ''"></button>
         <button type="button" data-fab data-icon="plus" commandfor="mail-compose" command="show-modal"
                 data-sn-on-click="compose = composeDraft('new', null, identities); needContacts = true"
                 data-sn-attr="{'aria-label': m.mail_newMessage()}"></button>

@@ -205,6 +205,11 @@ $phone: 639px;
 
 .page-status {
   anchor-name: --mail-page-status;
+
+  // Opens the page jump, but is no menu button: no caret (temper menu.css).
+  &::after {
+    content: none;
+  }
 }
 
 // The page-number jump: a small popover over the page status button.
