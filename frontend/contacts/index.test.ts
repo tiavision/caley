@@ -208,6 +208,18 @@ test('server events update, remove and reload contacts; the open dialog follows'
   expect(names(r.root)).toEqual(['Ada Lovelace', 'Alan Turing', 'Bob Babbage']);
 });
 
+test('the detail dialog closes when another client removes its contact', async () => {
+  const r = await show();
+  const dialog = await openDetail(r, 'Ada Lovelace');
+  r.stream.emit('contact_removed', { account_id: 'acc', uid: '2', addressbook_href: '/ab/personal/' });   // another contact
+  await r.flush();
+  expect(dialog.open).toBe(true);
+  r.stream.emit('contact_removed', { account_id: 'acc', uid: '1', addressbook_href: '/ab/personal/' });
+  await r.flush();
+  expect(dialog.open).toBe(false);
+  expect(names(r.root)).toEqual(['Bob Babbage']);
+});
+
 test('keyboard: c opens a new contact, e edits the open one', async () => {
   const r = await show();
   const form = r.root.querySelector<HTMLDialogElement>('#contact-form')!;

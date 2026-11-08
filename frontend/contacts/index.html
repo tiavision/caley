@@ -32,7 +32,9 @@
     <!-- The page's server events. The rail's <mail-notifier> listens here too. -->
     <sn-sync src="/api/events/stream">
       <sn-event name="contact_updated" resource="contacts" op="upsert" item="contact" fallback="refetch" type="ContactUpdatedEvent"></sn-event>
-      <sn-event name="contact_removed" resource="contacts" op="remove" type="ContactRemovedEvent"></sn-event>
+      <!-- Removed elsewhere while its detail dialog is open: close the dialog. -->
+      <sn-event name="contact_removed" resource="contacts" op="remove" type="ContactRemovedEvent"
+                then="sel?.uid === uid && sel.account_id === account_id && sel.addressbook_href === addressbook_href && (sel = null, close('contact-detail'))"></sn-event>
       <sn-event name="contacts_refetch" resource="contacts" op="refetch"></sn-event>
       <sn-event name="contacts_refetch" resource="addressbooks" op="refetch"></sn-event>
     </sn-sync>
