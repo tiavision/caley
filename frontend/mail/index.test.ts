@@ -265,6 +265,34 @@ test('keyboard: j/k open the neighbours, Ctrl/Shift+Space mark, Escape clears, S
   expect(marked()).toEqual([]);
 });
 
+test('j past the last row loads the next page when there is one, and nothing at the end', async () => {
+  // keyset paging: a full page (50) means there may be more, a shorter one is the end
+  const full = Array.from({ length: 50 }, (_, i) => msg(100 - i, `M${100 - i}`));
+  const pages = (first: Message[]) => (call: { url: string }) =>
+    new URL(call.url, 'http://x').searchParams.get('cursor_rowid') ? { messages: [msg(1, 'Next page')] } : { messages: first };
+  const press = (target: Element, key: string) =>
+    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  const listed = (r: { requests: { calls: { method: string; path: string; url: string }[] } }) =>
+    r.requests.calls.filter((c) => c.method === 'GET' && c.path === '/api/email/messages').map((c) => c.url);
+  const jAtLast = async (r: Awaited<ReturnType<typeof show>>) => {
+    rows(r.root).at(-1)!.click();
+    await r.settle();
+    press(rows(r.root).at(-1)!, 'j');
+    await r.settle();
+  };
+
+  const short = await show({ 'GET /api/email/messages': pages(inbox), 'PATCH /api/email/message/flags': null });  // three rows: the end
+  await jAtLast(short);
+  expect(listed(short)).toHaveLength(1);
+
+  const more = await show({ 'GET /api/email/messages': pages(full), 'PATCH /api/email/message/flags': null });   // a full page: load the next one
+  await jAtLast(more);
+  expect(listed(more)).toHaveLength(2);
+  expect(listed(more)[1]).toContain('direction=forward');
+  expect(listed(more)[1]).toContain('cursor_rowid=');
+  expect(subjects(more.root)).toEqual(['Next page']);
+});
+
 const folderRow = { folder_id: 'f1', display_name: 'followup-Folder', sort_order: 0, query: '', mailboxes: [] };
 const folderItems = (root: HTMLElement) => [...root.querySelectorAll('.sidebar-item')].map((b) => b.textContent!.trim()).filter((t) => t.startsWith('followup-'));
 

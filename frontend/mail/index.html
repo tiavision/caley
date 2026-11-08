@@ -62,7 +62,6 @@
              mail-open {detail: Message}: show it in the reader, with the cursor on it, read in the lists;
              mail-view: the list shows another view: no marks, search or open message;
              list-step {detail: 1 | -1}: j/k, open the next/previous message (or load that page at the end of one);
-             list-next, list-prev: load the next/previous page of the list shown, when there is one;
              reader-back (also the reader's back button): the overlay closes, the cursor goes to its message;
              view-removed: the virtual folder or account shown was removed: no view, no marks;
              mail-patched, mail-removed: see partials/mail-reader.html. -->
@@ -85,6 +84,7 @@
              cur: currentView(view, accounts, mailboxes, folders),
              searching: searchActive(search),
              list: searching ? results : messages,
+             listName: searching ? 'results' : 'messages',
              bulk: bulkOf(list, sel.keys, mailboxes),
              addressBook: contactAddresses(contacts ?? []),
              ownThread: !threadRef || threadRef.current,
@@ -104,9 +104,7 @@
            data-sn-on-list-step="hit = neighbor(list, open ? messageKey(open) : sel.cursor, $event.detail);
                                  hit && emit('mail-open', hit);
                                  hit && elementIn($el, '.message-detail')?.focus();
-                                 !hit && emit($event.detail > 0 ? 'list-next' : 'list-prev')"
-           data-sn-on-list-next="searching && $meta.results.hasNext && page('results', 'next'); !searching && $meta.messages.hasNext && page('messages', 'next')"
-           data-sn-on-list-prev="searching && $meta.results.hasPrev && page('results', 'prev'); !searching && $meta.messages.hasPrev && page('messages', 'prev')"
+                                 !hit && page(listName, $event.detail > 0 ? 'next' : 'prev')"
            data-sn-on-reader-back="reader.shown = false; sel.cursor = open ? messageKey(open) : sel.cursor"
            data-sn-on-keydown-j="pageKey($event, bulk.messages.length) && emit('list-step', 1)"
            data-sn-on-keydown-k="pageKey($event, bulk.messages.length) && emit('list-step', -1)">
@@ -372,8 +370,8 @@
                         data-sn-on-click="sel = rowClick($event, sel, k, list); reader.shown = true; opensRow($event) && emit('mail-open', msg)"
                         data-sn-on-keydown-mod-space="sel = rowClick($event, sel, k, list); reader.shown = true"
                         data-sn-on-keydown-shift-space="sel = rowClick($event, sel, k, list); reader.shown = true"
-                        data-sn-on-keydown-arrowdown="siblingRow($el, 1)?.focus(); !siblingRow($el, 1) && emit('list-next')"
-                        data-sn-on-keydown-arrowup="siblingRow($el, -1)?.focus(); !siblingRow($el, -1) && emit('list-prev')"
+                        data-sn-on-keydown-arrowdown="siblingRow($el, 1)?.focus(); !siblingRow($el, 1) && page(listName, 'next')"
+                        data-sn-on-keydown-arrowup="siblingRow($el, -1)?.focus(); !siblingRow($el, -1) && page(listName, 'prev')"
                         data-sn-on-dragstart="drag.msg = msg"
                         data-sn-on-dragend="drag = noDrag()">
                   <span data-layout="row" data-gap="sm" data-wrap="none">
