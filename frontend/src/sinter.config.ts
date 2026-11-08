@@ -22,6 +22,6 @@ configure({
   // <sn-sync> reconnects only after this answers 2xx; a 401 goes to the login page.
   sessionProbe: '/api/user',
   locale: { get: getLocale, set: setLocale },
-  // Contact addresses link to the device's map app (src/actions/maps.ts).
-  urlSchemes: ['geo:'],
+  // Contact addresses link to the device's map app (src/actions/maps.ts); decrypted mail attachments are blob: links.
+  urlSchemes: ['geo:', 'blob:'],
 });

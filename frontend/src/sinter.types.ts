@@ -46,3 +46,11 @@ export interface AccountDraft {
   has_password: boolean;
 }
 
+// Mail pages (mail/, mail/view/, partials/mail-*.html).
+export type {
+  Account, Identity, Mailbox, VirtualFolder, Message, Attachment, MessageRef, MailView, UnreadCounts,
+  MailboxEvent, AccountEvent, EmailUpdatedEvent, EmailRemovedEvent, SearchFilter, ComposeDraft, ComposeKeys,
+  ContactAddresses, ImageOrigins, AccountForm, Autodiscovery, IdentityForm, FolderDraft,
+} from './lib/mail.ts';
+export type { ReaderBody } from './actions/mail.ts';
+export type { ThreadNode as MailThreadNode } from './lib/mail.ts';

@@ -1,10 +1,8 @@
+// Mail page (mail/index.html, sinter): styles and the mail islands; helpers, actions and types come through sinter.
 import '../styles/temper.ts';
-import { initI18n } from '../lib/i18n.ts';
+import '../styles/mail.scss';
+import '../islands/mail.ts';
 import { rememberCurrentAppUrl } from '../lib/return-url.ts';
-import { mount } from 'svelte';
-import MailApp from '../components/MailApp.svelte';
+import './mail-bridge.svelte.ts';
 
 rememberCurrentAppUrl();
-
-initI18n();
-mount(MailApp, { target: document.getElementById('app')! });

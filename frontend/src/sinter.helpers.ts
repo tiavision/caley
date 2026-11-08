@@ -68,3 +68,15 @@ export {
 
 // ICS import dialog (partials/import-dialog.html).
 export { calendarValue, importEventDate } from './lib/import.ts';
+
+// Mail pages (mail/index.html, mail/view/index.html, partials/mail-*.html).
+export {
+  currentView, folderView, mailboxView, sameView, folderName, viewTitle, badgeCount, mailboxKey, sidebarSections, mailTitle,
+  toggled, refOf, isRef, urlRef, filterActive, markRange, neighbor, archiveMailbox, archiveTargets, moveTargets, bulkOf,
+  withFlag, flagBody, moveBody, inTrash, emptyTrashDays, validTrashDays, mailShortcut, rowKey, readerScroll, clampWidth,
+  keyWidth, isSentMailbox, messageDateTime, shownAttachments, attachmentUrl, attachmentCount, pgpBadgeLabel, isIconBadge,
+  bodyOrigins, matching, isThreadCurrent, composeDraft, composeTitle, recipientToken, withRecipient, contactAddresses,
+  recipientHits, senderHits, senderLabel, canSign, canEncrypt, signs, newAccount, editAccount, discovered, accountBody,
+  identityBody, folderDraft, folderBody, subscribed, canPreviewAttachment, folderKind, htmlAddsValue,
+  isIcsAttachment, formatDate, humanSize, textSegments, messageKey, senderName,
+} from './lib/mail.ts';

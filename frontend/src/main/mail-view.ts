@@ -1,22 +1,8 @@
+// Standalone message view (mail/view/index.html, sinter): one message in its own window.
 import '../styles/temper.ts';
-import { initI18n } from '../lib/i18n.ts';
+import '../styles/mail.scss';
+import '../islands/mail.ts';
 import { rememberCurrentAppUrl } from '../lib/return-url.ts';
-import { mount } from 'svelte';
-import MailApp from '../components/MailApp.svelte';
+import './mail-bridge.svelte.ts';
 
 rememberCurrentAppUrl();
-
-initI18n();
-
-const params = new URLSearchParams(window.location.search);
-const uid = Number(params.get('uid'));
-const accountId = params.get('account_id') ?? '';
-const mailbox = params.get('mailbox') ?? '';
-const initialMessage = accountId && mailbox && Number.isInteger(uid) && uid > 0
-  ? { accountId, mailbox, uid }
-  : null;
-
-mount(MailApp, {
-  target: document.getElementById('app')!,
-  props: { standalone: true, initialMessage },
-});

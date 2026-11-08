@@ -10,12 +10,541 @@
     <link rel="manifest" href="/site.webmanifest">
     <meta name="theme-color" content="#2563eb">
     <meta name="mobile-web-app-capable" content="yes" />
-    <title>Caley - Mail</title>
+    <title data-sn-text="mailTitle(unread)">Caley - Mail</title>
   </head>
-  <body data-shell="fixed" data-sn-state="{ here: '/mail/' }">
+  <!-- Mail: folders (accounts, mailboxes, virtual folders), the message list and the reader (partials/mail-reader.html).
+       Page state on <body> is what the reader, compose and the dialogs share with /mail/view/:
+       open: the MessageRef in the reader (from ?account_id=&mailbox=&uid= on load); detailOpen: the reader overlay is
+       shown below 1024px; wiped: decrypted content dropped while the page was hidden; compose: the draft of the
+       compose dialog (partials/mail-compose.html). -->
+  <body data-shell="fixed"
+        data-sn-state="{
+          here: '/mail/',
+          standalone: false,
+          open: urlRef($url),
+          detailOpen: !!urlRef($url),
+          wiped: false,
+          compose: /** @type {ComposeDraft|null} */ (null),
+          composeError: '',
+          sending: false,
+          rcpt: { field: '', token: '' },
+          needContacts: false,
+          origins: { only: false, q: '' },
+          acct: newAccount(),
+          acctStep: 'basic',
+          discovery: /** @type {Autodiscovery|null} */ (null),
+          advanced: false,
+          acctError: '',
+          acctBusy: false,
+          idAccount: '',
+          idForm: /** @type {IdentityForm|null} */ (null),
+          idError: '',
+          folderEdit: folderDraft(null),
+        }">
     <sn-include src="../partials/nav.html"></sn-include>
-    <main data-layout="stack" data-gap="none">
-      <div id="app" data-layout="stack" data-gap="none" data-density="compact" data-grow></div>
+    <sn-resource name="accounts" src="/api/email/accounts" items="accounts" key="account_id" type="Account[]"></sn-resource>
+    <sn-resource name="mailboxes" each="a in accounts" src="/api/email/mailboxes?account_id={a.account_id}" items="mailboxes" key="account_id,name" type="Mailbox[]"></sn-resource>
+    <sn-resource name="folders" src="/api/email/folders" items="folders" key="folder_id" order="sort_order" type="VirtualFolder[]"></sn-resource>
+    <sn-resource name="unread" src="/api/email/unread-counts" type="UnreadCounts"></sn-resource>
+    <sn-resource name="identities" src="/api/email/identities" items="identities" key="identity_id" type="Identity[]"></sn-resource>
+    <sn-resource name="contacts" src="/api/contacts" items="contacts" when="needContacts" type="ContactAddresses[]"></sn-resource>
+    <sn-include src="../partials/mail-reader-data.html"></sn-include>
+
+    <!-- view: the list shown (persisted; currentView() falls back to the first inbox); collapsed: account ids. -->
+    <main data-layout="stack" data-gap="none"
+          data-sn-state="{ view: /** @type {MailView} */ ({ account_id: null, mailbox: null, folder_id: null }), collapsed: /** @type {string[]} */ ([]) }"
+          data-sn-persist="mail">
+      <!-- List state: q the search (qInput while typing), filter the search filters, marked the keys of the rows
+           selected for a bulk action (anchor: the last one toggled), cursor the key of the row with the focus ring,
+           dragged the message being dragged to a mailbox. -->
+      <div class="mail-page" data-layout="stack" data-gap="none" data-density="compact" data-grow
+           data-sn-state="{
+             syncing: /** @type {string[]} */ ([]),
+             sidebarW: 220,
+             listW: 320,
+             sidebarOpen: false,
+             qInput: '',
+             q: '',
+             filter: /** @type {SearchFilter} */ ({ addrs: [], from: '', to: '', unread: false }),
+             addrInput: '',
+             addrQ: '',
+             cursor: /** @type {string|null} */ (null),
+             marked: /** @type {string[]} */ ([]),
+             anchor: /** @type {string|null} */ (null),
+             bulkError: '',
+             bulkMove: false,
+             bulkBusy: false,
+             dragged: /** @type {Message|null} */ (null),
+             dragOver: /** @type {string|null} */ (null),
+             pageValue: /** @type {number|null} */ (1),
+             trash: { choice: '30', custom: /** @type {number|null} */ (30), error: '', busy: false },
+             key: '',
+             hit: /** @type {Message|null} */ (null),
+           }"
+           data-sn-let="{
+             cur: currentView(view, accounts, mailboxes, folders),
+             searching: q.trim() !== '' || filterActive(filter),
+             list: searching ? results : messages,
+             bulk: bulkOf(list, marked, mailboxes),
+             addressBook: contactAddresses(contacts ?? []),
+           }"
+           data-sn-on-mail-patched="patch('messages', /** @type {Message} */ ($event.detail.ref), $event.detail.fields); patch('results', /** @type {Message} */ ($event.detail.ref), $event.detail.fields); refresh('unread')"
+           data-sn-on-mail-removed="remove('messages', /** @type {Message} */ ($event.detail.ref)); remove('results', /** @type {Message} */ ($event.detail.ref)); marked = []; refresh('unread')"
+           data-sn-on-keydown="key = rowKey($event) ? 'row-' + rowKey($event) : mailShortcut($event, bulk.messages.length, false);
+             hit = key.startsWith('row-') ? list.find(x => messageKey(x) === cursor) ?? null : neighbor(list, open ? messageKey(open) : cursor, key === 'next' ? 1 : -1);
+             key && key !== 'row-open' && key !== 'scroll' && $event.preventDefault();
+             key === 'clear' && (marked = [], anchor = null, bulkError = '', bulkMove = false);
+             key === 'row-toggle' && hit && (marked = toggled(marked, cursor), anchor = cursor, bulkError = '', bulkMove = false, detailOpen = true);
+             key === 'row-range' && hit && (marked = markRange(list, marked, anchor, cursor), bulkError = '', bulkMove = false, detailOpen = true);
+             key === 'row-down' && ((/** @type {HTMLElement} */ ($event.target)).nextElementSibling ? (/** @type {HTMLElement} */ ((/** @type {HTMLElement} */ ($event.target)).nextElementSibling)).focus() : searching ? $meta.results.hasNext && page('results', 'next') : $meta.messages.hasNext && page('messages', 'next'));
+             key === 'row-up' && ((/** @type {HTMLElement} */ ($event.target)).previousElementSibling?.matches('.message-row') ? (/** @type {HTMLElement} */ ((/** @type {HTMLElement} */ ($event.target)).previousElementSibling)).focus() : searching ? $meta.results.hasPrev && page('results', 'prev') : $meta.messages.hasPrev && page('messages', 'prev'));
+             (key === 'next' || key === 'prev') && !hit && (key === 'next' ? (searching ? $meta.results.hasNext && page('results', 'next') : $meta.messages.hasNext && page('messages', 'next')) : (searching ? $meta.results.hasPrev && page('results', 'prev') : $meta.messages.hasPrev && page('messages', 'prev')));
+             (key === 'next' || key === 'prev') && hit && (open = refOf(hit), cursor = messageKey(hit), detailOpen = true, marked = [], patch('messages', hit, withFlag(hit, '\\Seen', true)), patch('results', hit, withFlag(hit, '\\Seen', true)), (/** @type {HTMLElement} */ ($el.querySelector('.message-detail'))).focus());
+             key === 'back' && (detailOpen = false, cursor = open ? messageKey(open) : cursor);
+             key === 'scroll' && [$el.querySelector('.message-detail'), $el.querySelector('.detail-body')].filter(e => e && e.scrollHeight > e.clientHeight).slice(0, 1).forEach(e => ($event.preventDefault(), ['Home', 'End'].includes($event.key) ? e.scrollTo({top: $event.key === 'Home' ? 0 : e.scrollHeight}) : e.scrollBy({top: e.clientHeight * 0.9 * ($event.key === 'PageDown' ? 1 : -1)})));
+             ['reply', 'replyAll', 'forward', 'archive', 'delete', 'read', 'unread'].includes(key) && (/** @type {HTMLElement|null} */ ($el.querySelector(`[data-shortcut='${key}']`)))?.click()">
+        <sn-resource name="messages"
+                     src="/api/email/messages?account_id={cur.account_id}&mailbox={cur.mailbox}&folder_id={cur.folder_id}"
+                     when="(cur.mailbox || cur.folder_id) && !searching"
+                     items="messages" total="total" key="account_id,mailbox,uid" type="Message[]"
+                     paginate="keyset" page-size="50" size-param="limit" offset-param="offset"
+                     cursor="{cursor_sent_at: sent_at, cursor_rowid: rowid}" direction-param="direction"
+                     direction-values="{first: 'forward', prev: 'backward', next: 'forward', last: 'last'}"></sn-resource>
+        <sn-resource name="results"
+                     src="/api/email/search?q={q.trim()}&account_id={cur.account_id}&mailbox={cur.mailbox}&folder_id={cur.folder_id}&addrs={filter.addrs.length ? filter.addrs.join(',') : null}&date_from={filter.from || null}&date_to={filter.to || null}&unread_only={filter.unread ? 'true' : null}"
+                     when="searching"
+                     items="messages" key="account_id,mailbox,uid" type="Message[]"
+                     paginate="keyset" page-size="50" size-param="limit"
+                     cursor="{cursor_sent_at: sent_at, cursor_rowid: rowid}" direction-param="direction"
+                     direction-values="{first: 'forward', prev: 'backward', next: 'forward'}"></sn-resource>
+        <sn-resource name="seenAddrs" src="/api/email/suggest-addrs?q={addrQ}" when="addrQ.trim()" items="addrs" type="string[]"></sn-resource>
+
+        <!-- The page's server events. The rail's notifications and <mail-notifier> listen here too. -->
+        <sn-sync src="/api/events/stream">
+          <sn-event name="emails_refetch" resource="messages" op="refetch" type="MailboxEvent"
+                    when="!view.folder_id && (!view.mailbox || (account_id === view.account_id && mailbox === view.mailbox))"></sn-event>
+          <sn-event name="emails_refetch" resource="unread" op="refetch"></sn-event>
+          <sn-event name="email_updated" resource="messages" op="patch" type="EmailUpdatedEvent"
+                    set="{flags, is_read: flags.includes('\\Seen'), is_flagged: flags.includes('\\Flagged')}"></sn-event>
+          <sn-event name="email_updated" resource="results" op="patch" type="EmailUpdatedEvent"
+                    set="{flags, is_read: flags.includes('\\Seen'), is_flagged: flags.includes('\\Flagged')}"></sn-event>
+          <sn-event name="email_updated" resource="message" op="patch" type="EmailUpdatedEvent"
+                    when="isRef(open, {account_id, mailbox, uid})"
+                    set="{flags, is_read: flags.includes('\\Seen'), is_flagged: flags.includes('\\Flagged')}"></sn-event>
+          <sn-event name="email_updated" resource="unread" op="refetch"></sn-event>
+          <sn-event name="email_removed" resource="messages" op="remove" type="EmailRemovedEvent"></sn-event>
+          <sn-event name="email_removed" resource="results" op="remove" type="EmailRemovedEvent"></sn-event>
+          <sn-event name="email_removed" resource="message" op="remove" type="EmailRemovedEvent" when="isRef(open, {account_id, mailbox, uid})"
+                    then="open = null; detailOpen = false"></sn-event>
+          <sn-event name="email_removed" resource="unread" op="refetch"></sn-event>
+          <sn-event name="accounts_changed" resource="accounts" op="refetch"></sn-event>
+          <sn-event name="accounts_changed" resource="mailboxes" op="refetch"></sn-event>
+          <sn-event name="mailboxes_changed" resource="mailboxes" op="refetch" type="AccountEvent"></sn-event>
+          <sn-event name="sync_started" type="MailboxEvent" then="syncing = [...syncing, mailboxKey(account_id, mailbox)]"></sn-event>
+          <sn-event name="sync_completed" resource="unread" op="refetch" type="MailboxEvent"
+                    then="syncing = syncing.filter(k => k !== mailboxKey(account_id, mailbox))"></sn-event>
+        </sn-sync>
+        <!-- New-mail notifications: the rail shows none on this page, the page shows them itself. -->
+        <template data-sn-if="$meta.unread.loadedAt"><mail-notifier hidden></mail-notifier></template>
+        <mail-hidden-watch hidden data-sn-on-page-hidden="wiped = true"></mail-hidden-watch>
+
+        <div class="mail-layout" data-grow data-sn-style="{'--sidebar-w': sidebarW + 'px', '--list-w': listW + 'px'}">
+          <!-- ── Folders ───────────────────────────────────────────────────────── -->
+          <button type="button" class="sidebar-backdrop" data-sn-show="sidebarOpen" data-sn-on-click="sidebarOpen = false"
+                  data-sn-attr="{'aria-label': m.mail_aria_folders()}"></button>
+          <aside class="mail-sidebar" data-layout="stack" data-gap="md" data-pad="sm" data-scroll="y"
+                 data-sn-class="{open: sidebarOpen}" data-sn-attr="{'aria-label': m.mail_aria_folders()}">
+            <template data-sn-if="folders.length > 0">
+              <div data-layout="stack" data-gap="none">
+                <div class="section-header" data-layout="row" data-gap="xs" data-wrap="none">
+                  <span data-caption data-truncate data-grow data-sn-text="m.mail_virtualFolders()"></span>
+                </div>
+                <template data-sn-for="f in folders">
+                  <div data-layout="row" data-gap="none" data-wrap="none" data-sn-let="{ n: unread?.folders?.[f.folder_id] ?? 0 }">
+                    <button type="button" class="sidebar-item" data-variant="item" data-size="sm" data-layout="row" data-gap="sm" data-wrap="none" data-grow
+                            data-sn-attr="{'aria-current': cur.folder_id === f.folder_id ? 'true' : null}"
+                            data-sn-on-click="view = folderView(f.folder_id); marked = []; anchor = null; open = null; cursor = null; detailOpen = false; qInput = ''; q = ''; filter = {addrs: [], from: '', to: '', unread: false}; addrInput = ''; sidebarOpen = false">
+                      <span data-icon="layers" aria-hidden="true"></span>
+                      <span data-truncate data-grow data-sn-text="f.display_name"></span>
+                      <template data-sn-if="n > 0"><span data-badge data-tone="accent" data-sn-text="badgeCount(n)"></span></template>
+                    </button>
+                    <button type="button" data-variant="ghost" data-size="sm" data-icon="pencil" data-tooltip commandfor="mail-folder" command="show-modal"
+                            data-sn-on-click="sidebarOpen = false; folderEdit = folderDraft(f)"
+                            data-sn-attr="{'aria-label': m.mail_editVirtualFolder()}"></button>
+                    <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
+                            data-sn-delete="/api/email/folder?folder_id={f.folder_id}"
+                            data-sn-optimistic="remove('folders', f)"
+                            data-sn-then="remove('folders', f); sidebarOpen = false; view.folder_id === f.folder_id && (view = {account_id: null, mailbox: null, folder_id: null}, marked = [])"
+                            data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <template data-sn-for="section in sidebarSections(accounts, mailboxes, unread, collapsed)" data-sn-key="section.account.account_id">
+              <div data-layout="stack" data-gap="none" data-sn-let="{ acc: section.account }">
+                <div class="section-header" data-layout="row" data-gap="none" data-wrap="none">
+                  <button type="button" class="account-collapse-btn" data-variant="ghost" data-size="sm" data-icon="chevron-down"
+                          data-sn-class="{collapsed: section.collapsed}"
+                          data-sn-attr="{'aria-label': section.collapsed ? m.mail_expandAccount() : m.mail_collapseAccount(), 'aria-expanded': section.collapsed ? 'false' : 'true'}"
+                          data-sn-on-click="collapsed = toggled(collapsed, acc.account_id)"></button>
+                  <span data-caption data-truncate data-grow data-sn-attr="{title: acc.username}" data-sn-text="acc.display_name"></span>
+                  <template data-sn-if="section.unread > 0"><span data-badge data-tone="accent" data-sn-text="badgeCount(section.unread)"></span></template>
+                  <button type="button" data-variant="ghost" data-size="sm" data-icon="user" data-tooltip commandfor="mail-identities" command="show-modal"
+                          data-sn-on-click="sidebarOpen = false; idAccount = acc.account_id; idForm = null; idError = ''"
+                          data-sn-attr="{'aria-label': m.mail_identities()}"></button>
+                  <button type="button" data-variant="ghost" data-size="sm" data-icon="pencil" data-tooltip commandfor="mail-account" command="show-modal"
+                          data-sn-on-click="sidebarOpen = false; acct = editAccount(acc, identities); acctStep = 'details'; discovery = null; advanced = true; acctError = ''"
+                          data-sn-attr="{'aria-label': m.mail_editAccountHeading()}"></button>
+                  <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
+                          data-sn-delete="/api/email/account?account_id={acc.account_id}"
+                          data-sn-confirm="m.mail_removeAccountConfirm({name: acc.display_name})"
+                          data-sn-then="sidebarOpen = false; refresh('accounts'); collapsed = collapsed.filter(id => id !== acc.account_id); view.account_id === acc.account_id && (view = {account_id: null, mailbox: null, folder_id: null}, marked = [])"
+                          data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
+                </div>
+                <template data-sn-for="item in section.mailboxes" data-sn-key="item.key">
+                  <div class="sidebar-drop" data-layout="stack" data-gap="none"
+                       data-sn-let="{ mb: item.mailbox, canDrop: !!dragged && dragged.account_id === item.mailbox.account_id && dragged.mailbox !== item.mailbox.name }"
+                       data-sn-on-dragover="canDrop && ($event.preventDefault(), dragOver = item.key)"
+                       data-sn-on-dragleave="dragOver === item.key && (dragOver = null)"
+                       data-sn-on-drop="isRef(open, dragged) && (open = null, detailOpen = false)"
+                       data-sn-post="/api/email/message/move" data-sn-trigger="drop"
+                       data-sn-body="moveBody(dragged, mb.name)"
+                       data-sn-optimistic="remove('messages', dragged); remove('results', dragged)"
+                       data-sn-then="refresh('messages'); refresh('results'); refresh('unread')">
+                    <button type="button" class="sidebar-item" data-variant="item" data-size="sm" data-layout="row" data-gap="sm" data-wrap="none"
+                            data-sn-let="{ busy: syncing.includes(item.key), kind: folderKind(mb.name) }"
+                            data-sn-class="{'drag-target': canDrop, 'drag-over': dragOver === item.key}"
+                            data-sn-attr="{'aria-busy': busy ? 'true' : null, 'aria-current': cur.account_id === mb.account_id && cur.mailbox === mb.name ? 'true' : null}"
+                            data-sn-post="/api/email/sync?account_id={mb.account_id}&mailbox={mb.name}" data-sn-catch="bulkError = bulkError"
+                            data-sn-on-click="view = mailboxView(mb.account_id, mb.name); marked = []; anchor = null; open = null; cursor = null; detailOpen = false; qInput = ''; q = ''; filter = {addrs: [], from: '', to: '', unread: false}; addrInput = ''; sidebarOpen = false">
+                      <sn-include src="../partials/mail-folder-icon.html"></sn-include>
+                      <span data-truncate data-grow data-sn-text="folderName(mb.name)"></span>
+                      <template data-sn-if="!busy && item.unread > 0"><span data-badge data-tone="accent" data-sn-text="badgeCount(item.unread)"></span></template>
+                    </button>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <div class="sidebar-add" data-layout="stack" data-gap="none">
+              <button type="button" data-variant="ghost" data-size="sm" data-icon="plus" commandfor="mail-account" command="show-modal"
+                      data-sn-on-click="sidebarOpen = false; acct = newAccount(); acctStep = 'basic'; discovery = null; advanced = false; acctError = ''"
+                      data-sn-text="m.mail_addAccount()"></button>
+              <button type="button" data-variant="ghost" data-size="sm" data-icon="plus" commandfor="mail-folder" command="show-modal"
+                      data-sn-on-click="sidebarOpen = false; folderEdit = folderDraft(null)"
+                      data-sn-text="m.mail_addVirtualFolder()"></button>
+            </div>
+          </aside>
+          <mail-split class="resize-handle" role="separator" tabindex="0" aria-orientation="vertical" aria-valuemin="140" aria-valuemax="400"
+                      data-sn-prop="{width: sidebarW}"
+                      data-sn-attr="{'aria-label': m.mail_resizeFolders(), 'aria-valuenow': sidebarW}"
+                      data-sn-on-split-resize="sidebarW = clampWidth('sidebar', $event.detail)"
+                      data-sn-on-keydown="sidebarW = keyWidth('sidebar', $event, sidebarW); ($event.key === 'ArrowLeft' || $event.key === 'ArrowRight') && $event.preventDefault()"></mail-split>
+
+          <!-- ── Message list ───────────────────────────────────────────────────── -->
+          <section class="message-list" data-layout="stack" data-gap="none" data-sn-attr="{'aria-label': m.nav_mail()}">
+            <div class="message-list-header" data-layout="stack" data-gap="sm" data-pad="sm">
+              <div data-layout="row" data-gap="xs" data-wrap="none">
+                <sn-include src="../partials/nav-toggle.html"></sn-include>
+                <button type="button" class="folder-toggle" data-variant="ghost" data-icon="folder" data-sn-on-click="sidebarOpen = true"
+                        data-sn-attr="{'aria-label': m.mail_aria_folders()}"></button>
+                <h2 data-truncate data-grow data-sn-text="viewTitle(cur, folders)"></h2>
+                <template data-sn-if="cur.folder_id || cur.mailbox">
+                  <div data-layout="row" data-gap="xs" data-wrap="none">
+                    <template data-sn-if="cur.account_id && cur.mailbox && !cur.folder_id && folderKind(cur.mailbox) === 'trash'">
+                      <button type="button" data-variant="ghost" data-tone="danger" data-icon="trash-2" data-tooltip commandfor="mail-empty-trash" command="show-modal"
+                              data-sn-on-click="trash = {choice: '30', custom: 30, error: '', busy: false}"
+                              data-sn-attr="{'aria-label': m.mail_emptyTrash()}"></button>
+                    </template>
+                    <button type="button" data-variant="ghost" data-icon="user" data-tooltip popovertarget="mail-filter-addr"
+                            data-sn-on-click="needContacts = true"
+                            data-sn-attr="{'aria-label': m.mail_filterBySender(), 'aria-pressed': filter.addrs.length > 0 ? 'true' : 'false'}"></button>
+                    <div popover id="mail-filter-addr" class="filter-popover" data-menu role="dialog"
+                         data-sn-attr="{'aria-label': m.mail_filterBySender()}"
+                         data-sn-let="{ hits: senderHits(addrInput, addressBook, seenAddrs ?? [], filter.addrs) }">
+                      <input type="search" data-sn-model="addrInput" data-sn-on-input="addrQ = addrInput" data-sn-debounce-input="300"
+                             data-sn-attr="{placeholder: m.mail_filterAddrPlaceholder(), 'aria-label': m.mail_filterAddrPlaceholder()}">
+                      <template data-sn-if="filter.addrs.length > 0">
+                        <div data-layout="row" data-gap="xs" data-pad="xs">
+                          <template data-sn-for="addr in filter.addrs" data-sn-key="addr">
+                            <span class="filter-chip" data-badge data-tone="accent" data-sn-attr="{title: addr}">
+                              <span data-truncate data-sn-text="senderLabel(addr, addressBook)"></span>
+                              <button type="button" class="chip-remove" data-variant="ghost" data-icon="x"
+                                      data-sn-attr="{'aria-label': m.mail_removeAttachment()}"
+                                      data-sn-on-click="filter.addrs = filter.addrs.filter(a => a !== addr); marked = []; open = null"></button>
+                            </span>
+                          </template>
+                        </div>
+                        <button type="button" data-icon="trash-2" data-sn-on-click="filter.addrs = []; marked = []; open = null" data-sn-text="m.mail_filterClearAddrs()"></button>
+                        <hr>
+                      </template>
+                      <template data-sn-for="s in hits.contacts" data-sn-key="s.email">
+                        <label class="filter-suggestion-row">
+                          <input type="checkbox" data-sn-attr="{checked: filter.addrs.includes(s.email)}"
+                                 data-sn-on-change="filter.addrs = toggled(filter.addrs, s.email); marked = []; open = null">
+                          <span data-layout="stack" data-gap="none" data-grow>
+                            <template data-sn-if="s.name"><span data-truncate data-sn-text="s.name"></span></template>
+                            <small data-muted class="suggestion-email" data-sn-text="s.email"></small>
+                          </span>
+                        </label>
+                      </template>
+                      <template data-sn-for="addr in hits.seen" data-sn-key="addr">
+                        <label class="filter-suggestion-row">
+                          <input type="checkbox" data-sn-attr="{checked: filter.addrs.includes(addr)}"
+                                 data-sn-on-change="filter.addrs = toggled(filter.addrs, addr); marked = []; open = null">
+                          <small class="suggestion-email" data-grow data-sn-text="addr"></small>
+                        </label>
+                      </template>
+                      <template data-sn-if="hits.canAdd">
+                        <button type="button" data-tone="accent" data-icon="plus"
+                                data-sn-on-click="addrInput.trim() && !filter.addrs.includes(addrInput.trim()) && (filter.addrs = [...filter.addrs, addrInput.trim()], marked = [], open = null); addrInput = ''; addrQ = ''">
+                          <span data-truncate data-sn-text="`${m.mail_filterAddAddr()}: ${addrInput}`"></span>
+                        </button>
+                      </template>
+                    </div>
+                    <button type="button" data-variant="ghost" data-icon="calendar" data-tooltip popovertarget="mail-filter-date"
+                            data-sn-attr="{'aria-label': m.mail_filterByDate(), 'aria-pressed': filter.from || filter.to ? 'true' : 'false'}"></button>
+                    <div popover id="mail-filter-date" class="filter-popover filter-popover-date" data-menu role="dialog"
+                         data-sn-attr="{'aria-label': m.mail_filterByDate()}">
+                      <div data-layout="stack" data-gap="sm" data-pad="xs">
+                        <label>
+                          <span data-sn-text="m.mail_filterDateFrom()"></span>
+                          <input type="date" data-sn-model="filter.from" data-sn-on-change="marked = []; open = null">
+                        </label>
+                        <label>
+                          <span data-sn-text="m.mail_filterDateTo()"></span>
+                          <input type="date" data-sn-model="filter.to" data-sn-on-change="marked = []; open = null">
+                        </label>
+                        <template data-sn-if="filter.from || filter.to">
+                          <button type="button" data-variant="secondary" data-size="sm" data-self="start"
+                                  data-sn-on-click="filter.from = ''; filter.to = ''; marked = []; open = null" data-sn-text="m.mail_filterClearDate()"></button>
+                        </template>
+                      </div>
+                    </div>
+                    <button type="button" data-variant="ghost" data-icon="circle-check" data-tooltip
+                            data-sn-on-click="filter.unread = !filter.unread; marked = []; open = null; detailOpen = false"
+                            data-sn-attr="{'aria-label': m.mail_filterUnread(), 'aria-pressed': filter.unread ? 'true' : 'false'}"></button>
+                  </div>
+                </template>
+              </div>
+              <template data-sn-if="cur.folder_id || cur.mailbox">
+                <input type="search" data-sn-model="qInput"
+                       data-sn-on-input="q = qInput; marked = []; open = null; detailOpen = false" data-sn-debounce-input="250"
+                       data-sn-attr="{placeholder: m.mail_searchPlaceholder(), 'aria-label': m.mail_searchPlaceholder()}">
+              </template>
+              <template data-sn-if="searching && !$meta.results.loading">
+                <small data-muted data-sn-text="results.length === 1 ? m.mail_result1() : m.mail_resultsN({n: results.length})"></small>
+              </template>
+            </div>
+
+            <div class="message-list-scroll" data-layout="stack" data-gap="none" data-scroll="y" data-grow>
+              <template data-sn-if="(searching ? $meta.results.loading : $meta.messages.loading) && !list.length">
+                <p class="list-status" data-muted aria-busy="true" data-sn-text="m.mail_loading()"></p>
+              </template>
+              <template data-sn-else>
+                <template data-sn-if="!list.length">
+                  <p class="list-status" data-muted
+                     data-sn-text="searching ? (q.trim() ? m.mail_noResults({q}) : m.mail_noResultsFiltered()) : !accounts.length ? m.mail_noAccounts() : !cur.account_id && !cur.folder_id ? m.mail_selectMailbox() : m.mail_noMessages()"></p>
+                </template>
+              </template>
+              <template data-sn-for="msg in list">
+                <button type="button" class="message-row" data-variant="item" data-layout="stack" data-gap="none" data-align="stretch" data-bar draggable="true"
+                        data-sn-let="{ k: messageKey(msg) }"
+                        data-sn-class="{unread: !msg.is_read, cursor: k === cursor}"
+                        data-sn-attr="{
+                          'data-tone': msg.is_read ? null : 'accent',
+                          'aria-pressed': marked.includes(k) ? 'true' : 'false',
+                          'aria-current': !bulk.messages.length && isRef(open, msg) ? 'true' : null,
+                          tabindex: k === cursor || (!cursor && list[0] === msg) ? '0' : '-1',
+                        }"
+                        data-sn-on-focusin="cursor = k"
+                        data-sn-on-click="$event.ctrlKey || $event.metaKey
+                          ? (marked = toggled(marked, k), anchor = k, bulkError = '', bulkMove = false, detailOpen = true)
+                          : $event.shiftKey
+                            ? (marked = markRange(list, marked, anchor, k), bulkError = '', bulkMove = false, detailOpen = true)
+                            : (marked = [], anchor = null, bulkError = '', cursor = k, open = refOf(msg), detailOpen = true, patch('messages', msg, withFlag(msg, '\\Seen', true)), patch('results', msg, withFlag(msg, '\\Seen', true)))"
+                        data-sn-on-dragstart="dragged = msg"
+                        data-sn-on-dragend="dragged = null; dragOver = null">
+                  <span data-layout="row" data-gap="sm" data-wrap="none">
+                    <span class="from" data-truncate data-grow><template data-sn-if="!msg.is_read"><span class="unread-dot" aria-label="Unread"></span></template><span data-sn-text="senderName(msg.from) || m.mail_unknownSender()"></span></span>
+                    <small class="date" data-muted data-sn-text="formatDate(msg.sent_at)"></small>
+                  </span>
+                  <span data-layout="row" data-gap="xs" data-wrap="none">
+                    <span class="subject" data-truncate data-grow data-sn-text="msg.subject || m.mail_noSubject()"></span>
+                    <template data-sn-if="msg.is_flagged"><span class="flag-star" data-icon="star" role="img" data-sn-attr="{'aria-label': m.mail_flaggedTitle(), title: m.mail_flaggedTitle()}"></span></template>
+                    <template data-sn-if="msg.has_attachments && !msg.is_encrypted"><span data-icon="paperclip" data-muted role="img" data-sn-attr="{'aria-label': m.mail_hasAttachments(), title: m.mail_hasAttachments()}"></span></template>
+                  </span>
+                </button>
+              </template>
+            </div>
+
+            <template data-sn-if="searching ? results.length > 0 : $meta.messages.total > 0">
+              <nav class="pagination-bar" data-layout="row" data-gap="xs" data-justify="center" data-wrap="none" data-pad="xs">
+                <template data-sn-if="searching">
+                  <button type="button" data-variant="ghost" data-size="sm" data-icon="chevrons-left" data-tooltip data-sn-on-click="page('results', 'first'); marked = []"
+                          data-sn-attr="{disabled: !$meta.results.hasPrev, 'aria-label': m.mail_firstPageAria()}"></button>
+                  <button type="button" data-variant="ghost" data-size="sm" data-icon="chevron-left" data-tooltip data-sn-on-click="page('results', 'prev'); marked = []"
+                          data-sn-attr="{disabled: !$meta.results.hasPrev, 'aria-label': m.mail_prevPageAria()}"></button>
+                  <small data-muted data-sn-text="Math.max(1, Math.ceil(($meta.results.to ?? 0) / 50))"></small>
+                  <button type="button" data-variant="ghost" data-size="sm" data-icon="chevron-right" data-tooltip data-sn-on-click="page('results', 'next'); marked = []"
+                          data-sn-attr="{disabled: !$meta.results.hasNext, 'aria-label': m.mail_nextPageAria()}"></button>
+                </template>
+                <template data-sn-else>
+                  <button type="button" data-variant="ghost" data-size="sm" data-icon="chevrons-left" data-tooltip data-sn-on-click="page('messages', 'first'); marked = []"
+                          data-sn-attr="{disabled: !$meta.messages.hasPrev, 'aria-label': m.mail_firstPageAria()}"></button>
+                  <button type="button" data-variant="ghost" data-size="sm" data-icon="chevron-left" data-tooltip data-sn-on-click="page('messages', 'prev'); marked = []"
+                          data-sn-attr="{disabled: !$meta.messages.hasPrev, 'aria-label': m.mail_prevPageAria()}"></button>
+                  <button type="button" class="page-status" data-variant="ghost" data-size="sm" popovertarget="mail-page-jump"
+                          data-sn-on-click="pageValue = $meta.messages.page"
+                          data-sn-attr="{title: m.mail_jumpToPageAria()}"
+                          data-sn-text="m.mail_pageStatus({start: $meta.messages.from, end: $meta.messages.to, total: $meta.messages.total})"></button>
+                  <form popover id="mail-page-jump" class="page-jump" data-layout="row" data-gap="xs" data-wrap="none" data-pad="xs"
+                        data-sn-on-submit="$event.preventDefault(); pageValue && (page('messages', pageValue), marked = []); $el.hidePopover()">
+                    <input class="page-input" data-size="sm" type="number" min="1" autofocus data-sn-model="pageValue"
+                           data-sn-attr="{max: $meta.messages.pages, 'aria-label': m.mail_jumpToPageAria()}">
+                    <small data-muted data-sn-text="`/ ${$meta.messages.pages}`"></small>
+                  </form>
+                  <button type="button" data-variant="ghost" data-size="sm" data-icon="chevron-right" data-tooltip data-sn-on-click="page('messages', 'next'); marked = []"
+                          data-sn-attr="{disabled: !$meta.messages.hasNext, 'aria-label': m.mail_nextPageAria()}"></button>
+                  <button type="button" data-variant="ghost" data-size="sm" data-icon="chevrons-right" data-tooltip data-sn-on-click="page('messages', 'last'); marked = []"
+                          data-sn-attr="{disabled: !$meta.messages.hasNext, 'aria-label': m.mail_lastPageAria()}"></button>
+                </template>
+              </nav>
+            </template>
+          </section>
+          <mail-split class="resize-handle detail-resize-handle" role="separator" tabindex="0" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="600"
+                      data-sn-prop="{width: listW}"
+                      data-sn-attr="{'aria-label': m.mail_resizeMessages(), 'aria-valuenow': listW}"
+                      data-sn-on-split-resize="listW = clampWidth('list', $event.detail)"
+                      data-sn-on-keydown="listW = keyWidth('list', $event, listW); ($event.key === 'ArrowLeft' || $event.key === 'ArrowRight') && $event.preventDefault()"></mail-split>
+
+          <!-- ── Reader, or the bulk menu for marked rows ─────────────────────────── -->
+          <section class="message-detail" data-layout="stack" data-gap="none" tabindex="-1"
+                   data-sn-class="{'is-open': detailOpen && (bulk.messages.length > 0 || !!open)}"
+                   data-sn-attr="{'aria-label': m.nav_mail()}">
+            <template data-sn-if="bulk.messages.length > 0">
+              <div class="detail-header" data-layout="row" data-gap="sm" data-wrap="none" data-pad="sm">
+                <button type="button" class="overlay-only" data-variant="ghost" data-icon="arrow-left" data-sn-on-click="marked = []; anchor = null; bulkError = ''; bulkMove = false"
+                        data-sn-attr="{'aria-label': m.mail_back()}"></button>
+                <h2 class="detail-subject" data-grow data-sn-text="m.mail_selectedCount({n: bulk.messages.length})"></h2>
+                <button type="button" data-variant="outline" data-size="sm" data-sn-on-click="marked = []; anchor = null; bulkError = ''; bulkMove = false"
+                        data-sn-attr="{disabled: bulkBusy}" data-sn-text="m.mail_clearSelection()"></button>
+              </div>
+              <div data-layout="stack" data-gap="md" data-pad="md" data-scroll="y" data-sn-attr="{'aria-busy': bulkBusy ? 'true' : 'false'}">
+                <template data-sn-if="bulkError"><p data-callout data-tone="danger" role="alert" data-sn-text="bulkError"></p></template>
+                <div class="bulk-menu" data-menu data-self="start">
+                  <button type="button" data-icon="mail-open" data-sn-attr="{disabled: bulkBusy}" data-sn-on-click="bulkBusy = true"
+                          data-sn-call="mail.bulk('flag', bulk.messages, {flag: '\\Seen', set: true})"
+                          data-sn-then="bulkBusy = false; marked = $result; anchor = $result[0] ?? null; bulkError = $result.length ? m.mail_bulkActionError() : ''; bulkMove = false; refresh('messages'); refresh('results'); refresh('unread')"
+                          data-sn-text="m.mail_markRead()"></button>
+                  <button type="button" data-icon="mail" data-sn-attr="{disabled: bulkBusy}" data-sn-on-click="bulkBusy = true"
+                          data-sn-call="mail.bulk('flag', bulk.messages, {flag: '\\Seen', set: false})"
+                          data-sn-then="bulkBusy = false; marked = $result; anchor = $result[0] ?? null; bulkError = $result.length ? m.mail_bulkActionError() : ''; bulkMove = false; refresh('messages'); refresh('results'); refresh('unread')"
+                          data-sn-text="m.mail_markUnread()"></button>
+                  <button type="button" data-icon="star" data-sn-attr="{disabled: bulkBusy}" data-sn-on-click="bulkBusy = true"
+                          data-sn-call="mail.bulk('flag', bulk.messages, {flag: '\\Flagged', set: true})"
+                          data-sn-then="bulkBusy = false; marked = $result; anchor = $result[0] ?? null; bulkError = $result.length ? m.mail_bulkActionError() : ''; bulkMove = false; refresh('messages'); refresh('results')"
+                          data-sn-text="m.mail_flag()"></button>
+                  <button type="button" data-icon="star-off" data-sn-attr="{disabled: bulkBusy}" data-sn-on-click="bulkBusy = true"
+                          data-sn-call="mail.bulk('flag', bulk.messages, {flag: '\\Flagged', set: false})"
+                          data-sn-then="bulkBusy = false; marked = $result; anchor = $result[0] ?? null; bulkError = $result.length ? m.mail_bulkActionError() : ''; bulkMove = false; refresh('messages'); refresh('results')"
+                          data-sn-text="m.mail_unflag()"></button>
+                  <hr>
+                  <template data-sn-if="bulk.canArchive">
+                    <button type="button" data-icon="archive" data-sn-attr="{disabled: bulkBusy}" data-sn-on-click="bulkBusy = true"
+                            data-sn-call="mail.bulk('move', bulk.messages, {archive: archiveTargets(bulk.messages, mailboxes)})"
+                            data-sn-then="bulkBusy = false; marked = $result; anchor = $result[0] ?? null; bulkError = $result.length ? m.mail_bulkActionError() : ''; bulkMove = false; refresh('messages'); refresh('results'); refresh('unread')"
+                            data-sn-text="m.mail_archive()"></button>
+                  </template>
+                  <template data-sn-if="bulk.targets.length > 0">
+                    <button type="button" data-icon="folder-input" data-sn-attr="{disabled: bulkBusy, 'aria-expanded': bulkMove ? 'true' : 'false'}" data-sn-on-click="bulkMove = !bulkMove">
+                      <span data-grow data-sn-text="m.mail_moveToFolder()"></span>
+                      <span class="caret" data-icon="chevron-down" aria-hidden="true"></span>
+                    </button>
+                  </template>
+                  <template data-sn-if="bulk.canArchive || bulk.targets.length > 0"><hr></template>
+                  <button type="button" data-icon="trash-2" data-tone="danger" data-sn-attr="{disabled: bulkBusy}" data-sn-on-click="bulkBusy = true"
+                          data-sn-confirm="bulk.inTrash ? m.mail_bulkDeleteConfirm({n: bulk.messages.length}) : null"
+                          data-sn-call="mail.bulk('delete', bulk.messages, {})"
+                          data-sn-then="bulkBusy = false; marked = $result; anchor = $result[0] ?? null; bulkError = $result.length ? m.mail_bulkActionError() : ''; bulkMove = false; refresh('messages'); refresh('results'); refresh('unread')"
+                          data-sn-text="m.mail_delete()"></button>
+                </div>
+                <template data-sn-if="bulkMove && bulk.targets.length > 0">
+                  <div class="bulk-menu" data-menu data-self="start" role="group" data-sn-attr="{'aria-label': m.mail_moveToFolder()}">
+                    <template data-sn-for="mb in bulk.targets">
+                      <button type="button" data-sn-let="{ kind: folderKind(mb.name) }" data-sn-attr="{disabled: bulkBusy}" data-sn-on-click="bulkBusy = true"
+                              data-sn-call="mail.bulk('move', bulk.messages, {dest: mb.name})"
+                              data-sn-then="bulkBusy = false; marked = $result; anchor = $result[0] ?? null; bulkError = $result.length ? m.mail_bulkActionError() : ''; bulkMove = false; refresh('messages'); refresh('results'); refresh('unread')">
+                        <sn-include src="../partials/mail-folder-icon.html"></sn-include>
+                        <span data-truncate data-sn-text="folderName(mb.name)"></span>
+                      </button>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <template data-sn-else>
+              <sn-include src="../partials/mail-reader.html"></sn-include>
+            </template>
+          </section>
+        </div>
+
+        <!-- ── Empty trash ───────────────────────────────────────────────────────── -->
+        <dialog id="mail-empty-trash" closedby="any" data-sn-on-cancel="trash.busy && $event.preventDefault()"
+                data-sn-let="{ days: emptyTrashDays(trash.choice, trash.custom) }">
+          <form data-sn-post="/api/email/trash/empty"
+                data-sn-body="{account_id: cur.account_id, mailbox: cur.mailbox, days}"
+                data-sn-on-submit="trash.busy = true; trash.error = ''"
+                data-sn-then="trash.busy = false; open && open.account_id === cur.account_id && open.mailbox === cur.mailbox && (open = null, detailOpen = false); marked = []; refresh('messages'); refresh('unread'); close()"
+                data-sn-catch="trash.busy = false; trash.error = $error.body?.error === 'savedate_unsupported' ? m.mail_emptyTrashUnsupported() : m.mail_emptyTrashError()">
+            <header>
+              <h2 data-sn-text="m.mail_emptyTrash()"></h2>
+              <button type="button" commandfor="mail-empty-trash" command="close" data-sn-attr="{'aria-label': m.mail_close(), disabled: trash.busy}"></button>
+            </header>
+            <p data-muted data-sn-text="m.mail_emptyTrashPrompt()"></p>
+            <div data-list role="radiogroup" data-sn-attr="{'aria-label': m.mail_emptyTrashOlderThan()}">
+              <label><input type="radio" name="trash-days" value="7" data-sn-model="trash.choice" data-sn-attr="{disabled: trash.busy}"> <span data-sn-text="m.mail_emptyTrash7()"></span></label>
+              <label><input type="radio" name="trash-days" value="30" data-sn-model="trash.choice" data-sn-attr="{disabled: trash.busy}"> <span data-sn-text="m.mail_emptyTrash30()"></span></label>
+              <label><input type="radio" name="trash-days" value="90" data-sn-model="trash.choice" data-sn-attr="{disabled: trash.busy}"> <span data-sn-text="m.mail_emptyTrash90()"></span></label>
+              <label data-layout="row" data-gap="sm" data-wrap="none">
+                <input type="radio" name="trash-days" value="custom" data-sn-model="trash.choice" data-sn-attr="{disabled: trash.busy}">
+                <span data-grow data-sn-text="m.mail_emptyTrashCustom()"></span>
+                <input class="trash-days" type="number" data-size="sm" min="1" max="3650" step="1" data-sn-model="trash.custom"
+                       data-sn-attr="{disabled: trash.busy || trash.choice !== 'custom', 'aria-label': m.mail_emptyTrashCustomDays()}">
+              </label>
+            </div>
+            <template data-sn-if="trash.choice === 'custom' && !validTrashDays(days)">
+              <p data-tone="danger" role="alert" data-sn-text="m.mail_emptyTrashInvalidDays()"></p>
+            </template>
+            <template data-sn-else>
+              <template data-sn-if="trash.error"><p data-tone="danger" role="alert" data-sn-text="trash.error"></p></template>
+            </template>
+            <footer>
+              <button type="button" data-variant="secondary" commandfor="mail-empty-trash" command="close" data-sn-attr="{disabled: trash.busy}" data-sn-text="m.mail_cancel()"></button>
+              <button type="submit" data-tone="danger" data-icon="trash-2" data-sn-attr="{disabled: trash.busy || !validTrashDays(days)}"
+                      data-sn-text="trash.busy ? m.mail_emptyTrashDeleting() : m.mail_emptyTrashConfirm()"></button>
+            </footer>
+          </form>
+        </dialog>
+
+        <sn-include src="../partials/mail-origins.html"></sn-include>
+        <sn-include src="../partials/mail-compose.html"></sn-include>
+        <sn-include src="../partials/mail-account.html"></sn-include>
+        <sn-include src="../partials/mail-folder.html"></sn-include>
+
+        <!-- Next to the FAB: the image sources dialog for every message. -->
+        <button type="button" class="origins-trigger" data-variant="secondary" data-icon="image" data-tooltip commandfor="mail-origins" command="show-modal"
+                data-sn-on-click="origins = {only: false, q: ''}"
+                data-sn-attr="{'aria-label': m.mail_manageImageSources()}">
+          <template data-sn-if="(allowedOrigins?.origins.length ?? 0) + (ignoredOrigins?.origins.length ?? 0) > 0">
+            <span data-sn-text="allowedOrigins.origins.length + ignoredOrigins.origins.length"></span>
+          </template>
+        </button>
+        <button type="button" data-fab data-icon="plus" commandfor="mail-compose" command="show-modal"
+                data-sn-on-click="compose = composeDraft('new', null, identities); needContacts = true"
+                data-sn-attr="{'aria-label': m.mail_newMessage()}"></button>
+      </div>
     </main>
     <script type="module" src="/src/main/mail.ts"></script>
   </body>

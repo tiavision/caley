@@ -12,9 +12,54 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <title>Caley - Mail</title>
   </head>
-  <body data-shell="fixed">
+  <!-- One message in its own window (?account_id=&mailbox=&uid=, from the reader's pop-out button and new-mail
+       notifications): the reader of /mail/ (partials/mail-reader.html) without the list. -->
+  <body data-shell="fixed"
+        data-sn-state="{
+          standalone: true,
+          open: urlRef($url),
+          detailOpen: false,
+          cursor: /** @type {string|null} */ (null),
+          wiped: false,
+          compose: /** @type {ComposeDraft|null} */ (null),
+          composeError: '',
+          sending: false,
+          rcpt: { field: '', token: '' },
+          needContacts: false,
+          origins: { only: false, q: '' },
+          key: '',
+        }">
+    <sn-resource name="mailboxes" src="/api/email/mailboxes?account_id={open.account_id}" when="open" items="mailboxes" key="account_id,name" type="Mailbox[]"></sn-resource>
+    <sn-resource name="identities" src="/api/email/identities" items="identities" key="identity_id" type="Identity[]"></sn-resource>
+    <sn-resource name="contacts" src="/api/contacts" items="contacts" when="needContacts" type="ContactAddresses[]"></sn-resource>
+    <sn-include src="../../partials/mail-reader-data.html"></sn-include>
+    <sn-sync src="/api/events/stream">
+      <sn-event name="emails_refetch" resource="message" op="refetch" type="MailboxEvent"
+                when="open && account_id === open.account_id && mailbox === open.mailbox"></sn-event>
+      <sn-event name="emails_refetch" resource="body" op="refetch" type="MailboxEvent"
+                when="open && account_id === open.account_id && mailbox === open.mailbox"></sn-event>
+      <sn-event name="email_updated" resource="message" op="patch" type="EmailUpdatedEvent"
+                when="isRef(open, {account_id, mailbox, uid})"
+                set="{flags, is_read: flags.includes('\\Seen'), is_flagged: flags.includes('\\Flagged')}"></sn-event>
+      <sn-event name="email_removed" resource="message" op="remove" type="EmailRemovedEvent" when="isRef(open, {account_id, mailbox, uid})"
+                then="open = null"></sn-event>
+      <sn-event name="mailboxes_changed" resource="mailboxes" op="refetch" type="AccountEvent" when="open && account_id === open.account_id"></sn-event>
+      <sn-event name="accounts_changed" resource="mailboxes" op="refetch"></sn-event>
+    </sn-sync>
+    <mail-hidden-watch hidden data-sn-on-page-hidden="wiped = true"></mail-hidden-watch>
     <main data-layout="stack" data-gap="none">
-      <div id="app" data-layout="stack" data-gap="none" data-density="compact" data-grow></div>
+      <div class="mail-layout standalone" data-density="compact" data-grow>
+        <section class="message-detail standalone" data-layout="stack" data-gap="none" tabindex="-1" autofocus
+                 data-sn-attr="{'aria-label': m.nav_mail()}"
+                 data-sn-on-keydown="key = mailShortcut($event, 0, true);
+                   key && $event.preventDefault();
+                   key === 'scroll' && ($event.key === 'Home' || $event.key === 'End' ? $el.scrollTo({top: $event.key === 'Home' ? 0 : $el.scrollHeight}) : $el.scrollBy({top: readerScroll($event.key, $el.clientHeight, $el.scrollHeight).by ?? 0}));
+                   ['reply', 'replyAll', 'forward', 'archive', 'delete', 'read', 'unread'].includes(key) && (/** @type {HTMLElement|null} */ ($el.querySelector(`[data-shortcut='${key}']`)))?.click()">
+          <sn-include src="../../partials/mail-reader.html"></sn-include>
+        </section>
+      </div>
+      <sn-include src="../../partials/mail-origins.html"></sn-include>
+      <sn-include src="../../partials/mail-compose.html"></sn-include>
     </main>
     <script type="module" src="/src/main/mail-view.ts"></script>
   </body>

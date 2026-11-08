@@ -140,15 +140,7 @@ function parameterValue(name: string, value: string): string {
   return `${name}*=UTF-8''${encodeURIComponent(safe).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)}`;
 }
 
-export function parseEnvelopeAddresses(value: string): string[] {
-  return value
-    .split(',')
-    .map(address => {
-      const match = /<([^<>]+)>/.exec(address);
-      return (match?.[1] ?? address).trim();
-    })
-    .filter(address => address.length > 0);
-}
+export { parseEnvelopeAddresses } from '../addresses.ts';
 
 function messageHeaderLines(message: ProtectedComposeMessage, date: string, messageId: string): string[] {
   const headers = [

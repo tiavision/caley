@@ -9,3 +9,5 @@ export * as maps from './actions/maps.ts';
 export * as ics from './actions/ics.ts';
 export * as pgpVault from './actions/pgp-vault.ts';
 export * as pgpKeys from './actions/pgp-keys.ts';
+// Mail pages: reading (MIME, OpenPGP), compose and send, bulk actions.
+export * as mail from './actions/mail.ts';

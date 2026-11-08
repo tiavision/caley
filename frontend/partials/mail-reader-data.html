@@ -1,0 +1,8 @@
+<!-- The reader's resources (partials/mail-reader.html), included once at page level where the page state declares
+     `open` (MessageRef|null) and `wiped` (decrypted content dropped while the page was hidden). -->
+<sn-resource name="message" call="mail.open(open)" when="open" type="Message"></sn-resource>
+<sn-resource name="body" call="mail.body(open)" when="open && !wiped"></sn-resource>
+<sn-resource name="thread" src="/api/email/thread?account_id={open.account_id}&mailbox={open.mailbox}&uid={open.uid}" when="open" items="messages" type="MailThreadNode[]"></sn-resource>
+<sn-resource name="threadEvents" src="/api/email/thread-events?account_id={open.account_id}&mailbox={open.mailbox}&uid={open.uid}" when="open" type="MessageEventGroupJson[]"></sn-resource>
+<sn-resource name="allowedOrigins" src="/api/email/image-origins" type="ImageOrigins"></sn-resource>
+<sn-resource name="ignoredOrigins" src="/api/email/image-blacklist" type="ImageOrigins"></sn-resource>
