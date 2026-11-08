@@ -6,17 +6,6 @@
   flex-shrink: 0;
 }
 
-// No transitions until the page's stylesheets have applied and the early file has rendered (src/islands/common.ts
-// sets data-styled on <html> then). Firefox resolves styles before the head's sheets are in and before the early
-// file runs, so an element whose resting state in a late sheet differs from the user-agent default would transition
-// into it as the sheet lands (the mail folder drawer slid closed), and the early file's bindings would animate from
-// the unrendered state (the collapsed rail narrowed from its full width). Chromium holds rendering for both.
-html:not([data-styled]) *,
-html:not([data-styled]) *::before,
-html:not([data-styled]) *::after {
-  transition: none;
-}
-
 // Mail: attachment chip (message reader and compose dialog). temper has no chip/tag component.
 .mail-attachment-chip {
   display: inline-flex;
