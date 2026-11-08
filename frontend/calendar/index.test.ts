@@ -103,6 +103,31 @@ test('shows the current week; n, p and t move it', async () => {
   expect(range(root)).toBe('Nov 9 – Nov 15');
 });
 
+test('Shift+N/P move four weeks with the focus in the week grid; the arrows stay the grid\'s', async () => {
+  const { root, settle } = await show({
+    'GET /api/events': (call) => days(new URL(call.url, 'http://x').searchParams.get('start')!, {
+      '2026-11-11': [lunch], '2026-11-12': [event('v060-d1', 'v060-Dinner', '2026-11-12')],
+      '2026-12-09': [event('v060-l2', 'v060-Later', '2026-12-09')],
+    }),
+  });
+  const press = (target: Element, k: string, shiftKey = false) =>
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: k, shiftKey, bubbles: true, cancelable: true }));
+  const chip = (summary: string) => [...root.querySelectorAll<HTMLButtonElement>('.week .event-trigger')].find((b) => b.textContent!.includes(summary))!;
+
+  chip('Lunch').focus();
+  expect(press(chip('Lunch'), 'ArrowRight')).toBe(false);          // taken by the grid: the next chip
+  await settle();
+  expect(document.activeElement).toBe(chip('v060-Dinner'));
+  expect(range(root)).toBe('Nov 9 – Nov 15');
+
+  press(chip('v060-Dinner'), 'N', true);                            // not the grid's: the page moves four weeks
+  await settle();
+  expect(range(root)).toBe('Dec 7 – Dec 13');
+  press(chip('v060-Later'), 'P', true);
+  await settle();
+  expect(range(root)).toBe('Nov 9 – Nov 15');
+});
+
 test('the month view shows the month grid, and is remembered across reloads', async () => {
   const first = await show();
   [...first.root.querySelectorAll<HTMLButtonElement>('button[aria-pressed]')].find((b) => b.textContent === 'Month')!.click();

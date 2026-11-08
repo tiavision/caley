@@ -221,6 +221,14 @@ test('keyboard: j/k open the neighbours, Ctrl/Shift+Space mark, Escape clears, S
   press(rows(root)[1], 'k');
   await settle();
   expect(subject()).toBe('Third');
+  const handle = root.querySelector('.detail-resize-handle')!;     // over a resize handle: its arrows, the page's j/k
+  expect(press(handle, 'ArrowRight')).toBe(false);
+  press(handle, 'j');
+  await settle();
+  expect(subject()).toBe('Second');
+  press(handle, 'k');
+  await settle();
+  expect(subject()).toBe('Third');
 
   press(rows(root)[0], 'U', { shiftKey: true });                 // the read toggle in the actions menu
   await settle();

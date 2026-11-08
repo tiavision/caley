@@ -169,7 +169,8 @@
           <div class="pane" data-grow data-scroll="y">
             <template data-sn-if="view === 'week'">
               <!-- Arrow keys move between chips; at the edge of the grid they keep their default (they scroll), so one
-                   keydown handler rather than key filters, which always take the key. -->
+                   keydown handler rather than key filters, which always take the key. It prevents only the arrows it
+                   uses, so other keys (Shift+N/P) go on to <body>. -->
               <div class="week" data-layout="grid" data-cols="7" data-gap="sm" role="group"
                    data-sn-let="{ pos: weekPositions(weekDays), tabPos: Object.values(weekPositions(weekDays)).includes(focusPos) ? focusPos : '0:0' }"
                    data-sn-attr="{'aria-label': m.weekly_heading(), 'aria-busy': $meta.weekDays.loading ? 'true' : 'false'}"
