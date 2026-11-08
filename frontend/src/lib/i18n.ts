@@ -11,12 +11,10 @@ export function makeTl(locale: string): (key: string, params?: Record<string, st
   };
 }
 
+// sinter's first-paint script has picked the locale before the page showed (the `locale` option in
+// vite.config.ts: localStorage `locale`, else the browser's languages, else English) and set <html lang>.
 export function initI18n() {
-  const stored = localStorage.getItem('locale');
-  const browserLang = navigator.language || 'en';
-  const locale = (stored || browserLang).slice(0, 2);
-  paraglideSetLocale(locale);
-  document.documentElement.lang = locale;
+  paraglideSetLocale(document.documentElement.lang.slice(0, 2) || 'en');
 }
 
 export function setLocale(locale: string) {
