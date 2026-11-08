@@ -12,12 +12,328 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <title>Caley - Contacts</title>
   </head>
-  <body data-shell="fixed" data-sn-state="{ here: '/contacts/' }">
+  <!-- sel: the contact the detail dialog shows (looked up in `contacts`, so it follows server events);
+       draft: the form dialog's ContactDraft (src/lib/contacts.ts); hiddenBooks: addressbookKey()s filtered out.
+       Shortcuts: c = new contact, e = edit the open contact (src/lib/contacts.ts shortcutKey). -->
+  <body data-shell="fixed"
+        data-sn-state="{
+          here: '/contacts/',
+          q: '',
+          hiddenBooks: /** @type {string[]} */ ([]),
+          sel: /** @type {ContactJson|null} */ (null),
+          draft: newDraft([]),
+          formError: '',
+          saving: false,
+        }"
+        data-sn-on-keydown="shortcutKey($event) === 'c' && ($event.preventDefault(), draft = newDraft(addressbooks), formError = '', showModal('contact-form'))">
     <sn-include src="../partials/nav.html"></sn-include>
-    <!-- The page's server events. The rail's <mail-notifier> listens here; the page adds its <sn-event>s when it moves to sinter. -->
-    <sn-sync src="/api/events/stream"></sn-sync>
+    <sn-resource name="contacts" src="/api/contacts" items="contacts" key="account_id,uid,addressbook_href" order="fn_name" type="ContactJson[]"></sn-resource>
+    <sn-resource name="addressbooks" src="/api/contacts" items="addressbooks" key="account_id,href" type="AddressbookJson[]"></sn-resource>
+    <!-- The page's server events. The rail's <mail-notifier> listens here too. -->
+    <sn-sync src="/api/events/stream">
+      <sn-event name="contact_updated" resource="contacts" op="upsert" item="contact" fallback="refetch" type="ContactUpdatedEvent"></sn-event>
+      <sn-event name="contact_removed" resource="contacts" op="remove" type="ContactRemovedEvent"></sn-event>
+      <sn-event name="contacts_refetch" resource="contacts" op="refetch"></sn-event>
+      <sn-event name="contacts_refetch" resource="addressbooks" op="refetch"></sn-event>
+    </sn-sync>
     <main>
-      <div id="app" data-density="compact"></div>
+      <div data-density="compact"
+           data-sn-let="{
+             shown: filterContacts(contacts, addressbooks, hiddenBooks, q),
+             nBooks: addressbooks.filter(ab => !hiddenBooks.includes(addressbookKey(ab))).length,
+             types: {
+               home: m.contacts_type_home(), work: m.contacts_type_work(), mobile: m.contacts_type_mobile(),
+               fax: m.contacts_type_fax(), pager: m.contacts_type_pager(), other: m.contacts_type_other(),
+             },
+           }">
+        <div data-layout="stack" data-gap="md" data-pad="sm">
+          <div data-layout="row" data-gap="sm">
+            <sn-include src="../partials/nav-toggle.html"></sn-include>
+            <input type="search" data-grow style="--tm-grow-basis: 12rem" data-sn-model="q"
+                   data-sn-attr="{placeholder: m.contacts_filterplaceholder(), 'aria-label': m.contacts_filterplaceholder()}">
+            <template data-sn-if="addressbooks.length > 1">
+              <button type="button" popovertarget="ab-menu" data-variant="outline"
+                      data-sn-text="nBooks === addressbooks.length ? m.contacts_addressbooks() : `${m.contacts_addressbooks()} (${nBooks}/${addressbooks.length})`"></button>
+              <div popover id="ab-menu" data-menu>
+                <template data-sn-for="ab in addressbooks">
+                  <label>
+                    <input type="checkbox" data-sn-attr="{checked: !hiddenBooks.includes(addressbookKey(ab))}"
+                           data-sn-on-change="hiddenBooks = $el.checked ? hiddenBooks.filter(k => k !== addressbookKey(ab)) : [...hiddenBooks, addressbookKey(ab)]">
+                    <span data-sn-text="ab.name"></span>
+                  </label>
+                </template>
+              </div>
+            </template>
+          </div>
+
+          <template data-sn-if="$meta.contacts.error">
+            <div data-callout data-tone="danger" role="alert">Failed to load contacts.</div>
+          </template>
+          <template data-sn-else>
+            <template data-sn-if="!$meta.contacts.loadedAt">
+              <p aria-busy="true" data-sn-text="m.weekly_loading()"></p>
+            </template>
+            <template data-sn-else>
+              <template data-sn-if="!shown.length">
+                <p data-muted data-sn-text="m.contacts_noContacts()"></p>
+              </template>
+            </template>
+          </template>
+
+          <template data-sn-for="g in $meta.contacts.error ? [] : groupByLetter(shown)" data-sn-key="g.letter">
+            <section data-layout="stack" data-gap="sm">
+              <h2 data-caption data-sn-text="g.letter"></h2>
+              <div data-layout="grid" data-gap="sm" style="--tm-min: 10rem">
+                <template data-sn-for="c in g.items" data-sn-key="contactKey(c)">
+                  <article data-layout="stack" data-gap="xs" data-align="center">
+                    <span data-avatar>
+                      <template data-sn-if="c.has_photo"><img alt="" data-sn-attr="{src: contactPhotoUrl(c)}"></template>
+                      <template data-sn-else><span data-sn-text="contactInitial(c)"></span></template>
+                    </span>
+                    <button type="button" data-stretch data-variant="link" data-truncate
+                            commandfor="contact-detail" command="show-modal" data-sn-on-click="sel = c"><strong data-sn-text="c.fn_name || '—'"></strong></button>
+                    <template data-sn-if="c.emails[0]">
+                      <small data-truncate><a data-sn-attr="{href: 'mailto:' + c.emails[0].value}" data-sn-text="c.emails[0].value"></a></small>
+                    </template>
+                    <template data-sn-if="c.phones[0]">
+                      <small data-truncate><a data-sn-attr="{href: 'tel:' + c.phones[0].value}" data-sn-text="c.phones[0].value"></a></small>
+                    </template>
+                    <template data-sn-if="c.org">
+                      <small data-muted data-truncate data-sn-text="c.org"></small>
+                    </template>
+                    <template data-sn-if="addressbooks.length > 1">
+                      <small data-muted data-truncate data-sn-text="addressbookName(addressbooks, c)"></small>
+                    </template>
+                  </article>
+                </template>
+              </div>
+            </section>
+          </template>
+        </div>
+
+        <button type="button" data-fab data-icon="plus" data-sn-attr="{'aria-label': m.contacts_new()}"
+                commandfor="contact-form" command="show-modal"
+                data-sn-on-click="draft = newDraft(addressbooks); formError = ''"></button>
+
+        <dialog id="contact-detail" closedby="any"
+                data-sn-let="{ c: contacts.find(x => sameContact(x, sel)) }"
+                data-sn-on-keydown="c && shortcutKey($event, true) === 'e' && ($event.preventDefault(), draft = editDraft(c), formError = '', close(), showModal('contact-form'))">
+          <header>
+            <h2 data-sn-text="c?.fn_name || ''"></h2>
+            <div data-layout="row" data-gap="xs" data-wrap="none" data-sn-let="{ shareItem: c ? contactShare(c) : null }">
+              <sn-include src="../partials/share-menu.html"></sn-include>
+              <template data-sn-if="c">
+                <button type="button" data-icon="pencil" data-variant="ghost" data-tooltip
+                        data-sn-attr="{'aria-label': m.contacts_edit()}"
+                        data-sn-on-click="draft = editDraft(c); formError = ''; close(); showModal('contact-form')"></button>
+              </template>
+              <button type="button" commandfor="contact-detail" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
+            </div>
+          </header>
+
+          <template data-sn-if="c">
+            <span data-avatar data-self="center" style="--tm-avatar-size: 4rem">
+              <template data-sn-if="c.has_photo"><img alt="" data-sn-attr="{src: contactPhotoUrl(c)}"></template>
+              <template data-sn-else><span data-sn-text="contactInitial(c)"></span></template>
+            </span>
+
+            <dl data-pairs>
+              <template data-sn-if="c.org">
+                <dt data-sn-text="m.contacts_org()"></dt>
+                <dd data-sn-text="c.org"></dd>
+              </template>
+
+              <template data-sn-if="c.emails.length">
+                <dt data-sn-text="m.contacts_email()"></dt>
+                <dd data-layout="stack" data-gap="xs">
+                  <template data-sn-for="(e, i) in c.emails" data-sn-key="i">
+                    <span data-layout="row" data-gap="sm" data-wrap="none">
+                      <span data-badge data-sn-text="types[e.type_label] ?? e.type_label"></span>
+                      <a data-truncate data-sn-attr="{href: 'mailto:' + e.value}" data-sn-text="e.value"></a>
+                    </span>
+                  </template>
+                </dd>
+              </template>
+
+              <template data-sn-if="c.phones.length">
+                <dt data-sn-text="m.contacts_phone()"></dt>
+                <dd data-layout="stack" data-gap="xs">
+                  <template data-sn-for="(p, i) in c.phones" data-sn-key="i">
+                    <span data-layout="row" data-gap="sm" data-wrap="none">
+                      <span data-badge data-sn-text="types[p.type_label] ?? p.type_label"></span>
+                      <a data-sn-attr="{href: 'tel:' + p.value}" data-sn-text="p.value"></a>
+                    </span>
+                  </template>
+                </dd>
+              </template>
+
+              <template data-sn-if="c.addresses.length">
+                <dt data-sn-text="m.contacts_address()"></dt>
+                <dd data-layout="stack" data-gap="sm">
+                  <template data-sn-for="(a, i) in c.addresses" data-sn-key="i">
+                    <span data-layout="row" data-gap="sm" data-wrap="none" data-align="start"
+                          data-sn-let="{ lines: addressLines(a) }">
+                      <span data-badge data-sn-text="types[a.type_label] ?? a.type_label"></span>
+                      <!-- The device's map app, else the web map of the user's settings (src/actions/maps.ts). -->
+                      <a rel="noopener noreferrer" data-sn-attr="{href: geoUrl(addressQuery(a))}"
+                         data-sn-call="maps.open(addressQuery(a), user.map_url)">
+                        <template data-sn-for="(line, j) in lines" data-sn-key="j">
+                          <span data-sn-text="line"></span><br data-sn-show="j < lines.length - 1">
+                        </template>
+                      </a>
+                    </span>
+                  </template>
+                </dd>
+              </template>
+
+              <template data-sn-if="addressbooks.length > 1">
+                <dt data-sn-text="m.contacts_addressbook()"></dt>
+                <dd data-sn-text="addressbookName(addressbooks, c)"></dd>
+              </template>
+            </dl>
+
+            <footer>
+              <button type="button" data-variant="outline" data-tone="danger" data-icon="trash-2"
+                      data-sn-delete="/api/contact"
+                      data-sn-body="{account_id: c.account_id, uid: c.uid, addressbook_href: c.addressbook_href}"
+                      data-sn-confirm="m.contacts_deleteConfirm()"
+                      data-sn-then="close('contact-detail'); remove('contacts', c)"
+                      data-sn-catch="close('contact-detail')"
+                      data-sn-text="m.contacts_delete()"></button>
+            </footer>
+          </template>
+        </dialog>
+
+        <dialog id="contact-form" closedby="any" style="--tm-dialog-width: 36rem">
+          <header>
+            <h2 data-sn-text="draft.uid ? m.contacts_edit() : m.contacts_new()"></h2>
+            <button type="button" commandfor="contact-form" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
+          </header>
+
+          <form data-layout="stack" data-gap="md"
+                data-sn-post="/api/contact" data-sn-body="draftBody(draft)"
+                data-sn-on-submit="saving = true; formError = ''"
+                data-sn-then="saving = false; upsert('contacts', $result); sel = $result; close(); showModal('contact-detail')"
+                data-sn-catch="saving = false; formError = m.contacts_error()">
+            <template data-sn-if="formError">
+              <div data-callout data-tone="danger" role="alert" data-sn-text="formError"></div>
+            </template>
+
+            <label>
+              <span data-sn-text="m.contacts_name()"></span>
+              <input type="text" required autofocus data-sn-model="draft.fn_name">
+            </label>
+
+            <fieldset data-layout="stack" data-gap="sm">
+              <legend data-sn-text="m.contacts_email()"></legend>
+              <template data-sn-for="(e, i) in draft.emails">
+                <div data-layout="row" data-gap="sm" data-wrap="none">
+                  <input type="email" data-grow data-sn-attr="{'aria-label': m.contacts_email()}" data-sn-model="draft.emails[i].value">
+                  <select data-sn-attr="{'aria-label': m.contacts_type()}" data-sn-model="draft.emails[i].type_label">
+                    <option value="home" data-sn-text="m.contacts_type_home()"></option>
+                    <option value="work" data-sn-text="m.contacts_type_work()"></option>
+                    <option value="other" data-sn-text="m.contacts_type_other()"></option>
+                  </select>
+                  <button type="button" data-icon="x" data-variant="ghost" data-sn-attr="{'aria-label': m.contacts_remove()}"
+                          data-sn-on-click="draft.emails.splice(i, 1)"></button>
+                </div>
+              </template>
+              <button type="button" data-variant="outline" data-size="sm" data-icon="plus" data-self="start"
+                      data-sn-on-click="draft.emails.push(emptyEntry())" data-sn-text="m.contacts_addEmail()"></button>
+            </fieldset>
+
+            <fieldset data-layout="stack" data-gap="sm">
+              <legend data-sn-text="m.contacts_phone()"></legend>
+              <template data-sn-for="(p, i) in draft.phones">
+                <div data-layout="row" data-gap="sm" data-wrap="none">
+                  <input type="tel" data-grow data-sn-attr="{'aria-label': m.contacts_phone()}" data-sn-model="draft.phones[i].value">
+                  <select data-sn-attr="{'aria-label': m.contacts_type()}" data-sn-model="draft.phones[i].type_label">
+                    <option value="home" data-sn-text="m.contacts_type_home()"></option>
+                    <option value="work" data-sn-text="m.contacts_type_work()"></option>
+                    <option value="mobile" data-sn-text="m.contacts_type_mobile()"></option>
+                    <option value="fax" data-sn-text="m.contacts_type_fax()"></option>
+                    <option value="pager" data-sn-text="m.contacts_type_pager()"></option>
+                    <option value="other" data-sn-text="m.contacts_type_other()"></option>
+                  </select>
+                  <button type="button" data-icon="x" data-variant="ghost" data-sn-attr="{'aria-label': m.contacts_remove()}"
+                          data-sn-on-click="draft.phones.splice(i, 1)"></button>
+                </div>
+              </template>
+              <button type="button" data-variant="outline" data-size="sm" data-icon="plus" data-self="start"
+                      data-sn-on-click="draft.phones.push(emptyEntry())" data-sn-text="m.contacts_addPhone()"></button>
+            </fieldset>
+
+            <fieldset data-layout="stack" data-gap="sm">
+              <legend data-sn-text="m.contacts_address()"></legend>
+              <template data-sn-for="(a, i) in draft.addresses">
+                <div data-layout="stack" data-gap="sm">
+                  <div data-layout="row" data-gap="sm" data-justify="between" data-wrap="none">
+                    <span data-caption data-sn-text="m.contacts_address() + (draft.addresses.length > 1 ? ` ${i + 1}` : '')"></span>
+                    <button type="button" data-icon="x" data-variant="ghost" data-size="sm" data-sn-attr="{'aria-label': m.contacts_remove()}"
+                            data-sn-on-click="draft.addresses.splice(i, 1)"></button>
+                  </div>
+                  <label>
+                    <span data-sn-text="m.contacts_street()"></span>
+                    <input type="text" data-sn-model="draft.addresses[i].street">
+                  </label>
+                  <div data-layout="grid" data-gap="sm" style="--tm-min: 8rem">
+                    <label>
+                      <span data-sn-text="m.contacts_city()"></span>
+                      <input type="text" data-sn-model="draft.addresses[i].city">
+                    </label>
+                    <label>
+                      <span data-sn-text="m.contacts_region()"></span>
+                      <input type="text" data-sn-model="draft.addresses[i].region">
+                    </label>
+                    <label>
+                      <span data-sn-text="m.contacts_postal()"></span>
+                      <input type="text" data-sn-model="draft.addresses[i].postal">
+                    </label>
+                  </div>
+                  <div data-layout="grid" data-gap="sm" style="--tm-min: 8rem">
+                    <label>
+                      <span data-sn-text="m.contacts_country()"></span>
+                      <input type="text" data-sn-model="draft.addresses[i].country">
+                    </label>
+                    <label>
+                      <span data-sn-text="m.contacts_type()"></span>
+                      <select data-sn-model="draft.addresses[i].type_label">
+                        <option value="home" data-sn-text="m.contacts_type_home()"></option>
+                        <option value="work" data-sn-text="m.contacts_type_work()"></option>
+                        <option value="other" data-sn-text="m.contacts_type_other()"></option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+                <hr data-sn-show="i < draft.addresses.length - 1">
+              </template>
+              <button type="button" data-variant="outline" data-size="sm" data-icon="plus" data-self="start"
+                      data-sn-on-click="draft.addresses.push(emptyAddress())" data-sn-text="m.contacts_addAddress()"></button>
+            </fieldset>
+
+            <label>
+              <span data-sn-text="m.contacts_org()"></span>
+              <input type="text" data-sn-model="draft.org">
+            </label>
+
+            <template data-sn-if="addressbooks.length > 1">
+              <label>
+                <span data-sn-text="m.contacts_addressbook()"></span>
+                <select data-sn-model="draft.addressbook">
+                  <template data-sn-for="ab in addressbooks">
+                    <option data-sn-attr="{value: addressbookKey(ab)}" data-sn-text="ab.name"></option>
+                  </template>
+                </select>
+              </label>
+            </template>
+
+            <footer>
+              <button type="button" data-variant="ghost" commandfor="contact-form" command="close" data-sn-text="m.contacts_cancel()"></button>
+              <button type="submit" data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.contacts_save()"></button>
+            </footer>
+          </form>
+        </dialog>
+      </div>
     </main>
     <script type="module" src="/src/main/contacts.ts"></script>
   </body>

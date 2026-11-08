@@ -4,3 +4,4 @@
 // or sinter state (`data-sn-then` puts the result where it belongs).
 export * as notify from './actions/notify.ts';
 export * as share from './actions/share.ts';
+export * as maps from './actions/maps.ts';

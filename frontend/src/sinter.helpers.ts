@@ -16,3 +16,24 @@ export {
 } from './lib/format.ts';
 
 export { contactShare, eventShare } from './lib/share.ts';
+
+export {
+  addressbookKey,
+  sameContact,
+  filterContacts,
+  groupByLetter,
+  contactKey,
+  addressbookName,
+  contactInitial,
+  contactPhotoUrl,
+  addressQuery,
+  addressLines,
+  newDraft,
+  editDraft,
+  draftBody,
+  emptyEntry,
+  emptyAddress,
+  shortcutKey,
+} from './lib/contacts.ts';
+
+export { geoUrl } from './actions/maps.ts';
