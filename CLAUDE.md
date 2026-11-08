@@ -219,13 +219,14 @@ Encryption/settings:
 - `src/sinter.types.ts`: the types `type="…"` may name; re-export each by name (no `export type *`).
 - `src/islands/`: custom elements, `common.ts` for every page (`<mail-notifier>`, `<close-after>`), `<page>.ts` imported by the page entry. `src/lib/`: shared TS (API, formatting, mail utils and types, PGP, i18n). `partials/`: shared markup included with `<sn-include>` (nav, nav-toggle, event detail/form, thread, import, share menu, mail reader/compose/…). `src/styles/`: `temper.ts` plus per-page Sass.
 - Page wiring: `<body data-shell="fixed" data-sn-state="{ here: '/page/' }">` → `<sn-include src="../partials/nav.html">` → the page's resources and `<sn-sync>` → `<main>`, then `<script type="module" src="/src/main/<page>.ts">` (styles, page islands). The nav declares `user` (read `user.map_url`, don't redeclare it) and its own `<sn-sync>` for new-mail notifications; `<sn-sync>`s with the same URL share one connection, so pages declare their own only for their own events. `partials/nav-toggle.html` opens the rail as a drawer on narrow screens. Don't name state `page` (shadows `page()`).
-- Conventions: partials that declare a resource are included at page level, never inside `data-sn-if`/`data-sn-for`. An optimistic write's layer is dropped when the request settles, so `data-sn-then` writes the result (`upsert(…, $result)`, `remove(…)`, or `refresh(…)`). Persisted UI state uses `data-sn-persist="<key>"` (localStorage `sn:<key>`: `mail`, `calendar-view`, `nav-collapsed`, `event-default-calendar`, `caldav_base_url`); keep keys stable.
+- Conventions: partials that declare a resource are included at page level, never inside `data-sn-if`/`data-sn-for`. An optimistic change stays when the request succeeds and rolls back on error, so `data-sn-then` only writes what the server returned beyond it (`upsert(…, $result)`, `refresh(…)`), never the same change again. Persisted UI state uses `data-sn-persist="<key>"` (localStorage `sn:<key>`: `mail`, `calendar-view`, `nav-collapsed`, `event-default-calendar`, `caldav_base_url`); keep keys stable.
 - Tests sit next to the markup (`<page>/index.test.ts`, `partials/*.test.ts`) and use `@tiaforge-ui/sinter/testing`: `render(html, { requests: mockRequests({...}), actions, helpers, files: { './nav.html': nav }, streams: { '/api/events/stream': mockStream() }, storage: memoryStorage() })`, then `flush()`/`settle()`. Import HTML with `?raw`; jsdom needs `showModal`/`close` stubs.
 - Styling uses temper (`@tiaforge-ui/temper`): semantic HTML plus `data-*` variants, light/dark automatic. The reference is `node_modules/@tiaforge-ui/temper/llms-full.txt`. App-specific CSS goes in `src/styles/*.scss` with `--tm-*` tokens, no hard-coded colors or outer margins.
 - Icons are `data-icon="<lucide name>"`; the temper Vite plugin emits only names that appear as static strings in the markup.
-- The temper Vite plugin runs `temper check` on every build (errors fail it). Check rendered pages with `npm run inspect` (dev server running, backend in demo mode): it logs in and runs temper-inspect on every page; add `-- --sheet <dir>` for screenshots or `-- /mail/` for one page.
+- The temper Vite plugin runs `temper check` on every build (errors fail it). Check rendered pages with `npm run inspect` (backend in demo mode on :3000): it builds, logs in and runs temper-inspect on every page of the build the backend serves from `dist`; add `-- --sheet <dir>` for screenshots or `-- /mail/` for one page.
 - i18n messages live in `frontend/messages/`.
 - `vite.config.ts` proxies `/api`, `/auth`, and `/logout` to `http://localhost:3000`; the dev server is usually `localhost:5173`. After a dependency change restart it with `npx vite --force`.
+- Agents verify against the build, never the Vite dev server (its hot reloads navigate pages mid-check): `npm run build`, then the DEMO_MODE backend on `http://localhost:3000` serves `dist` (WebAuthn works there too, since that origin is `APP_BASE_URL`). Agents working in parallel build into their own `--outDir` and serve it with `npx vite preview --outDir <dir> --port <port>`, which proxies `/api` like the dev server.
 
 ## Demo Mode
 
@@ -266,7 +267,7 @@ npm run dev
 npm run build
 npm run preview
 npm test
-npm run inspect   # temper-inspect on every page, logged in (needs the dev server and a DEMO_MODE backend)
+npm run inspect   # build, then temper-inspect on every page, logged in (needs a DEMO_MODE backend on :3000)
 ```
 
 No root-level commands are configured.

@@ -1,17 +1,18 @@
-// Runs temper-inspect on every page of the running dev server, logged in.
+// Builds the frontend and runs temper-inspect on every page of the build, logged in.
 //
-//   npm run inspect                         all pages (backend in DEMO_MODE, Vite on :5173)
+//   npm run inspect                         all pages (`vite build`, then the DEMO_MODE backend on :3000 serves dist)
 //   npm run inspect -- --sheet /tmp/sheets  extra options go to temper-inspect
 //   npm run inspect -- /mail/ /contacts/    only these pages
 //
 // It logs in through POST /auth/login and passes the session cookie with --cookie. Demo mode accepts any
 // credentials; against a real CalDAV login set INSPECT_CALDAV_URL, INSPECT_USER and INSPECT_PASSWORD.
-// INSPECT_BASE changes the dev server (default http://localhost:5173). The login page is inspected
+// INSPECT_BASE changes the server (default http://localhost:3000, the backend serving dist; a built page never
+// hot-reloads mid-run, unlike the Vite dev server). The login page is inspected
 // without the cookie (signed in, it redirects to the app).
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const base = (process.env.INSPECT_BASE ?? 'http://localhost:5173').replace(/\/$/, '');
+const base = (process.env.INSPECT_BASE ?? 'http://localhost:3000').replace(/\/$/, '');
 const APP_PAGES = ['/calendar/', '/contacts/', '/search/', '/settings/', '/mail/'];
 
 const args = process.argv.slice(2);

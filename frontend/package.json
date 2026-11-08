@@ -7,7 +7,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run --environment jsdom",
-    "inspect": "node scripts/inspect.mjs"
+    "inspect": "vite build && node scripts/inspect.mjs"
   },
   "dependencies": {
     "@inlang/paraglide-js": "^2.24.1",
