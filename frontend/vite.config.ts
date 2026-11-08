@@ -3,6 +3,7 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { resolve } from 'path';
 import temper from '@tiaforge-ui/temper/vite';
+import sinter from '@tiaforge-ui/sinter/vite';
 
 const root = import.meta.dirname;
 
@@ -10,9 +11,12 @@ const root = import.meta.dirname;
 export default defineConfig({
   appType: 'mpa',
   plugins: [
+    // Every HTML entry is compiled by sinter (partials/, src/sinter.{config,helpers,actions,types}.ts).
+    // Pages not migrated yet still mount their Svelte app into #app from their entry script.
+    sinter({ typecheck: true }),
     svelte(),
     // temper check on all markup and CSS (errors fail the build); serves the Lucide icons the markup names.
-    temper({ paths: ['src', 'index.html', 'calendar', 'contacts', 'mail', 'search', 'settings'].map((p) => resolve(root, p)), icons: { lucide: true }, prune: true }),
+    temper({ paths: ['src', 'partials', 'index.html', 'calendar', 'contacts', 'mail', 'search', 'settings'].map((p) => resolve(root, p)), icons: { lucide: true }, prune: true }),
     paraglideVitePlugin({
       project: './project.inlang',
       outdir: './src/paraglide',
