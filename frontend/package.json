@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@inlang/paraglide-js": "^2.24.1",
-    "@tiaforge-ui/sinter": "^0.3.3",
+    "@tiaforge-ui/sinter": "^0.4.0",
     "@tiaforge-ui/temper": "^0.1.4",
     "dompurify": "^3.4.17",
     "openpgp": "^6.3.1"
