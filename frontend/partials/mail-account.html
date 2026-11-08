@@ -97,7 +97,7 @@
     <form data-layout="stack" data-gap="md"
           data-sn-post="/api/email/account" data-sn-body="accountBody(acct)"
           data-sn-on-submit="acctUi.busy = true; acctUi.error = ''"
-          data-sn-then="close('mail-account'); refresh('accounts'); refresh('identities'); refresh('mailboxes')"
+          data-sn-then="close('mail-account'); refresh('accounts', 'identities', 'mailboxes')"
           data-sn-catch="acctUi.busy = false; acctUi.error = $error.detail ?? m.mail_saveAccountError()">
       <template data-sn-if="acctUi.discovery?.provider_name">
         <p data-muted data-sn-text="m.mail_settingsDetected({provider: acctUi.discovery.provider_name})"></p>

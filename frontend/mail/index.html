@@ -61,7 +61,6 @@
            Events of the list (emitted inside it, handled here):
              mail-open {detail: Message}: show it in the reader, with the cursor on it, read in the lists;
              mail-view: the list shows another view: no marks, search or open message;
-             mail-changed: messages changed on the server: reload the lists and the unread counts;
              list-step {detail: 1 | -1}: j/k, open the next/previous message (or load that page at the end of one);
              list-next, list-prev: load the next/previous page of the list shown, when there is one;
              reader-back (also the reader's back button): the overlay closes, the cursor goes to its message;
@@ -102,7 +101,6 @@
            data-sn-on-mail-open="reader = readerOn($event.detail); sel = openedAt(sel, messageKey($event.detail)); patch('messages', $event.detail, markedRead($event.detail)); patch('results', $event.detail, markedRead($event.detail))"
            data-sn-on-view-removed="view = noView(); sel = unmarked(sel)"
            data-sn-on-mail-view="sel = cleared(sel, null); search = noSearch(); reader = noReader()"
-           data-sn-on-mail-changed="refresh('messages'); refresh('results'); refresh('unread')"
            data-sn-on-list-step="hit = neighbor(list, open ? messageKey(open) : sel.cursor, $event.detail);
                                  hit && emit('mail-open', hit);
                                  hit && elementIn($el, '.message-detail')?.focus();
@@ -221,7 +219,7 @@
                        data-sn-post="/api/email/message/move" data-sn-trigger="drop"
                        data-sn-body="moveBody(drag.msg, mb.name)"
                        data-sn-optimistic="remove('messages', drag.msg); remove('results', drag.msg)"
-                       data-sn-then="refresh('messages'); refresh('results'); refresh('unread')">
+                       data-sn-then="refresh('messages', 'results', 'unread')">
                     <button type="button" class="sidebar-item" data-variant="item" data-size="sm" data-layout="row" data-gap="sm" data-wrap="none"
                             data-sn-let="{ busy: syncing.includes(item.key), kind: folderKind(mb.name) }"
                             data-sn-class="{'drag-target': canDrop, 'drag-over': drag.over === item.key}"
@@ -455,25 +453,25 @@
                 <div class="bulk-menu" data-menu data-self="start">
                   <button type="button" data-icon="mail-open" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
                           data-sn-call="mail.bulk('flag', bulk.messages, {flag: '\\Seen', set: true})"
-                          data-sn-then="sel = afterBulk(sel, $result); emit('mail-changed')"
+                          data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results', 'unread')"
                           data-sn-text="m.mail_markRead()"></button>
                   <button type="button" data-icon="mail" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
                           data-sn-call="mail.bulk('flag', bulk.messages, {flag: '\\Seen', set: false})"
-                          data-sn-then="sel = afterBulk(sel, $result); emit('mail-changed')"
+                          data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results', 'unread')"
                           data-sn-text="m.mail_markUnread()"></button>
                   <button type="button" data-icon="star" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
                           data-sn-call="mail.bulk('flag', bulk.messages, {flag: '\\Flagged', set: true})"
-                          data-sn-then="sel = afterBulk(sel, $result); refresh('messages'); refresh('results')"
+                          data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results')"
                           data-sn-text="m.mail_flag()"></button>
                   <button type="button" data-icon="star-off" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
                           data-sn-call="mail.bulk('flag', bulk.messages, {flag: '\\Flagged', set: false})"
-                          data-sn-then="sel = afterBulk(sel, $result); refresh('messages'); refresh('results')"
+                          data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results')"
                           data-sn-text="m.mail_unflag()"></button>
                   <hr>
                   <template data-sn-if="bulk.canArchive">
                     <button type="button" data-icon="archive" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
                             data-sn-call="mail.bulk('move', bulk.messages, {archive: archiveTargets(bulk.messages, mailboxes)})"
-                            data-sn-then="sel = afterBulk(sel, $result); emit('mail-changed')"
+                            data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results', 'unread')"
                             data-sn-text="m.mail_archive()"></button>
                   </template>
                   <template data-sn-if="bulk.targets.length > 0">
@@ -486,7 +484,7 @@
                   <button type="button" data-icon="trash-2" data-tone="danger" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
                           data-sn-confirm="bulk.inTrash ? m.mail_bulkDeleteConfirm({n: bulk.messages.length}) : null"
                           data-sn-call="mail.bulk('delete', bulk.messages, {})"
-                          data-sn-then="sel = afterBulk(sel, $result); emit('mail-changed')"
+                          data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results', 'unread')"
                           data-sn-text="m.mail_delete()"></button>
                 </div>
                 <template data-sn-if="sel.move && bulk.targets.length > 0">
@@ -494,7 +492,7 @@
                     <template data-sn-for="mb in bulk.targets">
                       <button type="button" data-sn-let="{ kind: folderKind(mb.name) }" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
                               data-sn-call="mail.bulk('move', bulk.messages, {dest: mb.name})"
-                              data-sn-then="sel = afterBulk(sel, $result); emit('mail-changed')">
+                              data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results', 'unread')">
                         <sn-include src="../partials/mail-folder-icon.html"></sn-include>
                         <span data-truncate data-sn-text="folderName(mb.name)"></span>
                       </button>
@@ -515,7 +513,7 @@
           <form data-sn-post="/api/email/trash/empty"
                 data-sn-body="{account_id: cur.account_id, mailbox: cur.mailbox, days}"
                 data-sn-on-submit="trash.busy = true; trash.error = ''"
-                data-sn-then="reader = inMailbox(open, cur) ? noReader() : reader; sel = unmarked(sel); emit('mail-changed'); close()"
+                data-sn-then="reader = inMailbox(open, cur) ? noReader() : reader; sel = unmarked(sel); refresh('messages', 'results', 'unread'); close()"
                 data-sn-catch="trash.busy = false; trash.error = $error.body?.error === 'savedate_unsupported' ? m.mail_emptyTrashUnsupported() : m.mail_emptyTrashError()">
             <header>
               <h2 data-sn-text="m.mail_emptyTrash()"></h2>

@@ -146,8 +146,9 @@ test('searches the folder with filters, and pages by cursor', async () => {
   expect(requests.calls.at(-1)!.url).toContain('&unread_only=true');
 });
 
-test('marks rows with Ctrl and Shift, and runs a bulk action', async () => {
-  const { root, settle } = await show();
+test('marks rows with Ctrl and Shift, and runs a bulk action that reloads the list and the unread counts', async () => {
+  const { root, settle, requests } = await show();
+  const gets = (path: string) => requests.calls.filter((c) => c.method === 'GET' && c.path === path).length;
   const r = rows(root);
   r[0].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
   r[2].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
@@ -155,9 +156,11 @@ test('marks rows with Ctrl and Shift, and runs a bulk action', async () => {
   expect(rows(root).filter((x) => x.getAttribute('aria-pressed') === 'true')).toHaveLength(3);
   expect(root.querySelector('.message-detail h2')!.textContent).toBe('3 messages selected');
 
+  const [messages, unread] = [gets('/api/email/messages'), gets('/api/email/unread-counts')];
   root.querySelector<HTMLButtonElement>('.bulk-menu button[data-icon="mail"]')!.click();
   await settle();
   expect(root.querySelectorAll('.message-row[aria-pressed="true"]')).toHaveLength(0);
+  expect([gets('/api/email/messages'), gets('/api/email/unread-counts')]).toEqual([messages + 1, unread + 1]);
 });
 
 test('server events: flags patch the list, a removed open message closes the reader', async () => {

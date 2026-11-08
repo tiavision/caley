@@ -64,7 +64,7 @@
             <span data-truncate data-grow data-sn-text="origin"></span>
             <!-- Allow: off the ignore list, onto the allow list. -->
             <button type="button" data-variant="outline" data-tone="accent" data-size="sm"
-                    data-sn-call="mail.promoteOrigin(origin)" data-sn-then="refresh('allowedOrigins'); refresh('ignoredOrigins')"
+                    data-sn-call="mail.promoteOrigin(origin)" data-sn-then="refresh('allowedOrigins', 'ignoredOrigins')"
                     data-sn-text="m.mail_originsAllow()"></button>
             <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
                     data-sn-delete="/api/email/image-blacklist?origin={origin}" data-sn-then="refresh('ignoredOrigins')"

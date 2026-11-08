@@ -44,8 +44,8 @@
                              gridMonth = view === 'week' ? monthOf(weekStart) : addMonths(gridMonth, $event.detail)"
         data-sn-on-event-edit="eventDraft = editEventDraft($event.detail.event, $event.detail.scope); showModal('event-form')"
         data-sn-on-event-threads="threadRef = threadOfEmail($event.detail.email, $event.detail.event); showModal('thread-dialog')"
-        data-sn-on-event-saved="refresh('weekDays'); refresh('monthGrid'); refresh('monthDays')"
-        data-sn-on-event-deleted="refresh('weekDays'); refresh('monthGrid'); refresh('monthDays')">
+        data-sn-on-event-saved="refresh('weekDays', 'monthGrid', 'monthDays')"
+        data-sn-on-event-deleted="refresh('weekDays', 'monthGrid', 'monthDays')">
     <sn-include src="../partials/nav.html"></sn-include>
     <!-- Events in the viewer's zone: the server buckets days and renders time ranges in it. -->
     <sn-resource name="weekDays" when="view === 'week'" key="date_iso" type="DayEventsJson[]"
