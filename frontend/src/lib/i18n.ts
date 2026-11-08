@@ -11,11 +11,8 @@ export function makeTl(locale: string): (key: string, params?: Record<string, st
   };
 }
 
-// sinter's first-paint script has picked the locale before the page showed (the `locale` option in
-// vite.config.ts: localStorage `locale`, else the browser's languages, else English) and set <html lang>.
-export function initI18n() {
-  paraglideSetLocale(document.documentElement.lang.slice(0, 2) || 'en');
-}
+// The language is picked in one place, src/lib/language.ts (run before the first paint by src/sinter.early.ts).
+export { initLanguage as initI18n } from './language.ts';
 
 export function setLocale(locale: string) {
   const lang = locale.slice(0, 2);
