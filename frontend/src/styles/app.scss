@@ -102,3 +102,15 @@ body[data-shell] > main {
   justify-content: center;
   padding-inline: 0;
 }
+
+// Calendar color dot (was EventColorDot.svelte); temper has no color swatch. Pure CSS, no partial:
+//   <span class="event-color-dot" data-sn-show="cal.color" data-sn-style="{'--tm-tone': cal.color}"></span>
+// data-sn-show hides it when there is no color, as the Svelte {#if color} did (temper's [hidden] wins).
+.event-color-dot {
+  display: inline-block;
+  flex-shrink: 0;
+  inline-size: 10px;
+  block-size: 10px;
+  border-radius: 50%;
+  background: var(--tm-tone);
+}
