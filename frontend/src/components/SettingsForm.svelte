@@ -294,7 +294,7 @@
 
 <dialog id="caldav-account-dialog" closedby="any" aria-labelledby="caldav-account-title" bind:this={accountDialog}>
   <header>
-    <h2 id="caldav-account-title">{editingAccountId ? tl('mail_editAccountHeading') : tl('mail_addAccountHeading')}</h2>
+    <h2 id="caldav-account-title">{editingAccountId ? tl('mail_editAccountHeading') : tl('settings_addAccountHeading')}</h2>
     <button type="button" commandfor="caldav-account-dialog" command="close" aria-label={tl('weekly_aria_close')}></button>
   </header>
   <form data-layout="stack" data-gap="md" onsubmit={(e) => { e.preventDefault(); onSubmit(); }}>
