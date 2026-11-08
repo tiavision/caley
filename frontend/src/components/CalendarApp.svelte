@@ -672,6 +672,12 @@
     .week { grid-template-columns: minmax(0, 1fr); }
     .day.past-empty { display: none; }
     .day.collapsed .event-trigger { display: none; }
+    /* One day per row: full-size event rows instead of the compact chips of the seven columns. */
+    .day .event-trigger {
+      padding: var(--tm-space-sm) var(--tm-space-md);
+      font-size: var(--tm-control-font);
+      gap: 0.125rem;
+    }
   }
   @media (width >= 60rem) {
     .narrow-only { display: none; }
