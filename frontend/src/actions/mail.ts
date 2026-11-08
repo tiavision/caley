@@ -34,15 +34,9 @@ function fetchMessage(ref: MessageRef, ctx: CallContext, fresh: boolean): Promis
   return lastFetch.message;
 }
 
-/** The full message; an unread one is marked read on the server first (opening a message reads it). */
-export async function open(ref: MessageRef, ctx: CallContext): Promise<Message> {
-  const msg = await fetchMessage(ref, ctx, true);
-  if (msg.is_read) return msg;
-  await ctx.request('/api/email/message/flags', {
-    method: 'PATCH', body: { account_id: msg.account_id, mailbox: msg.mailbox, uid: msg.uid, flags: ['\\Seen'], set: true },
-  });
-  const flags = [...new Set([...msg.flags, '\\Seen'])];
-  return { ...msg, flags, is_read: true };
+/** The full message, fetched again (body() shares the fetch). The reader marks it read (partials/mail-reader-data.html). */
+export function open(ref: MessageRef, ctx: CallContext): Promise<Message> {
+  return fetchMessage(ref, ctx, true);
 }
 
 export interface DecryptedFile { filename: string; content_type: string; size: number; content_id: null; url: string }

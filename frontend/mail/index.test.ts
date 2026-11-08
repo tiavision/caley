@@ -80,7 +80,7 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
     maps: { open: async () => {} },
     notify: { status: () => ({ supported: false, permission: 'default', enabled: false }), toggle: async (s: unknown) => s },
     mail: {
-      open: async (ref: { uid: number }) => { opened.push(ref); return { ...(current.find((m) => m.uid === ref.uid) ?? inbox[0]), is_read: true }; },
+      open: async (ref: { uid: number }) => { opened.push(ref); return current.find((m) => m.uid === ref.uid) ?? inbox[0]; },
       body: async (ref: { account_id: string; mailbox: string; uid: number }) => ({
         key: `${ref.account_id} ${ref.mailbox} ${ref.uid}`, html: '', text: `body ${ref.uid}`, mode: 'text', encrypted: false, signed: false,
         locked: false, badges: [], subject: '', error: '', files: [], importable: [], origins: [],
@@ -102,8 +102,9 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
 const rows = (root: HTMLElement) => [...root.querySelectorAll<HTMLButtonElement>('.message-row')];
 const subjects = (root: HTMLElement) => rows(root).map((r) => r.querySelector('.subject')!.textContent);
 
-test('shows the first inbox with its unread count, then opens a message in the reader', async () => {
-  const { root, settle, opened } = await show();
+test('shows the first inbox with its unread count, then opens a message in the reader and marks it read once', async () => {
+  const { root, settle, opened, requests } = await show({ 'PATCH /api/email/message/flags': null });
+  const marks = () => requests.calls.filter((c) => c.method === 'PATCH').map((c) => c.body);
   expect(subjects(root)).toEqual(['Third', 'Second', 'First']);
   expect(root.querySelector('.message-list-header h2')!.textContent).toBe('Inbox');
   expect(root.querySelector('.sidebar-item[aria-current] [data-badge]')!.textContent).toBe('1');
@@ -116,6 +117,12 @@ test('shows the first inbox with its unread count, then opens a message in the r
   expect(root.querySelector('.reader .body-text')!.textContent).toBe('body 3');
   expect(rows(root)[0].classList.contains('unread')).toBe(false);
   expect(rows(root)[0].getAttribute('aria-current')).toBe('true');
+  expect(marks()).toEqual([{ account_id: 'work', mailbox: 'INBOX', uid: 3, flags: ['\\Seen'], set: true }]);
+
+  expect(root.querySelector('#mail-actions-menu button[data-icon="mail"]')!.textContent).toBe(helpers.m.mail_markUnread());   // the reader shows it read
+  rows(root)[1].click();                                          // a read message is not marked
+  await settle();
+  expect(marks()).toHaveLength(1);
 });
 
 test('searches the folder with filters, and pages by cursor', async () => {
