@@ -188,7 +188,7 @@
                     <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
                             data-sn-delete="/api/email/folder?folder_id={f.folder_id}"
                             data-sn-optimistic="remove('folders', f)"
-                            data-sn-then="remove('folders', f); sidebarOpen = false; view.folder_id === f.folder_id && (view = {account_id: null, mailbox: null, folder_id: null}, marked = [])"
+                            data-sn-then="sidebarOpen = false; view.folder_id === f.folder_id && (view = {account_id: null, mailbox: null, folder_id: null}, marked = [])"
                             data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
                   </div>
                 </template>

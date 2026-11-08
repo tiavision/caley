@@ -35,7 +35,7 @@
                     data-sn-attr="{'aria-label': msg.is_flagged ? m.mail_unflag() : m.mail_flag()}"
                     data-sn-patch="/api/email/message/flags" data-sn-body="flagBody(msg, '\\Flagged', !msg.is_flagged)"
                     data-sn-optimistic="patch('message', msg, star)"
-                    data-sn-then="patch('message', msg, star); emit('mail-patched', {ref: refOf(msg), fields: star})"></button>
+                    data-sn-then="emit('mail-patched', {ref: refOf(msg), fields: {flags: msg.flags, is_read: msg.is_read, is_flagged: msg.is_flagged}})"></button>
             <button type="button" data-variant="ghost" data-icon="reply" data-tooltip data-shortcut="reply" commandfor="mail-compose" command="show-modal"
                     data-sn-on-click="compose = composeDraft('reply', msg, identities, b?.text ?? '', b?.html ?? null); needContacts = true"
                     data-sn-attr="{'aria-label': m.mail_reply()}"></button>
@@ -57,7 +57,7 @@
                       data-sn-on-click="(/** @type {HTMLElement} */ ($el.closest('[popover]'))).hidePopover()"
                       data-sn-patch="/api/email/message/flags" data-sn-body="flagBody(msg, '\\Seen', !msg.is_read)"
                       data-sn-optimistic="patch('message', msg, read)"
-                      data-sn-then="patch('message', msg, read); emit('mail-patched', {ref: refOf(msg), fields: read})"
+                      data-sn-then="emit('mail-patched', {ref: refOf(msg), fields: {flags: msg.flags, is_read: msg.is_read, is_flagged: msg.is_flagged}})"
                       data-sn-text="msg.is_read ? m.mail_markUnread() : m.mail_markRead()"></button>
               <template data-sn-if="htmlAddsValue(html)">
                 <template data-sn-if="!encrypted && imgs.all.length > 0">

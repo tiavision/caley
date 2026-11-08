@@ -258,7 +258,7 @@
               <button type="button" data-variant="ghost" data-size="sm" data-tone="danger" data-icon="trash-2" data-tooltip
                       data-sn-delete="/api/pgp/key" data-sn-body="{ fingerprint: key.fingerprint }"
                       data-sn-confirm="m.pgp_confirmRemovePublicKey()"
-                      data-sn-optimistic="remove('publicKeys', key)" data-sn-then="remove('publicKeys', key)"
+                      data-sn-optimistic="remove('publicKeys', key)"
                       data-sn-catch="pubError = m.pgp_publicKeyRemoveError()"
                       data-sn-attr="{'aria-label': m.pgp_removeKey()}"></button>
             </li>

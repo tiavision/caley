@@ -167,6 +167,56 @@ test('server events: flags patch the list, a removed open message closes the rea
   expect(root.querySelector('.reader')).toBeNull();
 });
 
+test('the reader\'s star and read toggles stay on success, in the reader and the list', async () => {
+  const { root, settle, requests } = await show({ 'PATCH /api/email/message/flags': null });
+  const patched = () => requests.calls.filter((c) => c.method === 'PATCH').at(-1)!.body;
+  rows(root)[1].click();
+  await settle();
+  const star = () => root.querySelector<HTMLButtonElement>('.reader .star-btn')!;
+  star().click();
+  await settle();
+  expect(patched()).toEqual({ account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Flagged'], set: true });
+  expect(star().classList.contains('flagged')).toBe(true);
+  expect(rows(root)[1].querySelector('.flag-star')).not.toBeNull();
+
+  root.querySelector<HTMLButtonElement>('#mail-actions-menu button[data-icon="mail"]')!.click();
+  await settle();
+  expect(patched()).toEqual({ account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Seen'], set: false });
+  expect(root.querySelector('#mail-actions-menu button[data-icon="mail"]')!.textContent).toBe(helpers.m.mail_markRead());
+  expect(rows(root)[1].classList.contains('unread')).toBe(true);
+});
+
+test('a failed star toggle is rolled back', async () => {
+  const { root, settle } = await show({ 'PATCH /api/email/message/flags': { status: 500 } });
+  rows(root)[1].click();
+  await settle();
+  root.querySelector<HTMLButtonElement>('.reader .star-btn')!.click();
+  await settle();
+  expect(root.querySelector('.reader .star-btn')!.classList.contains('flagged')).toBe(false);
+  expect(rows(root)[1].querySelector('.flag-star')).toBeNull();
+});
+
+const folderRow = { folder_id: 'f1', display_name: 'followup-Folder', sort_order: 0, query: '', mailboxes: [] };
+const folderItems = (root: HTMLElement) => [...root.querySelectorAll('.sidebar-item')].map((b) => b.textContent!.trim()).filter((t) => t.startsWith('followup-'));
+
+test('removing the open virtual folder drops it and goes back to the inbox', async () => {
+  const { root, settle } = await show({ 'GET /api/email/folders': { folders: [folderRow] }, 'DELETE /api/email/folder': null, 'GET /api/email/search': { messages: [] } });
+  [...root.querySelectorAll<HTMLButtonElement>('.sidebar-item')].find((b) => b.textContent!.includes('followup-Folder'))!.click();
+  await settle();
+  expect(root.querySelector('.message-list-header h2')!.textContent).toBe('followup-Folder');
+  root.querySelector<HTMLButtonElement>(`button[aria-label="${helpers.m.mail_removeAttachment()}"][data-icon="x"]`)!.click();
+  await settle();
+  expect(folderItems(root)).toEqual([]);
+  expect(root.querySelector('.message-list-header h2')!.textContent).toBe('Inbox');
+});
+
+test('a failed folder removal brings it back', async () => {
+  const { root, settle } = await show({ 'GET /api/email/folders': { folders: [folderRow] }, 'DELETE /api/email/folder': { status: 500 } });
+  root.querySelector<HTMLButtonElement>(`button[aria-label="${helpers.m.mail_removeAttachment()}"][data-icon="x"]`)!.click();
+  await settle();
+  expect(folderItems(root)).toEqual(['followup-Folder']);
+});
+
 test('reply opens the compose dialog with the quoted message, and sends it', async () => {
   const { root, settle } = await show();
   rows(root)[2].click();

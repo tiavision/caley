@@ -96,7 +96,7 @@
                     <button type="button" data-variant="outline" data-tone="danger" data-size="sm"
                             data-sn-delete="/api/caldav/account?account_id={account.account_id}"
                             data-sn-confirm="m.settings_removeCaldavAccountConfirm({name: account.display_name})"
-                            data-sn-optimistic="remove('caldavAccounts', account)" data-sn-then="remove('caldavAccounts', account)"
+                            data-sn-optimistic="remove('caldavAccounts', account)"
                             data-sn-text="m.contacts_delete()"></button>
                   </div>
                 </header>
@@ -107,8 +107,7 @@
                       <input type="checkbox" data-sn-attr="{checked: cal.is_active}"
                              data-sn-post="/api/calendar/toggle" data-sn-encoding="form"
                              data-sn-body="{ account_id: cal.account_id, href: cal.href, active: $el.checked }"
-                             data-sn-optimistic="patch('caldavAccounts', account, { calendars: account.calendars.map(c => c.href === cal.href ? { ...c, is_active: $el.checked } : c) })"
-                             data-sn-then="patch('caldavAccounts', account, { calendars: account.calendars.map(c => c.href === cal.href ? { ...c, is_active: $el.checked } : c) })">
+                             data-sn-optimistic="patch('caldavAccounts', account, { calendars: account.calendars.map(c => c.href === cal.href ? { ...c, is_active: $el.checked } : c) })">
                       <span class="event-color-dot" data-sn-show="cal.color" data-sn-style="{'--tm-tone': cal.color}"></span>
                       <span data-sn-text="cal.name"></span>
                     </label>

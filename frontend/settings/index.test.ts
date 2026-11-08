@@ -165,6 +165,16 @@ test('toggles a calendar', async () => {
   const call = requests.calls.at(-1)!;
   expect(call.path).toBe('/api/calendar/toggle');
   expect(String(call.body)).toBe('account_id=acc&href=%2Fcal%2Fwork%2F&active=false');
+  expect(root.querySelector<HTMLInputElement>('main article label input')!.checked).toBe(false);
+});
+
+test('a failed toggle puts the calendar back', async () => {
+  const { root, settle } = await show({ 'POST /api/calendar/toggle': { status: 500 } });
+  const box = root.querySelector<HTMLInputElement>('main article label input')!;
+  box.checked = false;
+  box.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  expect(root.querySelector<HTMLInputElement>('main article label input')!.checked).toBe(true);
 });
 
 test('adds a CalDAV account; the server message shows on failure', async () => {
@@ -220,6 +230,15 @@ test('removes an account after confirmation', async () => {
   button(root, m.contacts_delete()).click();
   await settle();
   expect(requests.calls.find((c) => c.method === 'DELETE')!.url).toBe('/api/caldav/account?account_id=acc');
+  expect(root.querySelector('main article')).toBeNull();
+});
+
+test('a failed account removal brings the account back', async () => {
+  const { root, settle } = await show({ 'DELETE /api/caldav/account': { status: 500 } });
+  confirmAnswer = true;
+  button(root, m.contacts_delete()).click();
+  await settle();
+  expect(root.querySelector('main article h3')!.textContent).toBe('Home');
 });
 
 test('creates a calendar, with a color when chosen', async () => {
@@ -466,4 +485,14 @@ test('encryption tab: trusted sender keys, import and remove', async () => {
   await settle();
   expect(requests.calls.at(-1)!.body).toEqual({ fingerprint: 'CCCC3333DDDD4444EEEE' });
   expect(trusted()).toEqual(['carol@example.com']);
+});
+
+test('encryption tab: a failed key removal brings the key back with the error', async () => {
+  const { root, settle } = await encryptionTab(lockedVault, { 'DELETE /api/pgp/key': { status: 500 } });
+  const trusted = () => [...root.querySelectorAll('#settings-panel-encryption li span[data-truncate]')].map((s) => s.textContent);
+  const remove = root.querySelectorAll<HTMLButtonElement>('#settings-panel-encryption li button[data-tone=danger]');
+  remove[remove.length - 1]!.click();
+  await settle();
+  expect(trusted()).toEqual(['bob@example.com']);
+  expect(root.querySelector('#settings-panel-encryption')!.textContent).toContain(m.pgp_publicKeyRemoveError());
 });
