@@ -44,7 +44,7 @@
       const chips = Array.from(container.querySelectorAll<HTMLElement>('.event-trigger'));
       if (!chips.length) continue;
 
-      const available = container.clientHeight;
+      const available = container.clientHeight - 2; // the list box's top and bottom border
       if (available <= 0) continue;
 
       let h = 0, count = 0;
@@ -138,20 +138,24 @@
           <span class="day-num" data-self="end" aria-current={isToday ? 'date' : null}>{cell.day_number}</span>
 
           <div class="cell-events" data-layout="stack" data-gap="none" data-grow>
-            {#each visibleEvents as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
-              <button
-                type="button"
-                class="event-trigger"
-                data-variant="item"
-                data-size="sm"
-                data-bar
-                style={event.color ? `--tm-tone: ${event.color}` : null}
-                tabindex="-1"
-                onclick={(e) => { if (!isMobile) { e.stopPropagation(); onEventClick(event); } }}
-              >
-                <span class="chip-text">{event.summary}</span>
-              </button>
-            {/each}
+            {#if visibleEvents.length > 0}
+            <div data-list>
+              {#each visibleEvents as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
+                <button
+                  type="button"
+                  class="event-trigger"
+                  data-variant="item"
+                  data-size="sm"
+                  data-bar
+                  style={event.color ? `--tm-tone: ${event.color}` : null}
+                  tabindex="-1"
+                  onclick={(e) => { if (!isMobile) { e.stopPropagation(); onEventClick(event); } }}
+                >
+                  <span class="chip-text">{event.summary}</span>
+                </button>
+              {/each}
+            </div>
+            {/if}
 
             {#if hidden > 0}
               <button
