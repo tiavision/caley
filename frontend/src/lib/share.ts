@@ -43,3 +43,33 @@ export function composeEmailWithAttachment(subject: string, filename: string, mi
 export function safeFilename(name: string, ext: string): string {
   return (name.replace(/[^\w\- ]/g, '_').trim() || 'file') + ext;
 }
+
+/** What partials/share-menu.html shares: a file fetched from `url` (src/actions/share.ts). */
+export interface ShareItem {
+  title: string;
+  filename: string;
+  type: 'text/vcard' | 'text/calendar';
+  url: string;
+}
+
+/** The vCard of a contact as a ShareItem (pure; a sinter helper). */
+export function contactShare(c: ContactJson): ShareItem {
+  const params = new URLSearchParams({ account_id: c.account_id, addressbook_href: c.addressbook_href, uid: c.uid });
+  return {
+    title: c.fn_name,
+    filename: safeFilename(c.fn_name || 'contact', '.vcf'),
+    type: 'text/vcard',
+    url: `/api/contact/vcf?${params}`,
+  };
+}
+
+/** The iCalendar file of an event as a ShareItem (pure; a sinter helper). */
+export function eventShare(event: EventJson): ShareItem {
+  const params = new URLSearchParams({ account_id: event.account_id, calendar_href: event.calendar_href, uid: event.uid });
+  return {
+    title: event.summary,
+    filename: safeFilename(event.summary || 'event', '.ics'),
+    type: 'text/calendar',
+    url: `/api/event/ics?${params}`,
+  };
+}

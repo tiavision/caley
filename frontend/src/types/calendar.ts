@@ -106,6 +106,7 @@ export interface ContactJson {
   phones: TypedEntry[];
   addresses: AddressEntry[];
   org: string;
+  has_photo: boolean;
 }
 
 export interface AddressbookJson {

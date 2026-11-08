@@ -14,3 +14,5 @@ export {
   formatRecurrence,
   formatAlarm,
 } from './lib/format.ts';
+
+export { contactShare, eventShare } from './lib/share.ts';
