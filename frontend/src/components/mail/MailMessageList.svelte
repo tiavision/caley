@@ -370,7 +370,7 @@
   .message-list {
     min-inline-size: 0;
     overflow: hidden;
-    background: var(--tm-bg);
+    background: var(--tm-surface);
   }
 
   .message-list-header {
@@ -443,8 +443,9 @@
     background: var(--tm-fill);
   }
 
-  .message-row[aria-pressed='true'] {
-    box-shadow: inset 3px 0 0 var(--tm-accent);
+  /* The selected and the marked rows show their data-bar in the accent color (read rows hide it otherwise). */
+  .message-row:is([aria-current], [aria-pressed='true']) {
+    border-inline-start-color: var(--tm-accent);
   }
 
   .message-row .date {

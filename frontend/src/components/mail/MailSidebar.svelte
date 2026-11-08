@@ -162,7 +162,7 @@
   }
 
   .mail-sidebar {
-    background: var(--tm-surface);
+    background: var(--tm-bg);
     border-inline-end: 1px solid var(--tm-border);
   }
 
