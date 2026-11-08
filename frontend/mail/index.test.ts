@@ -178,6 +178,18 @@ test('server events: flags patch the list, a removed open message closes the rea
   expect(root.querySelector('.reader')).toBeNull();
 });
 
+test('server events: a mailbox refetch reloads the list when it is the one shown (the first inbox when none is chosen)', async () => {
+  const { requests, stream, settle } = await show();
+  const lists = () => requests.calls.filter((c) => c.method === 'GET' && c.path === '/api/email/messages').length;
+  const before = lists();
+  stream.emit('emails_refetch', { account_id: 'work', mailbox: 'Archive' });
+  await settle();
+  expect(lists()).toBe(before);
+  stream.emit('emails_refetch', { account_id: 'work', mailbox: 'INBOX' });
+  await settle();
+  expect(lists()).toBe(before + 1);
+});
+
 test('the reader\'s star and read toggles stay on success, in the reader and the list', async () => {
   const { root, settle, requests } = await show({ 'PATCH /api/email/message/flags': null });
   const patched = () => requests.calls.filter((c) => c.method === 'PATCH').at(-1)!.body;

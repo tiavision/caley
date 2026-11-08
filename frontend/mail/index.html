@@ -129,19 +129,19 @@
         <!-- The page's server events (shares the rail's connection). -->
         <sn-sync src="/api/events/stream">
           <sn-event name="emails_refetch" resource="messages" op="refetch" type="MailboxEvent"
-                    when="!view.folder_id && (!view.mailbox || (account_id === view.account_id && mailbox === view.mailbox))"></sn-event>
+                    when="!cur.folder_id && account_id === cur.account_id && mailbox === cur.mailbox"></sn-event>
           <sn-event name="emails_refetch" resource="unread" op="refetch"></sn-event>
           <sn-event name="email_updated" resource="messages" op="patch" type="EmailUpdatedEvent"
                     set="{flags, is_read: flags.includes('\\Seen'), is_flagged: flags.includes('\\Flagged')}"></sn-event>
           <sn-event name="email_updated" resource="results" op="patch" type="EmailUpdatedEvent"
                     set="{flags, is_read: flags.includes('\\Seen'), is_flagged: flags.includes('\\Flagged')}"></sn-event>
           <sn-event name="email_updated" resource="message" op="patch" type="EmailUpdatedEvent"
-                    when="isRef(reader.ref, {account_id, mailbox, uid})"
+                    when="isRef(open, {account_id, mailbox, uid})"
                     set="{flags, is_read: flags.includes('\\Seen'), is_flagged: flags.includes('\\Flagged')}"></sn-event>
           <sn-event name="email_updated" resource="unread" op="refetch"></sn-event>
           <sn-event name="email_removed" resource="messages" op="remove" type="EmailRemovedEvent"></sn-event>
           <sn-event name="email_removed" resource="results" op="remove" type="EmailRemovedEvent"></sn-event>
-          <sn-event name="email_removed" resource="message" op="remove" type="EmailRemovedEvent" when="isRef(reader.ref, {account_id, mailbox, uid})"
+          <sn-event name="email_removed" resource="message" op="remove" type="EmailRemovedEvent" when="isRef(open, {account_id, mailbox, uid})"
                     then="reader = noReader()"></sn-event>
           <sn-event name="email_removed" resource="unread" op="refetch"></sn-event>
           <sn-event name="accounts_changed" resource="accounts" op="refetch"></sn-event>
