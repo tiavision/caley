@@ -1,0 +1,8 @@
+// Settings page (settings/index.html).
+
+// temper's data-layout="center" keeps at least md side padding; match the sm page padding of the other
+// pages so the nav toggle sits in the same place on phones.
+.settings {
+  max-inline-size: calc(var(--tm-measure) + 2 * var(--tm-space-sm));
+  padding-inline: var(--tm-space-sm);
+}

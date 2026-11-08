@@ -50,6 +50,7 @@
   "settings_subtitle": "Configure your CalDAV connection to fetch calendar events.",
   "settings_deleteAccount": "Delete account",
   "settings_deleteAccountConfirm": "Delete your account and all data? This cannot be undone.",
+  "settings_removeCaldavAccountConfirm": "Remove account \"{name}\"?",
   "settings_baseUrl": "CalDAV Base URL",
   "settings_baseUrlPlaceholder": "https://caldav.example.com",
   "settings_username": "CalDAV Username",

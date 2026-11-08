@@ -31,5 +31,18 @@ export interface ContactRemovedEvent {
 export type { EventJson, CalendarJson, CalDavAccountJson, SourceEmailJson, MessageEventGroupJson } from './types/calendar.ts';
 export type { EventDraft, SearchQuery } from './lib/events.ts';
 
-// ICS import dialog (CalDavAccountJson is exported with the event types above).
+// Settings page, import dialog and encryption tab (CalDavAccountJson is exported with the event types above).
 export type { ImportDraft } from './lib/import.ts';
+export type { VaultView } from './actions/pgp-vault.ts';
+export type { StoredPublicKey } from './lib/pgp/public-keys.ts';
+
+/** The CalDAV account dialog on the settings page (POST /api/caldav/account); account_id '' adds one. */
+export interface AccountDraft {
+  account_id: string;
+  display_name: string;
+  caldav_base_url: string;
+  caldav_username: string;
+  caldav_password: string;
+  has_password: boolean;
+}
+

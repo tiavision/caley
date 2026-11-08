@@ -1,10 +1,7 @@
+// Settings page (settings/index.html, sinter): styles and the page's islands.
 import '../styles/temper.ts';
-import { initI18n } from '../lib/i18n.ts';
+import '../styles/settings.scss';
+import '../islands/settings.ts';
 import { rememberCurrentAppUrl } from '../lib/return-url.ts';
-import { mount } from 'svelte';
-import SettingsForm from '../components/SettingsForm.svelte';
 
 rememberCurrentAppUrl();
-
-initI18n();
-mount(SettingsForm, { target: document.getElementById('app')! });

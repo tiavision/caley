@@ -50,6 +50,7 @@
   "settings_subtitle": "Konfiguriere deine CalDAV-Verbindung, um Kalendertermine abzurufen.",
   "settings_deleteAccount": "Konto löschen",
   "settings_deleteAccountConfirm": "Konto und alle Daten löschen? Dies kann nicht rückgängig gemacht werden.",
+  "settings_removeCaldavAccountConfirm": "Konto „{name}“ entfernen?",
   "settings_baseUrl": "CalDAV-Basis-URL",
   "settings_baseUrlPlaceholder": "https://caldav.example.com",
   "settings_username": "CalDAV-Benutzername",

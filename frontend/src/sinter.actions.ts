@@ -5,5 +5,7 @@
 export * as notify from './actions/notify.ts';
 export * as share from './actions/share.ts';
 export * as maps from './actions/maps.ts';
-// Settings: ICS import dialog (partials/import-dialog.html).
+// Settings: ICS import dialog (partials/import-dialog.html) and the OpenPGP vault (partials/pgp-settings.html).
 export * as ics from './actions/ics.ts';
+export * as pgpVault from './actions/pgp-vault.ts';
+export * as pgpKeys from './actions/pgp-keys.ts';

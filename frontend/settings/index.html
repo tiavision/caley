@@ -12,12 +12,173 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <title>Caley - Settings</title>
   </head>
-  <body data-shell="fixed" data-sn-state="{ here: '/settings/' }">
+  <!-- tab: the open tab; draft: the CalDAV account dialog's fields (account_id '' for a new account);
+       imp: the import dialog's ImportDraft (partials/import-dialog.html). -->
+  <body data-shell="fixed"
+        data-sn-state="{
+          here: '/settings/',
+          lang: ($locale ?? 'en').slice(0, 2),
+          tab: 'settings',
+          draft: /** @type {AccountDraft|null} */ (null),
+          draftError: '',
+          imp: /** @type {ImportDraft|null} */ (null),
+        }">
     <sn-include src="../partials/nav.html"></sn-include>
-    <!-- The page's server events. The rail's <mail-notifier> listens here; the page adds its <sn-event>s when it moves to sinter. -->
-    <sn-sync src="/api/events/stream"></sn-sync>
+    <sn-resource name="caldavAccounts" src="/api/caldav/accounts" items="accounts" key="account_id" type="CalDavAccountJson[]"></sn-resource>
+    <!-- The encryption tab (partials/pgp-settings.html), loaded while it is open. -->
+    <sn-resource name="vault" call="pgpVault.status()" when="tab === 'encryption'" type="VaultView"></sn-resource>
+    <sn-resource name="publicKeys" src="/api/pgp/keys" key="fingerprint" when="tab === 'encryption'" type="StoredPublicKey[]"></sn-resource>
+    <!-- The page's server events. The rail's <mail-notifier> listens here too. -->
+    <sn-sync src="/api/events/stream">
+      <sn-event name="calendars_changed" resource="caldavAccounts" op="refetch"></sn-event>
+      <sn-event name="contacts_refetch" resource="caldavAccounts" op="refetch"></sn-event>
+    </sn-sync>
     <main>
-      <div id="app" data-density="compact"></div>
+      <div data-density="compact">
+      <div class="settings" data-layout="center" data-gap="lg" data-pad="sm" style="--tm-measure: 40rem">
+        <div data-layout="row" data-gap="sm">
+          <sn-include src="../partials/nav-toggle.html"></sn-include>
+          <h2 data-grow style="--tm-grow-basis: 12rem" data-sn-text="m.settings_heading()"></h2>
+          <label data-layout="row" data-gap="sm">
+            <span data-icon="globe" data-muted></span>
+            <select data-size="sm" data-sn-attr="{'aria-label': m.settings_language()}"
+                    data-sn-model="lang" data-sn-on-change="$locale = lang">
+              <option value="en">English</option>
+              <option value="de">Deutsch</option>
+            </select>
+          </label>
+        </div>
+
+        <template data-sn-if="!$meta.caldavAccounts.loadedAt && !$meta.caldavAccounts.error">
+          <p aria-busy="true" data-sn-text="m.nav_loading()"></p>
+        </template>
+        <template data-sn-else>
+          <div role="tablist" data-sn-attr="{'aria-label': m.settings_heading()}">
+            <button type="button" role="tab" id="settings-tab-general" aria-controls="settings-panel-general"
+                    data-sn-attr="{'aria-selected': tab === 'settings' ? 'true' : 'false'}"
+                    data-sn-on-click="tab = 'settings'" data-sn-text="m.nav_settings()"></button>
+            <button type="button" role="tab" id="settings-tab-encryption" aria-controls="settings-panel-encryption"
+                    data-sn-attr="{'aria-selected': tab === 'encryption' ? 'true' : 'false'}"
+                    data-sn-on-click="tab = 'encryption'" data-sn-text="m.pgp_tabEncryption()"></button>
+          </div>
+
+          <div role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general"
+               data-layout="stack" data-gap="lg" data-sn-show="tab === 'settings'">
+            <div data-layout="row" data-gap="sm">
+              <button type="button" data-variant="outline" data-size="sm" data-icon="user-plus"
+                      commandfor="caldav-account-dialog" command="show-modal"
+                      data-sn-on-click="draft = { account_id: '', display_name: '', caldav_base_url: '', caldav_username: '', caldav_password: '', has_password: false }; draftError = ''"
+                      data-sn-text="m.mail_addAccount()"></button>
+              <button type="button" data-variant="outline" data-size="sm" data-icon="calendar-plus"
+                      commandfor="create-calendar-dialog" command="show-modal" data-sn-text="m.cal_createCalendar()"></button>
+              <button type="button" data-variant="outline" data-size="sm" data-icon="upload"
+                      data-sn-call="ics.draft(caldavAccounts, null, null)" data-sn-then="imp = $result; showModal('import-ics')"
+                      data-sn-text="m.cal_import()"></button>
+            </div>
+
+            <template data-sn-if="!caldavAccounts.length">
+              <p data-muted data-sn-text="m.settings_subtitle()"></p>
+            </template>
+            <template data-sn-for="account in caldavAccounts">
+              <article data-layout="stack" data-gap="sm">
+                <header data-layout="row" data-gap="sm" data-justify="between">
+                  <div data-layout="stack" data-gap="none">
+                    <h3 data-sn-text="account.display_name"></h3>
+                    <small data-muted data-sn-text="account.caldav_username"></small>
+                  </div>
+                  <div data-layout="row" data-gap="xs">
+                    <button type="button" data-variant="secondary" data-size="sm"
+                            commandfor="caldav-account-dialog" command="show-modal"
+                            data-sn-on-click="draft = { account_id: account.account_id, display_name: account.display_name || '', caldav_base_url: account.caldav_base_url || '', caldav_username: account.caldav_username || '', caldav_password: '', has_password: !!account.has_password }; draftError = ''"
+                            data-sn-text="m.contacts_edit()"></button>
+                    <button type="button" data-variant="outline" data-tone="danger" data-size="sm"
+                            data-sn-delete="/api/caldav/account?account_id={account.account_id}"
+                            data-sn-confirm="m.settings_removeCaldavAccountConfirm({name: account.display_name})"
+                            data-sn-optimistic="remove('caldavAccounts', account)" data-sn-then="remove('caldavAccounts', account)"
+                            data-sn-text="m.contacts_delete()"></button>
+                  </div>
+                </header>
+                <h4 data-caption data-sn-text="m.cal_calendars()"></h4>
+                <div data-layout="stack" data-gap="xs">
+                  <template data-sn-for="cal in account.calendars" data-sn-key="cal.account_id + cal.href">
+                    <label>
+                      <input type="checkbox" data-sn-attr="{checked: cal.is_active}"
+                             data-sn-post="/api/calendar/toggle" data-sn-encoding="form"
+                             data-sn-body="{ account_id: cal.account_id, href: cal.href, active: $el.checked }"
+                             data-sn-optimistic="patch('caldavAccounts', account, { calendars: account.calendars.map(c => c.href === cal.href ? { ...c, is_active: $el.checked } : c) })"
+                             data-sn-then="patch('caldavAccounts', account, { calendars: account.calendars.map(c => c.href === cal.href ? { ...c, is_active: $el.checked } : c) })">
+                      <span class="event-color-dot" data-sn-show="cal.color" data-sn-style="{'--tm-tone': cal.color}"></span>
+                      <span data-sn-text="cal.name"></span>
+                    </label>
+                  </template>
+                </div>
+                <template data-sn-if="account.addressbooks.length > 0">
+                  <h4 data-caption data-sn-text="m.contacts_addressbooks()"></h4>
+                  <ul data-layout="stack" data-gap="xs">
+                    <template data-sn-for="ab in account.addressbooks" data-sn-key="ab.account_id + ab.href">
+                      <li data-sn-text="ab.name"></li>
+                    </template>
+                  </ul>
+                </template>
+              </article>
+            </template>
+
+            <hr />
+            <button type="button" data-variant="outline" data-tone="danger" data-self="start" data-icon="trash-2"
+                    data-sn-delete="/api/account" data-sn-confirm="m.settings_deleteAccountConfirm()"
+                    data-sn-then="emit('account-deleted', $result)"
+                    data-sn-text="m.settings_deleteAccount()"></button>
+          </div>
+
+          <div role="tabpanel" id="settings-panel-encryption" aria-labelledby="settings-tab-encryption"
+               data-sn-show="tab === 'encryption'">
+            <sn-include src="../partials/pgp-settings.html"></sn-include>
+          </div>
+        </template>
+      </div>
+
+      <dialog id="caldav-account-dialog" closedby="any" aria-labelledby="caldav-account-title">
+        <header>
+          <h2 id="caldav-account-title" data-sn-text="draft.account_id ? m.mail_editAccountHeading() : m.settings_addAccountHeading()"></h2>
+          <button type="button" commandfor="caldav-account-dialog" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
+        </header>
+        <form data-layout="stack" data-gap="md"
+              data-sn-post="/api/caldav/account" data-sn-encoding="form"
+              data-sn-body="{ account_id: draft.account_id || null, display_name: draft.display_name, caldav_base_url: draft.caldav_base_url, caldav_username: draft.caldav_username, caldav_password: draft.caldav_password }"
+              data-sn-on-submit="draftError = ''"
+              data-sn-then="refresh('caldavAccounts'); close()"
+              data-sn-catch="draftError = $error.status ? ($error.detail ?? m.event_error()) : m.event_error()">
+          <label>
+            <span data-sn-text="m.settings_accountName()"></span>
+            <input type="text" data-sn-model="draft.display_name">
+          </label>
+          <label>
+            <span data-sn-text="m.settings_baseUrl()"></span>
+            <input type="url" required data-sn-attr="{placeholder: m.settings_baseUrlPlaceholder()}" data-sn-model="draft.caldav_base_url">
+          </label>
+          <label>
+            <span data-sn-text="m.settings_username()"></span>
+            <input type="text" autocomplete="username" required data-sn-attr="{placeholder: m.settings_usernamePlaceholder()}" data-sn-model="draft.caldav_username">
+          </label>
+          <label>
+            <span data-sn-text="m.settings_password()"></span>
+            <input type="password" autocomplete="current-password"
+                   data-sn-attr="{placeholder: draft.has_password ? m.settings_passwordHint() : m.settings_passwordPlaceholder()}"
+                   data-sn-model="draft.caldav_password">
+          </label>
+          <template data-sn-if="draftError">
+            <div data-callout data-tone="danger" role="alert" data-sn-text="draftError"></div>
+          </template>
+          <footer>
+            <button type="button" data-variant="secondary" commandfor="caldav-account-dialog" command="close" data-sn-text="m.event_cancel()"></button>
+            <button type="submit" data-sn-text="m.settings_submit()"></button>
+          </footer>
+        </form>
+      </dialog>
+
+      <sn-include src="../partials/create-calendar-dialog.html"></sn-include>
+      <sn-include src="../partials/import-dialog.html"></sn-include>
+      </div>
     </main>
     <script type="module" src="/src/main/settings.ts"></script>
   </body>
