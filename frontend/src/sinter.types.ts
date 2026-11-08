@@ -58,7 +58,7 @@ export type { ThreadNode as MailThreadNode } from './lib/mail.ts';
 
 // Calendar page and thread dialog.
 export type { DayEventsJson, MonthGridJson } from './types/calendar.ts';
-export type { ThreadNode } from './components/mail/MailTypes.ts';
+export type { ThreadNode } from './lib/MailTypes.ts';
 export type { MonthFit } from './islands/calendar.ts';
 
 /** event_removed on /api/events/stream. */

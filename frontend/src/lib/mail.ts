@@ -8,8 +8,8 @@ import {
   linkifySegments,
   isPgpSignatureAttachment,
   isPgpTransportAttachment,
-} from '../components/mail/mailUtils.ts';
-import type { Account, Attachment, Identity, Mailbox, Message, ThreadNode, VirtualFolder } from '../components/mail/MailTypes.ts';
+} from './mailUtils.ts';
+import type { Account, Attachment, Identity, Mailbox, Message, ThreadNode, VirtualFolder } from './MailTypes.ts';
 import { parseEnvelopeAddresses } from './addresses.ts';
 
 export type { Account, Attachment, Identity, Mailbox, Message, ThreadNode, VirtualFolder };
@@ -21,7 +21,7 @@ export {
   formatDate,
   humanSize,
   senderName,
-} from '../components/mail/mailUtils.ts';
+} from './mailUtils.ts';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

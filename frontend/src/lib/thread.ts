@@ -1,8 +1,8 @@
 // Pure helpers for partials/thread-dialog.html: the conversation of a message as indented rows, with the
 // calendar events imported from each message under it. Exported to templates through src/sinter.helpers.ts.
 import type { EventJson, MessageEventGroupJson } from '../types/calendar.ts';
-import type { ThreadNode, ThreadTreeNode } from '../components/mail/MailTypes.ts';
-import { buildThreadTree, identityKey, senderName, formatDate } from '../components/mail/mailUtils.ts';
+import type { ThreadNode, ThreadTreeNode } from './MailTypes.ts';
+import { buildThreadTree, identityKey, senderName, formatDate } from './mailUtils.ts';
 
 /** Which conversation the thread dialog shows: the message it is opened for, and what to mark in it. */
 export interface ThreadRef {

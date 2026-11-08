@@ -7,7 +7,7 @@ import {
   attachmentUrl, canEncrypt, composeDraft, folderBody, messageKey, type ComposeDraft, type FolderDraft, type ComposeKeys, type Identity, type Message, type MessageRef,
 } from '../lib/mail.ts';
 import { cidReferencesFromHtml, htmlToPlainText, imageOriginsFromHtml, prepareEmailHtml, restoreForwardedImageSources } from '../lib/mail-html.ts';
-import { canPreviewContentType, htmlAddsValue, insertDecryptedInlineImages, isPgpPublicKeyAttachment, bareMailbox, keyHasEmail } from '../components/mail/mailUtils.ts';
+import { canPreviewContentType, htmlAddsValue, insertDecryptedInlineImages, isPgpPublicKeyAttachment, bareMailbox, keyHasEmail } from '../lib/mailUtils.ts';
 import { decryptMessage, detectPgpMessage, parseMimeMessage, verifySignedMessage } from '../lib/pgp/keyring.ts';
 import { listPublicKeys, parsePublicKey, readVerificationKeys, savePublicKey } from '../lib/pgp/public-keys.ts';
 import { getKeys, isUnlocked, openVault } from '../lib/pgp/session.ts';
