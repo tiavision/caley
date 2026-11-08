@@ -500,7 +500,7 @@
 </script>
 
 <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
-<div class="cal" data-layout="stack" data-gap="sm" data-pad="md" data-grow role="application" ontouchstart={handleTouchStart} ontouchend={handleTouchEnd}>
+<div class="cal" data-layout="stack" data-gap="sm" data-pad="sm" data-grow role="application" ontouchstart={handleTouchStart} ontouchend={handleTouchEnd}>
   <div data-layout="row" data-gap="sm" data-justify="between">
     <div data-layout="row" data-gap="xs" data-wrap="none">
       <NavToggle />

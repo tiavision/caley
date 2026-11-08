@@ -173,10 +173,10 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div data-layout="stack" data-gap="lg" data-pad="lg">
+<div data-layout="stack" data-gap="md" data-pad="sm">
   <div data-layout="row" data-gap="sm">
     <NavToggle />
-    <h1>{tl('contacts_heading')}</h1>
+    <h2>{tl('contacts_heading')}</h2>
     <input
       type="search"
       data-grow
