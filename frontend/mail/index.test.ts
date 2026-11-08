@@ -11,6 +11,7 @@ import origins from '../partials/mail-origins.html?raw';
 import compose from '../partials/mail-compose.html?raw';
 import account from '../partials/mail-account.html?raw';
 import folder from '../partials/mail-folder.html?raw';
+import importDialog from '../partials/import-dialog.html?raw';
 import source from './index.html?raw';
 import type { Message } from '../src/lib/mail.ts';
 
@@ -19,7 +20,7 @@ const page = source.replaceAll('../partials/', './');
 const files = {
   './nav.html': nav, './nav-toggle.html': navToggle, './mail-reader.html': reader, './mail-reader-data.html': readerData,
   './mail-folder-icon.html': folderIcon, './mail-origins.html': origins, './mail-compose.html': compose,
-  './mail-account.html': account, './mail-folder.html': folder,
+  './mail-account.html': account, './mail-folder.html': folder, './import-dialog.html': importDialog,
 };
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
@@ -43,6 +44,8 @@ afterEach(() => configure({ confirm: null as never, urlSchemes: [] }));
 
 async function show(routes: Record<string, RouteResponse> = {}) {
   const opened: unknown[] = [];
+  const listed = routes['GET /api/email/messages'];
+  const current: Message[] = listed && typeof listed === 'object' && 'messages' in listed ? (listed as { messages: Message[] }).messages : inbox;
   const requests = mockRequests({
     'GET /api/user': user,
     'GET /api/email/accounts': { accounts: [{ account_id: 'work', display_name: 'Work', host: 'imap', port: 993, username: 'me@x', use_tls: true, smtp_host: null, smtp_port: null }] },
@@ -61,13 +64,15 @@ async function show(routes: Record<string, RouteResponse> = {}) {
     'GET /api/email/thread-events': [],
     'POST /api/email/sync': null,
     'GET /api/contacts': { addressbooks: [], contacts: [] },
+    'GET /api/caldav/accounts': { accounts: [] },
     ...routes,
   });
   const stream = mockStream();
   const actions = {
+    ics: { draft: () => null, preview: async () => [], run: async () => ({ imported: 0, errors: 0 }) },
     notify: { status: () => ({ supported: false, permission: 'default', enabled: false }), toggle: async (s: unknown) => s },
     mail: {
-      open: async (ref: { uid: number }) => { opened.push(ref); return { ...inbox.find((m) => m.uid === ref.uid)!, is_read: true }; },
+      open: async (ref: { uid: number }) => { opened.push(ref); return { ...(current.find((m) => m.uid === ref.uid) ?? inbox[0]), is_read: true }; },
       body: async (ref: { account_id: string; mailbox: string; uid: number }) => ({
         key: `${ref.account_id} ${ref.mailbox} ${ref.uid}`, html: '', text: `body ${ref.uid}`, mode: 'text', encrypted: false, signed: false,
         locked: false, badges: [], subject: '', error: '', files: [], importable: [], origins: [],
@@ -76,7 +81,7 @@ async function show(routes: Record<string, RouteResponse> = {}) {
       composeKeys: async () => ({ keys: [], vault: [], unlocked: [] }),
       send: async () => null,
       forwardFiles: async () => ({ files: [], html: '', preview: '' }),
-      popout: () => {}, unlock: async () => true, importKey: async () => '', icsFile: async () => null,
+      popout: () => {}, unlock: async () => true, importKey: async () => '', icsDraft: async (_m: unknown, filename: string) => ({ file: new File(['x'], filename), filename }),
       promoteOrigin: async () => null, saveFolder: async () => null,
     },
   };
@@ -167,4 +172,17 @@ test('reply opens the compose dialog with the quoted message, and sends it', asy
   root.querySelector<HTMLFormElement>('.compose-form')!.requestSubmit();
   await settle();
   expect(root.querySelector<HTMLDialogElement>('#mail-compose')!.open).toBe(false);
+});
+
+test('a calendar attachment opens the import dialog with its draft', async () => {
+  const invite = msg(1, 'First', { has_attachments: true, attachments: [{ filename: 'invite.ics', content_type: 'text/calendar', size: 10, content_id: null }] });
+  const { root, settle } = await show({ 'GET /api/email/messages': { messages: [invite], total: 1 } });
+  rows(root)[0].click();
+  await settle();
+  root.querySelector<HTMLButtonElement>('.attachments button')!.click();
+  await settle();
+  expect(root.querySelector('.mail-attachment-chip')!.getAttribute('href')).toBe('/api/email/attachment?account_id=work&mailbox=INBOX&uid=1&filename=invite.ics');
+  root.querySelector<HTMLButtonElement>('.attachments button[data-icon="calendar-plus"]')!.click();
+  await settle();
+  expect(root.querySelector<HTMLDialogElement>('#import-ics')!.open).toBe(true);
 });

@@ -25,6 +25,7 @@
           detailOpen: !!urlRef($url),
           wiped: false,
           compose: /** @type {ComposeDraft|null} */ (null),
+          imp: /** @type {ImportDraft|null} */ (null),
           composeError: '',
           sending: false,
           rcpt: { field: '', token: '' },
@@ -139,6 +140,7 @@
           <sn-event name="email_removed" resource="unread" op="refetch"></sn-event>
           <sn-event name="accounts_changed" resource="accounts" op="refetch"></sn-event>
           <sn-event name="accounts_changed" resource="mailboxes" op="refetch"></sn-event>
+          <sn-event name="calendars_changed" resource="caldavAccounts" op="refetch"></sn-event>
           <sn-event name="mailboxes_changed" resource="mailboxes" op="refetch" type="AccountEvent"></sn-event>
           <sn-event name="sync_started" type="MailboxEvent" then="syncing = [...syncing, mailboxKey(account_id, mailbox)]"></sn-event>
           <sn-event name="sync_completed" resource="unread" op="refetch" type="MailboxEvent"
@@ -530,6 +532,7 @@
 
         <sn-include src="../partials/mail-origins.html"></sn-include>
         <sn-include src="../partials/mail-compose.html"></sn-include>
+        <sn-include src="../partials/import-dialog.html"></sn-include>
         <sn-include src="../partials/mail-account.html"></sn-include>
         <sn-include src="../partials/mail-folder.html"></sn-include>
 

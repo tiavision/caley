@@ -6,3 +6,5 @@
 <sn-resource name="threadEvents" src="/api/email/thread-events?account_id={open.account_id}&mailbox={open.mailbox}&uid={open.uid}" when="open" type="MessageEventGroupJson[]"></sn-resource>
 <sn-resource name="allowedOrigins" src="/api/email/image-origins" type="ImageOrigins"></sn-resource>
 <sn-resource name="ignoredOrigins" src="/api/email/image-blacklist" type="ImageOrigins"></sn-resource>
+<!-- Calendars for importing a calendar attachment (partials/import-dialog.html). -->
+<sn-resource name="caldavAccounts" src="/api/caldav/accounts" items="accounts" key="account_id" type="CalDavAccountJson[]"></sn-resource>

@@ -2,8 +2,8 @@
      Page state it reads: open, standalone, detailOpen, cursor, wiped, compose, needContacts, origins; resources
      message, body, thread, threadEvents, mailboxes, identities, allowedOrigins, ignoredOrigins.
      Changes to the open message go out as events for the page's list: `mail-patched` {ref, fields} after a flag
-     change, `mail-removed` {ref} after a move or delete; `mail-threads` and `mail-import-ics` open the thread and
-     calendar import dialogs. -->
+     change, `mail-removed` {ref} after a move or delete; `mail-threads` opens the thread dialog; calendar attachments open
+     partials/import-dialog.html (state `imp`). -->
 <template data-sn-if="open && message && isRef(message, open)">
   <template data-sn-for="msg in [message]" data-sn-key="messageKey(msg)">
     <div class="reader" data-layout="stack" data-gap="none" data-grow
@@ -184,8 +184,8 @@
                   </template>
                   <template data-sn-if="isIcsAttachment(att)">
                     <button type="button" data-variant="ghost" data-size="sm" data-icon="calendar-plus" data-tooltip
-                            data-sn-call="mail.icsFile(msg, att.filename, att.content_type)"
-                            data-sn-then="keyError = ''; emit('mail-import-ics', {file: $result, source: refOf(msg)})"
+                            data-sn-call="mail.icsDraft(msg, att.filename, att.content_type, caldavAccounts)"
+                            data-sn-then="keyError = ''; imp = $result; showModal('import-ics')"
                             data-sn-catch="keyError = $error.detail ?? m.cal_importError(); keyNote = ''"
                             data-sn-attr="{'aria-label': m.cal_import()}"></button>
                   </template>

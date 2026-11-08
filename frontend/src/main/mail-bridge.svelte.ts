@@ -1,11 +1,9 @@
-// TEMPORARY: the Svelte thread, event and calendar-import dialogs on the sinter mail pages, until their sinter
-// partials (thread dialog, event detail: search+calendar; import dialog: settings) are committed. The reader emits
-// `mail-threads` and `mail-import-ics`; picking a message in the thread dialog opens it in the reader.
+// TEMPORARY: the Svelte thread and event dialogs on the sinter mail pages, until their sinter
+// partials (thread dialog, event detail: search+calendar) are committed. The reader emits `mail-threads`; picking a message in the thread dialog opens it in the reader.
 import { mount } from 'svelte';
 import { instance } from '@tiaforge-ui/sinter';
 import ThreadDialog from '../components/mail/ThreadDialog.svelte';
 import EventDetail from '../components/EventDetail.svelte';
-import ImportDialog from '../components/ImportDialog.svelte';
 import { apiFetch } from '../lib/api.ts';
 import { getLocale } from '../lib/i18n.ts';
 import type { EventJson, MessageEventGroupJson, SourceEmailJson } from '../types/calendar.ts';
@@ -42,10 +40,6 @@ const detail = mount(EventDetail, {
     onthreads: (emails: SourceEmailJson[], event: EventJson) => { detail.close(); void eventThread(emails, event); },
   },
 }) as unknown as { open(ev: EventJson): void; close(): void };
-const importProps = $state({ locale, calendars: [] as unknown[], accounts: [] as unknown[] });
-const importer = mount(ImportDialog, { target: host, props: importProps as never }) as unknown as {
-  open(file?: File, ctx?: { account_id: string; mailbox: string; uid: number }): void;
-};
 
 async function eventThread(emails: SourceEmailJson[], event: EventJson) {
   const src = emails[0];
@@ -67,14 +61,3 @@ document.addEventListener('mail-threads', (e) => {
   thread.show();
 });
 
-document.addEventListener('mail-import-ics', (e) => {
-  const { file, source } = (e as CustomEvent<{ file: File; source: { account_id: string; mailbox: string; uid: number } }>).detail;
-  void (async () => {
-    const [c, a] = await Promise.all([apiFetch('/api/calendars'), apiFetch('/api/caldav/accounts')]);
-    const calendars = c.ok ? await c.json() : [];
-    const accounts = a.ok ? (await a.json()).accounts ?? [] : [];
-    importProps.calendars = calendars;
-    importProps.accounts = accounts;
-    importer.open(file, source);
-  })();
-});
