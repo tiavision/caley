@@ -235,7 +235,11 @@
   }
 
   @media (width < 60rem) {
+    /* Edge to edge: no outer side rules, and narrow chips keep their width for the text. */
+    .month-grid { border-inline-start: 0; }
+    .month-cell:nth-child(7n) { border-inline-end: 0; }
     .month-cell { padding-inline: 0; }
+    .event-trigger { padding-inline: 2px; }
     .month-cell.has-events { cursor: pointer; }
     .month-cell.has-events:hover { background: var(--tm-fill); }
   }

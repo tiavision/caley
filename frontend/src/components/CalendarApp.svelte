@@ -501,7 +501,7 @@
 
 <!-- ── Layout ─────────────────────────────────────────────────────────────── -->
 <div class="cal" data-layout="stack" data-gap="sm" data-pad="sm" data-grow role="application" ontouchstart={handleTouchStart} ontouchend={handleTouchEnd}>
-  <div data-layout="row" data-gap="sm" data-justify="between">
+  <div class="toolbar" data-layout="row" data-gap="sm" data-justify="between">
     <div data-layout="row" data-gap="xs" data-wrap="none">
       <NavToggle />
       {#if viewMode === 'month'}
@@ -685,6 +685,11 @@
       font-size: var(--tm-control-font);
       gap: 0.125rem;
     }
+  }
+  /* The month grid uses the whole screen width and height; only the toolbar keeps the page padding. */
+  @media (width < 60rem) {
+    .cal:has(.month) { padding-inline: 0; padding-block-end: 0; }
+    .cal:has(.month) > .toolbar { padding-inline: var(--tm-space-sm); }
   }
   @media (width >= 60rem) {
     .narrow-only { display: none; }
