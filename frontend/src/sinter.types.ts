@@ -30,6 +30,7 @@ export interface ContactRemovedEvent {
 // Event partials, search and calendar pages.
 export type { EventJson, CalendarJson, CalDavAccountJson, SourceEmailJson, MessageEventGroupJson } from './types/calendar.ts';
 export type { EventDraft, SearchQuery } from './lib/events.ts';
+export type { ThreadRef, ThreadResponse } from './lib/thread.ts';
 
 // Settings page, import dialog and encryption tab (CalDavAccountJson is exported with the event types above).
 export type { ImportDraft } from './lib/import.ts';
@@ -54,3 +55,15 @@ export type {
 } from './lib/mail.ts';
 export type { ReaderBody } from './actions/mail.ts';
 export type { ThreadNode as MailThreadNode } from './lib/mail.ts';
+
+// Calendar page and thread dialog.
+export type { DayEventsJson, MonthGridJson } from './types/calendar.ts';
+export type { ThreadNode } from './components/mail/MailTypes.ts';
+export type { MonthFit } from './islands/calendar.ts';
+
+/** event_removed on /api/events/stream. */
+export interface EventRemovedEvent {
+  account_id: string;
+  uid: string;
+  calendar_href: string;
+}

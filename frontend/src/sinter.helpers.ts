@@ -66,6 +66,9 @@ export {
   searchSources,
 } from './lib/events.ts';
 
+// Thread dialog (partials/thread-dialog.html).
+export { threadRows, messageUrl } from './lib/thread.ts';
+
 // ICS import dialog (partials/import-dialog.html).
 export { calendarValue, importEventDate } from './lib/import.ts';
 
@@ -80,3 +83,11 @@ export {
   identityBody, folderDraft, folderBody, subscribed, canPreviewAttachment, folderKind, htmlAddsValue,
   isIcsAttachment, formatDate, humanSize, textSegments, messageKey, senderName,
 } from './lib/mail.ts';
+
+// Calendar page.
+export {
+  userTz, addDays, mondayOf, monthOf, addMonths, weekRangeText, dayLabel, dayCollapsed, eventsOn, weekNeighbor,
+  weekPositions, weekColumnDate, navStep, weekdayNames, monthGridHeader, monthNames, pickerYears, monthTitle,
+  pickerMonth, cellEvents, posOf, swipeDir,
+} from './lib/calendar.ts';
+export { threadOfEmail } from './lib/thread.ts';

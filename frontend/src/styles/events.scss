@@ -11,3 +11,15 @@
 .event-unit { inline-size: 7rem; }
 .event-partstat { inline-size: 7.5rem; flex-shrink: 0; }
 .event-attendee-email { flex-grow: 2; }
+
+// Thread dialog (partials/thread-dialog.html): rows indented by reply depth, with one guide line per level
+// (each level was a nested list with a start border and md padding).
+.thread-tree { list-style: none; margin: 0; padding: 0; }
+.thread-row {
+  --thread-step: calc(var(--tm-space-md) + 1px);
+  padding-inline-start: calc(var(--thread-depth, 0) * var(--thread-step));
+  background-image: repeating-linear-gradient(to right, var(--tm-border) 0 1px, transparent 1px var(--thread-step));
+  background-size: calc(var(--thread-depth, 0) * var(--thread-step)) 100%;
+  background-repeat: no-repeat;
+}
+.thread-from { flex: 0 1 10rem; font-weight: 550; }

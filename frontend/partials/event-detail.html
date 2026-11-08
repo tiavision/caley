@@ -7,7 +7,7 @@
        - `event-edit`, detail {event, scope: 'series'|'this_instance'}: the edit button (partials/event-form.html);
        - `event-threads`, detail {email: SourceEmailJson, event}: the threads button (partials/thread-dialog.html).
      Shortcut: e = edit. Uses partials/share-menu.html (so the page must not include another one). -->
-<sn-resource name="eventEmails" type="SourceEmailJson[]" when="eventThreads && detail"
+<sn-resource name="eventEmails" type="SourceEmailJson[]" key="account_id,mailbox,uid" when="eventThreads && detail"
              src="/api/calendar/event-emails?cal_account_id={detail.account_id}&calendar_href={detail.calendar_href}&event_uid={detail.uid}"></sn-resource>
 
 <dialog id="event-detail" closedby="any"

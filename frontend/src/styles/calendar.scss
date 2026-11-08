@@ -1,0 +1,111 @@
+// Calendar page (calendar/index.html): week grid, month grid and month picker.
+
+// The page fills main: toolbar on top, the calendar scrolls in .pane below it.
+.cal { min-block-size: 0; }
+.month { block-size: 100%; }
+.cal-range { white-space: nowrap; }
+
+// Week grid: seven columns, one column with collapsible days on narrow screens.
+.day { min-inline-size: 0; }
+.day-heading { font-size: var(--tm-text-md); font-weight: 600; text-align: start; }
+.day-date { text-align: end; font-weight: 400; font-size: var(--tm-text-sm); }
+
+// Compact rows in the seven columns, with a little more room than the sm item size.
+.day .event-trigger { padding-block: var(--tm-space-sm); }
+
+@media (width < 60rem) {
+  .week { grid-template-columns: minmax(0, 1fr); }
+  .day.past-empty { display: none; }
+  .day.collapsed .events { display: none; }
+  // One day per row: full-size event rows instead of the compact chips of the seven columns.
+  .day .event-trigger {
+    padding: var(--tm-space-sm) var(--tm-space-md);
+    font-size: var(--tm-control-font);
+    gap: 0.125rem;
+  }
+  // The month grid uses the whole screen width and height; only the toolbar keeps the page padding.
+  .cal:has(.month) { padding-inline: 0; padding-block-end: 0; }
+  .cal:has(.month) > .cal-toolbar { padding-inline: var(--tm-space-sm); }
+}
+
+@media (width >= 60rem) {
+  .narrow-only { display: none; }
+  .day.past { opacity: 0.45; }
+  .day-add { opacity: 0; }
+  .day-head:hover .day-add, .day-add:focus-visible { opacity: 1; }
+}
+
+// Month grid: hairline-ruled cells that share the pane height; temper has no ruled grid.
+.month-view {
+  display: flex;
+  flex-direction: column;
+  block-size: 100%;
+  min-block-size: 0;
+}
+.month-view .dow {
+  flex-shrink: 0;
+  text-align: center;
+  text-transform: uppercase;
+  border-block-end: 1px solid var(--tm-border);
+}
+.month-grid {
+  grid-template-rows: repeat(var(--row-count), minmax(0, 1fr));
+  flex: 1;
+  min-block-size: 0;
+  border-inline-start: 1px solid var(--tm-border);
+  border-block-end: 1px solid var(--tm-border);
+}
+.month-cell {
+  min-block-size: 0;
+  overflow: hidden;
+  padding: var(--tm-space-xs) 2px 2px;
+  border-inline-end: 1px solid var(--tm-border);
+  border-block-start: 1px solid var(--tm-border);
+}
+.month-cell.other-month { opacity: 0.45; }
+
+// Day number; today gets a filled accent circle.
+.day-num {
+  flex-shrink: 0;
+  min-inline-size: 1.5em;
+  border-radius: var(--tm-radius-full);
+  font-size: var(--tm-text-xs);
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--tm-text-muted);
+}
+.day-num[aria-current='date'] {
+  --tm-tone: var(--tm-accent);
+  background: var(--tm-tone);
+  color: var(--tm-tone-on);
+  font-weight: 700;
+}
+
+.cell-events { overflow: hidden; }
+.cell-events > * { flex-shrink: 0; }
+// Two lines at most, cut without ellipsis (chips are narrow).
+.chip-text {
+  max-block-size: 2.8em;
+  overflow: hidden;
+  font-size: var(--tm-text-xs);
+  word-break: break-all;
+}
+
+@media (width < 60rem) {
+  // Edge to edge: no outer side rules, and narrow chips keep their width for the text.
+  .month-grid { border-inline-start: 0; }
+  .month-cell:nth-child(7n) { border-inline-end: 0; }
+  .month-cell { padding-inline: 0; }
+  .month-cell .event-trigger { padding-inline: 2px; }
+  .month-cell.has-events { cursor: pointer; }
+  .month-cell.has-events:hover { background: var(--tm-fill); }
+}
+
+// Month picker.
+.picker { inline-size: min(18rem, 100vw - 2rem); }
+.picker-dow { text-align: center; }
+.picker-date { padding-inline: 0; }
+// Up to three calendar-colored dots under the day number.
+.picker-dots { display: flex; gap: 3px; block-size: 6px; }
+.picker-dot { inline-size: 6px; block-size: 6px; border-radius: 50%; background: var(--tm-tone); }
