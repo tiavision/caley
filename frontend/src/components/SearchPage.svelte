@@ -170,10 +170,13 @@
   {:else if results.length > 0}
     <ul data-list aria-live="polite">
       {#each results as item (`${item.account_id}\0${item.calendar_href}\0${item.uid}\0${item.dtstart}`)}
-        <li data-pad="xs" data-bar={item.color ? '' : null} style:--tm-tone={item.color || null}>
+        <li data-pad="none">
           <button
             type="button"
+            class="result"
             data-variant="item"
+            data-bar={item.color ? '' : null}
+            style:--tm-tone={item.color || null}
             data-layout="stack"
             data-gap="none"
             onclick={() => eventDetail.open(item)}
@@ -212,3 +215,8 @@
   onsaved={() => doSearch()}
   ondeleted={() => doSearch()}
 />
+
+<style>
+  /* A little more room per result than a plain item row. */
+  .result { padding-block: calc(var(--tm-space-sm) + var(--tm-space-xs)); }
+</style>

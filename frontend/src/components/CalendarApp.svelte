@@ -585,19 +585,19 @@
             {#if day.events.length > 0}
               <div class="events" data-list>
                 {#each day.events as event (`${event.account_id}\0${event.calendar_href}\0${event.uid}\0${event.dtstart}`)}
-                  <div data-pad="xs" data-bar style={event.color ? `--tm-tone: ${event.color}` : null}>
-                    <button
-                      type="button"
-                      class="event-trigger"
-                      data-variant="item"
-                      data-size="sm"
-                      tabindex="-1"
-                      onclick={() => eventDetail.open(event)}
-                    >
-                      <small data-muted>{eventTimeLabel(event)}</small>
-                      <span data-clamp="2">{event.summary}</span>
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    class="event-trigger"
+                    data-variant="item"
+                    data-size="sm"
+                    data-bar
+                    style={event.color ? `--tm-tone: ${event.color}` : null}
+                    tabindex="-1"
+                    onclick={() => eventDetail.open(event)}
+                  >
+                    <small data-muted>{eventTimeLabel(event)}</small>
+                    <span data-clamp="2">{event.summary}</span>
+                  </button>
                 {/each}
               </div>
             {/if}
@@ -671,6 +671,9 @@
   .day { min-inline-size: 0; }
   .day-heading { font-size: var(--tm-text-md); font-weight: 600; text-align: start; }
   .day-date { text-align: end; font-weight: 400; font-size: var(--tm-text-sm); }
+
+  /* Compact rows in the seven columns, with a little more room than the sm item size. */
+  .day .event-trigger { padding-block: var(--tm-space-sm); }
 
   @media (width < 60rem) {
     .week { grid-template-columns: minmax(0, 1fr); }
