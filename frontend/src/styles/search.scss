@@ -1,0 +1,4 @@
+// Search page (search/index.html).
+
+// A little more room per result than a plain item row.
+.search-result { padding-block: calc(var(--tm-space-sm) + var(--tm-space-xs)); }

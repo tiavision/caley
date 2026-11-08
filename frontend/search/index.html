@@ -12,12 +12,105 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <title>Caley - Search</title>
   </head>
-  <body data-shell="fixed" data-sn-state="{ here: '/search/' }">
+  <!-- q, start, end: the search form; flipped: calendarKey()s whose checkbox differs from the calendar's is_active;
+       search: the submitted SearchQuery (src/lib/events.ts) the results load for.
+       detail, eventDraft: partials/event-detail.html and partials/event-form.html. -->
+  <body data-shell="fixed"
+        data-sn-state="{
+          here: '/search/',
+          q: '',
+          start: '',
+          end: '',
+          flipped: /** @type {string[]} */ ([]),
+          search: /** @type {SearchQuery|null} */ (null),
+          detail: /** @type {EventJson|null} */ (null),
+          eventDraft: /** @type {EventDraft|null} */ (null),
+        }"
+        data-sn-on-event-edit="eventDraft = editEventDraft($event.detail.event, $event.detail.scope); showModal('event-form')"
+        data-sn-on-event-saved="refresh('results')"
+        data-sn-on-event-deleted="refresh('results')">
     <sn-include src="../partials/nav.html"></sn-include>
-    <!-- The page's server events. The rail's <mail-notifier> listens here; the page adds its <sn-event>s when it moves to sinter. -->
+    <!-- The page's server events. The rail's <mail-notifier> listens here. -->
     <sn-sync src="/api/events/stream"></sn-sync>
-    <main>
-      <div id="app" data-density="compact"></div>
+    <!-- One request per chosen calendar (the API takes one `cal` each); none chosen searches all, as before. -->
+    <sn-resource name="results" each="s in searchSources(search)" when="search"
+                 src="/api/search?q={search.q}&start={search.start || null}&end={search.end || null}&cal={s.cal}"
+                 key="account_id,calendar_href,uid,dtstart" order="-dtstart" type="EventJson[]"></sn-resource>
+    <main data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar">
+      <div data-density="compact" data-sn-let="{ eventThreads: false, chosen: chosenCalendars(calendars, flipped) }">
+        <div data-layout="stack" data-gap="md" data-pad="sm">
+          <div data-layout="row" data-gap="sm" data-wrap="none">
+            <sn-include src="../partials/nav-toggle.html"></sn-include>
+            <form data-layout="row" data-gap="sm" data-wrap="none" data-grow
+                  data-sn-on-submit="$event.preventDefault(); q.trim() && (sameSearch(search, searchQuery(q, start, end, chosen)) ? refresh('results') : search = searchQuery(q, start, end, chosen))">
+              <input type="search" data-grow autofocus data-sn-model="q"
+                     data-sn-attr="{placeholder: m.search_placeholder(), 'aria-label': m.search_placeholder()}">
+              <button type="submit" data-icon="search" data-sn-text="m.search_submit()"></button>
+            </form>
+          </div>
+
+          <div data-layout="row" data-gap="sm">
+            <button type="button" popovertarget="search-calendars" data-variant="outline" data-size="sm"
+                    data-sn-text="!calendars.length || chosen.length === calendars.length ? m.search_calendars() : `${m.search_calendars()} (${chosen.length}/${calendars.length})`"></button>
+            <div popover id="search-calendars" data-menu>
+              <template data-sn-for="cal in calendars">
+                <label>
+                  <input type="checkbox" data-sn-attr="{checked: chosen.includes(calendarKey(cal))}"
+                         data-sn-on-change="flipped = flipped.includes(calendarKey(cal)) ? flipped.filter(k => k !== calendarKey(cal)) : [...flipped, calendarKey(cal)]">
+                  <span class="event-color-dot" data-sn-show="cal.color" data-sn-style="{'--tm-tone': cal.color}"></span>
+                  <span data-sn-text="cal.name"></span>
+                </label>
+              </template>
+            </div>
+
+            <label data-layout="row" data-gap="xs">
+              <small data-muted data-sn-text="m.search_from()"></small>
+              <input type="date" data-size="sm" data-sn-model="start">
+            </label>
+            <label data-layout="row" data-gap="xs">
+              <small data-muted data-sn-text="m.search_to()"></small>
+              <input type="date" data-size="sm" data-sn-model="end">
+            </label>
+          </div>
+
+          <template data-sn-if="$meta.results.loading">
+            <p aria-busy="true" aria-live="polite" data-sn-text="m.search_loading()"></p>
+          </template>
+          <template data-sn-else>
+            <template data-sn-if="$meta.results.error">
+              <p data-tone="danger" aria-live="polite" data-sn-text="m.search_error()"></p>
+            </template>
+            <template data-sn-else>
+              <template data-sn-if="search && $meta.results.loadedAt && !results.length">
+                <p data-muted aria-live="polite" data-sn-text="m.search_noResults()"></p>
+              </template>
+              <template data-sn-else>
+                <ul data-list aria-live="polite" data-sn-show="results.length > 0">
+                  <template data-sn-for="item in results">
+                    <li data-pad="none">
+                      <button type="button" class="search-result" data-variant="item" data-layout="stack" data-gap="none"
+                              data-sn-attr="{'data-bar': item.color ? '' : null}" data-sn-style="{'--tm-tone': item.color || null}"
+                              data-sn-on-click="detail = item; showModal('event-detail')">
+                        <strong data-sn-text="item.summary"></strong>
+                        <small data-muted data-sn-text="eventDateLong(item.dtstart, $locale) + (item.location ? ` · ${item.location}` : '')"></small>
+                        <template data-sn-if="item.description">
+                          <small data-muted data-truncate data-sn-text="item.description"></small>
+                        </template>
+                        <template data-sn-if="calendarName(calendars, item)">
+                          <small data-caption data-sn-text="calendarName(calendars, item)"></small>
+                        </template>
+                      </button>
+                    </li>
+                  </template>
+                </ul>
+              </template>
+            </template>
+          </template>
+        </div>
+
+        <sn-include src="../partials/event-detail.html"></sn-include>
+        <sn-include src="../partials/event-form.html"></sn-include>
+      </div>
     </main>
     <script type="module" src="/src/main/search.ts"></script>
   </body>

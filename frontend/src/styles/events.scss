@@ -1,0 +1,13 @@
+// Event partials (partials/event-detail.html, partials/event-form.html); import from the page entry.
+
+// Detail: the description keeps its line breaks and wraps long words.
+.event-description {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+// Form: narrow number inputs and selects beside growing fields in the reminder, attendee and repeat rows.
+.event-num { inline-size: 5rem; }
+.event-unit { inline-size: 7rem; }
+.event-partstat { inline-size: 7.5rem; flex-shrink: 0; }
+.event-attendee-email { flex-grow: 2; }

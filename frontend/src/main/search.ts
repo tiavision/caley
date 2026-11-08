@@ -1,10 +1,7 @@
+// Search page (search/index.html, sinter): styles; helpers, actions and types come through sinter.
 import '../styles/temper.ts';
-import { initI18n } from '../lib/i18n.ts';
+import '../styles/events.scss';
+import '../styles/search.scss';
 import { rememberCurrentAppUrl } from '../lib/return-url.ts';
-import { mount } from 'svelte';
-import SearchPage from '../components/SearchPage.svelte';
 
 rememberCurrentAppUrl();
-
-initI18n();
-mount(SearchPage, { target: document.getElementById('app')! });

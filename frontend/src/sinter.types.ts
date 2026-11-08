@@ -26,3 +26,7 @@ export interface ContactRemovedEvent {
   uid: string;
   addressbook_href: string;
 }
+
+// Event partials, search and calendar pages.
+export type { EventJson, CalendarJson, CalDavAccountJson, SourceEmailJson, MessageEventGroupJson } from './types/calendar.ts';
+export type { EventDraft, SearchQuery } from './lib/events.ts';

@@ -1,0 +1,105 @@
+<!-- Event detail dialog #event-detail (was EventDetail.svelte). Include it once per page, outside any <template>.
+     The page provides:
+       - state `detail` (EventJson|null): the event shown; open with `detail = ev; showModal('event-detail')`;
+       - `eventThreads` (state or data-sn-let, boolean): offer the button for the mails the event came from;
+       - the `user` resource (partials/nav.html declares it): `user.map_url` for addresses no map app opens.
+     It emits, from inside the dialog (handle them on an ancestor, e.g. data-sn-on-event-edit on <body>):
+       - `event-edit`, detail {event, scope: 'series'|'this_instance'}: the edit button (partials/event-form.html);
+       - `event-threads`, detail {email: SourceEmailJson, event}: the threads button (partials/thread-dialog.html).
+     Shortcut: e = edit. Uses partials/share-menu.html (so the page must not include another one). -->
+<sn-resource name="eventEmails" type="SourceEmailJson[]" when="eventThreads && detail"
+             src="/api/calendar/event-emails?cal_account_id={detail.account_id}&calendar_href={detail.calendar_href}&event_uid={detail.uid}"></sn-resource>
+
+<dialog id="event-detail" closedby="any"
+        data-sn-on-keydown="detail && shortcutKey($event, true) === 'e' && ($event.preventDefault(), /** @type {HTMLElement} */ ($el.querySelector('.event-edit')).click())"
+        data-sn-on-close="/** @type {HTMLElement} */ ($el.querySelector('#event-edit-choice')).hidePopover()">
+  <header data-layout="row" data-gap="xs" data-align="start">
+    <h2 data-grow data-sn-text="detail?.summary || ''"></h2>
+    <div data-layout="row" data-gap="xs" data-wrap="none" data-sn-let="{ shareItem: detail ? eventShare(detail) : null }">
+      <template data-sn-if="detail && eventThreads && eventEmails.length > 0">
+        <button type="button" data-variant="ghost" data-icon="list-tree" data-tooltip
+                data-sn-attr="{'aria-label': m.mail_threads()}"
+                data-sn-on-click="close(); emit('event-threads', {email: eventEmails[0], event: detail})"></button>
+      </template>
+      <sn-include src="./share-menu.html"></sn-include>
+      <template data-sn-if="detail?.is_recurring">
+        <button type="button" class="event-edit" data-variant="ghost" data-icon="pencil" popovertarget="event-edit-choice"
+                data-sn-attr="{'aria-label': m.event_edit()}"></button>
+      </template>
+      <template data-sn-else>
+        <button type="button" class="event-edit" data-variant="ghost" data-icon="pencil" data-tooltip
+                data-sn-attr="{'aria-label': m.event_edit()}"
+                data-sn-on-click="close(); emit('event-edit', {event: detail, scope: 'series'})"></button>
+      </template>
+      <button type="button" commandfor="event-detail" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
+    </div>
+  </header>
+
+  <div popover id="event-edit-choice" data-menu>
+    <button type="button" popovertarget="event-edit-choice" popovertargetaction="hide"
+            data-sn-on-click="close('event-detail'); emit('event-edit', {event: detail, scope: 'series'})"
+            data-sn-text="m.event_editSeries()"></button>
+    <button type="button" popovertarget="event-edit-choice" popovertargetaction="hide"
+            data-sn-on-click="close('event-detail'); emit('event-edit', {event: detail, scope: 'this_instance'})"
+            data-sn-text="m.event_editInstance()"></button>
+  </div>
+
+  <template data-sn-if="detail">
+    <dl data-pairs data-sn-let="{ times: formatEventTimes(detail), repeats: detail.is_recurring ? formatRecurrence(detail.recurrence, $locale) : '' }">
+      <template data-sn-if="times.localText">
+        <div>
+          <dt data-sn-text="m.event_time()"></dt>
+          <dd>
+            <span data-sn-text="times.localText"></span>
+            <template data-sn-if="times.sourceText">
+              <br><small data-muted data-sn-text="`${m.event_originalTime()}: ${times.sourceText}`"></small>
+            </template>
+          </dd>
+        </div>
+      </template>
+      <template data-sn-if="detail.location">
+        <div>
+          <dt data-sn-text="m.event_location()"></dt>
+          <!-- The device's map app, else the web map of the user's settings (src/actions/maps.ts). -->
+          <dd><a rel="noopener noreferrer" data-sn-attr="{href: geoUrl(detail.location)}"
+                 data-sn-call="maps.open(detail.location, user?.map_url)" data-sn-text="detail.location"></a></dd>
+        </div>
+      </template>
+      <template data-sn-if="repeats">
+        <div>
+          <dt data-sn-text="m.event_repeats()"></dt>
+          <dd data-sn-text="repeats"></dd>
+        </div>
+      </template>
+      <template data-sn-if="detail.description">
+        <div>
+          <dt data-sn-text="m.event_description()"></dt>
+          <dd class="event-description" data-sn-text="detail.description"></dd>
+        </div>
+      </template>
+      <template data-sn-if="detail.alarms.length > 0">
+        <div>
+          <dt data-sn-text="m.event_reminder()"></dt>
+          <dd data-layout="stack" data-gap="xs">
+            <template data-sn-for="(alarm, i) in detail.alarms" data-sn-key="i">
+              <span data-sn-text="formatAlarm(alarm)"></span>
+            </template>
+          </dd>
+        </div>
+      </template>
+      <template data-sn-if="detail.attendees.length > 0">
+        <div>
+          <dt data-sn-text="m.event_attendees()"></dt>
+          <dd data-layout="stack" data-gap="xs">
+            <template data-sn-for="(att, i) in detail.attendees" data-sn-key="i">
+              <span data-layout="row" data-gap="sm">
+                <span data-badge data-sn-attr="{'data-tone': partstatTone(att.partstat)}" data-sn-text="partstatLabel(att.partstat)"></span>
+                <span data-sn-text="attendeeLabel(att)"></span>
+              </span>
+            </template>
+          </dd>
+        </div>
+      </template>
+    </dl>
+  </template>
+</dialog>

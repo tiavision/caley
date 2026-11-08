@@ -37,3 +37,31 @@ export {
 } from './lib/contacts.ts';
 
 export { geoUrl } from './actions/maps.ts';
+
+// Event partials (partials/event-detail.html, event-form.html), search and calendar pages.
+export {
+  calendarKey,
+  eventKey,
+  calendarName,
+  partstatTone,
+  partstatLabel,
+  attendeeLabel,
+  eventDateLong,
+  weekdays,
+  newEventDraft,
+  editEventDraft,
+  todayIso,
+  newAlarm,
+  newAttendee,
+  halfHourAfter,
+  eventFormBody,
+  intervalUnit,
+  calendarGroups,
+  summarySuggestions,
+  applySummarySuggestion,
+  attendeeSuggestions,
+  chosenCalendars,
+  searchQuery,
+  sameSearch,
+  searchSources,
+} from './lib/events.ts';
