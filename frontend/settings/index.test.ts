@@ -306,6 +306,48 @@ test('imports into a new calendar', async () => {
   expect(dialog.open).toBe(true);
 });
 
+test('reopening the import dialog shows the new draft: empty form, remembered calendar, no old messages', async () => {
+  storage.setItem('sn:event-default-calendar', JSON.stringify({ defaultCal: 'acc\0/cal/private/' }));
+  const { root, settle } = await show({
+    'GET /api/caldav/accounts': { accounts: [account({ calendars: [cal('/cal/work/', 'Work'), cal('/cal/private/', 'Private')] })] },
+    'POST /api/import/preview': { status: 400, body: 'No events found in ICS file' },
+  });
+  const dialog = root.querySelector<HTMLDialogElement>('#import-ics')!;
+  const select = () => dialog.querySelector<HTMLSelectElement>('select')!;
+  button(root, m.cal_import()).click();
+  await settle();
+  expect(select().value).toBe('acc\0/cal/private/');
+  const input = dialog.querySelector<HTMLInputElement>('input[type=file]')!;
+  Object.defineProperty(input, 'files', { value: [new File(['x'], 'empty.ics')], configurable: true });
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  button(root, m.cal_importPreview()).click();
+  await settle();
+  expect(dialog.querySelector('[role=alert]')!.textContent).toBe('No events found in ICS file');
+  type(select(), '__new__');
+  await settle();
+  type(dialog.querySelector<HTMLInputElement>('input[type=text]')!, 'Half typed');
+
+  let resets = 0;
+  dialog.querySelector('form')!.addEventListener('reset', () => resets++);
+  button(root, m.event_cancel()).click();                     // closing resets the form: that empties the file input
+  await settle();
+  expect(dialog.open).toBe(false);
+  expect(resets).toBe(1);
+  delete (input as { files?: unknown }).files;               // what the reset did to the real input
+
+  button(root, m.cal_import()).click();
+  await settle();
+  expect(dialog.open).toBe(true);
+  expect(dialog.querySelector('input[type=file]')).toBe(input);   // the same form, updated in place
+  expect(select().value).toBe('acc\0/cal/private/');           // the new draft's calendar, though reset() had moved the select
+  expect(input.required).toBe(true);
+  expect(dialog.querySelector('small[data-truncate]')).toBeNull();
+  expect(dialog.querySelector('[role=alert]')).toBeNull();
+  expect(dialog.querySelector('input[type=text]')).toBeNull();
+  expect(dialog.querySelector('ul[data-list]')).toBeNull();
+});
+
 test('deleting the whole account hands the redirect to the island', async () => {
   const { root, settle } = await show({ 'DELETE /api/account': { redirect: '/' } });
   const seen: unknown[] = [];
