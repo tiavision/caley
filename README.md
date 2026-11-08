@@ -2,7 +2,7 @@
 
 Caley is a self-hosted personal groupware web app for calendars, contacts, email, and OpenPGP-assisted mail workflows.
 
-It connects to existing CalDAV, CardDAV, IMAP, and SMTP servers, stores local cache data in SQLite, and serves a Svelte web UI from a Rust backend.
+It connects to existing CalDAV, CardDAV, IMAP, and SMTP servers, stores local cache data in SQLite, and serves a static web UI (plain HTML pages compiled by sinter) from a Rust backend.
 
 ## Features
 
@@ -17,7 +17,7 @@ It connects to existing CalDAV, CardDAV, IMAP, and SMTP servers, stores local ca
 ## Architecture
 
 - **`backend/`** — Rust 2024 Axum server. Handles auth, CalDAV/CardDAV/IMAP/SMTP clients, SQLite persistence, encryption, sync tasks, WebAuthn/OpenPGP endpoints, SSE, and static frontend serving.
-- **`frontend/`** — Vite + Svelte 5 static multi-page app. temper CSS (`@tiaforge-ui/temper`), Sass, TypeScript, and `@inlang/paraglide-js` i18n.
+- **`frontend/`** — Vite static multi-page app: HTML pages compiled by sinter (`@tiaforge-ui/sinter`), temper CSS (`@tiaforge-ui/temper`), Sass, TypeScript, and `@inlang/paraglide-js` i18n.
 
 There is no root-level package manager or workspace. Run backend and frontend commands from their own directories.
 
@@ -132,7 +132,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 - Demo data lives in `./data/demo.db`, separate from the regular `caley.db`. Delete it to reset to the original seed data.
 - Credential rows are re-encrypted on every startup, so you can freely change `ENCRYPTION_KEY` between runs.
-- OIDC login and the WebAuthn/OpenPGP vault are not available in demo mode.
+- OIDC login is not available in demo mode. Passkeys and the OpenPGP vault work when you open the app at `APP_BASE_URL` (or an origin in `WEBAUTHN_EXTRA_ORIGINS`).
 
 ## Local Development
 

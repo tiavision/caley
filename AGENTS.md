@@ -5,7 +5,7 @@
 Two-package monorepo with no root-level tooling:
 
 - **`backend/`** — Rust 2024 Axum binary. Handles auth, CalDAV/CardDAV/IMAP/SMTP clients, SQLite persistence, encryption, background sync, SSE, WebAuthn/OpenPGP endpoints, and static frontend serving.
-- **`frontend/`** — Vite + Svelte 5 static multi-page app. temper CSS (`@tiaforge-ui/temper`, `data-*` attributes) + Sass for app-specific rules, TypeScript strict mode, i18n via `@inlang/paraglide-js`.
+- **`frontend/`** — Vite static multi-page app of sinter-compiled HTML pages (`@tiaforge-ui/sinter`). temper CSS (`@tiaforge-ui/temper`, `data-*` attributes) + Sass for app-specific rules, TypeScript strict mode, i18n via `@inlang/paraglide-js`.
 
 There is no root `package.json`, Cargo workspace, or shared command runner. Work inside the package directory.
 
@@ -66,8 +66,8 @@ CalDAV-credential login is always available; OIDC login is shown alongside it wh
 - Tests: `npm test` (Vitest with jsdom).
 - SCSS uses `sass-embedded`, not dart-sass.
 - Pages: `/`, `/calendar/`, `/contacts/`, `/mail/`, `/mail/view/`, `/search/`, `/settings/`.
-- `SettingsForm.svelte` includes CalDAV/account settings and encryption/key management.
-- `MailApp.svelte` is the main mail UI and includes PGP-aware viewing/compose behavior.
+- Each page is an HTML file compiled by sinter (`<page>/index.html`, entry script `src/main/<page>.ts`); shared markup lives in `partials/`, imperative code in `src/actions/`, custom elements in `src/islands/`. See CLAUDE.md "Frontend Notes" for the conventions.
+- `settings/` includes CalDAV/account settings and encryption/key management (`partials/pgp-settings.html`); `mail/` is the main mail UI with PGP-aware viewing/compose (`partials/mail-reader.html`, `partials/mail-compose.html`, `src/actions/mail.ts`).
 
 ## Account Deletion
 
@@ -88,7 +88,7 @@ DEMO_MODE=true APP_BASE_URL=http://localhost:3000 ENCRYPTION_KEY=demo-key cargo 
 - Pre-seeded: 3 calendars, ~16 events (including recurring), 1 addressbook, 31 contacts, 2 IMAP accounts (Work + Personal), 6 mailboxes each, 22+ messages with styled HTML bodies.
 - All outbound network calls are suppressed: CalDAV PUT/DELETE, IMAP connect (sync, IDLE, flag updates, delete, move), SMTP send, email autodiscovery.
 - SMTP compose returns 200 OK without sending. Flag changes, deletes, and moves update only the local DB.
-- OIDC and WebAuthn/PGP are not available in demo mode (they require external infrastructure).
+- OIDC is not available in demo mode. WebAuthn/PGP work when the page origin is `APP_BASE_URL` or listed in `WEBAUTHN_EXTRA_ORIGINS`.
 
 ## Notes
 

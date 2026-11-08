@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The repository is a two-package monorepo with independent frontend and backend tooling:
 
 - **`backend/`** — Rust 2024 Axum binary. Handles auth, CalDAV/CardDAV/IMAP/SMTP clients, SQLite persistence, encryption, sync tasks, SSE, and static frontend serving.
-- **`frontend/`** — Vite + Svelte 5 static multi-page app. temper CSS (`@tiaforge-ui/temper`, `data-*` attributes) + Sass for app-specific rules, compile-time i18n via `@inlang/paraglide-js`.
+- **`frontend/`** — Vite static multi-page app: HTML pages compiled by sinter (`@tiaforge-ui/sinter`), temper CSS (`@tiaforge-ui/temper`, `data-*` attributes) + Sass for app-specific rules, compile-time i18n via `@inlang/paraglide-js`.
 
 There is no root-level package manager or Cargo workspace.
 
@@ -171,15 +171,15 @@ WebAuthn/OpenPGP:
 
 ### Pages
 
-Vite builds multiple HTML entries:
+Vite builds one HTML entry per page, each a sinter page (markup in the HTML file, entry script in `src/main/<page>.ts`):
 
-- `/` — login page (`LoginPage.svelte`).
-- `/calendar/` — calendar app (`CalendarApp.svelte`).
-- `/contacts/` — contacts app (`ContactsPage.svelte`).
-- `/mail/` — mail app (`MailApp.svelte`).
-- `/mail/view/` — standalone mail message view.
-- `/search/` — calendar search page (`SearchPage.svelte`).
-- `/settings/` — settings and encryption management (`SettingsForm.svelte`).
+- `/` — login page (`index.html`).
+- `/calendar/` — calendar app.
+- `/contacts/` — contacts app.
+- `/mail/` — mail app.
+- `/mail/view/` — standalone mail message view (no nav rail).
+- `/search/` — calendar search page.
+- `/settings/` — settings and encryption management.
 
 ### User-Visible Capabilities
 
@@ -211,15 +211,21 @@ Encryption/settings:
 
 ### Frontend Notes
 
-- Svelte 5 with TypeScript strict mode.
-- Styling uses temper (`@tiaforge-ui/temper` 0.1.0): semantic HTML plus `data-*` variants, light/dark automatic. The reference is `node_modules/@tiaforge-ui/temper/llms-full.txt`. Entry styles: `src/styles/temper.ts` (temper modules, `virtual:temper-icons.css`, `app.scss`). Scoped CSS only for app-specific parts, with `--tm-*` tokens, no hard-coded colors or outer margins.
+- TypeScript strict mode. Pages are plain HTML compiled by sinter (`@tiaforge-ui/sinter`); the reference is `node_modules/@tiaforge-ui/sinter/llms.txt`. Data lives in `<sn-resource>`s, live updates come from `<sn-sync src="/api/events/stream">` + `<sn-event>`, mutations use `data-sn-post/put/patch/delete` with `data-sn-then`/`catch`/`optimistic`, UI state uses `data-sn-state`/`let`/`model`, lists and conditionals use `<template data-sn-for/if>`, dialogs are native `<dialog>`s. Prefer plain HTML/CSS, then sinter directives, then helpers, then actions; islands only for layout measuring, foreign DOM (iframes) or timers.
+- `vite.config.ts`: `sinter({ typecheck: true })` compiles every HTML entry and runs `sinter check` on `vite build` (type errors fail it); `caley-render-blocking-entry` marks entry scripts `blocking="render"` so cross-document view transitions (`app.scss`) capture the page after sinter has rendered its templates.
+- `src/sinter.config.ts` (imported by every page): paraglide locale, 401 → remember the URL and go to `/`, `sessionProbe: '/api/user'`, allowed URL schemes, shared islands.
+- `src/sinter.helpers.ts`: pure functions templates call by name, plus `m` (paraglide messages: `m.nav_mail()`). Page tests import it whole, so it and what it re-exports stay light and pure: no openpgp/`lib/pgp/*`, no DOM side effects.
+- `src/sinter.actions.ts`: one namespace per module in `src/actions/` (`mail`, `ics`, `pgpVault`, `pgpKeys`, `notify`, `share`, `maps`) for imperative work (crypto, files, MIME), called with `data-sn-call="ns.fn(…)"` or `<sn-resource call>`. Actions return data and never touch the DOM or sinter state.
+- `src/sinter.types.ts`: the types `type="…"` may name; re-export each by name (no `export type *`).
+- `src/islands/`: custom elements, `common.ts` for every page (`<mail-notifier>`, `<close-after>`), `<page>.ts` imported by the page entry. `src/lib/`: shared TS (API, formatting, mail utils and types, PGP, i18n). `partials/`: shared markup included with `<sn-include>` (nav, nav-toggle, event detail/form, thread, import, share menu, mail reader/compose/…). `src/styles/`: `temper.ts` plus per-page Sass.
+- Page wiring: `<body data-shell="fixed" data-sn-state="{ here: '/page/' }">` → `<sn-include src="../partials/nav.html">` → the page's resources and `<sn-sync>` → `<main>`, then `<script type="module" src="/src/main/<page>.ts">` (styles, page islands). The nav declares `user` (read `user.map_url`, don't redeclare it) and its own `<sn-sync>` for new-mail notifications; `<sn-sync>`s with the same URL share one connection, so pages declare their own only for their own events. `partials/nav-toggle.html` opens the rail as a drawer on narrow screens. Don't name state `page` (shadows `page()`).
+- Conventions: partials that declare a resource are included at page level, never inside `data-sn-if`/`data-sn-for`. An optimistic write's layer is dropped when the request settles, so `data-sn-then` writes the result (`upsert(…, $result)`, `remove(…)`, or `refresh(…)`). Persisted UI state uses `data-sn-persist="<key>"` (localStorage `sn:<key>`: `mail`, `calendar-view`, `nav-collapsed`, `event-default-calendar`, `caldav_base_url`); keep keys stable.
+- Tests sit next to the markup (`<page>/index.test.ts`, `partials/*.test.ts`) and use `@tiaforge-ui/sinter/testing`: `render(html, { requests: mockRequests({...}), actions, helpers, files: { './nav.html': nav }, streams: { '/api/events/stream': mockStream() }, storage: memoryStorage() })`, then `flush()`/`settle()`. Import HTML with `?raw`; jsdom needs `showModal`/`close` stubs.
+- Styling uses temper (`@tiaforge-ui/temper`): semantic HTML plus `data-*` variants, light/dark automatic. The reference is `node_modules/@tiaforge-ui/temper/llms-full.txt`. App-specific CSS goes in `src/styles/*.scss` with `--tm-*` tokens, no hard-coded colors or outer margins.
 - Icons are `data-icon="<lucide name>"`; the temper Vite plugin emits only names that appear as static strings in the markup.
-- The Vite plugin runs `temper check` on every build (errors fail it). Check rendered pages with `npm run inspect` (dev server running, backend in demo mode): it logs in and runs temper-inspect on every page; add `-- --sheet <dir>` for screenshots or `-- /mail/` for one page.
-- Pages use `<body data-shell="fixed">`; `initRail()` (`src/main/nav.ts`) mounts `NavRail.svelte` as a direct child of body, and `NavToggle.svelte` opens it as a drawer on narrow screens.
+- The temper Vite plugin runs `temper check` on every build (errors fail it). Check rendered pages with `npm run inspect` (dev server running, backend in demo mode): it logs in and runs temper-inspect on every page; add `-- --sheet <dir>` for screenshots or `-- /mail/` for one page.
 - i18n messages live in `frontend/messages/`.
-- `vite.config.ts` proxies `/api`, `/auth`, and `/logout` to `http://localhost:3000`.
-- The dev server defaults to Vite's port, usually `localhost:5173`.
-- There is a Vitest test script for frontend tests.
+- `vite.config.ts` proxies `/api`, `/auth`, and `/logout` to `http://localhost:3000`; the dev server is usually `localhost:5173`. After a dependency change restart it with `npx vite --force`.
 
 ## Demo Mode
 
@@ -231,7 +237,7 @@ Set `DEMO_MODE=true` to start the backend in a fully self-contained demo mode �
 - CalDAV/CardDAV write ops (create/edit/delete event, contact) update the local DB only.
 - SMTP sends are logged to stdout and silently discarded.
 - Email autodiscovery returns a fixture response without HTTP calls.
-- OIDC and WebAuthn/PGP are not available in demo mode.
+- OIDC is not available in demo mode. WebAuthn/PGP work (passkey with PRF, vault, keys) when the page origin is `APP_BASE_URL` or listed in `WEBAUTHN_EXTRA_ORIGINS` (e.g. `http://localhost:5173` for Vite).
 
 ```bash
 # Run backend in demo mode (frontend dev server still needed separately)
