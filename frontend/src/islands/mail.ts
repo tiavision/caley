@@ -5,20 +5,6 @@
 const overlayQuery = '(max-width: 1023px)';
 
 /**
- * sinter may set an island's props before this module defines the element: those land as own properties that
- * hide the class's accessors. Move them through the accessors once the element is upgraded.
- */
-function upgradeProps(el: HTMLElement, props: string[]) {
-  const own = el as unknown as Record<string, unknown>;
-  for (const prop of props) {
-    if (!Object.hasOwn(el, prop)) continue;
-    const value = own[prop];
-    delete own[prop];
-    own[prop] = value;
-  }
-}
-
-/**
  * `<mail-frame>`: an HTML mail body in a sandboxed iframe, `data-sn-prop="{html, isolated, version, label}"`.
  * `isolated` (decrypted mail with inline data: images) leaves out allow-same-origin. In the narrow layout the frame
  * grows to its content, since the whole reader scrolls there. A new `version` reloads it (after allowing an image
@@ -56,7 +42,6 @@ class MailFrame extends HTMLElement {
   declare _props: { html: string; isolated: boolean; version: number; label: string; height: string };
 
   connectedCallback() {
-    upgradeProps(this, ['html', 'isolated', 'version', 'label', 'height']);
     this.#media.addEventListener('change', this.#onMedia);
     this.#render();
   }
@@ -126,7 +111,6 @@ class MailSplit extends HTMLElement {
   set width(v: number) { this.#width = v ?? 0; }
 
   connectedCallback() {
-    upgradeProps(this, ['width']);
     this.addEventListener('pointerdown', this.#down);
   }
 
