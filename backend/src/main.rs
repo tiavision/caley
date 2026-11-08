@@ -16,6 +16,7 @@ mod pgp;
 mod search;
 mod session_store;
 mod settings;
+mod static_files;
 mod sse;
 mod sync;
 mod version;
@@ -36,7 +37,6 @@ use search::SearchMode;
 use session_store::SqliteStore;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tower_http::services::ServeDir;
 use tower_sessions::{Expiry, SessionManagerLayer, cookie::SameSite};
 use webauthn_rs::prelude::*;
 
@@ -372,7 +372,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/login", post(local_auth::handle_login))
         .route("/logout", get(oidc::logout_handler))
         .with_state(state.clone())
-        .fallback_service(ServeDir::new(&static_dir))
+        .fallback_service(static_files::service(&static_dir))
         .layer(oidc::RequireAuthLayer {
             oidc_enabled: use_oidc,
         });
