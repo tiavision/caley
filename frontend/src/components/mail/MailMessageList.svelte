@@ -419,6 +419,11 @@
     padding-block: var(--tm-space-xs);
   }
 
+  /* Rows can wrap, so they align to the top: center the checkbox on the first line of text instead. */
+  .filter-suggestion-row > input {
+    margin-block-start: calc((1lh - 1.125rem) / 2);
+  }
+
   .suggestion-email {
     overflow-wrap: anywhere;
   }
