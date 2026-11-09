@@ -408,6 +408,7 @@
   "pgp_badgeUnsupportedAlg": "Algorithmus nicht unterstützt",
   "pgp_badgeVerificationFailed": "Signatur ungültig",
   "pgp_decryptFailed": "Entschlüsselung fehlgeschlagen.",
+  "pgp_loadError": "Die Verschlüsselung konnte nicht geladen werden. Caley wurde vielleicht aktualisiert: Seite neu laden.",
   "pgp_unlockToRead": "Diese Nachricht ist verschlüsselt. Entsperre deinen privaten Schlüsseltresor, um sie zu lesen.",
   "pgp_decryptButton": "Entschlüsseln",
   "pgp_decrypting": "Wird entschlüsselt…",

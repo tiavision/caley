@@ -34,7 +34,7 @@ export type { ThreadRef, ThreadResponse } from './lib/thread.ts';
 
 // Settings page, import dialog and encryption tab (CalDavAccountJson is exported with the event types above).
 export type { ImportDraft } from './lib/import.ts';
-export type { VaultView } from './actions/pgp-vault.ts';
+export type { VaultView } from './lib/pgp/vault-steps.ts';
 export type { StoredPublicKey } from './lib/pgp/public-keys.ts';
 
 export type { AccountDraft } from './lib/settings.ts';

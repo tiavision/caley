@@ -8,13 +8,11 @@ import {
 } from '../lib/mail.ts';
 import { cidReferencesFromHtml, htmlToPlainText, imageOriginsFromHtml, prepareEmailHtml, restoreForwardedImageSources } from '../lib/mail-html.ts';
 import { canPreviewContentType, htmlAddsValue, insertDecryptedInlineImages, isPgpPublicKeyAttachment, bareMailbox, keyHasEmail } from '../lib/mailUtils.ts';
-import { decryptMessage, detectPgpMessage, parseMimeMessage, verifySignedMessage } from '../lib/pgp/keyring.ts';
-import { listPublicKeys, parsePublicKey, readVerificationKeys, savePublicKey } from '../lib/pgp/public-keys.ts';
+// openpgp only through loadPgp() (src/lib/pgp/load.ts): a static import puts it back into the page bundle.
+import { detectPgpMessage, parseMimeMessage } from '../lib/pgp/mime.ts';
 import { getKeys, isUnlocked, openVault } from '../lib/pgp/session.ts';
-import { decryptPrivateKeys, eraseBytes, localActiveDevice, readVault, rememberLocalDevice, unwrapVaultKey, validateVault } from '../lib/pgp/vault.ts';
-import { unlock as webauthnUnlock } from '../lib/pgp/webauthn.ts';
-import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
-import { buildProtectedMime, parseEnvelopeAddresses } from '../lib/pgp/compose.ts';
+import { loadPgp, type Pgp } from '../lib/pgp/load.ts';
+import type * as openpgp from 'openpgp';
 import { m } from '@tiaforge-ui/sinter/messages';
 
 // ── Reading ───────────────────────────────────────────────────────────────────
@@ -79,8 +77,10 @@ async function bytes(url: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer());
 }
 
+/** Stores the sender's Autocrypt keys; in the background (body() does not wait), errors ignored. */
 async function harvestAutocrypt(headers: string[], msg: Message) {
   if (headers.length === 0) return;
+  const { autocryptKeys, savePublicKey } = await loadPgp();
   const raw = new TextEncoder().encode(`${headers.map((v) => `Autocrypt: ${v}`).join('\r\n')}\r\n\r\n`);
   for (const key of await autocryptKeys(raw, msg.from)) {
     await savePublicKey(key, 'harvested_autocrypt', bareMailbox(msg.from)).catch(() => {});
@@ -90,6 +90,7 @@ async function harvestAutocrypt(headers: string[], msg: Message) {
 async function importableKeys(msg: Message, files: { filename: string; content_type: string }[]): Promise<string[]> {
   const candidates = files.filter((f) => isPgpPublicKeyAttachment({ ...f, size: 0, content_id: null }));
   if (candidates.length === 0) return [];
+  const { listPublicKeys, parsePublicKey } = await loadPgp();
   const stored = new Set((await listPublicKeys()).map((r) => r.fingerprint.toUpperCase()));
   const out: string[] = [];
   for (const c of candidates) {
@@ -102,10 +103,10 @@ async function importableKeys(msg: Message, files: { filename: string; content_t
   return out;
 }
 
-const verificationKeys = () => listPublicKeys().then(readVerificationKeys).catch(() => []);
+const verificationKeys = (pgp: Pgp) => pgp.listPublicKeys().then(pgp.readVerificationKeys).catch(() => []);
 
-async function decrypt(msg: Message, raw: Uint8Array, body: ReaderBody): Promise<ReaderBody> {
-  const result = await decryptMessage(getKeys(), raw, await verificationKeys());
+async function decrypt(pgp: Pgp, msg: Message, raw: Uint8Array, body: ReaderBody): Promise<ReaderBody> {
+  const result = await pgp.decryptMessage(getKeys(), raw, await verificationKeys(pgp));
   if (result.badges.some((b) => b === 'decrypt_failed' || b === 'missing_key' || b === 'unsupported_alg')) {
     return { ...body, badges: result.badges, error: m.pgp_decryptFailed() };
   }
@@ -147,7 +148,7 @@ export async function body(ref: MessageRef, ctx: CallContext): Promise<ReaderBod
     out.text = msg.body_text ?? '';
     out.mode = htmlAddsValue(msg.body_html) ? 'html' : 'text';
   }
-  await harvestAutocrypt(msg.autocrypt_headers, msg);
+  void harvestAutocrypt(msg.autocrypt_headers, msg).catch(() => {});
   let raw: Uint8Array | null = null;
   if (!msg.body_cached || msg.is_encrypted || msg.is_signed) {
     try {
@@ -163,12 +164,15 @@ export async function body(ref: MessageRef, ctx: CallContext): Promise<ReaderBod
         out.mode = htmlAddsValue(parsed.html) ? 'html' : 'text';
       }
       if (!msg.body_cached) {
-        await harvestAutocrypt(new TextDecoder().decode(raw).split(/\r?\n\r?\n/, 1)[0]
+        void harvestAutocrypt(new TextDecoder().decode(raw).split(/\r?\n\r?\n/, 1)[0]
           .replace(/\r?\n[ \t]+/g, ' ').split(/\r?\n/)
           .filter((line) => line.toLowerCase().startsWith('autocrypt:'))
-          .map((line) => line.slice(line.indexOf(':') + 1).trim()), msg);
+          .map((line) => line.slice(line.indexOf(':') + 1).trim()), msg).catch(() => {});
       }
-      if (detected.isSigned && !out.encrypted) out.badges = await verifySignedMessage(raw, await verificationKeys());
+      if (detected.isSigned && !out.encrypted) {
+        const pgp = await loadPgp();
+        out.badges = await pgp.verifySignedMessage(raw, await verificationKeys(pgp));
+      }
     } catch {
       if (ctx.signal.aborted) throw ctx.signal.reason;
       // Raw MIME unavailable: the message still renders without it.
@@ -178,7 +182,9 @@ export async function body(ref: MessageRef, ctx: CallContext): Promise<ReaderBod
   if (out.encrypted && raw) {
     if (getKeys().length === 0) out.locked = true;
     else {
-      try { out = await decrypt(msg, raw, out); } catch { out.error = m.pgp_decryptFailed(); }
+      let pgp: Pgp | null = null;
+      try { pgp = await loadPgp(); } catch (e) { out.error = (e as Error).message; }
+      if (pgp) try { out = await decrypt(pgp, msg, raw, out); } catch { out.error = m.pgp_decryptFailed(); }
     }
   }
   ctx.signal.throwIfAborted();
@@ -189,6 +195,7 @@ export async function body(ref: MessageRef, ctx: CallContext): Promise<ReaderBod
 /** Unlocks the synced OpenPGP vault with this device's passkey; the reader then reloads its body. */
 export async function unlock(): Promise<boolean> {
   try {
+    const { readVault, localActiveDevice, webauthnUnlock, unwrapVaultKey, validateVault, decryptPrivateKeys, rememberLocalDevice, eraseBytes } = await loadPgp();
     const vault = await readVault();
     if (!vault) throw new Error('no vault');
     const device = localActiveDevice(vault);
@@ -215,6 +222,7 @@ export function unlocked(): boolean {
 
 /** Stores the public key of an attachment (a server one, or a decrypted one by name). */
 export async function importKey(msg: MessageRef, filename: string): Promise<string> {
+  const { parsePublicKey, savePublicKey } = await loadPgp();
   try {
     const data = decryptedData.get(filename) ?? await bytes(attachmentUrl(msg, filename));
     await savePublicKey(await parsePublicKey(new TextDecoder().decode(data)), 'message_attachment');
@@ -270,6 +278,7 @@ export async function bulk(op: 'flag' | 'move' | 'delete', messages: Message[], 
 
 /** The trusted public keys (emails per key), the vault's key fingerprints and the unlocked keys' emails. */
 export async function composeKeys(): Promise<ComposeKeys> {
+  const { listPublicKeys, readVault, parsePublicKey, localActiveDevice } = await loadPgp();
   const [records, vault] = await Promise.all([listPublicKeys().catch(() => []), readVault().catch(() => null)]);
   const keys = [];
   for (const record of records.filter((r) => r.trust === 'trusted')) {
@@ -311,6 +320,7 @@ async function unlockForSigning() {
 export async function send(draft: ComposeDraft, identities: Identity[], sign: boolean, ctx: CallContext): Promise<null> {
   const identity = identities.find((i) => i.identity_id === draft.identity_id);
   if (!identity) throw new Error(m.pgp_composeIdentityMissing());
+  const { parseEnvelopeAddresses, listPublicKeys, parsePublicKey, buildProtectedMime } = await loadPgp();
   const to = parseEnvelopeAddresses(draft.to);
   const cc = parseEnvelopeAddresses(draft.cc);
   const bcc = parseEnvelopeAddresses(draft.bcc);
@@ -322,7 +332,7 @@ export async function send(draft: ComposeDraft, identities: Identity[], sign: bo
   }
   if (sign && !signingKey) throw new Error(isUnlocked() ? m.pgp_composeNoSigningKey() : m.pgp_composeUnlockSigningKey());
 
-  let encryptionKeys: Awaited<ReturnType<typeof parsePublicKey>>[] = [];
+  let encryptionKeys: openpgp.PublicKey[] = [];
   if (draft.encrypt) {
     if (to.length + cc.length + bcc.length === 0) throw new Error(m.pgp_composeNoRecipients());
     const keys = await composeKeys();
