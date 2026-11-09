@@ -42,11 +42,11 @@
         }"
         data-sn-let="{ open: reader.ref }">
     <sn-include src="../partials/nav.html"></sn-include>
-    <sn-resource name="accounts" src="/api/email/accounts" items="accounts" key="account_id" type="Account[]"></sn-resource>
+    <sn-resource name="accounts" src="/api/email/accounts" cache items="accounts" key="account_id" type="Account[]"></sn-resource>
     <sn-resource name="mailboxes" each="a in accounts" src="/api/email/mailboxes?account_id={a.account_id}" items="mailboxes" key="account_id,name" type="Mailbox[]"></sn-resource>
-    <sn-resource name="folders" src="/api/email/folders" items="folders" key="folder_id" order="sort_order" type="VirtualFolder[]"></sn-resource>
-    <sn-resource name="unread" src="/api/email/unread-counts" type="UnreadCounts"></sn-resource>
-    <sn-resource name="identities" src="/api/email/identities" items="identities" key="identity_id" type="Identity[]"></sn-resource>
+    <sn-resource name="folders" src="/api/email/folders" cache items="folders" key="folder_id" order="sort_order" type="VirtualFolder[]"></sn-resource>
+    <sn-resource name="unread" src="/api/email/unread-counts" cache type="UnreadCounts"></sn-resource>
+    <sn-resource name="identities" src="/api/email/identities" cache items="identities" key="identity_id" type="Identity[]"></sn-resource>
     <sn-resource name="contacts" src="/api/contacts" items="contacts" when="needContacts" type="ContactAddresses[]"></sn-resource>
     <sn-include src="../partials/mail-reader-data.html"></sn-include>
 
@@ -82,10 +82,13 @@
              hit: /** @type {Message|null} */ (null),
            }"
            data-sn-let="{
-             cur: currentView(view, accounts, mailboxes, folders),
+             cur: currentView(view, accounts, mailboxes, folders, { accounts: !!$meta.accounts.loadedAt, folders: !!$meta.folders.loadedAt }),
              searching: searchActive(search),
              list: searching ? results : messages,
              listName: searching ? 'results' : 'messages',
+             listPending: searching ? $meta.results.loading
+               : $meta.messages.loading
+                 || (!accounts.length && !$meta.accounts.loadedAt && !$meta.accounts.error),
              bulk: bulkOf(list, sel.keys, mailboxes),
              addressBook: contactAddresses(contacts ?? []),
              ownThread: !threadRef || threadRef.current,
@@ -111,7 +114,7 @@
            data-sn-on-keydown-k="pageKey($event, bulk.messages.length) && emit('list-step', -1)">
         <sn-resource name="messages"
                      src="/api/email/messages?account_id={cur.account_id}&mailbox={cur.mailbox}&folder_id={cur.folder_id}"
-                     when="(cur.mailbox || cur.folder_id) && !searching"
+                     when="(cur.mailbox || cur.folder_id) && !searching" cache
                      items="messages" total="total" key="account_id,mailbox,uid" type="Message[]"
                      paginate="keyset" page-size="50" size-param="limit" offset-param="offset"
                      cursor="{cursor_sent_at: sent_at, cursor_rowid: rowid}" direction-param="direction"
@@ -188,6 +191,11 @@
               </div>
             </template>
 
+            <template data-sn-if="!accounts.length && !$meta.accounts.loadedAt && !$meta.accounts.error">
+              <div class="sidebar-placeholder" data-layout="stack" data-gap="none" aria-busy="true" data-sn-attr="{'aria-label': m.mail_loading()}">
+                <template data-sn-for="w in [40, 70, 55, 62, 48]" data-sn-key="w"><span class="placeholder-bar" data-sn-style="{'--w': w + '%'}"></span></template>
+              </div>
+            </template>
             <template data-sn-for="section in sidebarSections(accounts, mailboxes, unread, collapsed)" data-sn-key="section.account.account_id">
               <div data-layout="stack" data-gap="none" data-sn-let="{ acc: section.account }">
                 <div class="section-header" data-layout="row" data-gap="none" data-wrap="none">
@@ -209,6 +217,11 @@
                           data-sn-then="sidebarOpen = false; refresh('accounts'); collapsed = collapsed.filter(id => id !== acc.account_id); view.account_id === acc.account_id && emit('view-removed')"
                           data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
                 </div>
+                <template data-sn-if="!section.collapsed && !section.mailboxes.length && ($meta.mailboxes.loading || (!$meta.mailboxes.loadedAt && !$meta.mailboxes.error))">
+                  <div class="sidebar-placeholder" data-layout="stack" data-gap="none" aria-busy="true" data-sn-attr="{'aria-label': m.mail_loading()}">
+                    <template data-sn-for="w in [45, 60, 50, 68]" data-sn-key="w"><span class="placeholder-bar" data-sn-style="{'--w': w + '%'}"></span></template>
+                  </div>
+                </template>
                 <template data-sn-for="item in section.mailboxes" data-sn-key="item.key">
                   <div class="sidebar-drop" data-layout="stack" data-gap="none"
                        data-sn-let="{ mb: item.mailbox, canDrop: canDrop(drag.msg, item.mailbox) }"
@@ -345,11 +358,22 @@
               <template data-sn-if="searching && !$meta.results.loading">
                 <small data-muted data-sn-text="results.length === 1 ? m.mail_result1() : m.mail_resultsN({n: results.length})"></small>
               </template>
+              <template data-sn-if="listPending && list.length > 0">
+                <progress class="list-progress" data-sn-attr="{'aria-label': m.mail_loading()}"></progress>
+              </template>
             </div>
 
-            <div class="message-list-scroll" data-layout="stack" data-gap="none" data-scroll="y" data-grow>
-              <template data-sn-if="(searching ? $meta.results.loading : $meta.messages.loading) && !list.length">
-                <p class="list-status" data-muted aria-busy="true" data-sn-text="m.mail_loading()"></p>
+            <div class="message-list-scroll" data-layout="stack" data-gap="none" data-scroll="y" data-grow
+                 data-sn-attr="{'aria-busy': listPending && list.length > 0 && (searching || !!$meta.messages.loadedAt) ? 'true' : null}">
+              <template data-sn-if="listPending && !list.length">
+                <div class="list-placeholder" data-layout="stack" data-gap="none" aria-busy="true" data-sn-attr="{'aria-label': m.mail_loading()}">
+                  <template data-sn-for="w in [62, 48, 70, 55, 66, 42, 58, 50]" data-sn-key="w">
+                    <div class="placeholder-row" data-layout="stack" data-gap="xs" data-pad="sm">
+                      <span class="placeholder-bar" data-sn-style="{'--w': (w - 20) + '%'}"></span>
+                      <span class="placeholder-bar" data-sn-style="{'--w': w + '%'}"></span>
+                    </div>
+                  </template>
+                </div>
               </template>
               <template data-sn-else>
                 <template data-sn-if="!list.length">

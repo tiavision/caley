@@ -2,9 +2,9 @@ import '../test-messages.ts';
 // The mail page's state helpers (src/lib/mail.ts "Page state", keys) and the settings helpers they sit next to.
 import { describe, expect, test } from 'vitest';
 import {
-  accountUi, addableSender, afterBulk, bodyOf, canDrop, cleared, inMailbox, listStatus, markedRead, noReader, noSearch,
+  accountUi, addableSender, afterBulk, bodyOf, canDrop, cleared, currentView, folderView, inMailbox, mailboxView, noView, listStatus, markedRead, noReader, noSearch,
   noSelection, openedAt, opensRow, pageKey, readerOn, rowClick, scrollTopFor, searchActive, senderAdded, sharedDraft,
-  siblingRow, unmarked, type Message,
+  siblingRow, unmarked, type Account, type Mailbox, type Message, type VirtualFolder,
 } from './mail.ts';
 import { caldavBody, caldavDraft, enrollErrorText, keyImportError, withCalendarActive } from './settings.ts';
 import { importSummary } from './import.ts';
@@ -61,6 +61,30 @@ describe('search', () => {
     expect(listStatus(true, 'q', 1, view)).toContain('q');
     expect(listStatus(false, '', 0, view)).not.toBe(listStatus(false, '', 1, view));
     expect(listStatus(false, '', 1, view)).not.toBe(listStatus(false, '', 1, { ...view, account_id: 'a', mailbox: 'INBOX' }));
+  });
+});
+
+describe('view', () => {
+  const accounts = [{ account_id: 'a' }, { account_id: 'b' }] as Account[];
+  const mbs = (account_id: string, ...names: string[]) => names.map((name) => ({ account_id, name })) as Mailbox[];
+  const folders = [{ folder_id: 'f' }] as VirtualFolder[];
+  const none = { accounts: false, folders: false };
+  test('the remembered view is shown before the lists that could disprove it have arrived', () => {
+    expect(currentView(mailboxView('b', 'Sent'), [], [], [], none)).toEqual(mailboxView('b', 'Sent'));
+    expect(currentView(mailboxView('b', 'Sent'), accounts, mbs('a', 'INBOX'), [], none)).toEqual(mailboxView('b', 'Sent'));
+    expect(currentView(folderView('x'), accounts, mbs('a', 'INBOX'), [], none)).toEqual(folderView('x'));
+    expect(currentView(noView(), accounts, [], [], none)).toEqual(mailboxView('a', 'INBOX'));
+    expect(currentView(noView(), accounts, mbs('a', 'Inbox'), [], none)).toEqual(mailboxView('a', 'Inbox'));
+  });
+  test('once they have, a view that is gone falls back to the first inbox', () => {
+    const loaded = { accounts: true, folders: true };
+    const all = [...mbs('a', 'Drafts', 'INBOX'), ...mbs('b', 'INBOX')];
+    expect(currentView(mailboxView('b', 'Sent'), accounts, all, folders, loaded)).toEqual(mailboxView('a', 'INBOX'));
+    expect(currentView(mailboxView('c', 'INBOX'), accounts, all, folders, loaded)).toEqual(mailboxView('a', 'INBOX'));
+    expect(currentView(folderView('x'), accounts, all, folders, loaded)).toEqual(mailboxView('a', 'INBOX'));
+    expect(currentView(folderView('f'), accounts, all, folders, loaded)).toEqual(folderView('f'));
+    expect(currentView(noView(), accounts, all, folders, loaded)).toEqual(mailboxView('a', 'INBOX'));
+    expect(currentView(noView(), [], [], [], loaded)).toEqual(noView());
   });
 });
 

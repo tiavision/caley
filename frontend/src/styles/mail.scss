@@ -98,6 +98,7 @@ $phone: 639px;
 }
 
 .message-list-header {
+  position: relative;
   border-block-end: 1px solid var(--tm-border);
 
   h2 {
@@ -142,6 +143,56 @@ $phone: 639px;
 
 .suggestion-email {
   overflow-wrap: anywhere;
+}
+
+// The list header's bar while the shown list is being replaced (another view or page: the list dims too) or a
+// cached list revalidates (not dimmed: it is usually right): over the header's bottom border, so nothing moves when it comes and goes.
+.list-progress {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: -1px;
+  inline-size: 100%;
+  block-size: 2px;
+  border-radius: 0;
+}
+
+// Placeholders while nothing is there to show yet: bars of the size of the rows they stand for.
+.placeholder-bar {
+  display: block;
+  inline-size: var(--w, 60%);
+  block-size: 0.7em;
+  border-radius: var(--tm-radius-sm);
+  background: var(--tm-fill);
+  animation: placeholder-pulse 1.4s ease-in-out infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@keyframes placeholder-pulse {
+  50% { opacity: 0.5; }
+}
+
+// One bar per sidebar item, at its height (a small item: 0.8 of the control height), so nothing moves when they arrive.
+.sidebar-placeholder {
+  padding-inline: var(--tm-space-sm);
+
+  .placeholder-bar {
+    border-block: calc((var(--tm-control-h) * 0.8 - 0.7em) / 2) solid transparent;
+    block-size: calc(var(--tm-control-h) * 0.8);
+    background-clip: padding-box;
+  }
+}
+
+.placeholder-row {
+  flex-shrink: 0;
+  border-block-end: 1px solid var(--tm-border);
+  padding-inline-start: var(--tm-space-md);
+
+  .placeholder-bar + .placeholder-bar {
+    block-size: 0.6em;
+  }
 }
 
 .list-status {

@@ -63,19 +63,33 @@ export function folderView(folder_id: string): MailView {
   return { account_id: null, mailbox: null, folder_id };
 }
 
+/** Which lists the server has answered on this page load (`!!$meta.x.loadedAt`; cached data does not count). */
+export interface ViewLists { accounts: boolean; folders: boolean }
+
 /**
  * The view to show: the remembered one while it still exists, else the first account's inbox
- * (or its first mailbox), as MailApp did on load.
+ * (or its first mailbox; `INBOX` before its mailboxes are known), as MailApp did on load. The remembered view is trusted until the lists
+ * that could disprove it have arrived (its account's mailboxes, the folders), so its messages load
+ * alongside them instead of after them.
  */
-export function currentView(view: MailView, accounts: Account[], mailboxes: Mailbox[], folders: VirtualFolder[]): MailView {
-  if (view.folder_id && folders.some((f) => f.folder_id === view.folder_id)) return view;
-  if (view.account_id && view.mailbox &&
-      mailboxes.some((mb) => mb.account_id === view.account_id && mb.name === view.mailbox)) return view;
+export function currentView(view: MailView, accounts: Account[], mailboxes: Mailbox[], folders: VirtualFolder[],
+                            loaded: ViewLists = { accounts: true, folders: true }): MailView {
+  if (view.folder_id) {
+    if (!loaded.folders || folders.some((f) => f.folder_id === view.folder_id)) return view;
+  } else if (view.account_id && view.mailbox) {
+    const known = accounts.some((a) => a.account_id === view.account_id);
+    if (!known && !loaded.accounts) return view;
+    const own = known ? mailboxes.filter((mb) => mb.account_id === view.account_id) : [];
+    // an account's mailboxes arrive in one response: none yet means not loaded yet
+    if (known && (!own.length || own.some((mb) => mb.name === view.mailbox))) return view;
+  }
   const first = accounts[0];
   if (!first) return noView();
   const own = mailboxes.filter((mb) => mb.account_id === first.account_id);
-  const inbox = own.find((mb) => mb.name.toUpperCase() === 'INBOX') ?? own[0];
-  return inbox ? mailboxView(first.account_id, inbox.name) : noView();
+  // every IMAP account has an INBOX: assume it until the account's mailboxes have arrived
+  if (!own.length) return mailboxView(first.account_id, 'INBOX');
+  const inbox = own.find((mb) => mb.name.toUpperCase() === 'INBOX') ?? own[0]!;
+  return mailboxView(first.account_id, inbox.name);
 }
 
 export function sameView(a: MailView, b: MailView): boolean {
