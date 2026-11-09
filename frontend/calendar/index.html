@@ -49,11 +49,14 @@
         data-sn-on-event-deleted="refresh('weekDays', 'monthGrid', 'monthDays')">
     <sn-include src="../partials/nav.html"></sn-include>
     <!-- Events in the viewer's zone: the server buckets days and renders time ranges in it. -->
-    <sn-resource name="weekDays" when="view === 'week'" key="date_iso" type="DayEventsJson[]"
+    <!-- The grids are built from dates (weekDates(), monthCells()), so the month's events need no /api/calendar
+         response first: both requests go out together (the early file sends them). `cache`: a return visit in
+         this tab shows the last data at once. -->
+    <sn-resource name="weekDays" when="view === 'week'" key="date_iso" type="DayEventsJson[]" cache
                  src="/api/events?start={weekStart}&end={addDays(weekStart, 6)}&tz={userTz()}"></sn-resource>
-    <sn-resource name="monthGrid" src="/api/calendar?month={gridMonth}&tz={userTz()}" type="MonthGridJson"></sn-resource>
-    <sn-resource name="monthDays" when="view === 'month' && monthGrid" key="date_iso" type="DayEventsJson[]"
-                 src="/api/events?start={monthGrid.days[0].date_str}&end={monthGrid.days[monthGrid.days.length - 1].date_str}&tz={userTz()}"></sn-resource>
+    <sn-resource name="monthGrid" src="/api/calendar?month={gridMonth}&tz={userTz()}" type="MonthGridJson" cache></sn-resource>
+    <sn-resource name="monthDays" when="view === 'month'" key="date_iso" type="DayEventsJson[]" cache
+                 src="/api/events?start={monthRange(gridMonth).start}&end={monthRange(gridMonth).end}&tz={userTz()}"></sn-resource>
     <!-- the thread dialog's mails (partials/thread-dialog.html), for an event imported from mail -->
     <sn-resource name="threadNodes" when="threadRef" items="messages" key="account_id,mailbox,uid" type="ThreadNode[]"
                  src="/api/email/thread?account_id={threadRef.account_id}&mailbox={threadRef.mailbox}&uid={threadRef.uid}"></sn-resource>
@@ -88,7 +91,7 @@
               <template data-sn-if="view === 'month'">
                 <button type="button" data-variant="ghost" data-icon="chevron-left" data-shortcut="p" data-sn-attr="{'aria-label': m.cal_aria_prevMonth()}"
                         data-sn-on-click="gridMonth = addMonths(gridMonth, -1)"></button>
-                <button type="button" class="cal-range" data-variant="ghost" popovertarget="month-picker" data-sn-text="monthTitle(monthGrid)"></button>
+                <button type="button" class="cal-range" data-variant="ghost" popovertarget="month-picker" data-sn-text="monthLabel(gridMonth, $locale)"></button>
                 <button type="button" data-variant="ghost" data-icon="chevron-right" data-shortcut="n" data-sn-attr="{'aria-label': m.cal_aria_nextMonth()}"
                         data-sn-on-click="gridMonth = addMonths(gridMonth, 1)"></button>
               </template>
@@ -110,6 +113,14 @@
               <button type="button" data-variant="outline" data-size="sm" data-shortcut="t" data-sn-text="m.cal_today()"
                       data-sn-on-click="weekStart = mondayOf(today); gridMonth = monthOf(today); $el.closest('.cal')?.querySelector('.pane')?.scrollTo(0, 0)"></button>
             </div>
+          </div>
+
+          <!-- While the range shown reloads (a live update, a cached range revalidating); a range not loaded yet shows
+               placeholders in its days instead. -->
+          <div class="cal-progress">
+            <template data-sn-if="view === 'week' ? $meta.weekDays.loading && hasDay(weekDays, weekStart) : $meta.monthDays.loading && hasDay(monthDays, monthRange(gridMonth).start)">
+              <progress data-sn-attr="{'aria-label': m.cal_loadingCalendar()}"></progress>
+            </template>
           </div>
 
           <!-- Month picker (was MonthPicker.svelte): picks a week in the week view, a month in the month view. -->
@@ -174,36 +185,41 @@
                    uses, so other keys (Shift+N/P) go on to <body>. -->
               <div class="week" data-layout="grid" data-cols="7" data-gap="sm" role="group"
                    data-sn-let="{ pos: weekPositions(weekDays), tabPos: Object.values(weekPositions(weekDays)).includes(focusPos) ? focusPos : '0:0' }"
-                   data-sn-attr="{'aria-label': m.weekly_heading(), 'aria-busy': $meta.weekDays.loading ? 'true' : 'false'}"
+                   data-sn-attr="{'aria-label': m.weekly_heading()}"
                    data-sn-on-keydown="weekMove($event, weekDays) && $event.preventDefault();
                                        focusPos = weekMove($event, weekDays) ?? focusPos;
                                        focusDate = $event.defaultPrevented ? weekColumnDate(weekDays, focusPos) : focusDate;
                                        $event.defaultPrevented && elementIn($el, `[data-pos='${focusPos}']`)?.focus()">
-                <template data-sn-for="day in weekDays">
+                <template data-sn-for="iso in weekDates(weekStart)" data-sn-key="iso">
                   <div class="day" data-layout="stack" data-gap="xs"
-                       data-sn-let="{ past: day.date_iso < today, collapsed: dayCollapsed(day.date_iso, today, flippedDays) }"
-                       data-sn-class="{past: past, 'past-empty': past && day.events.length === 0, collapsed: collapsed && day.events.length > 0}"
-                       data-sn-attr="{'data-date': day.date_iso}">
+                       data-sn-let="{ events: eventsOn(weekDays, iso), past: iso < today, collapsed: dayCollapsed(iso, today, flippedDays) }"
+                       data-sn-class="{past: past, 'past-empty': past && hasDay(weekDays, iso) && events.length === 0, collapsed: collapsed && events.length > 0}"
+                       data-sn-attr="{'data-date': iso}">
                     <div class="day-head" data-layout="row" data-gap="xs" data-wrap="none">
                       <button type="button" class="day-heading" data-variant="ghost" data-grow data-layout="row" data-gap="xs" data-wrap="none" data-justify="start"
-                              data-sn-attr="{'aria-current': day.date_iso === today ? 'date' : null, title: dayLabel(day.date_iso, $locale, {dateStyle: 'long'})}"
-                              data-sn-on-click="focusDate = day.date_iso; day.events.length > 0 && (flippedDays = toggled(flippedDays, day.date_iso))">
-                        <span data-truncate data-sn-text="dayLabel(day.date_iso, $locale, {weekday: 'long'})"></span>
-                        <template data-sn-if="collapsed && day.events.length > 0">
-                          <span class="narrow-only" data-badge data-tone="accent" data-sn-text="String(day.events.length)"></span>
+                              data-sn-attr="{'aria-current': iso === today ? 'date' : null, title: dayLabel(iso, $locale, {dateStyle: 'long'})}"
+                              data-sn-on-click="focusDate = iso; events.length > 0 && (flippedDays = toggled(flippedDays, iso))">
+                        <span data-truncate data-sn-text="dayLabel(iso, $locale, {weekday: 'long'})"></span>
+                        <template data-sn-if="collapsed && events.length > 0">
+                          <span class="narrow-only" data-badge data-tone="accent" data-sn-text="String(events.length)"></span>
                           <span class="narrow-only" data-icon="chevron-right" aria-hidden="true"></span>
                         </template>
-                        <template data-sn-if="!collapsed && day.events.length > 0">
+                        <template data-sn-if="!collapsed && events.length > 0">
                           <span class="narrow-only" data-icon="chevron-down" aria-hidden="true"></span>
                         </template>
-                        <span class="narrow-only day-date" data-muted data-grow data-sn-text="dayLabel(day.date_iso, $locale, {month: 'short', day: 'numeric'})"></span>
+                        <span class="narrow-only day-date" data-muted data-grow data-sn-text="dayLabel(iso, $locale, {month: 'short', day: 'numeric'})"></span>
                       </button>
                       <button type="button" class="day-add" data-variant="ghost" data-size="sm" data-icon="plus" data-sn-attr="{'aria-label': m.event_new()}"
-                              data-sn-on-click="focusDate = day.date_iso; eventDraft = newEventDraft(calendars, day.date_iso, defaultCal); showModal('event-form')"></button>
+                              data-sn-on-click="focusDate = iso; eventDraft = newEventDraft(calendars, iso, defaultCal); showModal('event-form')"></button>
                     </div>
-                    <template data-sn-if="day.events.length > 0">
+                    <template data-sn-if="!hasDay(weekDays, iso) && !$meta.weekDays.error">
+                      <div class="events-placeholder" data-layout="stack" data-gap="xs" aria-hidden="true">
+                        <span class="placeholder-chip"></span><span class="placeholder-chip"></span>
+                      </div>
+                    </template>
+                    <template data-sn-if="events.length > 0">
                       <div class="events" data-list>
-                        <template data-sn-for="event in day.events" data-sn-key="eventKey(event)">
+                        <template data-sn-for="event in events" data-sn-key="eventKey(event)">
                           <button type="button" class="event-trigger" data-variant="item" data-size="sm" data-bar
                                   data-sn-style="{'--tm-tone': event.color || null}"
                                   data-sn-attr="{tabindex: pos[eventKey(event)] === tabPos ? '0' : '-1', 'data-pos': pos[eventKey(event)]}"
@@ -220,47 +236,48 @@
             </template>
             <template data-sn-else>
               <!-- Month view (was MonthView.svelte) -->
-              <div class="month" data-layout="stack" data-sn-attr="{'aria-busy': $meta.monthDays.loading ? 'true' : 'false'}">
+              <div class="month" data-layout="stack" data-sn-let="{ cells: monthCells(gridMonth) }">
                 <div class="month-view">
                   <div class="dow" data-layout="grid" data-cols="7" data-gap="none" aria-hidden="true">
                     <template data-sn-for="(name, i) in monthGridHeader()" data-sn-key="i">
                       <span data-caption data-sn-text="name"></span>
                     </template>
                   </div>
-                  <template data-sn-if="monthGrid">
-                    <div class="month-grid" data-layout="grid" data-cols="7" data-gap="none" role="group"
-                         data-sn-style="{'--row-count': String(monthGrid.days.length / 7)}"
-                         data-sn-attr="{'aria-label': monthTitle(monthGrid)}">
-                      <template data-sn-for="cell in monthGrid.days" data-sn-key="cell.date_str">
-                        <div class="month-cell" data-layout="stack" data-gap="xs"
-                             data-sn-let="{ ce: cellEvents(monthDays, cell.date_str, fit.counts) }"
-                             data-sn-class="{'other-month': !cell.is_current_month, 'has-events': ce.all.length > 0}"
-                             data-sn-attr="{'data-date': cell.date_str}"
-                             data-sn-on-click="dayDate = cell.date_str; fit.narrow && ce.all.length > 0 && showModal('day-events')">
-                          <span class="day-num" data-self="end" data-sn-attr="{'aria-current': cell.date_str === today ? 'date' : null}" data-sn-text="String(cell.day_number)"></span>
-                          <div class="cell-events" data-layout="stack" data-gap="none" data-grow>
-                            <template data-sn-if="ce.shown.length > 0">
-                              <div data-list>
-                                <template data-sn-for="event in ce.shown" data-sn-key="eventKey(event)">
-                                  <button type="button" class="event-trigger" data-variant="item" data-size="sm" data-bar tabindex="-1"
-                                          data-sn-style="{'--tm-tone': event.color || null}"
-                                          data-sn-on-click="$event.stopPropagation(); detail = event; showModal('event-detail')">
-                                    <span class="chip-text" data-sn-text="event.summary"></span>
-                                  </button>
-                                </template>
-                              </div>
-                            </template>
-                            <template data-sn-if="ce.hidden > 0">
-                              <button type="button" data-variant="link" data-size="sm" data-tone="neutral" data-self="start"
-                                      data-sn-on-click="$event.stopPropagation(); dayDate = cell.date_str; showModal('day-events')"
-                                      data-sn-text="`+${ce.hidden}`"></button>
-                            </template>
-                          </div>
+                  <div class="month-grid" data-layout="grid" data-cols="7" data-gap="none" role="group"
+                       data-sn-style="{'--row-count': String(cells.length / 7)}"
+                       data-sn-attr="{'aria-label': monthLabel(gridMonth, $locale)}">
+                    <template data-sn-for="cell in cells" data-sn-key="cell.date_str">
+                      <div class="month-cell" data-layout="stack" data-gap="xs"
+                           data-sn-let="{ ce: cellEvents(monthDays, cell.date_str, fit.counts) }"
+                           data-sn-class="{'other-month': !cell.is_current_month, 'has-events': ce.all.length > 0}"
+                           data-sn-attr="{'data-date': cell.date_str}"
+                           data-sn-on-click="dayDate = cell.date_str; fit.narrow && ce.all.length > 0 && showModal('day-events')">
+                        <span class="day-num" data-self="end" data-sn-attr="{'aria-current': cell.date_str === today ? 'date' : null}" data-sn-text="String(cell.day_number)"></span>
+                        <div class="cell-events" data-layout="stack" data-gap="none" data-grow>
+                          <template data-sn-if="cell.is_current_month && !hasDay(monthDays, cell.date_str) && !$meta.monthDays.error">
+                            <span class="placeholder-chip" aria-hidden="true"></span>
+                          </template>
+                          <template data-sn-if="ce.shown.length > 0">
+                            <div data-list>
+                              <template data-sn-for="event in ce.shown" data-sn-key="eventKey(event)">
+                                <button type="button" class="event-trigger" data-variant="item" data-size="sm" data-bar tabindex="-1"
+                                        data-sn-style="{'--tm-tone': event.color || null}"
+                                        data-sn-on-click="$event.stopPropagation(); detail = event; showModal('event-detail')">
+                                  <span class="chip-text" data-sn-text="event.summary"></span>
+                                </button>
+                              </template>
+                            </div>
+                          </template>
+                          <template data-sn-if="ce.hidden > 0">
+                            <button type="button" class="cell-more" data-variant="link" data-size="sm" data-tone="neutral" data-self="start"
+                                    data-sn-on-click="$event.stopPropagation(); dayDate = cell.date_str; showModal('day-events')"
+                                    data-sn-text="`+${ce.hidden}`"></button>
+                          </template>
                         </div>
-                      </template>
-                    </div>
-                    <month-fit hidden data-sn-prop="{data: [monthGrid, monthDays]}" data-sn-on-fit="fit = $event.detail"></month-fit>
-                  </template>
+                      </div>
+                    </template>
+                  </div>
+                    <month-fit hidden data-sn-prop="{data: monthDays}" data-sn-on-fit="fit = $event.detail"></month-fit>
                 </div>
               </div>
             </template>

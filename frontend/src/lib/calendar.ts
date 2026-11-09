@@ -135,6 +135,48 @@ export function monthTitle(grid: MonthGridJson | null): string {
   return grid ? `${grid.month_name} ${grid.year}` : '';
 }
 
+/** "November 2026" for a month (YYYY-MM), in `locale`. */
+export function monthLabel(ym: string, locale: string): string {
+  const [y, mo] = ym.split('-').map(Number);
+  return new Date(y!, mo! - 1, 1).toLocaleDateString(locale, { month: 'long', year: 'numeric' });
+}
+
+/** A cell of the month grid, as the browser builds it (no data needed). */
+export interface MonthCell { date_str: string; day_number: number; is_current_month: boolean }
+
+/**
+ * The month grid's cells for `ym` (YYYY-MM): whole weeks from the Monday on or before the 1st through the week
+ * of the last day, as /api/calendar builds them (backend list_calendar), so the grid and its events request need
+ * no response first.
+ */
+export function monthCells(ym: string): MonthCell[] {
+  const [y, mo] = ym.split('-').map(Number);
+  const first = new Date(y!, mo! - 1, 1);
+  const offset = (first.getDay() + 6) % 7; // days since Monday
+  const daysInMonth = new Date(y!, mo!, 0).getDate();
+  const total = Math.ceil((offset + daysInMonth) / 7) * 7;
+  return Array.from({ length: total }, (_, i) => {
+    const d = new Date(y!, mo! - 1, 1 - offset + i);
+    return { date_str: localDateIso(d), day_number: d.getDate(), is_current_month: d.getMonth() === mo! - 1 };
+  });
+}
+
+/** The first and last date of the month grid of `ym` (the range of its /api/events request). */
+export function monthRange(ym: string): { start: string; end: string } {
+  const cells = monthCells(ym);
+  return { start: cells[0]!.date_str, end: cells[cells.length - 1]!.date_str };
+}
+
+/** The seven dates of the week starting on Monday `weekStart`. */
+export function weekDates(weekStart: string): string[] {
+  return Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+}
+
+/** Whether a /api/events response has the day `iso` (it has every day of its range, empty ones too). */
+export function hasDay(days: readonly DayEventsJson[] | null | undefined, iso: string): boolean {
+  return !!days?.some((d) => d.date_iso === iso);
+}
+
 /** A month of the picker's grid with its month or year changed by the selects. */
 export function pickerMonth(grid: MonthGridJson | null, field: 'month' | 'year', value: string): string {
   const year = field === 'year' ? Number(value) : grid?.year ?? new Date().getFullYear();

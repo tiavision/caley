@@ -104,3 +104,26 @@ body[data-shell] > main {
   border-radius: 50%;
   background: var(--tm-tone);
 }
+
+// Placeholders while nothing is there to show yet (mail sidebar and list, calendar days): a pulsing bar,
+// --w wide; .placeholder-chip (calendar.scss) is an event chip's size.
+.placeholder-bar,
+.placeholder-chip {
+  display: block;
+  border-radius: var(--tm-radius-sm);
+  background: var(--tm-fill);
+  animation: placeholder-pulse 1.4s ease-in-out infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+.placeholder-bar {
+  inline-size: var(--w, 60%);
+  block-size: 0.7em;
+}
+
+@keyframes placeholder-pulse {
+  50% { opacity: 0.5; }
+}

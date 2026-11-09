@@ -156,25 +156,6 @@ $phone: 639px;
   border-radius: 0;
 }
 
-// Placeholders while nothing is there to show yet: bars of the size of the rows they stand for.
-.placeholder-bar {
-  display: block;
-  inline-size: var(--w, 60%);
-  block-size: 0.7em;
-  border-radius: var(--tm-radius-sm);
-  background: var(--tm-fill);
-  animation: placeholder-pulse 1.4s ease-in-out infinite;
-
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-  }
-}
-
-@keyframes placeholder-pulse {
-  50% { opacity: 0.5; }
-}
-
-// One bar per sidebar item, at its height (a small item: 0.8 of the control height), so nothing moves when they arrive.
 .sidebar-placeholder {
   padding-inline: var(--tm-space-sm);
 

@@ -134,13 +134,13 @@ test('the month view shows the month grid, and is remembered across reloads', as
   [...first.root.querySelectorAll<HTMLButtonElement>('button[aria-pressed]')].find((b) => b.textContent === 'Month')!.click();
   await first.settle();
   expect(range(first.root)).toBe('November 2026');
-  expect(first.root.querySelectorAll('.month-cell')).toHaveLength(35);
+  expect(first.root.querySelectorAll('.month-cell')).toHaveLength(42);
   expect(first.root.querySelector('.month-cell[data-date="2026-11-11"] .chip-text')!.textContent).toBe('Lunch');
   await first.window('pagehide');
 
   const second = await show({}, first.storage);
   expect(range(second.root)).toBe('November 2026');
-  expect(second.root.querySelectorAll('.month-cell')).toHaveLength(35);
+  expect(second.root.querySelectorAll('.month-cell')).toHaveLength(42);
   expect([...second.root.querySelectorAll<HTMLButtonElement>('button[aria-pressed=true]')].map((b) => b.textContent)).toContain('Month');
 });
 
