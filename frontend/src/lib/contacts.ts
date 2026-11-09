@@ -65,9 +65,10 @@ export function contactInitial(c: ContactJson): string {
   return (c.fn_name[0] ?? '?').toUpperCase();
 }
 
-/** URL of the contact's photo (when `has_photo`). */
+/** URL of the contact's photo (when `has_photo`), with its version: the browser keeps it until the photo changes. */
 export function contactPhotoUrl(c: ContactJson): string {
   const params = new URLSearchParams({ account_id: c.account_id, uid: c.uid, addressbook_href: c.addressbook_href });
+  if (c.photo_rev) params.set('v', c.photo_rev);
   return `/api/contact/photo?${params}`;
 }
 

@@ -1,0 +1,27 @@
+// Contacts page (contacts/index.html).
+
+// The bar while a list already shown reloads: over the toolbar's bottom edge, so nothing moves.
+.contacts-toolbar { position: relative; }
+.contacts-progress {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: calc(var(--tm-space-md) / -2 - 1px);
+  inline-size: 100%;
+  block-size: 2px;
+  border-radius: 0;
+}
+
+// A contact card before the list has loaded: avatar and two lines (.placeholder-bar, app.scss).
+.contact-placeholder { padding-block: var(--tm-space-xs); }
+.placeholder-avatar {
+  display: block;
+  inline-size: var(--tm-avatar-size, 2.5rem);
+  block-size: var(--tm-avatar-size, 2.5rem);
+  border-radius: var(--tm-radius-full);
+  background: var(--tm-fill);
+  animation: placeholder-pulse 1.4s ease-in-out infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}

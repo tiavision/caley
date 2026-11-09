@@ -1,6 +1,6 @@
 use axum::{
     extract::{Query, State},
-    http::{StatusCode, header},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Json, Response},
 };
 use base64::prelude::*;
@@ -30,6 +30,29 @@ pub struct ContactJson {
     pub addresses: Vec<AddressEntry>,
     pub org: String,
     pub has_photo: bool,
+    /// Version of the photo (a hash of it), sent as `v` with the photo URL so the browser may keep the photo
+    /// until it changes. None when there is no photo GET /api/contact/photo would serve.
+    pub photo_rev: Option<String>,
+}
+
+/// Whether GET /api/contact/photo serves this photo: only embedded raster images (`data:image/…`, not SVG).
+fn servable_photo(photo: &str) -> bool {
+    photo
+        .strip_prefix("data:")
+        .and_then(|rest| rest.split([';', ',']).next())
+        .map(|mime| {
+            let mime = mime.to_ascii_lowercase();
+            mime.starts_with("image/") && !mime.contains("svg")
+        })
+        .unwrap_or(false)
+}
+
+/// The photo's version: the first 16 hex digits of its SHA-256, when it is served at all.
+fn photo_rev(photo: Option<&str>) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let photo = photo.filter(|p| servable_photo(p))?;
+    let digest = Sha256::digest(photo.as_bytes());
+    Some(digest.iter().take(8).map(|b| format!("{b:02x}")).collect())
 }
 
 #[derive(Serialize)]
@@ -68,7 +91,8 @@ fn cached_to_json(c: &db::CachedContact) -> ContactJson {
         phones,
         addresses,
         org: c.org.clone(),
-        has_photo: c.photo.is_some(),
+        has_photo: c.photo.as_deref().is_some_and(servable_photo),
+        photo_rev: photo_rev(c.photo.as_deref()),
     }
 }
 
@@ -244,7 +268,8 @@ pub async fn save_contact(
         phones: req.phones.clone(),
         addresses: req.addresses.clone(),
         org: req.org.clone(),
-        has_photo: existing_photo.is_some(),
+        has_photo: existing_photo.as_deref().is_some_and(servable_photo),
+        photo_rev: photo_rev(existing_photo.as_deref()),
     };
     let contact_json_str = serde_json::to_string(&contact_json).ok();
 
@@ -327,12 +352,15 @@ pub struct PhotoQuery {
     pub account_id: String,
     pub uid: String,
     pub addressbook_href: String,
+    /// The photo's version (ContactJson.photo_rev): with it the response may be kept for good.
+    pub v: Option<String>,
 }
 
 pub async fn get_contact_photo(
     State(state): State<AppState>,
     user: CurrentUser,
     Query(q): Query<PhotoQuery>,
+    headers: HeaderMap,
 ) -> Response {
     match db::get_user_id_for_caldav_account(&state.db, &q.account_id).await {
         Ok(Some(owner)) if owner == user.user_id => {}
@@ -372,14 +400,33 @@ pub async fn get_contact_photo(
                 return StatusCode::NOT_FOUND.into_response();
             }
             if let Ok(bytes) = BASE64_STANDARD.decode(b64.trim()) {
+                // The URL names the version (`v` = photo_rev): a changed photo gets another URL, so the
+                // browser keeps this one. Without it (or with an old one), revalidate by ETag.
+                let rev = photo_rev(Some(&photo)).unwrap_or_default();
+                let etag = format!("\"{rev}\"");
+                let cache = if q.v.as_deref() == Some(rev.as_str()) {
+                    "private, max-age=31536000, immutable"
+                } else {
+                    "private, no-cache"
+                };
+                let fresh = headers
+                    .get(header::IF_NONE_MATCH)
+                    .and_then(|v| v.to_str().ok())
+                    .is_some_and(|v| v.split(',').any(|t| t.trim() == etag));
+                let common = [
+                    (header::CACHE_CONTROL, cache.to_string()),
+                    (header::ETAG, etag),
+                    (
+                        header::HeaderName::from_static("x-content-type-options"),
+                        "nosniff".to_string(),
+                    ),
+                ];
+                if fresh {
+                    return (StatusCode::NOT_MODIFIED, common).into_response();
+                }
                 return (
-                    [
-                        (header::CONTENT_TYPE, mime.to_string()),
-                        (
-                            header::HeaderName::from_static("x-content-type-options"),
-                            "nosniff".to_string(),
-                        ),
-                    ],
+                    common,
+                    [(header::CONTENT_TYPE, mime.to_string())],
                     bytes,
                 )
                     .into_response();
@@ -414,4 +461,28 @@ pub async fn get_contact_vcf(
         contact.raw_vcard,
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod photo_tests {
+    use super::*;
+
+    #[test]
+    fn only_embedded_raster_images_are_served() {
+        assert!(servable_photo("data:image/jpeg;base64,AAAA"));
+        assert!(servable_photo("data:IMAGE/PNG;base64,AAAA"));
+        assert!(!servable_photo("data:image/svg+xml;base64,AAAA"));
+        assert!(!servable_photo("data:text/html;base64,AAAA"));
+        assert!(!servable_photo("https://example.com/a.jpg"));
+    }
+
+    #[test]
+    fn photo_rev_changes_with_the_photo() {
+        let a = photo_rev(Some("data:image/png;base64,AAAA")).unwrap();
+        let b = photo_rev(Some("data:image/png;base64,AAAB")).unwrap();
+        assert_eq!(a.len(), 16);
+        assert_ne!(a, b);
+        assert_eq!(photo_rev(Some("https://example.com/a.jpg")), None);
+        assert_eq!(photo_rev(None), None);
+    }
 }

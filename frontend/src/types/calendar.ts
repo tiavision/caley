@@ -107,6 +107,8 @@ export interface ContactJson {
   addresses: AddressEntry[];
   org: string;
   has_photo: boolean;
+  /** the photo's version, for its URL (null without a photo) */
+  photo_rev?: string | null;
 }
 
 export interface AddressbookJson {

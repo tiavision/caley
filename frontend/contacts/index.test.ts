@@ -242,3 +242,27 @@ test('keyboard: c opens a new contact, e edits the open one', async () => {
   expect(detail.open).toBe(false);
   expect(form.querySelector<HTMLInputElement>('input[required]')!.value).toBe('Ada Lovelace');
 });
+
+test('placeholder cards until the contacts arrive; a failed load says so', async () => {
+  // mockRequests holds every response until the test delivers it (settle)
+  const requests = mockRequests({ 'GET /api/user': user, 'GET /api/contacts': { addressbooks: [book('/ab/personal/', 'Personal')], contacts: [ada, alan, bob] } });
+  const r = await render(page, {
+    messages, requests, helpers, streams: { '/api/events/stream': mockStream() },
+    actions: {
+      notify: { status: () => ({ supported: false, permission: 'default', enabled: false }), toggle: async (s: unknown) => s },
+      share: { native: () => false, send: async () => {}, download: async () => {}, email: async () => {} },
+      maps: { open: async () => {} },
+    },
+    files: { './nav.html': nav, './nav-toggle.html': navToggle, './share-menu.html': shareMenu },
+  });
+  expect(requests.pending).toBeGreaterThan(0);
+  expect(r.root.querySelectorAll('.contact-placeholder').length).toBeGreaterThan(0);
+  expect(names(r.root)).toEqual([]);
+  await r.settle();
+  expect(r.root.querySelectorAll('.contact-placeholder')).toHaveLength(0);
+  expect(names(r.root)).toHaveLength(3);
+
+  const failed = await show({ 'GET /api/contacts': { status: 500 } });
+  expect(failed.root.querySelector('[role=alert]')!.textContent).toBe('Failed to load contacts.');
+  expect(failed.root.querySelectorAll('.contact-placeholder')).toHaveLength(0);
+});
