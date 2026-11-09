@@ -16,14 +16,14 @@
   <!-- Mail: folders (accounts, mailboxes, virtual folders), the message list and the reader (partials/mail-reader.html).
        Page state on <body> is what the reader, compose and the dialogs share with /mail/view/:
        reader (Reader): the message in the reader (from ?account_id=&mailbox=&uid= on load; `open` names its ref) and
-       whether its overlay is shown below 1024px; wiped: decrypted content dropped while the page was hidden;
+       whether its overlay is shown below 1024px; wiped: the key of the encrypted message whose decrypted content was dropped while the page was hidden (it is not loaded again until asked);
        compose: the draft of the compose dialog (partials/mail-compose.html). -->
   <body data-shell="fixed"
         data-sn-state="{
           here: '/mail/',
           standalone: false,
           reader: readerOn(urlRef($url)),
-          wiped: false,
+          wiped: '',
           compose: /** @type {ComposeDraft|null} */ (null),
           imp: /** @type {ImportDraft|null} */ (null),
           detail: /** @type {EventJson|null} */ (null),
@@ -104,7 +104,7 @@
              threadLinks: false,
              eventThreads: true,
            }"
-           data-sn-on-thread-message="reader = readerOn($event.detail); wiped = false; sel = unmarked(sel)"
+           data-sn-on-thread-message="reader = readerOn($event.detail); sel = unmarked(sel)"
            data-sn-on-event-threads="threadRef = threadOfEmail($event.detail.email, $event.detail.event); showModal('thread-dialog')"
            data-sn-on-mail-patched="patch('messages', $event.detail.ref, $event.detail.fields); patch('results', $event.detail.ref, $event.detail.fields); refresh('unread')"
            data-sn-on-mail-removed="remove('messages', $event.detail.ref); remove('results', $event.detail.ref); sel = unmarked(sel); refresh('unread')"
@@ -162,7 +162,7 @@
         </sn-sync>
         <!-- New-mail notifications: the rail shows none on this page, the page shows them itself. -->
         <template data-sn-if="$meta.unread.loadedAt"><mail-notifier hidden></mail-notifier></template>
-        <mail-hidden-watch hidden data-sn-on-page-hidden="wiped = true"></mail-hidden-watch>
+        <mail-hidden-watch hidden data-sn-on-page-hidden="wiped = body && body.encrypted ? body.key : wiped"></mail-hidden-watch>
 
         <div class="mail-layout" data-grow data-sn-style="{'--sidebar-w': sidebarW + 'px', '--list-w': listW + 'px'}">
           <!-- ── Folders ───────────────────────────────────────────────────────── -->

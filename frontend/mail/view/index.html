@@ -19,7 +19,7 @@
         data-sn-state="{
           standalone: true,
           reader: { ref: urlRef($url), shown: false },
-          wiped: false,
+          wiped: '',
           compose: /** @type {ComposeDraft|null} */ (null),
           imp: /** @type {ImportDraft|null} */ (null),
           detail: /** @type {EventJson|null} */ (null),
@@ -50,7 +50,7 @@
       <sn-event name="accounts_changed" resource="mailboxes" op="refetch"></sn-event>
           <sn-event name="calendars_changed" resource="caldavAccounts" op="refetch"></sn-event>
     </sn-sync>
-    <mail-hidden-watch hidden data-sn-on-page-hidden="wiped = true"></mail-hidden-watch>
+    <mail-hidden-watch hidden data-sn-on-page-hidden="wiped = body && body.encrypted ? body.key : wiped"></mail-hidden-watch>
     <main data-layout="stack" data-gap="none"
           data-sn-let="{
              ownThread: !threadRef || threadRef.current,
@@ -60,7 +60,7 @@
              threadLinks: false,
              eventThreads: true,
            }"
-          data-sn-on-thread-message="reader = readerOn($event.detail); wiped = false"
+          data-sn-on-thread-message="reader = readerOn($event.detail)"
            data-sn-on-event-threads="threadRef = threadOfEmail($event.detail.email, $event.detail.event); showModal('thread-dialog')">
       <!-- defaultCal: the calendar the import dialog preselects and remembers (shared with the calendar pages' event form). -->
       <div class="mail-contents" data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"

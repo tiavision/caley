@@ -1,9 +1,9 @@
 <!-- The reader's resources (partials/mail-reader.html), included once at page level where the page state declares
-     `open` (MessageRef|null), `threadRef` (ThreadRef|null, partials/thread-dialog.html) and `wiped` (decrypted content dropped while the page was hidden). -->
+     `open` (MessageRef|null), `threadRef` (ThreadRef|null, partials/thread-dialog.html) and `wiped` (the key of the encrypted message whose decrypted content was dropped while the page was hidden, or ''). -->
 <sn-resource name="message" call="mail.open(open)" when="open" type="Message"></sn-resource>
 <!-- Once the body is there, an unread message is marked read (#mark-read); the read message keeps later loads of the
      body (unlock, key import) from marking it again. -->
-<sn-resource name="body" call="mail.body(open)" when="open && !wiped"
+<sn-resource name="body" call="mail.body(open)" when="open && wiped !== messageKey(open)"
              then="$result && message && !message.is_read && run('mark-read')"></sn-resource>
 <span hidden id="mark-read" data-sn-patch="/api/email/message/flags" data-sn-body="flagBody(open, '\\Seen', true)"
       data-sn-optimistic="patch('message', message, markedRead(message))"></span>
