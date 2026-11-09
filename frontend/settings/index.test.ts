@@ -145,7 +145,7 @@ const button = (root: HTMLElement, text: string) =>
 test('lists the CalDAV accounts with their calendars and address books', async () => {
   const { root } = await show();
   const article = root.querySelector('main article')!;
-  expect(article.querySelector('h3')!.textContent).toBe('Home');
+  expect(article.querySelector('h4')!.textContent).toBe('Home');
   expect(article.querySelector('small')!.textContent).toBe('ada');
   const labels = [...article.querySelectorAll('label')];
   expect(labels.map((l) => l.textContent!.trim())).toEqual(['Work', 'Private']);
@@ -246,7 +246,7 @@ test('a failed account removal brings the account back', async () => {
   confirmAnswer = true;
   button(root, m.contacts_delete()).click();
   await settle();
-  expect(root.querySelector('main article h3')!.textContent).toBe('Home');
+  expect(root.querySelector('main article h4')!.textContent).toBe('Home');
 });
 
 test('creates a calendar, with a color when chosen', async () => {

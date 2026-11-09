@@ -59,6 +59,7 @@
   "settings_passwordPlaceholder": "dein-passwort",
   "settings_passwordHint": "Leer lassen, um das aktuelle Passwort zu behalten",
   "settings_language": "Sprache",
+  "settings_accountsHeading": "Kalenderkonten",
   "settings_submit": "Speichern",
   "settings_addAccountHeading": "CalDAV-Konto hinzufügen",
   "settings_accountName": "Kontoname",
