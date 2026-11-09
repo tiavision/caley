@@ -39,11 +39,7 @@ a.mail-attachment-chip:hover {
 
 // Page transitions: cross-document view transitions between the app pages (same-origin navigations).
 // The rail keeps its place and cross-fades (only aria-current changes); <main> fades with a short lift.
-// Entry scripts carry blocking="render" (vite.config.ts) so the new page is captured after sinter has rendered it.
-@view-transition {
-  navigation: auto;
-}
-
+// temper turns the transitions on (`@view-transition`, not with reduced motion); these rules only shape them.
 body[data-shell] > nav[data-rail] {
   view-transition-name: nav-rail;
 }
@@ -71,12 +67,6 @@ body[data-shell] > main {
 
 @keyframes page-in {
   from { opacity: 0; translate: 0 0.5rem; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  @view-transition {
-    navigation: none;
-  }
 }
 
 // Nav rail (partials/nav.html): the brand link. The logo stays as the mark of the collapsed rail; temper

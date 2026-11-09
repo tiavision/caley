@@ -399,8 +399,9 @@ async fn main() -> anyhow::Result<()> {
 
 /// Defense-in-depth response headers applied to every response.
 ///
-/// The production frontend (Vite build) loads only an external module script, so
-/// `script-src 'self'` is safe; inline `style=` attributes require
+/// The production frontend (Vite build) loads only external scripts plus sinter's inline
+/// Speculation Rules (prefetch of the app's other pages), so `script-src 'self'
+/// 'inline-speculation-rules'` is safe (that keyword allows no executable inline script); inline `style=` attributes require
 /// `style-src 'unsafe-inline'`. Email HTML is rendered in a sandboxed srcdoc iframe
 /// whose images are proxied to same-origin or `data:`, both covered below.
 async fn security_headers(req: Request, next: Next) -> Response {
@@ -412,7 +413,7 @@ async fn security_headers(req: Request, next: Next) -> Response {
         img-src 'self' data:; \
         manifest-src 'self'; \
         style-src 'self' 'unsafe-inline'; \
-        script-src 'self'; \
+        script-src 'self' 'inline-speculation-rules'; \
         frame-src 'self'";
 
     let mut resp = next.run(req).await;
