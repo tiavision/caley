@@ -2,3 +2,18 @@
 
 // A little more room per result than a plain item row.
 .search-result { padding-block: calc(var(--tm-space-sm) + var(--tm-space-xs)); }
+
+// The bar while a new search loads over the last results: no height of its own, so nothing moves.
+.search-progress {
+  position: relative;
+  block-size: 0;
+
+  progress {
+    position: absolute;
+    inset-inline: 0;
+    inset-block-end: calc(var(--tm-space-md) / 2 - 1px);
+    inline-size: 100%;
+    block-size: 2px;
+    border-radius: 0;
+  }
+}

@@ -395,29 +395,37 @@ export function attendeeSuggestions(contacts: readonly ContactJson[], query: str
 // ── Search page ─────────────────────────────────────────────────────────────
 
 /** A submitted search: the results resource loads for it. `cals` are calendarKey()s; none means all. */
-export interface SearchQuery {
-  q: string;
-  start: string;
-  end: string;
-  cals: string[];
+/** calendarKey()s of the calendars searched: the ones picked (`picked`, see urlCals()), by default the active ones. */
+export function chosenCalendars(calendars: readonly CalendarJson[], picked: readonly string[] | null): string[] {
+  return picked ?? calendars.filter((c) => c.is_active).map(calendarKey);
 }
 
-/** calendarKey()s of the calendars searched: the active ones, with the checkboxes in `flipped` toggled. */
-export function chosenCalendars(calendars: readonly CalendarJson[], flipped: readonly string[]): string[] {
-  return calendars.map(calendarKey).filter((k, i) => calendars[i]!.is_active !== flipped.includes(k));
+// ── The search in the URL ───────────────────────────────────────────────────
+// The search page keeps its search in the URL (?q=…&start=…&end=…&cals=…), so a reload, the back button or a
+// shared link shows it again, and the early file can request it before the page script runs. `cals` is left out
+// for the default choice (the active calendars, `active=1` to the server, which knows them); `all` when every
+// box is unchecked (search all, as before); else the chosen calendarKey()s, one per line.
+
+type UrlParams = Record<string, string | undefined>;
+
+/** The calendar choice in the URL: null for the default (active calendars), [] for all, else the keys. */
+export function urlCals(url: UrlParams): string[] | null {
+  if (!url.cals) return null;
+  return url.cals === 'all' ? [] : url.cals.split('\n');
 }
 
-export function searchQuery(q: string, start: string, end: string, cals: readonly string[]): SearchQuery {
-  return { q: q.trim(), start, end, cals: [...cals] };
+/** The `cals` URL parameter for a choice: null when it is the default one. */
+export function calsParam(picked: readonly string[] | null, calendars: readonly CalendarJson[]): string | null {
+  if (picked === null) return null;
+  const active = calendars.filter((c) => c.is_active).map(calendarKey);
+  if (picked.length === active.length && picked.every((k) => active.includes(k))) return null;
+  return picked.length ? picked.join('\n') : 'all';
 }
 
-export function sameSearch(a: SearchQuery | null, b: SearchQuery): boolean {
-  return !!a && a.q === b.q && a.start === b.start && a.end === b.end && a.cals.join('\n') === b.cals.join('\n');
-}
-
-/** The search to load after a submit: `next`, unless it is empty or the one already loaded (`search`). */
-export function submittedSearch(search: SearchQuery | null, next: SearchQuery): SearchQuery | null {
-  return !next.q || sameSearch(search, next) ? search : next;
+/** The request of the search in the URL; `q` is '' without one (no request). */
+export function urlSearch(url: UrlParams): { q: string; start: string | null; end: string | null; cals: string[]; active: '1' | null } {
+  const picked = urlCals(url);
+  return { q: (url.q ?? '').trim(), start: url.start || null, end: url.end || null, cals: picked ?? [], active: picked === null ? '1' : null };
 }
 
 /** The calendar menu's button: "Calendars", with "(chosen/all)" while some are left out. */

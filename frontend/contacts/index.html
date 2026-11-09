@@ -71,7 +71,7 @@
             </template>
             <!-- While a list already shown reloads (a cached list revalidating, a live update): a bar under the toolbar. -->
             <template data-sn-if="$meta.contacts.loading && contacts.length > 0">
-              <progress class="contacts-progress" data-sn-attr="{'aria-label': m.weekly_loading()}"></progress>
+              <progress class="contacts-progress" data-sn-attr="{'aria-label': m.contacts_loading()}"></progress>
             </template>
           </div>
 
@@ -81,7 +81,7 @@
           <template data-sn-else>
             <!-- Nothing to show yet (first visit in this tab): cards of a contact's size. -->
             <template data-sn-if="!$meta.contacts.loadedAt && !contacts.length">
-              <div data-layout="grid" data-gap="sm" style="--tm-min: 10rem" aria-busy="true" data-sn-attr="{'aria-label': m.weekly_loading()}">
+              <div data-layout="grid" data-gap="sm" style="--tm-min: 10rem" aria-busy="true" data-sn-attr="{'aria-label': m.contacts_loading()}">
                 <template data-sn-for="w in [70, 55, 80, 60, 65, 50, 75, 58]" data-sn-key="w">
                   <div class="contact-placeholder" data-layout="stack" data-gap="sm" data-align="center" aria-hidden="true">
                     <span class="placeholder-avatar"></span>

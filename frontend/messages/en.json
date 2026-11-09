@@ -170,6 +170,7 @@
   "contacts_cancel": "Cancel",
   "contacts_addEmail": "Add email",
   "contacts_addPhone": "Add phone",
+  "contacts_loading": "Loading contacts",
   "contacts_loadError": "Failed to load contacts.",
   "contacts_error": "Failed to save contact.",
   "contacts_addressbook": "Address book",

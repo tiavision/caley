@@ -247,6 +247,9 @@ pub async fn search_events(
     let mut start: Option<String> = None;
     let mut end: Option<String> = None;
     let mut cal_keys: Vec<(String, String)> = Vec::new();
+    // `active=1` without `cal`: the calendars shown in the calendar (not deactivated), as the search page's
+    // default; it needs no calendar list in the browser, so the request can leave before the page has one.
+    let mut active_only = false;
 
     if let Some(query) = raw_query {
         for (key, value) in form_urlencoded::parse(query.as_bytes()) {
@@ -254,6 +257,7 @@ pub async fn search_events(
                 "q" => q = value.into_owned(),
                 "start" => start = Some(value.into_owned()),
                 "end" => end = Some(value.into_owned()),
+                "active" => active_only = value == "1",
                 "cal" => {
                     let value = value.into_owned();
                     if let Some((account_id, href)) = value.split_once('\0') {
@@ -278,6 +282,24 @@ pub async fn search_events(
         return Json(Vec::<EventJson>::new()).into_response();
     }
     let user_id = user.user_id.clone();
+
+    if cal_keys.is_empty() && active_only {
+        let calendars = db::get_cached_calendars(&state.db, &user_id)
+            .await
+            .unwrap_or_default();
+        for c in &calendars {
+            let deactivated =
+                db::get_deactivated_calendars(&state.db, &c.account_id, &state.encryption_key)
+                    .await
+                    .unwrap_or_default();
+            if !deactivated.contains(&c.href) {
+                cal_keys.push((c.account_id.clone(), c.href.clone()));
+            }
+        }
+        if cal_keys.is_empty() {
+            return Json(Vec::<EventJson>::new()).into_response();
+        }
+    }
 
     let mut sql =
         r#"SELECT e.account_id, e.uid, e.calendar_href, e.dtstart, e.raw_ical, c.color AS calendar_color

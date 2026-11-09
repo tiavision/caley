@@ -19,11 +19,7 @@
   <body data-shell="fixed"
         data-sn-state="{
           here: '/search/',
-          q: '',
-          start: '',
-          end: '',
-          flipped: /** @type {string[]} */ ([]),
-          search: /** @type {SearchQuery|null} */ (null),
+          q: $url.q ?? '',
           detail: /** @type {EventJson|null} */ (null),
           eventDraft: /** @type {EventDraft|null} */ (null),
         }"
@@ -31,21 +27,22 @@
         data-sn-on-event-saved="refresh('results')"
         data-sn-on-event-deleted="refresh('results')">
     <sn-include src="../partials/nav.html"></sn-include>
-    <!-- One request: `cal` repeated for each chosen calendar; none chosen searches all. -->
-    <sn-resource name="results" when="search"
-                 src="/api/search?q={search.q}&start={search.start || null}&end={search.end || null}&cal={search.cals}"
+    <!-- The search in the URL (urlSearch(), src/lib/events.ts): one request, `cal` repeated for each chosen calendar,
+         `active=1` for the default choice; it reads only $url, so the early file requests it on a reload. -->
+    <sn-resource name="results" when="urlSearch($url).q"
+                 src="/api/search?q={urlSearch($url).q}&start={urlSearch($url).start}&end={urlSearch($url).end}&cal={urlSearch($url).cals}&active={urlSearch($url).active}"
                  key="account_id,calendar_href,uid,dtstart" order="-dtstart" type="EventJson[]"></sn-resource>
     <main data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar">
-      <div data-density="compact" data-sn-let="{ eventThreads: false, chosen: chosenCalendars(calendars, flipped) }">
+      <div data-density="compact" data-sn-let="{ eventThreads: false, chosen: chosenCalendars(calendars, urlCals($url)) }">
         <div data-layout="stack" data-gap="md" data-pad="sm">
           <div data-layout="row" data-gap="sm" data-wrap="none">
             <sn-include src="../partials/nav-toggle.html"></sn-include>
-            <!-- Submitting the search shown again reloads it. -->
+            <!-- Submitting puts the words into the URL, which loads the search; the same words again reload it.
+                 The dates and calendars below write their URL parameters when changed: they apply at once. -->
             <form data-layout="row" data-gap="sm" data-wrap="none" data-grow
-                  data-sn-let="{ query: searchQuery(q, start, end, chosen) }"
                   data-sn-on-submit="$event.preventDefault();
-                                     query.q && sameSearch(search, query) && refresh('results');
-                                     search = submittedSearch(search, query)">
+                                     q.trim() && q.trim() === urlSearch($url).q && refresh('results');
+                                     q.trim() && ($url.q = q.trim())">
               <input type="search" data-grow autofocus data-sn-model="q"
                      data-sn-attr="{placeholder: m.search_placeholder(), 'aria-label': m.search_placeholder()}">
               <button type="submit" data-icon="search" data-sn-text="m.search_submit()"></button>
@@ -59,7 +56,7 @@
               <template data-sn-for="cal in calendars">
                 <label>
                   <input type="checkbox" data-sn-attr="{checked: chosen.includes(calendarKey(cal))}"
-                         data-sn-on-change="flipped = toggled(flipped, calendarKey(cal))">
+                         data-sn-on-change="$url.cals = calsParam(toggled(chosen, calendarKey(cal)), calendars)">
                   <span class="event-color-dot" data-sn-show="cal.color" data-sn-style="{'--tm-tone': cal.color}"></span>
                   <span data-sn-text="cal.name"></span>
                 </label>
@@ -68,27 +65,34 @@
 
             <label data-layout="row" data-gap="xs">
               <small data-muted data-sn-text="m.search_from()"></small>
-              <input type="date" data-size="sm" data-sn-model="start">
+              <input type="date" data-size="sm" data-sn-attr="{value: $url.start ?? ''}" data-sn-on-change="$url.start = $el.value || null">
             </label>
             <label data-layout="row" data-gap="xs">
               <small data-muted data-sn-text="m.search_to()"></small>
-              <input type="date" data-size="sm" data-sn-model="end">
+              <input type="date" data-size="sm" data-sn-attr="{value: $url.end ?? ''}" data-sn-on-change="$url.end = $el.value || null">
             </label>
           </div>
 
-          <template data-sn-if="$meta.results.loading">
+          <!-- A new search keeps the last results, dimmed, with a bar above them; the text only while there are none. -->
+          <div class="search-progress">
+            <template data-sn-if="$meta.results.loading && results.length > 0">
+              <progress data-sn-attr="{'aria-label': m.search_loading()}"></progress>
+            </template>
+          </div>
+          <template data-sn-if="$meta.results.loading && !results.length">
             <p aria-busy="true" aria-live="polite" data-sn-text="m.search_loading()"></p>
           </template>
           <template data-sn-else>
-            <template data-sn-if="$meta.results.error">
+            <template data-sn-if="$meta.results.error && !$meta.results.loading">
               <p data-tone="danger" aria-live="polite" data-sn-text="m.search_error()"></p>
             </template>
             <template data-sn-else>
-              <template data-sn-if="search && $meta.results.loadedAt && !results.length">
+              <template data-sn-if="urlSearch($url).q && $meta.results.loadedAt && !$meta.results.loading && !results.length">
                 <p data-muted aria-live="polite" data-sn-text="m.search_noResults()"></p>
               </template>
               <template data-sn-else>
-                <ul data-list aria-live="polite" data-sn-show="results.length > 0">
+                <ul data-list aria-live="polite" data-sn-show="results.length > 0"
+                    data-sn-attr="{'aria-busy': $meta.results.loading ? 'true' : null}">
                   <template data-sn-for="item in results">
                     <li data-pad="none">
                       <button type="button" class="search-result" data-variant="item" data-layout="stack" data-gap="none"
