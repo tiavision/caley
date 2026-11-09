@@ -392,7 +392,6 @@
                         data-sn-let="{ k: messageKey(msg) }"
                         data-sn-class="{unread: !msg.is_read, cursor: k === sel.cursor}"
                         data-sn-attr="{
-                          'data-tone': msg.is_read ? null : 'accent',
                           'aria-pressed': sel.keys.includes(k) ? 'true' : 'false',
                           'aria-current': !bulk.messages.length && isRef(open, msg) ? 'true' : null,
                           tabindex: k === sel.cursor || (!sel.cursor && list[0] === msg) ? '0' : '-1',

@@ -187,7 +187,8 @@ $phone: 639px;
   border-block-end: 1px solid var(--tm-border);
   padding-inline-start: calc(var(--tm-space-md) - 3px);
 
-  &:not(.unread) {
+  // The data-bar marks only the selected and the marked rows (below); unread rows have their dot and bold text.
+  &:not([aria-current], [aria-pressed='true']) {
     border-inline-start-color: transparent;
   }
 
@@ -195,7 +196,7 @@ $phone: 639px;
     background: var(--tm-fill);
   }
 
-  // The selected and the marked rows show their data-bar in the accent color (read rows hide it otherwise).
+  // The selected and the marked rows show their data-bar in the accent color.
   &:is([aria-current], [aria-pressed='true']) {
     border-inline-start-color: var(--tm-accent);
   }
