@@ -610,18 +610,30 @@ mail-frame {
     }
   }
 
+  // The whole reader scrolls. Its body fills at least the rest of the screen, so the mail's frame has its full
+  // height before the mail has loaded (no jump), and the frame grows past that with the mail (islands/mail.ts).
   .reader {
-    flex: none;
+    flex: 1 0 auto;
   }
 
   .detail-body {
-    flex: none;
+    flex: 1 0 auto;
     overflow-y: visible;
   }
 
   .detail-body mail-frame,
   .detail-body mail-frame iframe {
-    flex: none;
+    flex: 1 0 auto;
+  }
+
+  // The frame takes a wide mail's width (islands/mail.ts): the mail scrolls sideways here, the reader vertically.
+  .detail-body mail-frame {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+
+    iframe {
+      max-inline-size: none;
+    }
   }
 }
 

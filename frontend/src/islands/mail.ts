@@ -7,7 +7,8 @@ const overlayQuery = '(max-width: 1023px)';
 /**
  * `<mail-frame>`: an HTML mail body in a sandboxed iframe, `data-sn-prop="{html, isolated, version, label}"`.
  * `isolated` (decrypted mail with inline data: images) leaves out allow-same-origin. In the narrow layout the frame
- * grows to its content, since the whole reader scrolls there. A new `version` reloads it (after allowing an image
+ * fills the rest of the reader and grows to its content, since the whole reader scrolls there; a mail wider than the
+ * reader scrolls sideways in it. A new `version` reloads it (after allowing an image
  * origin). `height` fixes the height instead (the compose dialog's forward preview).
  */
 class MailFrame extends HTMLElement {
@@ -80,6 +81,7 @@ class MailFrame extends HTMLElement {
     this.#observer?.disconnect();
     if (!this.#media.matches) {
       frame.style.height = '';
+      frame.style.width = '';
       frame.removeAttribute('scrolling');
       return;
     }
@@ -87,13 +89,27 @@ class MailFrame extends HTMLElement {
     try {
       const doc = frame.contentDocument;
       if (!doc) return;
-      const setHeight = () => {
-        const h = Math.max(doc.documentElement.scrollHeight, doc.documentElement.offsetHeight, doc.documentElement.clientHeight,
-          doc.body?.scrollHeight ?? 0, doc.body?.offsetHeight ?? 0, doc.body?.clientHeight ?? 0);
-        if (h > 0) frame.style.height = `${Math.ceil(h) + 2}px`;
+      // The frame cannot scroll here. It fills the rest of the reader from the start (mail.scss), so it does not jump
+      // when the mail has loaded, and grows past that to the mail's width (a wide mail then scrolls sideways in
+      // <mail-frame>) and height. Inside, the mail is measured at least as large as the frame, so it only ever grows:
+      // a content change (an image loading) keeps the reader's scroll position. A new reader width (rotation) starts
+      // over from the filled size.
+      let hostWidth = -1;
+      const setSize = () => {
+        if (this.clientWidth !== hostWidth) {
+          hostWidth = this.clientWidth;
+          frame.style.width = '';
+          frame.style.height = '';
+        }
+        const root = doc.documentElement;
+        const w = Math.max(root.scrollWidth, doc.body?.scrollWidth ?? 0);
+        if (w > frame.clientWidth) frame.style.width = `${w}px`;
+        const h = Math.max(root.scrollHeight, doc.body?.scrollHeight ?? 0);
+        if (h > frame.clientHeight) frame.style.height = `${h}px`;
       };
-      setHeight();
-      this.#observer = new ResizeObserver(setHeight);
+      setSize();
+      this.#observer = new ResizeObserver(setSize);
+      this.#observer.observe(this);
       this.#observer.observe(doc.documentElement);
       if (doc.body) this.#observer.observe(doc.body);
     } catch { /* an isolated frame is cross-origin and cannot be measured */ }
