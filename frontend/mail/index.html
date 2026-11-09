@@ -566,7 +566,7 @@
               <template data-sn-if="trash.error"><p data-tone="danger" role="alert" data-sn-text="trash.error"></p></template>
             </template>
             <footer>
-              <button type="button" data-variant="secondary" commandfor="mail-empty-trash" command="close" data-sn-attr="{disabled: trash.busy}" data-sn-text="m.mail_cancel()"></button>
+              <button type="button" data-variant="ghost" commandfor="mail-empty-trash" command="close" data-sn-attr="{disabled: trash.busy}" data-sn-text="m.mail_cancel()"></button>
               <button type="submit" data-tone="danger" data-icon="trash-2" data-sn-attr="{disabled: trash.busy || !validTrashDays(days)}"
                       data-sn-text="trash.busy ? m.mail_emptyTrashDeleting() : m.mail_emptyTrashConfirm()"></button>
             </footer>

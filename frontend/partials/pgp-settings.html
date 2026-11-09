@@ -302,7 +302,7 @@
           <input type="email" autocomplete="email" required data-sn-model="pk.email">
         </label>
         <footer>
-          <button type="button" data-variant="secondary" commandfor="pgp-private-key-dialog" command="close" data-sn-text="m.event_cancel()"></button>
+          <button type="button" data-variant="ghost" commandfor="pgp-private-key-dialog" command="close" data-sn-text="m.event_cancel()"></button>
           <button type="submit" data-sn-attr="{disabled: !pk.email.trim()}" data-sn-text="m.pgp_createButton()"></button>
         </footer>
       </form>
@@ -327,7 +327,7 @@
           <input type="password" autocomplete="current-password" data-sn-model="pk.passphrase">
         </label>
         <footer>
-          <button type="button" data-variant="secondary" commandfor="pgp-private-key-dialog" command="close" data-sn-text="m.event_cancel()"></button>
+          <button type="button" data-variant="ghost" commandfor="pgp-private-key-dialog" command="close" data-sn-text="m.event_cancel()"></button>
           <button type="submit" data-sn-attr="{disabled: !pk.armored}" data-sn-text="m.pgp_importButton()"></button>
         </footer>
       </form>
@@ -346,7 +346,7 @@
           </label>
         </template>
         <footer>
-          <button type="button" data-variant="secondary" commandfor="pgp-private-key-dialog" command="close" data-sn-text="m.event_cancel()"></button>
+          <button type="button" data-variant="ghost" commandfor="pgp-private-key-dialog" command="close" data-sn-text="m.event_cancel()"></button>
           <button type="submit" data-sn-text="vault?.exists ? m.pgp_addToVaultButton() : m.pgp_createVaultButton()"></button>
         </footer>
       </form>
@@ -376,7 +376,7 @@
         <input type="text" data-sn-model="ident.comment">
       </label>
       <footer>
-        <button type="button" data-variant="secondary" commandfor="pgp-identity-dialog" command="close" data-sn-text="m.event_cancel()"></button>
+        <button type="button" data-variant="ghost" commandfor="pgp-identity-dialog" command="close" data-sn-text="m.event_cancel()"></button>
         <button type="submit" data-sn-text="m.mail_add()"></button>
       </footer>
     </form>
@@ -404,7 +404,7 @@
         <textarea rows="6" placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----" data-sn-model="ownPub.armored"></textarea>
       </label>
       <footer>
-        <button type="button" data-variant="secondary" commandfor="pgp-own-public-key-dialog" command="close" data-sn-text="m.event_cancel()"></button>
+        <button type="button" data-variant="ghost" commandfor="pgp-own-public-key-dialog" command="close" data-sn-text="m.event_cancel()"></button>
         <button type="submit" data-sn-attr="{disabled: !ownPub.armored}" data-sn-text="m.pgp_importPublicKeyButton()"></button>
       </footer>
     </form>
@@ -426,7 +426,7 @@
         <input type="text" data-sn-attr="{placeholder: m.pgp_deviceLabelPlaceholder()}" data-sn-model="label">
       </label>
       <footer>
-        <button type="button" data-variant="secondary" commandfor="pgp-access-dialog" command="close" data-sn-text="m.event_cancel()"></button>
+        <button type="button" data-variant="ghost" commandfor="pgp-access-dialog" command="close" data-sn-text="m.event_cancel()"></button>
         <button type="submit" data-sn-text="m.pgp_addAccessMethod()"></button>
       </footer>
     </form>
@@ -474,7 +474,7 @@
         <textarea rows="6" placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----" data-sn-model="pubArmored"></textarea>
       </label>
       <footer>
-        <button type="button" data-variant="secondary" commandfor="pgp-public-key-dialog" command="close" data-sn-text="m.event_cancel()"></button>
+        <button type="button" data-variant="ghost" commandfor="pgp-public-key-dialog" command="close" data-sn-text="m.event_cancel()"></button>
         <button type="submit" data-sn-attr="{disabled: !pubArmored}" data-sn-text="m.pgp_importPublicKeyButton()"></button>
       </footer>
     </form>

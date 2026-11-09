@@ -88,7 +88,7 @@
       </label>
       <template data-sn-if="acctUi.busy"><p data-muted aria-busy="true" data-sn-text="m.mail_detectingSettings()"></p></template>
       <footer>
-        <button type="button" data-variant="secondary" commandfor="mail-account" command="close" data-sn-text="m.mail_cancel()"></button>
+        <button type="button" data-variant="ghost" commandfor="mail-account" command="close" data-sn-text="m.mail_cancel()"></button>
         <button type="submit" data-sn-attr="{disabled: acctUi.busy}" data-sn-text="m.mail_continue()"></button>
       </footer>
     </form>
@@ -150,7 +150,7 @@
           <button type="button" data-variant="secondary" data-sn-on-click="acctUi.step = 'basic'; acctUi.error = ''" data-sn-text="m.mail_back()"></button>
         </template>
         <template data-sn-else>
-          <button type="button" data-variant="secondary" commandfor="mail-account" command="close" data-sn-text="m.mail_cancel()"></button>
+          <button type="button" data-variant="ghost" commandfor="mail-account" command="close" data-sn-text="m.mail_cancel()"></button>
         </template>
         <button type="submit" data-sn-attr="{disabled: acctUi.busy}" data-sn-text="acctUi.busy ? m.mail_testingConnection() : m.mail_save()"></button>
       </footer>
