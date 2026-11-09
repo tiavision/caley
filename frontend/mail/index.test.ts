@@ -2,7 +2,7 @@ import { m } from '@tiaforge-ui/sinter/messages';
 import { messages } from '../src/test-messages.ts';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { configure } from '@tiaforge-ui/sinter';
-import { render, mockRequests, mockStream, type RouteResponse } from '@tiaforge-ui/sinter/testing';
+import { render, memoryStorage, mockRequests, mockStream, type RouteResponse } from '@tiaforge-ui/sinter/testing';
 import * as helpers from '../src/sinter.helpers.ts';
 import '../src/islands/common.ts';                 // data-shortcut keys
 import nav from '../partials/nav.html?raw';
@@ -49,7 +49,7 @@ if (!HTMLElement.prototype.hidePopover) HTMLElement.prototype.hidePopover = func
 beforeEach(() => { localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'] }); });
 afterEach(() => configure({ confirm: null as never, urlSchemes: [] }));
 
-async function show(routes: Record<string, RouteResponse> = {}, pending: { subject: string; files: File[] } | null = null) {
+async function show(routes: Record<string, RouteResponse> = {}, pending: { subject: string; files: File[] } | null = null, storage = memoryStorage()) {
   const opened: unknown[] = [];
   let pendingCalls = 0;
   const listed = routes['GET /api/email/messages'];
@@ -96,9 +96,9 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
       pendingCompose: () => { pendingCalls++; const p = pending; pending = null; return p; },
     },
   };
-  const r = await render(page, { messages, requests, actions, helpers, files, streams: { '/api/events/stream': stream } });
+  const r = await render(page, { messages, requests, actions, helpers, files, storage, streams: { '/api/events/stream': stream } });
   await r.settle();
-  return { ...r, requests, stream, opened, pendingCalls: () => pendingCalls };
+  return { ...r, requests, stream, storage, opened, pendingCalls: () => pendingCalls };
 }
 
 const rows = (root: HTMLElement) => [...root.querySelectorAll<HTMLButtonElement>('.message-row')];
@@ -388,4 +388,32 @@ test('the thread button opens the conversation; a message in it opens in the rea
   await settle();
   expect(dialog.open).toBe(false);
   expect(root.querySelector('.reader .detail-subject')!.textContent).toBe('Second');
+});
+
+// The message list's URL reads only the remembered view (so sinter's early file can request it): the view the
+// lists settle on is written back, a remembered one is requested at once, a gone one is replaced.
+const listUrls = (requests: { calls: { path: string; url: string }[] }) => requests.calls.filter((c) => c.path === '/api/email/messages').map((c) => c.url);
+const remembered = (storage: Storage) => JSON.parse(storage.getItem('sn:mail') ?? '{}').view;
+
+test('the inbox the page settles on is remembered for the next visit', async () => {
+  const { storage, requests } = await show();
+  expect(remembered(storage)).toEqual({ account_id: 'work', mailbox: 'INBOX', folder_id: null });
+  expect(listUrls(requests)).toEqual(['/api/email/messages?account_id=work&mailbox=INBOX&limit=50&direction=forward']);
+});
+
+test('a remembered mailbox is the first list requested', async () => {
+  const storage = memoryStorage();
+  storage.setItem('sn:mail', JSON.stringify({ view: { account_id: 'work', mailbox: 'Archive', folder_id: null }, collapsed: [] }));
+  const { root, requests } = await show({}, null, storage);
+  expect(listUrls(requests)[0]).toBe('/api/email/messages?account_id=work&mailbox=Archive&limit=50&direction=forward');
+  expect(root.querySelector('.message-list-header h2')!.textContent).toBe('Archive');
+});
+
+test('a remembered folder that is gone gives way to the inbox', async () => {
+  const storage = memoryStorage();
+  storage.setItem('sn:mail', JSON.stringify({ view: { account_id: null, mailbox: null, folder_id: 'gone' }, collapsed: [] }));
+  const { root, requests } = await show({ 'GET /api/email/search': { messages: [] } }, null, storage);
+  expect(root.querySelector('.message-list-header h2')!.textContent).toBe('Inbox');
+  expect(listUrls(requests).at(-1)).toBe('/api/email/messages?account_id=work&mailbox=INBOX&limit=50&direction=forward');
+  expect(remembered(storage)).toEqual({ account_id: 'work', mailbox: 'INBOX', folder_id: null });
 });

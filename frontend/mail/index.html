@@ -42,18 +42,24 @@
         }"
         data-sn-let="{ open: reader.ref }">
     <sn-include src="../partials/nav.html"></sn-include>
-    <sn-resource name="accounts" src="/api/email/accounts" cache items="accounts" key="account_id" type="Account[]"></sn-resource>
-    <sn-resource name="mailboxes" each="a in accounts" src="/api/email/mailboxes?account_id={a.account_id}" items="mailboxes" key="account_id,name" type="Mailbox[]"></sn-resource>
-    <sn-resource name="folders" src="/api/email/folders" cache items="folders" key="folder_id" order="sort_order" type="VirtualFolder[]"></sn-resource>
     <sn-resource name="unread" src="/api/email/unread-counts" cache type="UnreadCounts"></sn-resource>
     <sn-resource name="identities" src="/api/email/identities" cache items="identities" key="identity_id" type="Identity[]"></sn-resource>
     <sn-resource name="contacts" src="/api/contacts" items="contacts" when="needContacts" type="ContactAddresses[]"></sn-resource>
     <sn-include src="../partials/mail-reader-data.html"></sn-include>
 
-    <!-- view: the list shown (persisted; currentView() falls back to the first inbox); collapsed: account ids. -->
+    <!-- view: the list shown (persisted), always a valid one once the lists have arrived: the lists' `then` write back
+         currentView() (the remembered view while it exists, else the first inbox), so the message list's URL reads
+         only `view` and the early file can request it before the page script; collapsed: account ids.
+         The lists are declared here, in view's scope, for those `then`s; their names are page-wide. -->
     <main data-layout="stack" data-gap="none"
           data-sn-state="{ view: noView(), collapsed: /** @type {string[]} */ ([]) }"
           data-sn-persist="mail">
+      <sn-resource name="accounts" src="/api/email/accounts" cache items="accounts" key="account_id" type="Account[]"
+                   then="view = currentView(view, accounts, mailboxes, folders, { accounts: true, folders: !!$meta.folders.loadedAt })"></sn-resource>
+      <sn-resource name="mailboxes" each="a in accounts" src="/api/email/mailboxes?account_id={a.account_id}" items="mailboxes" key="account_id,name" type="Mailbox[]"
+                   then="view = currentView(view, accounts, mailboxes, folders, { accounts: !!$meta.accounts.loadedAt, folders: !!$meta.folders.loadedAt })"></sn-resource>
+      <sn-resource name="folders" src="/api/email/folders" cache items="folders" key="folder_id" order="sort_order" type="VirtualFolder[]"
+                   then="view = currentView(view, accounts, mailboxes, folders, { accounts: !!$meta.accounts.loadedAt, folders: true })"></sn-resource>
       <!-- defaultCal: the calendar the import dialog preselects and remembers (shared with the calendar pages' event form). -->
       <div class="mail-contents" data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
            data-sn-on-ics-imported="$event.detail.errors === 0 && (defaultCal = $event.detail.calendar)">
@@ -82,7 +88,7 @@
              hit: /** @type {Message|null} */ (null),
            }"
            data-sn-let="{
-             cur: currentView(view, accounts, mailboxes, folders, { accounts: !!$meta.accounts.loadedAt, folders: !!$meta.folders.loadedAt }),
+             cur: view,
              searching: searchActive(search),
              list: searching ? results : messages,
              listName: searching ? 'results' : 'messages',
@@ -103,7 +109,7 @@
            data-sn-on-mail-patched="patch('messages', $event.detail.ref, $event.detail.fields); patch('results', $event.detail.ref, $event.detail.fields); refresh('unread')"
            data-sn-on-mail-removed="remove('messages', $event.detail.ref); remove('results', $event.detail.ref); sel = unmarked(sel); refresh('unread')"
            data-sn-on-mail-open="reader = readerOn($event.detail); sel = openedAt(sel, messageKey($event.detail)); patch('messages', $event.detail, markedRead($event.detail)); patch('results', $event.detail, markedRead($event.detail))"
-           data-sn-on-view-removed="view = noView(); sel = unmarked(sel)"
+           data-sn-on-view-removed="view = currentView(noView(), accounts, mailboxes, folders); sel = unmarked(sel)"
            data-sn-on-mail-view="sel = cleared(sel, null); search = noSearch(); reader = noReader()"
            data-sn-on-list-step="hit = neighbor(list, open ? messageKey(open) : sel.cursor, $event.detail);
                                  hit && emit('mail-open', hit);
@@ -113,8 +119,8 @@
            data-sn-on-keydown-j="pageKey($event, bulk.messages.length) && emit('list-step', 1)"
            data-sn-on-keydown-k="pageKey($event, bulk.messages.length) && emit('list-step', -1)">
         <sn-resource name="messages"
-                     src="/api/email/messages?account_id={cur.account_id}&mailbox={cur.mailbox}&folder_id={cur.folder_id}"
-                     when="(cur.mailbox || cur.folder_id) && !searching" cache
+                     src="/api/email/messages?account_id={view.account_id}&mailbox={view.mailbox}&folder_id={view.folder_id}"
+                     when="(view.mailbox || view.folder_id) && !searching" cache
                      items="messages" total="total" key="account_id,mailbox,uid" type="Message[]"
                      paginate="keyset" page-size="50" size-param="limit" offset-param="offset"
                      cursor="{cursor_sent_at: sent_at, cursor_rowid: rowid}" direction-param="direction"
@@ -184,7 +190,7 @@
                     <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
                             data-sn-delete="/api/email/folder?folder_id={f.folder_id}"
                             data-sn-optimistic="remove('folders', f)"
-                            data-sn-then="sidebarOpen = false; view.folder_id === f.folder_id && emit('view-removed')"
+                            data-sn-then="sidebarOpen = false; view.folder_id === f.folder_id && (sel = unmarked(sel)); view = currentView(view, accounts, mailboxes, folders)"
                             data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
                   </div>
                 </template>
