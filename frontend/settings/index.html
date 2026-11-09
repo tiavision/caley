@@ -39,7 +39,7 @@
           data-sn-on-ics-imported="$event.detail.errors === 0 && (defaultCal = $event.detail.calendar)">
       <div data-density="compact">
       <div class="settings" data-layout="center" data-gap="lg" data-pad="sm" style="--tm-measure: 40rem">
-        <!-- The tabs take the heading's place (it stays for screen readers); the language is the first setting. -->
+        <!-- The tabs take the heading's place (it stays for screen readers). -->
         <div data-layout="row" data-gap="sm" data-wrap="none">
           <sn-include src="../partials/nav-toggle.html"></sn-include>
           <h2 data-sr-only data-sn-text="m.settings_heading()"></h2>
@@ -53,20 +53,23 @@
           </div>
         </div>
 
+        <!-- The language: the Settings tab's first setting, outside the template so it shows with the first paint. -->
+        <label data-layout="row" data-gap="sm" data-self="start"
+               data-sn-show="tab === 'settings'">
+          <span data-icon="globe" data-muted></span>
+          <span data-sn-text="m.settings_language()"></span>
+          <select data-size="sm" data-sn-model="lang" data-sn-on-change="$locale = lang">
+            <option value="en">English</option>
+            <option value="de">Deutsch</option>
+          </select>
+        </label>
+
         <template data-sn-if="!$meta.caldavAccounts.loadedAt && !$meta.caldavAccounts.error">
           <p aria-busy="true" data-sn-text="m.nav_loading()"></p>
         </template>
         <template data-sn-else>
           <div role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general"
                data-layout="stack" data-gap="lg" data-sn-show="tab === 'settings'">
-            <label data-layout="row" data-gap="sm" data-self="start">
-              <span data-icon="globe" data-muted></span>
-              <span data-sn-text="m.settings_language()"></span>
-              <select data-size="sm" data-sn-model="lang" data-sn-on-change="$locale = lang">
-                <option value="en">English</option>
-                <option value="de">Deutsch</option>
-              </select>
-            </label>
             <div data-layout="row" data-gap="sm">
               <button type="button" data-variant="outline" data-size="sm" data-icon="user-plus"
                       commandfor="caldav-account-dialog" command="show-modal"
