@@ -13,6 +13,7 @@ export async function unlock(credId: string): Promise<VaultView> { return (await
 export async function lock(): Promise<VaultView> { return (await steps()).lock(); }
 export async function reset(): Promise<VaultView> { return (await steps()).reset(); }
 export async function readKey(armored: string, passphrase: string): Promise<{ fingerprint: string }> { return (await steps()).readKey(armored, passphrase); }
+export async function generateKey(name: string, email: string): Promise<{ fingerprint: string }> { return (await steps()).generateKey(name, email); }
 export async function forgetKey(): Promise<void> { (await steps()).forgetKey(); }
 export async function store(label: string): Promise<VaultView> { return (await steps()).store(label); }
 export async function addIdentity(fingerprint: string, name: string, email: string, comment: string): Promise<VaultView> { return (await steps()).addIdentity(fingerprint, name, email, comment); }

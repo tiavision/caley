@@ -38,6 +38,19 @@ export async function importPrivateKey(armored: string, passphrase: string): Pro
   return decrypted;
 }
 
+/** Generate a new private key (Ed25519 signing, Curve25519 encryption subkey, no expiry) for one User ID. */
+export async function generatePrivateKey(identity: openpgp.UserID): Promise<openpgp.PrivateKey> {
+  const { privateKey } = await openpgp.generateKey({ type: 'ecc', curve: 'curve25519Legacy', userIDs: [identity], format: 'object' });
+  return privateKey;
+}
+
+/** The first key of a binary (unarmored) key file, ASCII-armored; a protected private key stays protected. */
+export async function armorBinaryKey(binaryKey: Uint8Array): Promise<string> {
+  const [key] = await openpgp.readKeys({ binaryKeys: binaryKey });
+  if (!key) throw new Error('no key in file');
+  return key.armor();
+}
+
 /** Return the primary fingerprint (uppercase hex) of a private or public key. */
 export function getFingerprint(key: openpgp.Key): string {
   return key.getFingerprint().toUpperCase();

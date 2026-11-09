@@ -39,7 +39,7 @@ import {
   type EncryptedBlob,
 } from './vault.ts';
 import { enroll, unlock as webauthnUnlock, listCredentials } from './webauthn.ts';
-import { importPrivateKey, getFingerprint, getKeyIdentities, getPrimaryEmail, addKeyIdentity, extractPublicKey } from './keyring.ts';
+import { importPrivateKey, generatePrivateKey, getFingerprint, getKeyIdentities, getPrimaryEmail, addKeyIdentity, extractPublicKey } from './keyring.ts';
 import { parsePublicKey, listPublicKeys, type StoredPublicKey } from './public-keys.ts';
 import { openVault, addKey as sessionAddKey, removeKey as sessionRemoveKey, getWrappingKey, getKeys, lock as sessionLock, isUnlocked } from './session.ts';
 import { apiFetch } from '../api.ts';
@@ -224,12 +224,20 @@ export async function readKey(armored: string, passphrase: string): Promise<{ fi
   return { fingerprint: getFingerprint(key) };
 }
 
+/** Generates a new private key for `name <email>` and holds it for store(), like readKey(). */
+export async function generateKey(name: string, email: string): Promise<{ fingerprint: string }> {
+  imported = null;
+  const key = await generatePrivateKey({ name: name.trim(), email: email.trim() });
+  imported = key;
+  return { fingerprint: getFingerprint(key) };
+}
+
 /** Drops a key read by readKey() that was not stored (the import dialog closed). */
 export function forgetKey(): void {
   imported = null;
 }
 
-/** First setup: a passkey (with PRF) for this browser, and a new vault holding the imported key. */
+/** First setup: a passkey (with PRF) for this browser, and a new vault holding the imported or generated key. */
 async function create(label: string): Promise<VaultView> {
   const key = imported;
   if (!key) throw new Error('no key');
@@ -283,7 +291,7 @@ async function storeKey(key: openpgp.PrivateKey): Promise<void> {
   await reloadPublicKeys();
 }
 
-/** Stores the key read by readKey(): in a new vault with a passkey named `label`, or in the unlocked vault. */
+/** Stores the key read by readKey() or made by generateKey(): in a new vault with a passkey named `label`, or in the unlocked vault. */
 export async function store(label: string): Promise<VaultView> {
   if (!vault) return create(label);
   if (!imported) throw new Error('no key');

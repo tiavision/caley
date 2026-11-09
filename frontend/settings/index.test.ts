@@ -1,3 +1,4 @@
+import { keyFile } from '../src/actions/pgp-keys.ts';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { configure } from '@tiaforge-ui/sinter';
 import { render, mockRequests, mockStream, memoryStorage, type RouteResponse } from '@tiaforge-ui/sinter/testing';
@@ -83,6 +84,10 @@ function fakeVault(initial: VaultView | null, failUnlock = false) {
         if (passphrase !== 'right') throw new Error('Incorrect key passphrase');
         return { fingerprint: 'BBBB2222' };
       },
+      generateKey: async (name: string, email: string) => {
+        calls.push(['generateKey', [name, email]]);
+        return { fingerprint: 'BBBB2222' };
+      },
       forgetKey: () => { calls.push(['forgetKey', []]); },
       store: step('store', (v) => ({
         ...v, exists: true, unlocked: true,
@@ -116,7 +121,7 @@ async function show(routes: Record<string, RouteResponse> = {}, vault: VaultView
     notify: { status: () => ({ supported: false, permission: 'default', enabled: false }), toggle: async (s: unknown) => s },
     ics,
     pgpVault: pgp.ns,
-    pgpKeys: { importPublic: async (armored: string) => ({ fingerprint: 'FFFF', email: armored, armored, is_own: false, source: 'imported', trust: 'trusted' }) },
+    pgpKeys: { keyFile, importPublic: async (armored: string) => ({ fingerprint: 'FFFF', email: armored, armored, is_own: false, source: 'imported', trust: 'trusted' }) },
   };
   const r = await render(page, { messages, requests, actions, helpers, files, storage, streams: { '/api/events/stream': stream } });
   await r.settle();
@@ -464,6 +469,56 @@ test('encryption tab, no vault: import a private key and create the vault with a
   expect(pgp.calls.at(-1)).toEqual(['forgetKey', []]);
   expect(panel.querySelector('[data-badge]')!.textContent).toBe(m.pgp_vaultUnlocked());
   expect(panel.querySelector('small[data-tone=success]')!.textContent).toBe(m.pgp_enrolled());
+});
+
+test('encryption tab: create a private key in the unlocked vault', async () => {
+  const { root, settle, pgp } = await encryptionTab(lockedVault);
+  expect(button(root, m.pgp_createUnlockFirst()).disabled).toBe(true);
+  button(root, m.pgp_unlockVaultButton()).click();
+  await settle();
+  button(root, m.pgp_createPrivateKeyButton()).click();
+  await settle();
+  const dialog = root.querySelector<HTMLDialogElement>('#pgp-private-key-dialog')!;
+  expect(dialog.open).toBe(true);
+  expect(dialog.querySelector('h2')!.textContent).toBe(m.pgp_createHeading());
+  expect(dialog.querySelector('textarea')).toBeNull();
+  expect(dialog.querySelector<HTMLInputElement>('input[type=text]')!.value).toBe('Demo User');   // prefilled from the user
+  const submit = dialog.querySelector<HTMLButtonElement>('button[type=submit]')!;
+  expect(submit.disabled).toBe(true);
+  type(dialog.querySelector('input[type=email]')!, 'demo@example.com');
+  await settle();
+  expect(submit.disabled).toBe(false);
+  dialog.querySelector('form')!.requestSubmit();
+  await settle();
+  expect(pgp.calls.find((c) => c[0] === 'generateKey')).toEqual(['generateKey', ['Demo User', 'demo@example.com']]);
+  expect(dialog.querySelector('code')!.textContent).toBe('BBBB2222');
+  expect(dialog.querySelector('button[type=submit]')!.textContent).toBe(m.pgp_addToVaultButton());
+  dialog.querySelector('form')!.requestSubmit();
+  await settle();
+  expect(pgp.calls.find((c) => c[0] === 'store')).toEqual(['store', ['']]);
+  expect(dialog.open).toBe(false);
+  expect(root.querySelector('#settings-panel-encryption small[data-tone=success]')!.textContent).toBe(m.pgp_enrolled());
+});
+
+test('encryption tab: a key file fills the import dialog; a file without a key says so', async () => {
+  const { root, settle } = await encryptionTab({ ...lockedVault, unlocked: true });
+  button(root, m.pgp_importPrivateKeyButton()).click();
+  await settle();
+  const dialog = root.querySelector<HTMLDialogElement>('#pgp-private-key-dialog')!;
+  const input = dialog.querySelector<HTMLInputElement>('input[type=file]')!;
+  const choose = async (file: File) => {
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+  };
+  const armored = '-----BEGIN PGP PRIVATE KEY BLOCK-----\n\nxyz\n-----END PGP PRIVATE KEY BLOCK-----';
+  await choose(new File([armored + '\n'], 'key.asc'));
+  expect(dialog.querySelector('textarea')!.value).toBe(armored);
+  expect(dialog.querySelector<HTMLButtonElement>('button[type=submit]')!.disabled).toBe(false);
+
+  await choose(new File([new Uint8Array([1, 2, 3])], 'photo.gpg'));
+  expect(dialog.querySelector('[role=alert]')!.textContent).toBe(m.pgp_keyFileError());
+  expect(dialog.querySelector('textarea')!.value).toBe(armored);           // the key read before stays
 });
 
 test('encryption tab: trusted sender keys, import and remove', async () => {
