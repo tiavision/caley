@@ -128,11 +128,3 @@ body[data-shell] > main {
   50% { opacity: 0.5; }
 }
 
-// temper's [data-stretch] covers its card with an ::after at inset 0, but temper also gives every button
-// position: relative (for the busy spinner), so on a <button data-stretch> (the contact cards) the overlay only
-// covered the button and a click on the card opened nothing. Static, the overlay spans the card (article). No
-// press transform either: a transform makes the button the overlay's containing block again, so during the press
-// the overlay shrank to the button, the release landed on the card and the click went to the article.
-// TODO: fix in temper, then drop this.
-button[data-stretch]:not([aria-busy='true']) { position: static; }
-button[data-stretch]:active { transform: none; }
