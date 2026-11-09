@@ -18,13 +18,13 @@
     "inspect": "vite build && node scripts/inspect.mjs"
   },
   "dependencies": {
-    "@tiaforge-ui/sinter": "^0.11.0",
-    "@tiaforge-ui/temper": "^0.1.7",
+    "@tiaforge-ui/sinter": "^0.12.0",
+    "@tiaforge-ui/temper": "^0.1.8",
     "dompurify": "^3.4.17",
     "openpgp": "^6.3.1"
   },
   "devDependencies": {
-    "@tiaforge-ui/temper-inspect": "^0.1.7",
+    "@tiaforge-ui/temper-inspect": "^0.1.8",
     "jsdom": "^30.1.3",
     "lucide-static": "^1.70.0",
     "sass-embedded": "^1.106.1",
