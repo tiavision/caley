@@ -255,6 +255,7 @@
   "mail_lastPageAria": "Letzte Seite",
   "mail_jumpToPageAria": "Zur Seite springen",
   "mail_pageStatus": "{start}–{end} von {total}",
+  "mail_pageRange": "{start}–{end}",
   "mail_unknownSender": "(unbekannt)",
   "mail_selectMessage": "Nachricht auswählen.",
   "mail_loadingBody": "Inhalt wird geladen…",

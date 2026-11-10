@@ -128,7 +128,7 @@
         <sn-resource name="results"
                      src="/api/email/search?q={search.q.trim()}&account_id={cur.account_id}&mailbox={cur.mailbox}&folder_id={cur.folder_id}&addrs={search.filter.addrs.length ? search.filter.addrs.join(',') : null}&date_from={search.filter.from || null}&date_to={search.filter.to || null}&unread_only={search.filter.unread ? 'true' : null}"
                      when="searching"
-                     items="messages" total="total" key="account_id,mailbox,uid" type="Message[]"
+                     items="messages" key="account_id,mailbox,uid" type="Message[]"
                      paginate="keyset" page-size="50" size-param="limit"
                      cursor="{cursor_sent_at: sent_at, cursor_rowid: rowid}" direction-param="direction"
                      direction-values="{first: 'forward', prev: 'backward', next: 'forward'}"></sn-resource>
@@ -424,7 +424,8 @@
                           data-sn-attr="{disabled: !$meta.results.hasPrev, 'aria-label': m.mail_firstPageAria()}"></button>
                   <button type="button" data-variant="ghost" data-size="sm" data-icon="chevron-left" data-tooltip data-sn-on-click="page('results', 'prev'); sel = unmarked(sel)"
                           data-sn-attr="{disabled: !$meta.results.hasPrev, 'aria-label': m.mail_prevPageAria()}"></button>
-                  <small data-muted data-sn-text="m.mail_pageStatus({start: $meta.results.from, end: $meta.results.to, total: $meta.results.total})"></small>
+                  <!-- no total for a search (counting every match is as slow as the search): the range, which sinter tracks from the page moves -->
+                  <small data-muted data-sn-text="m.mail_pageRange({start: $meta.results.from ?? 0, end: $meta.results.to ?? 0})"></small>
                   <button type="button" data-variant="ghost" data-size="sm" data-icon="chevron-right" data-tooltip data-sn-on-click="page('results', 'next'); sel = unmarked(sel)"
                           data-sn-attr="{disabled: !$meta.results.hasNext, 'aria-label': m.mail_nextPageAria()}"></button>
                 </template>

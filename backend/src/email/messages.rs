@@ -780,7 +780,7 @@ pub async fn search(
     };
 
     if raw_q.is_empty() && filters.is_empty() {
-        return Json(json!({ "messages": [], "total": 0 })).into_response();
+        return Json(json!({ "messages": [] })).into_response();
     }
 
     let fts_query = if raw_q.is_empty() {
@@ -814,9 +814,9 @@ pub async fn search(
     .await;
 
     match result {
-        Ok((messages, total)) => {
+        Ok(messages) => {
             let list: Vec<_> = messages.iter().map(message_to_json).collect();
-            Json(json!({ "messages": list, "total": total })).into_response()
+            Json(json!({ "messages": list })).into_response()
         }
         Err(e) => {
             eprintln!("[email] search error: {e}");

@@ -981,7 +981,7 @@ pub enum SearchScope<'a> {
 }
 
 /// The search's `FROM … WHERE …`: the user's messages in `scope` matching `fts_query` (all of them when empty)
-/// and `filters`. The same for the page and for the count.
+/// and `filters`.
 fn push_search_body(
     qb: &mut QueryBuilder<Sqlite>,
     user_id: &str,
@@ -1026,7 +1026,8 @@ fn push_search_body(
     push_filter_clauses(qb, filters);
 }
 
-/// One page of a search (keyset, as the mailbox list) and the number of messages the search finds in all.
+/// One page of a search (keyset, as the mailbox list). No total: counting every match of a broad search costs
+/// as much as the search itself; the list tracks its position from the page moves.
 pub async fn search_messages(
     pool: &SqlitePool,
     user_id: &str,
@@ -1036,17 +1037,9 @@ pub async fn search_messages(
     limit: i64,
     cursor: Option<PageCursor>,
     direction: PageDirection,
-) -> Result<(Vec<MessageRow>, i64)> {
-    // a message can match several rules of a virtual folder: counted and listed once
+) -> Result<Vec<MessageRow>> {
+    // a message can match several rules of a virtual folder: listed once
     let distinct = matches!(scope, SearchScope::Virtual { .. });
-    let mut count = QueryBuilder::<Sqlite>::new(if distinct {
-        "SELECT COUNT(DISTINCT m.rowid)"
-    } else {
-        "SELECT COUNT(*)"
-    });
-    push_search_body(&mut count, user_id, &scope, fts_query, filters);
-    let total: i64 = count.build_query_scalar().fetch_one(pool).await?;
-
     let mut qb = QueryBuilder::<Sqlite>::new(if distinct { "SELECT DISTINCT" } else { "SELECT" });
     qb.push(
         " m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
@@ -1075,7 +1068,7 @@ pub async fn search_messages(
     if matches!(direction, PageDirection::Backward | PageDirection::Last) {
         messages.reverse();
     }
-    Ok((messages, total))
+    Ok(messages)
 }
 
 pub async fn suggest_addrs(
