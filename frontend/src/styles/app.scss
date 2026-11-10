@@ -1,11 +1,5 @@
 // App-wide rules on top of temper. Use temper tokens (--tm-*), never hard-coded colors.
 
-// temper 0.1.4: [data-menu] is a scrolling flex column (max 24rem), but its items may shrink, so a long menu
-// squashes its rows on top of each other instead of scrolling. Remove once temper sets this itself.
-:where([data-menu]) > * {
-  flex-shrink: 0;
-}
-
 // Mail: attachment chip (message reader and compose dialog). temper has no chip/tag component.
 .mail-attachment-chip {
   display: inline-flex;
