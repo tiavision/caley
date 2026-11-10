@@ -780,7 +780,7 @@ pub async fn search(
     };
 
     if raw_q.is_empty() && filters.is_empty() {
-        return Json(json!({ "messages": [] })).into_response();
+        return Json(json!({ "messages": [], "total": 0 })).into_response();
     }
 
     let fts_query = if raw_q.is_empty() {
@@ -792,50 +792,31 @@ pub async fn search(
     let direction = parse_direction(q.direction.as_deref());
     let limit = q.limit.unwrap_or(51).min(200);
 
-    let result = if let Some(folder_id) = q.folder_id.as_deref() {
-        email_db::search_messages_virtual(
-            &state.db,
-            &user.user_id,
-            folder_id,
-            &fts_query,
-            &filters,
-            limit,
-            cursor,
-            direction,
-        )
-        .await
+    let scope = if let Some(folder_id) = q.folder_id.as_deref() {
+        email_db::SearchScope::Virtual { folder_id }
     } else if let (Some(account_id), Some(mailbox)) =
         (q.account_id.as_deref(), q.mailbox.as_deref())
     {
-        email_db::search_messages_mailbox(
-            &state.db,
-            &user.user_id,
-            account_id,
-            mailbox,
-            &fts_query,
-            &filters,
-            limit,
-            cursor,
-            direction,
-        )
-        .await
+        email_db::SearchScope::Mailbox { account_id, mailbox }
     } else {
-        email_db::search_messages(
-            &state.db,
-            &user.user_id,
-            &fts_query,
-            &filters,
-            limit,
-            cursor,
-            direction,
-        )
-        .await
+        email_db::SearchScope::All
     };
+    let result = email_db::search_messages(
+        &state.db,
+        &user.user_id,
+        scope,
+        &fts_query,
+        &filters,
+        limit,
+        cursor,
+        direction,
+    )
+    .await;
 
     match result {
-        Ok(messages) => {
+        Ok((messages, total)) => {
             let list: Vec<_> = messages.iter().map(message_to_json).collect();
-            Json(json!({ "messages": list })).into_response()
+            Json(json!({ "messages": list, "total": total })).into_response()
         }
         Err(e) => {
             eprintln!("[email] search error: {e}");

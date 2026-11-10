@@ -973,181 +973,87 @@ fn push_filter_clauses(qb: &mut QueryBuilder<Sqlite>, filters: &SearchFilters) {
     }
 }
 
+/// Where a search looks: every account of the user, one mailbox, or a virtual folder's rules.
+pub enum SearchScope<'a> {
+    All,
+    Mailbox { account_id: &'a str, mailbox: &'a str },
+    Virtual { folder_id: &'a str },
+}
+
+/// The search's `FROM … WHERE …`: the user's messages in `scope` matching `fts_query` (all of them when empty)
+/// and `filters`. The same for the page and for the count.
+fn push_search_body(
+    qb: &mut QueryBuilder<Sqlite>,
+    user_id: &str,
+    scope: &SearchScope<'_>,
+    fts_query: &str,
+    filters: &SearchFilters,
+) {
+    if fts_query.is_empty() {
+        qb.push(" FROM cached_messages m");
+    } else {
+        qb.push(" FROM messages_fts f JOIN cached_messages m ON m.rowid = f.rowid");
+    }
+    qb.push(" JOIN imap_accounts a ON a.account_id = m.account_id");
+    if let SearchScope::Virtual { folder_id } = scope {
+        qb.push(" JOIN virtual_folder_rules r ON r.folder_id = ")
+            .push_bind(folder_id.to_string())
+            .push(
+                " AND (r.account_id = '' OR r.account_id = m.account_id)
+                   AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
+                  JOIN virtual_folders vf ON vf.folder_id = r.folder_id",
+            );
+    }
+    qb.push(" WHERE a.user_id = ").push_bind(user_id.to_string());
+    if !fts_query.is_empty() {
+        qb.push(" AND messages_fts MATCH ").push_bind(fts_query.to_string());
+    }
+    match scope {
+        SearchScope::All => {}
+        SearchScope::Mailbox { account_id, mailbox } => {
+            qb.push(" AND m.account_id = ")
+                .push_bind(account_id.to_string())
+                .push(" AND m.mailbox = ")
+                .push_bind(mailbox.to_string());
+        }
+        SearchScope::Virtual { .. } => {
+            qb.push(
+                " AND (vf.only_flagged = 0 OR EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Flagged'))
+                   AND (vf.only_attachments = 0 OR m.has_attachments = 1)",
+            );
+        }
+    }
+    push_filter_clauses(qb, filters);
+}
+
+/// One page of a search (keyset, as the mailbox list) and the number of messages the search finds in all.
 pub async fn search_messages(
     pool: &SqlitePool,
     user_id: &str,
+    scope: SearchScope<'_>,
     fts_query: &str,
     filters: &SearchFilters,
     limit: i64,
     cursor: Option<PageCursor>,
     direction: PageDirection,
-) -> Result<Vec<MessageRow>> {
-    let use_fts = !fts_query.is_empty();
-    let mut qb = QueryBuilder::<Sqlite>::new(
-        "SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
-                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted, m.reply_to_addrs",
-    );
-    if use_fts {
-        qb.push(
-            " FROM messages_fts f
-              JOIN cached_messages m ON m.rowid = f.rowid
-              JOIN imap_accounts a ON a.account_id = m.account_id
-              WHERE messages_fts MATCH ",
-        )
-        .push_bind(fts_query)
-        .push(" AND a.user_id = ")
-        .push_bind(user_id);
+) -> Result<(Vec<MessageRow>, i64)> {
+    // a message can match several rules of a virtual folder: counted and listed once
+    let distinct = matches!(scope, SearchScope::Virtual { .. });
+    let mut count = QueryBuilder::<Sqlite>::new(if distinct {
+        "SELECT COUNT(DISTINCT m.rowid)"
     } else {
-        qb.push(
-            " FROM cached_messages m
-              JOIN imap_accounts a ON a.account_id = m.account_id
-              WHERE a.user_id = ",
-        )
-        .push_bind(user_id);
-    }
-    push_filter_clauses(&mut qb, filters);
-    match direction {
-        PageDirection::Forward => {
-            if let Some(ref c) = cursor {
-                push_keyset_forward(&mut qb, c);
-            }
-            qb.push(" ORDER BY m.sent_at DESC, m.rowid DESC LIMIT ")
-                .push_bind(limit);
-        }
-        PageDirection::Backward | PageDirection::Last => {
-            if let Some(ref c) = cursor {
-                push_keyset_backward(&mut qb, c);
-            }
-            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ")
-                .push_bind(limit);
-        }
-    }
-    let rows = qb.build().fetch_all(pool).await?;
-    let mut messages: Vec<MessageRow> = rows.iter().map(row_to_message).collect();
-    if matches!(direction, PageDirection::Backward | PageDirection::Last) {
-        messages.reverse();
-    }
-    Ok(messages)
-}
+        "SELECT COUNT(*)"
+    });
+    push_search_body(&mut count, user_id, &scope, fts_query, filters);
+    let total: i64 = count.build_query_scalar().fetch_one(pool).await?;
 
-pub async fn search_messages_mailbox(
-    pool: &SqlitePool,
-    user_id: &str,
-    account_id: &str,
-    mailbox: &str,
-    fts_query: &str,
-    filters: &SearchFilters,
-    limit: i64,
-    cursor: Option<PageCursor>,
-    direction: PageDirection,
-) -> Result<Vec<MessageRow>> {
-    let use_fts = !fts_query.is_empty();
-    let mut qb = QueryBuilder::<Sqlite>::new(
-        "SELECT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
-                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted, m.reply_to_addrs",
-    );
-    if use_fts {
-        qb.push(
-            " FROM messages_fts f
-              JOIN cached_messages m ON m.rowid = f.rowid
-              JOIN imap_accounts a ON a.account_id = m.account_id
-              WHERE messages_fts MATCH ",
-        )
-        .push_bind(fts_query)
-        .push(" AND a.user_id = ")
-        .push_bind(user_id);
-    } else {
-        qb.push(
-            " FROM cached_messages m
-              JOIN imap_accounts a ON a.account_id = m.account_id
-              WHERE a.user_id = ",
-        )
-        .push_bind(user_id);
-    }
-    qb.push(" AND m.account_id = ")
-        .push_bind(account_id)
-        .push(" AND m.mailbox = ")
-        .push_bind(mailbox);
-    push_filter_clauses(&mut qb, filters);
-    match direction {
-        PageDirection::Forward => {
-            if let Some(ref c) = cursor {
-                push_keyset_forward(&mut qb, c);
-            }
-            qb.push(" ORDER BY m.sent_at DESC, m.rowid DESC LIMIT ")
-                .push_bind(limit);
-        }
-        PageDirection::Backward | PageDirection::Last => {
-            if let Some(ref c) = cursor {
-                push_keyset_backward(&mut qb, c);
-            }
-            qb.push(" ORDER BY m.sent_at ASC, m.rowid ASC LIMIT ")
-                .push_bind(limit);
-        }
-    }
-    let rows = qb.build().fetch_all(pool).await?;
-    let mut messages: Vec<MessageRow> = rows.iter().map(row_to_message).collect();
-    if matches!(direction, PageDirection::Backward | PageDirection::Last) {
-        messages.reverse();
-    }
-    Ok(messages)
-}
-
-pub async fn search_messages_virtual(
-    pool: &SqlitePool,
-    user_id: &str,
-    folder_id: &str,
-    fts_query: &str,
-    filters: &SearchFilters,
-    limit: i64,
-    cursor: Option<PageCursor>,
-    direction: PageDirection,
-) -> Result<Vec<MessageRow>> {
-    let use_fts = !fts_query.is_empty();
-    let mut qb = QueryBuilder::<Sqlite>::new(
-        "SELECT DISTINCT m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
-                m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
-                m.rowid, m.is_encrypted, m.reply_to_addrs",
-    );
-    if use_fts {
-        qb.push(
-            " FROM messages_fts f
-              JOIN cached_messages m ON m.rowid = f.rowid
-              JOIN imap_accounts a ON a.account_id = m.account_id
-              JOIN virtual_folder_rules r ON r.folder_id = ",
-        )
-        .push_bind(folder_id)
-        .push(
-            " AND (r.account_id = '' OR r.account_id = m.account_id)
-               AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
-              JOIN virtual_folders vf ON vf.folder_id = r.folder_id
-              WHERE messages_fts MATCH ",
-        )
-        .push_bind(fts_query)
-        .push(" AND a.user_id = ")
-        .push_bind(user_id);
-    } else {
-        qb.push(
-            " FROM cached_messages m
-              JOIN imap_accounts a ON a.account_id = m.account_id
-              JOIN virtual_folder_rules r ON r.folder_id = ",
-        )
-        .push_bind(folder_id)
-        .push(
-            " AND (r.account_id = '' OR r.account_id = m.account_id)
-               AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
-              JOIN virtual_folders vf ON vf.folder_id = r.folder_id
-              WHERE a.user_id = ",
-        )
-        .push_bind(user_id);
-    }
+    let mut qb = QueryBuilder::<Sqlite>::new(if distinct { "SELECT DISTINCT" } else { "SELECT" });
     qb.push(
-        " AND (vf.only_flagged = 0 OR EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Flagged'))
-           AND (vf.only_attachments = 0 OR m.has_attachments = 1)",
+        " m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
+          m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
+          m.rowid, m.is_encrypted, m.reply_to_addrs",
     );
-    push_filter_clauses(&mut qb, filters);
+    push_search_body(&mut qb, user_id, &scope, fts_query, filters);
     match direction {
         PageDirection::Forward => {
             if let Some(ref c) = cursor {
@@ -1169,7 +1075,7 @@ pub async fn search_messages_virtual(
     if matches!(direction, PageDirection::Backward | PageDirection::Last) {
         messages.reverse();
     }
-    Ok(messages)
+    Ok((messages, total))
 }
 
 pub async fn suggest_addrs(

@@ -20,7 +20,7 @@ pub use messages_db::{
     get_message_render_body, insert_attachment, list_attachments, list_messages,
     set_message_reply_to,
     list_messages_virtual, list_thread_messages, replace_message_addresses, search_messages,
-    search_messages_mailbox, search_messages_virtual, suggest_addrs, update_message_body,
+    SearchScope, suggest_addrs, update_message_body,
     update_message_flags, upsert_message_header, upsert_message_render_body,
 };
 
