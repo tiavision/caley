@@ -5,7 +5,7 @@
      body (unlock, key import) from marking it again. -->
 <sn-resource name="body" call="mail.body(open)" when="open && wiped !== messageKey(open)"
              then="$result && message && !message.is_read && run('mark-read')"></sn-resource>
-<span hidden id="mark-read" data-sn-patch="/api/email/message/flags" data-sn-body="flagBody(open, '\\Seen', true)"
+<span hidden id="mark-read" data-sn-patch="/api/email/message/flags" data-sn-retry="flags" data-sn-body="flagBody(open, '\\Seen', true)"
       data-sn-optimistic="patch('message', message, markedRead(message))"></span>
 <sn-resource name="thread" src="/api/email/thread?account_id={open.account_id}&mailbox={open.mailbox}&uid={open.uid}" when="open" items="messages" type="MailThreadNode[]"></sn-resource>
 <sn-resource name="threadEvents" src="/api/email/thread-events?account_id={open.account_id}&mailbox={open.mailbox}&uid={open.uid}" when="open" type="MessageEventGroupJson[]"></sn-resource>

@@ -12,7 +12,7 @@ export default defineConfig({
   plugins: [
     // Every HTML entry is compiled by sinter (partials/, src/sinter.{config,helpers,actions,types}.ts). Messages are
     // sinter's own: messages/{locale}.json of project.inlang (the inlang tooling edits the same files).
-    sinter({ typecheck: true }),
+    sinter({ typecheck: true, embed: true }),
     // temper check on all markup and CSS (errors fail the build); serves the Lucide icons the markup names.
     // Only existing paths: temper stops the build on a missing one (partials/ arrives with the sinter pages).
     temper({ paths: ['src', 'partials', 'index.html', 'calendar', 'contacts', 'mail', 'search', 'settings'].map((p) => resolve(root, p)).filter(existsSync), icons: { lucide: true }, prune: true }),

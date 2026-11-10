@@ -30,7 +30,10 @@ tokio = { version = "1.52.3", features = ["macros", "net", "rt-multi-thread", "t
 tokio-stream = { version = "0.1", features = ["sync"] }
 hmac = "0.13"
 tower = "0.5"
-tower-http = { version = "0.7.1", features = ["auth", "fs"] }
+tower-http = { version = "0.7.1", features = ["auth", "fs", "compression-full"] }
+sinter-axum = { version = "0.1", default-features = false }
+bytes = "1"
+http-body-util = "0.1"
 tower-sessions = "0.15"
 async-trait = "0.1"
 rmp-serde = "1"

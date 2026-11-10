@@ -6,6 +6,8 @@ mod crypto;
 mod db;
 mod demo;
 mod email;
+mod embed;
+mod etag;
 mod email_autodiscover;
 mod email_db;
 mod email_sync;
@@ -28,6 +30,7 @@ use axum::http::HeaderValue;
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::{delete, get, patch, post, put};
+use axum::serve::ListenerExt;
 use clap::Parser;
 use dotenvy::dotenv;
 use oidc::{AppState, OidcProvider, UserIdClaim};
@@ -37,6 +40,7 @@ use search::SearchMode;
 use session_store::SqliteStore;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tower_http::compression::CompressionLayer;
 use tower_sessions::{Expiry, SessionManagerLayer, cookie::SameSite};
 use webauthn_rs::prelude::*;
 
@@ -367,15 +371,26 @@ async fn main() -> anyhow::Result<()> {
     // RequireAuthLayer allows public paths and requires a session user_id for all others.
     // When OIDC is enabled, unauthenticated page requests are redirected to /auth/oidc?auto=1
     // for silent re-authentication; API requests always get 401.
-    let private = shared_private
+    //
+    // The pages come with their API data (embed.rs): the layer calls these API routes in-process, with
+    // the page request's session cookie, and sits inside RequireAuthLayer, so a signed-out request for an
+    // app page is redirected before anything is fetched.
+    let embed_api = Router::new()
+        .merge(public.clone())
+        .merge(shared_private.clone().with_state(state.clone()))
+        .layer(session_layer.clone());
+    let mut private = shared_private
         .route("/auth/oidc", get(oidc::oidc_handler))
         .route("/auth/login", post(local_auth::handle_login))
         .route("/logout", get(oidc::logout_handler))
         .with_state(state.clone())
-        .fallback_service(static_files::service(&static_dir))
-        .layer(oidc::RequireAuthLayer {
-            oidc_enabled: use_oidc,
-        });
+        .fallback_service(static_files::service(&static_dir));
+    if let Some(embed) = embed::layer(&static_dir, embed_api)? {
+        private = private.layer(embed);
+    }
+    let private = private.layer(oidc::RequireAuthLayer {
+        oidc_enabled: use_oidc,
+    });
 
     if use_oidc {
         println!("Auth: CalDAV login + OIDC enabled");
@@ -388,10 +403,23 @@ async fn main() -> anyhow::Result<()> {
         .merge(private)
         .layer(session_layer);
 
-    let app = app.layer(middleware::from_fn(security_headers));
+    // Every response compressed (br, zstd, gzip or deflate, as the browser accepts), except what
+    // tower-http's default predicate leaves alone: event streams (compressing them would hold events
+    // back), images (already compressed) and bodies under 32 bytes.
+    let app = app
+        // validators for the API's JSON (etag.rs): a reload that changed nothing is a 304
+        .layer(middleware::from_fn(etag::etag))
+        .layer(middleware::from_fn(security_headers))
+        .layer(CompressionLayer::new());
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port)).await?;
     println!("Listening on {}", listener.local_addr()?);
+    let listener = listener
+        // An embedded page is two writes (the head at once, then its data): without TCP_NODELAY the
+        // second can wait for the first's ACK (~40 ms).
+        .tap_io(|tcp| {
+            let _ = tcp.set_nodelay(true);
+        });
     axum::serve(listener, app).await?;
 
     Ok(())
