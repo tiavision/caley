@@ -1,0 +1,24 @@
+<!-- The reader's resources (src/components/mail-reader.html), once at page level, outside any <template>:
+       <mail-reader-data data-sn-prop="{ open, threadRef, wiped }"></mail-reader-data>
+     `open` (MessageRef|null): the message in the reader; `threadRef` (ThreadRef|null, <thread-dialog>); `wiped`: the
+     key of the encrypted message whose decrypted content was dropped while the page was hidden, or ''.
+     The root is the #mark-read action: once the body is there, an unread message is marked read. -->
+<template data-sn-component="{ open: MessageRef | null; threadRef: ThreadRef | null; wiped: string }">
+  <span hidden id="mark-read" data-sn-patch="/api/email/message/flags" data-sn-retry="flags" data-sn-body="flagBody(open, '\\Seen', true)"
+        data-sn-optimistic="patch(message, markedRead(message))">
+    <sn-resource name="message" call="mail.open(open)" when="open" type="Message"></sn-resource>
+    <!-- Once the body is there, an unread message is marked read (#mark-read); the read message keeps later loads of the
+         body (unlock, key import) from marking it again. -->
+    <sn-resource name="body" call="mail.body(open)" when="open && wiped !== messageKey(open)"
+                 then="$result && message && !message.is_read && run('mark-read')"></sn-resource>
+    <sn-resource name="thread" src="/api/email/thread?account_id={open.account_id}&mailbox={open.mailbox}&uid={open.uid}" when="open" items="messages" type="MailThreadNode[]"></sn-resource>
+    <sn-resource name="threadEvents" src="/api/email/thread-events?account_id={open.account_id}&mailbox={open.mailbox}&uid={open.uid}" when="open" type="MessageEventGroupJson[]"></sn-resource>
+    <sn-resource name="allowedOrigins" src="/api/email/image-origins" type="ImageOrigins"></sn-resource>
+    <sn-resource name="ignoredOrigins" src="/api/email/image-blacklist" type="ImageOrigins"></sn-resource>
+    <!-- The thread of a message an event came from (event detail → threads), when it is not the open one. -->
+    <sn-resource name="otherThread" src="/api/email/thread?account_id={threadRef.account_id}&mailbox={threadRef.mailbox}&uid={threadRef.uid}" when="threadRef && !threadRef.current" items="messages" type="MailThreadNode[]"></sn-resource>
+    <sn-resource name="otherThreadEvents" src="/api/email/thread-events?account_id={threadRef.account_id}&mailbox={threadRef.mailbox}&uid={threadRef.uid}" when="threadRef && !threadRef.current" type="MessageEventGroupJson[]"></sn-resource>
+    <!-- Calendars for importing a calendar attachment (src/components/import-dialog.html). -->
+    <sn-resource name="caldavAccounts" src="/api/caldav/accounts" items="accounts" key="account_id" type="CalDavAccountJson[]"></sn-resource>
+  </span>
+</template>

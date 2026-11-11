@@ -1,0 +1,154 @@
+<!-- Compose dialog #mail-compose (/mail/ and /mail/view/). It wraps the part of the page that opens it; an opener
+     emits `compose` with the draft: emit('compose', composeDraft(mode, msg, identities, text, html, files)).
+     With `pending`, it also opens a draft another page left (share menu → send by email).
+     Sending builds the MIME message here (signed/encrypted with OpenPGP when chosen) and posts it raw.
+     Resources: identities. -->
+<template data-sn-component="{ pending?: boolean }" data-sn-emits="{ compose: ComposeDraft }">
+  <div data-sn-state="{
+         compose: /** @type {ComposeDraft|null} */ (null),
+         composeError: '',
+         sending: false,
+         rcpt: { field: '', token: '' },
+       }"
+       data-sn-on-compose="compose = $event.detail; showModal('mail-compose')">
+    <sn-resource name="composeKeys" call="mail.composeKeys()" when="!!compose"></sn-resource>
+    <sn-resource name="recipientAddrs" src="/api/email/suggest-addrs?q={rcpt.token}" when="rcpt.token.length >= 2" items="addrs" type="string[]"></sn-resource>
+    <!-- address suggestions: the contacts, loaded when compose first opens -->
+    <sn-resource name="composeContacts" src="/api/contacts" items="contacts" when="!!compose" type="ContactAddresses[]"></sn-resource>
+    <!-- "Send by email" from the calendar/contacts share menu leaves a draft in sessionStorage.caley_compose
+         (src/lib/share.ts); with `pending`, mail.pendingCompose() takes it once, after the identities have loaded (the draft's sender). -->
+    <sn-resource name="pendingCompose" call="mail.pendingCompose()" when="pending && !!$meta.identities.loadedAt"
+                 then="$result && (compose = sharedDraft($result, identities)); $result && showModal('mail-compose')"></sn-resource>
+    <slot></slot>
+    <dialog id="mail-compose" class="compose-dialog" data-layout="stack" data-gap="none" data-pad="none"
+            data-sn-on-close="composeError = ''; sending = false">
+      <template data-sn-if="compose">
+        <div class="compose-inner" data-layout="stack" data-gap="none" data-grow
+             data-sn-let="{
+               canEnc: canEncrypt(compose, identities, composeKeys),
+               signing: signs(compose, identities, composeKeys),
+               hits: recipientHits(rcpt.token, contactAddresses(composeContacts ?? []), recipientAddrs ?? []),
+             }">
+          <header class="compose-header" data-pad="sm">
+            <h2 data-sn-text="composeTitle(compose.mode)"></h2>
+            <button type="button" commandfor="mail-compose" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
+          </header>
+          <form class="compose-form" data-layout="stack" data-gap="none" data-grow
+                data-sn-on-submit="sending = true; composeError = ''"
+                data-sn-call="mail.send({...compose, encrypt: compose.encrypt && canEnc}, identities, signing)"
+                data-sn-then="sending = false; close('mail-compose')"
+                data-sn-catch="sending = false; composeError = $error.detail ?? m.mail_sendError()">
+            <template data-sn-if="identities.length > 1">
+              <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+                <label class="compose-label" for="compose-from" data-sn-text="m.mail_composeFrom()"></label>
+                <select id="compose-from" class="compose-input" data-grow data-sn-model="compose.identity_id">
+                  <template data-sn-for="id in identities">
+                    <option data-sn-attr="{value: id.identity_id, selected: id.identity_id === compose.identity_id}" data-sn-text="`${id.name} <${id.email}>`"></option>
+                  </template>
+                </select>
+              </div>
+            </template>
+            <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+              <label class="compose-label" for="compose-to" data-sn-text="m.mail_composeTo()"></label>
+              <div class="compose-input-wrap" data-combo data-grow>
+                <input id="compose-to" class="compose-input" autocomplete="off" data-sn-model="compose.to" data-sn-listbox="compose-to-list"
+                       data-sn-on-input="rcpt = {field: 'to', token: recipientToken(compose.to)}" data-sn-debounce-input="200"
+                       data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-dismiss="rcpt = {field: '', token: ''}"
+                       data-sn-attr="{placeholder: m.mail_composeToPlaceholder()}">
+                <div data-menu role="listbox" id="compose-to-list" data-sn-show="rcpt.field === 'to' && hits.length > 0">
+                  <template data-sn-for="addr in hits" data-sn-key="addr">
+                    <div role="option" tabindex="-1" data-sn-on-click="compose.to = withRecipient(compose.to, addr); rcpt = {field: '', token: ''}" data-sn-text="addr"></div>
+                  </template>
+                </div>
+              </div>
+              <button type="button" data-variant="ghost" data-size="sm" data-icon="lock" data-tooltip
+                      data-sn-attr="{disabled: !canEnc || sending, 'aria-pressed': compose.encrypt && canEnc ? 'true' : 'false', 'aria-label': m.pgp_composeEncrypt()}"
+                      data-sn-on-click="compose.encrypt = !compose.encrypt"></button>
+              <button type="button" data-variant="ghost" data-size="sm" data-icon="signature" data-tooltip
+                      data-sn-attr="{disabled: !canSign(compose, identities, composeKeys) || sending, 'aria-pressed': signing ? 'true' : 'false', 'aria-label': m.pgp_composeSign()}"
+                      data-sn-on-click="compose.signOptOut = signing; compose.sign = !signing"></button>
+              <template data-sn-if="!compose.ccOpen">
+                <button type="button" class="nowrap" data-variant="ghost" data-size="sm" data-sn-on-click="compose.ccOpen = true" data-sn-text="m.mail_composeCcBcc()"></button>
+              </template>
+            </div>
+            <template data-sn-if="compose.ccOpen">
+              <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+                <label class="compose-label" for="compose-cc" data-sn-text="m.mail_composeCc()"></label>
+                <div class="compose-input-wrap" data-combo data-grow>
+                  <input id="compose-cc" class="compose-input" autocomplete="off" data-sn-model="compose.cc" data-sn-listbox="compose-cc-list"
+                         data-sn-on-input="rcpt = {field: 'cc', token: recipientToken(compose.cc)}" data-sn-debounce-input="200"
+                         data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-dismiss="rcpt = {field: '', token: ''}"
+                         data-sn-attr="{placeholder: m.mail_composeCcPlaceholder()}">
+                  <div data-menu role="listbox" id="compose-cc-list" data-sn-show="rcpt.field === 'cc' && hits.length > 0">
+                    <template data-sn-for="addr in hits" data-sn-key="addr">
+                      <div role="option" tabindex="-1" data-sn-on-click="compose.cc = withRecipient(compose.cc, addr); rcpt = {field: '', token: ''}" data-sn-text="addr"></div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+              <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+                <label class="compose-label" for="compose-bcc" data-sn-text="m.mail_composeBcc()"></label>
+                <div class="compose-input-wrap" data-combo data-grow>
+                  <input id="compose-bcc" class="compose-input" autocomplete="off" data-sn-model="compose.bcc" data-sn-listbox="compose-bcc-list"
+                         data-sn-on-input="rcpt = {field: 'bcc', token: recipientToken(compose.bcc)}" data-sn-debounce-input="200"
+                         data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-dismiss="rcpt = {field: '', token: ''}"
+                         data-sn-attr="{placeholder: m.mail_composeBccPlaceholder()}">
+                  <div data-menu role="listbox" id="compose-bcc-list" data-sn-show="rcpt.field === 'bcc' && hits.length > 0">
+                    <template data-sn-for="addr in hits" data-sn-key="addr">
+                      <div role="option" tabindex="-1" data-sn-on-click="compose.bcc = withRecipient(compose.bcc, addr); rcpt = {field: '', token: ''}" data-sn-text="addr"></div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+              <label class="compose-label" for="compose-subject" data-sn-text="m.mail_composeSubject()"></label>
+              <input id="compose-subject" class="compose-input" data-grow data-sn-model="compose.subject">
+            </div>
+            <textarea class="compose-body" data-grow data-sn-model="compose.body"
+                      data-sn-attr="{rows: compose.forwardHtml ? 4 : 10, 'aria-label': m.mail_newMessage()}"></textarea>
+            <template data-sn-if="compose.forwardHtml && compose.forwardRef">
+              <div class="compose-forward-preview">
+                <mail-frame data-sn-prop="{html: compose.forwardPreview, isolated: false, height: '240px', label: 'Forwarded message'}"></mail-frame>
+              </div>
+            </template>
+            <template data-sn-if="compose.files.length > 0">
+              <ul class="compose-attachments" data-layout="row" data-gap="xs" data-pad="sm">
+                <template data-sn-for="(file, i) in compose.files">
+                  <li class="mail-attachment-chip" data-icon="paperclip">
+                    <span class="mail-attachment-name" data-truncate data-sn-attr="{title: file.name}" data-sn-text="file.name"></span>
+                    <span data-muted data-sn-text="humanSize(file.size)"></span>
+                    <button type="button" class="mail-attachment-remove" data-variant="ghost" data-icon="x"
+                            data-sn-attr="{'aria-label': m.mail_removeAttachment()}" data-sn-on-click="compose.files.splice(i, 1)"></button>
+                  </li>
+                </template>
+              </ul>
+            </template>
+            <template data-sn-if="composeError">
+              <p class="compose-error" data-tone="danger" role="alert" data-sn-text="composeError"></p>
+            </template>
+            <footer class="compose-footer" data-layout="row" data-gap="sm" data-justify="between" data-pad="sm">
+              <button type="button" data-variant="ghost" data-icon="paperclip"
+                      data-sn-on-click="(/** @type {HTMLElement} */ ($el.closest('dialog').querySelector('.compose-files input'))).click()" data-sn-text="m.mail_attach()"></button>
+              <div data-layout="row" data-gap="sm">
+                <button type="button" data-variant="secondary" commandfor="mail-compose" command="close" data-sn-text="m.mail_discard()"></button>
+                <button type="submit" data-icon="send" data-sn-attr="{disabled: sending, 'aria-busy': sending ? 'true' : null}"
+                        data-sn-text="sending ? m.mail_sending() : m.mail_send()"></button>
+              </div>
+            </footer>
+          </form>
+          <!-- The file picker: its own form, so reset() clears it after the files went into the draft. -->
+          <form class="compose-files" hidden>
+            <input type="file" multiple data-sn-attr="{'aria-label': m.mail_attachFiles()}"
+                   data-sn-on-change="compose.files = [...compose.files, ...$el.files]; reset()">
+          </form>
+        </div>
+      </template>
+    </dialog>
+  </div>
+</template>
+
+<!-- The root only holds the dialog's state and handlers: it takes no part in the layout. -->
+<style>
+  :scope { display: contents; }
+</style>

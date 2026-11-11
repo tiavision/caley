@@ -1,0 +1,53 @@
+<!-- Conversation dialog #thread-dialog: the mail thread of a message as an indented tree, with the calendar events
+     imported from each message under it. Once per page, outside any <template>, with <event-detail>. It declares no
+     resources, so a page that already loads the thread (mail) passes its own. Props:
+       - `nodes` (ThreadNode[]): GET /api/email/thread `messages` of the message;
+       - `eventGroups` (MessageEventGroupJson[]): GET /api/email/thread-events of the message;
+       - `loading`: either is loading;
+       - `current` (ThreadRef|null, src/lib/thread.ts): what to mark (the current message, the event it came from);
+       - `links`: true, message rows are links to the mail page; false, they close the dialog and emit
+         `thread-message` (the ThreadNode) for the page to open in place.
+     An event row closes it and emits `event-open` (the EventJson) for the page's #event-detail.
+     Open it with showModal('thread-dialog'). -->
+<template data-sn-component="{ nodes: ThreadNode[]; eventGroups: MessageEventGroupJson[]; loading: boolean; current: ThreadRef | null; links: boolean }"
+          data-sn-emits="{ 'thread-message': ThreadNode; 'event-open': EventJson }">
+  <dialog id="thread-dialog" closedby="any" data-layout="stack" style="--tm-dialog-width: 40rem">
+    <header>
+      <h2 data-sn-text="m.mail_threadsHeading()"></h2>
+      <button type="button" commandfor="thread-dialog" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
+    </header>
+    <!-- the wrapper scrolls, so a short thread does not get a minimum height and long ones keep full-height rows -->
+    <div data-scroll="y">
+      <template data-sn-if="loading">
+        <p aria-busy="true" data-sn-text="m.weekly_loading()"></p>
+      </template>
+      <template data-sn-else>
+        <ul class="thread-tree" data-layout="stack" data-gap="xs" data-sn-attr="{'aria-label': m.mail_threadsHeading()}">
+          <template data-sn-for="r in threadRows(nodes, eventGroups, current)" data-sn-key="r.key">
+            <li class="thread-row" data-sn-style="{'--thread-depth': r.depth}">
+              <template data-sn-if="r.kind === 'message'">
+                <a data-variant="item" data-layout="row" data-gap="sm" data-wrap="none"
+                   data-sn-attr="{href: messageUrl(r.node), 'aria-current': r.current ? 'true' : null}"
+                   data-sn-on-click="!links && $event.preventDefault(); !links && close(); emit('thread-message', r.node)">
+                  <span class="thread-from" data-truncate data-sn-text="r.from || m.mail_unknownSender()"></span>
+                  <span data-truncate data-grow data-muted data-sn-text="r.node.subject || m.mail_noSubject()"></span>
+                  <small data-muted data-sn-text="r.date"></small>
+                </a>
+              </template>
+              <template data-sn-else>
+                <button type="button" data-variant="item" data-size="sm" data-layout="row" data-gap="sm" data-wrap="none" data-bar
+                        data-sn-style="{'--tm-tone': r.event.color || null}"
+                        data-sn-attr="{'aria-current': r.current ? 'true' : null}"
+                        data-sn-on-click="close(); emit('event-open', r.event)">
+                  <span data-icon="calendar" aria-hidden="true"></span>
+                  <span data-truncate data-grow data-sn-text="r.event.summary || '—'"></span>
+                  <small data-muted data-sn-text="formatEventTime(r.event)"></small>
+                </button>
+              </template>
+            </li>
+          </template>
+        </ul>
+      </template>
+    </div>
+  </dialog>
+</template>

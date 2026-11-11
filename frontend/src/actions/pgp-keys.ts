@@ -1,4 +1,4 @@
-// `pgpKeys` actions: trusted senders' public keys on the settings page (partials/pgp-settings.html).
+// `pgpKeys` actions: trusted senders' public keys on the settings page (src/components/pgp-settings.html).
 // keyFile() reads a key file for the import dialogs' textareas. Parsing a key needs OpenPGP.js (loaded on first use); listing and deleting are plain requests in the markup.
 import { loadPgp } from '../lib/pgp/load.ts';
 import type { StoredPublicKey } from '../lib/pgp/public-keys.ts';

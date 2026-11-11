@@ -1,4 +1,4 @@
-// `share` actions: partials/share-menu.html shares a ShareItem (src/lib/share.ts) through the system share
+// `share` actions: src/components/share-menu.html shares a ShareItem (src/lib/share.ts) through the system share
 // sheet (touch devices with the Web Share API) or offers it as a download or as a mail attachment.
 import type { CallContext } from '@tiaforge-ui/sinter';
 import { composeEmailWithAttachment, downloadFile, type ShareItem } from '../lib/share.ts';

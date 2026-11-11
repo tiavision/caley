@@ -5,13 +5,9 @@ import * as helpers from '../src/sinter.helpers.ts';
 import '../src/islands/common.ts';                 // data-shortcut keys
 import { m } from '@tiaforge-ui/sinter/messages';
 import { messages } from '../src/test-messages.ts';
-import nav from '../partials/nav.html?raw';
-import navToggle from '../partials/nav-toggle.html?raw';
-import shareMenu from '../partials/share-menu.html?raw';
-import source from './index.html?raw';
+import page from './index.html?raw';
+import { app } from '../src/test-components.ts';
 
-// The test page lives at the root of sinter's virtual project: its partials sit next to it.
-const page = source.replaceAll('../partials/', './');
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: 'https://maps.example/?q={q}' };
 const book = (href: string, name: string) => ({ account_id: 'acc', href, name });
@@ -49,9 +45,8 @@ async function show(routes: Record<string, RouteResponse> = {}, books = [book('/
     share: { native: () => false, send: async () => {}, download: async () => {}, email: async () => {} },
     maps: { open: async (...args: unknown[]) => { calls.push(['maps.open', args.slice(0, 2)]); } },
   };
-  const r = await render(page, {
+  const r = await render(page, { ...app,
     messages, requests, actions, helpers, streams: { '/api/events/stream': stream },
-    files: { './nav.html': nav, './nav-toggle.html': navToggle, './share-menu.html': shareMenu },
   });
   await r.settle();
   return { ...r, requests, stream, calls };
@@ -246,14 +241,13 @@ test('keyboard: c opens a new contact, e edits the open one', async () => {
 test('placeholder cards until the contacts arrive; a failed load says so', async () => {
   // mockRequests holds every response until the test delivers it (settle)
   const requests = mockRequests({ 'GET /api/user': user, 'GET /api/contacts': { addressbooks: [book('/ab/personal/', 'Personal')], contacts: [ada, alan, bob] } });
-  const r = await render(page, {
+  const r = await render(page, { ...app,
     messages, requests, helpers, streams: { '/api/events/stream': mockStream() },
     actions: {
       notify: { status: () => ({ supported: false, permission: 'default', enabled: false }), toggle: async (s: unknown) => s },
       share: { native: () => false, send: async () => {}, download: async () => {}, email: async () => {} },
       maps: { open: async () => {} },
     },
-    files: { './nav.html': nav, './nav-toggle.html': navToggle, './share-menu.html': shareMenu },
   });
   expect(requests.pending).toBeGreaterThan(0);
   expect(r.root.querySelectorAll('.contact-placeholder').length).toBeGreaterThan(0);

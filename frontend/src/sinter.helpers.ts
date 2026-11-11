@@ -37,7 +37,7 @@ export {
 
 export { geoUrl } from './actions/maps.ts';
 
-// Event partials (partials/event-detail.html, event-form.html), search and calendar pages.
+// Event components (src/components/event-detail.html, event-form.html), search and calendar pages.
 export {
   calendarKey,
   eventKey,
@@ -69,16 +69,16 @@ export {
   newCalendarBody,
 } from './lib/events.ts';
 
-// Thread dialog (partials/thread-dialog.html).
+// Thread dialog (src/components/thread-dialog.html).
 export { threadRows, messageUrl } from './lib/thread.ts';
 
-// ICS import dialog (partials/import-dialog.html).
+// ICS import dialog (src/components/import-dialog.html).
 export { calendarValue, importEventDate, importDraft, importSummary } from './lib/import.ts';
 
 // Settings page: the CalDAV account dialog, calendar toggles, encryption tab errors.
 export { caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText } from './lib/settings.ts';
 
-// Mail pages (mail/index.html, mail/view/index.html, partials/mail-*.html).
+// Mail pages (mail/index.html, mail/view/index.html, src/components/mail-*.html).
 export {
   currentView, folderView, mailboxView, sameView, folderName, viewTitle, badgeCount, mailboxKey, sidebarSections, mailTitle,
   toggled, refOf, isRef, urlRef, filterActive, markRange, neighbor, archiveMailbox, archiveTargets, moveTargets, bulkOf,

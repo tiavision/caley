@@ -1,16 +1,19 @@
 import { expect, test } from 'vitest';
 import { render, mockRequests, mockStream, memoryStorage } from '@tiaforge-ui/sinter/testing';
 import { m } from '@tiaforge-ui/sinter/messages';
-import { messages } from '../src/test-messages.ts';
-import nav from './nav.html?raw';
-import navToggle from './nav-toggle.html?raw';
-import type { NotificationStatus } from '../src/actions/notify.ts';
+import { messages } from '../test-messages.ts';
+import { app } from '../test-components.ts';
+import type { NotificationStatus } from '../actions/notify.ts';
 
+// A page of the app layout (src/layouts/app-layout.html), which has the rail.
 const page = (here: string) => `
-<body data-shell="fixed" data-sn-state="{ here: '${here}' }">
-  <sn-include src="./nav.html"></sn-include>
-  <main><sn-include src="./nav-toggle.html"></sn-include></main>
-</body>`;
+<app-layout data-sn-prop="{ here: '${here}' }">
+  <main><nav-toggle></nav-toggle></main>
+</app-layout>`;
+
+// <mail-notifier>'s script listens to server events: here it only keeps the live instances.
+const live = new Set<object>();
+const scripts = { 'mail-notifier': class { connected() { live.add(this); } disconnected() { live.delete(this); } } };
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
 
@@ -26,7 +29,7 @@ async function show(here: string, options: { status?: NotificationStatus; storag
   const requests = mockRequests({ 'GET /api/user': options.userResponse ?? user });
   const actions = { notify: notify(options.status ?? { supported: true, permission: 'default', enabled: false }) };
   const r = await render(page(here), {
-    requests, actions, messages, storage: options.storage, files: { './nav.html': nav, './nav-toggle.html': navToggle },
+    ...app, scripts, requests, actions, messages, storage: options.storage,
     streams: { '/api/events/stream': mockStream() },
   });
   await r.settle();
@@ -71,16 +74,16 @@ test('the bell turns notifications on; the notifier runs except on the mail page
   const { root, settle } = await show('/search/');
   const bell = root.querySelector<HTMLButtonElement>('button[data-icon="bell"]')!;
   expect(bell.getAttribute('aria-pressed')).toBe('false');
-  expect(root.querySelector('mail-notifier')).toBeNull();
+  expect(live.size).toBe(0);
 
   bell.click();
   await settle();
   expect(bell.getAttribute('aria-pressed')).toBe('true');
-  expect(root.querySelector('mail-notifier')).not.toBeNull();
+  expect(live.size).toBe(1);
 
   const mail = await show('/mail/', { status: { supported: true, permission: 'granted', enabled: true } });
   expect(mail.root.querySelector('button[data-icon="bell"]')!.getAttribute('aria-pressed')).toBe('true');
-  expect(mail.root.querySelector('mail-notifier')).toBeNull();
+  expect(live.size).toBe(0);
 });
 
 test('blocked or unsupported notifications', async () => {

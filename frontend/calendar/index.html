@@ -1,93 +1,74 @@
 <!doctype html>
-<!-- view: 'week' or 'month', remembered across visits (on <html> so the body's shortcuts can read it). -->
-<html lang="en" data-sn-state="{ view: 'week' }" data-sn-persist="calendar-view">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="color-scheme" content="light dark" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" href="/favicon.ico" sizes="any">
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-    <link rel="manifest" href="/site.webmanifest">
-    <meta name="theme-color" content="#2563eb">
-    <meta name="mobile-web-app-capable" content="yes" />
-    <title>Caley</title>
-  </head>
-  <!-- weekStart: Monday of the week shown (YYYY-MM-DD); gridMonth: the month grid's month (YYYY-MM), which the
-       week view's picker browses too; pickerAt: the month the month view's picker browses; focusDate: the day new
-       events go to; flippedDays: days whose collapsed state was toggled; focusPos: the week grid's focused chip;
-       dayDate: the day of #day-events; fit: what <month-fit> measured; tx, ty: where a touch started.
-       detail, eventDraft, threadRef: partials/event-detail.html, event-form.html, thread-dialog.html.
-       Shortcuts: c new event, t today, n/p next/previous week or month (data-shortcut on those buttons, e edit in
-       partials/event-detail.html); Shift+N/P four weeks or three months (key filters below). `cal-step` {detail: days in
-       the week view, months in the month view} moves the calendar (N/P and swipes). -->
-  <body data-shell="fixed"
-        data-sn-state="{
-          here: '/calendar/',
-          weekStart: mondayOf(todayIso($now)),
-          gridMonth: monthOf(mondayOf(todayIso($now))),
-          pickerAt: '',
-          focusDate: '',
-          flippedDays: /** @type {string[]} */ ([]),
-          focusPos: '0:0',
-          dayDate: '',
-          fit: /** @type {MonthFit} */ ({ counts: {}, narrow: false }),
-          tx: 0,
-          ty: 0,
-          detail: /** @type {EventJson|null} */ (null),
-          eventDraft: /** @type {EventDraft|null} */ (null),
-          threadRef: /** @type {ThreadRef|null} */ (null),
-        }"
-        data-sn-on-keydown-shift-n="farStep($event, view) && emit('cal-step', farStep($event, view)); farStep($event, view) && view === 'week' && $el.querySelector('.pane')?.scrollTo(0, 0)"
-        data-sn-on-keydown-shift-p="farStep($event, view) && emit('cal-step', farStep($event, view)); farStep($event, view) && view === 'week' && $el.querySelector('.pane')?.scrollTo(0, 0)"
-        data-sn-on-cal-step="weekStart = view === 'week' ? addDays(weekStart, $event.detail) : weekStart;
-                             gridMonth = view === 'week' ? monthOf(weekStart) : addMonths(gridMonth, $event.detail)"
-        data-sn-on-event-edit="eventDraft = editEventDraft($event.detail.event, $event.detail.scope); showModal('event-form')"
-        data-sn-on-event-threads="threadRef = threadOfEmail($event.detail.email, $event.detail.event); showModal('thread-dialog')"
-        data-sn-on-event-saved="refresh('weekDays', 'monthGrid', 'monthDays')"
-        data-sn-on-event-deleted="refresh('weekDays', 'monthGrid', 'monthDays')">
-    <sn-include src="../partials/nav.html"></sn-include>
-    <!-- Events in the viewer's zone: the server buckets days and renders time ranges in it. -->
-    <!-- The grids are built from dates (weekDates(), monthCells()), so the month's events need no /api/calendar
-         response first: both requests go out together (the early file sends them). `cache`: a return visit in
-         this tab shows the last data at once. -->
-    <sn-resource name="weekDays" when="view === 'week'" key="date_iso" type="DayEventsJson[]" cache
-                 src="/api/events?start={weekStart}&end={addDays(weekStart, 6)}&tz={userTz()}"></sn-resource>
-    <sn-resource name="monthGrid" src="/api/calendar?month={gridMonth}&tz={userTz()}" type="MonthGridJson" cache></sn-resource>
-    <sn-resource name="monthDays" when="view === 'month'" key="date_iso" type="DayEventsJson[]" cache
-                 src="/api/events?start={monthRange(gridMonth).start}&end={monthRange(gridMonth).end}&tz={userTz()}"></sn-resource>
-    <!-- the thread dialog's mails (partials/thread-dialog.html), for an event imported from mail -->
-    <sn-resource name="threadNodes" when="threadRef" items="messages" key="account_id,mailbox,uid" type="ThreadNode[]"
-                 src="/api/email/thread?account_id={threadRef.account_id}&mailbox={threadRef.mailbox}&uid={threadRef.uid}"></sn-resource>
-    <sn-resource name="threadEventGroups" when="threadRef" key="account_id,mailbox,uid" type="MessageEventGroupJson[]"
-                 src="/api/email/thread-events?account_id={threadRef.account_id}&mailbox={threadRef.mailbox}&uid={threadRef.uid}"></sn-resource>
-    <sn-resource name="pickerGrid" when="view === 'month' && pickerAt" src="/api/calendar?month={pickerAt}&tz={userTz()}" type="MonthGridJson"></sn-resource>
-    <!-- The page's server events (shares the rail's connection). A changed event can move between
-         days, so the day lists reload rather than patch one item. -->
-    <sn-sync src="/api/events/stream">
-      <sn-event name="events_refetch" resource="weekDays" op="refetch"></sn-event>
-      <sn-event name="events_refetch" resource="monthDays" op="refetch"></sn-event>
-      <sn-event name="events_refetch" resource="monthGrid" op="refetch"></sn-event>
-      <sn-event name="event_updated" resource="weekDays" op="refetch"></sn-event>
-      <sn-event name="event_updated" resource="monthDays" op="refetch"></sn-event>
-      <sn-event name="event_updated" resource="monthGrid" op="refetch"></sn-event>
-      <sn-event name="event_removed" resource="weekDays" op="refetch" type="EventRemovedEvent"
-                then="detail = sameEvent(detail, {account_id, uid, calendar_href}) ? null : detail; !detail && close('event-detail')"></sn-event>
-      <sn-event name="event_removed" resource="monthDays" op="refetch"></sn-event>
-      <sn-event name="event_removed" resource="monthGrid" op="refetch"></sn-event>
-      <sn-event name="calendars_changed" resource="calendars" op="refetch"></sn-event>
-      <sn-event name="calendars_changed" resource="monthGrid" op="refetch"></sn-event>
-    </sn-sync>
-    <main data-layout="stack" data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar">
-      <div data-layout="stack" data-density="compact" data-grow
-           data-sn-let="{ today: todayIso($now), eventThreads: true, threadLinks: true, threadLoading: $meta.threadNodes.loading || $meta.threadEventGroups.loading }">
+<!-- view: 'week' or 'month', remembered across visits by the week/month switcher (data-sn-persist on its radios; `calendar-mode`, since
+     `calendar-view` held the old page's whole <html> state).
+     weekStart: Monday of the week shown (YYYY-MM-DD); gridMonth: the month grid's month (YYYY-MM), which the
+     week view's picker browses too; pickerAt: the month the month view's picker browses; focusDate: the day new
+     events go to; flippedDays: days whose collapsed state was toggled; focusPos: the week grid's focused chip;
+     dayDate: the day of #day-events; fit: what <month-fit> measured; tx, ty: where a touch started.
+     detail: the event <event-detail> shows; threadRef: the mail thread <thread-dialog> shows.
+     Shortcuts: c new event, t today, n/p next/previous week or month (data-shortcut on those buttons, e edit in
+     <event-detail>); Shift+N/P four weeks or three months (key filters below, farStep()), swipes (swipeStep()):
+     days in the week view, months in the month view. -->
+<app-layout data-sn-prop="{ here: '/calendar/' }"
+            data-sn-state="{
+              view: 'week',
+              weekStart: mondayOf(todayIso($now)),
+              gridMonth: monthOf(mondayOf(todayIso($now))),
+              pickerAt: '',
+              focusDate: '',
+              flippedDays: /** @type {string[]} */ ([]),
+              focusPos: '0:0',
+              dayDate: '',
+              fit: /** @type {MonthFit} */ ({ counts: {}, narrow: false }),
+              tx: 0,
+              ty: 0,
+              detail: /** @type {EventJson|null} */ (null),
+              threadRef: /** @type {ThreadRef|null} */ (null),
+            }"
+            data-sn-on-keydown-shift-n="farStep($event, view) && view === 'week' && (weekStart = addDays(weekStart, farStep($event, view))); farStep($event, view) && (gridMonth = view === 'week' ? monthOf(weekStart) : addMonths(gridMonth, farStep($event, view))); farStep($event, view) && view === 'week' && $el.querySelector('.pane')?.scrollTo(0, 0)"
+            data-sn-on-keydown-shift-p="farStep($event, view) && view === 'week' && (weekStart = addDays(weekStart, farStep($event, view))); farStep($event, view) && (gridMonth = view === 'week' ? monthOf(weekStart) : addMonths(gridMonth, farStep($event, view))); farStep($event, view) && view === 'week' && $el.querySelector('.pane')?.scrollTo(0, 0)">
+  <!-- Events in the viewer's zone: the server buckets days and renders time ranges in it. -->
+  <!-- The grids are built from dates (weekDates(), monthCells()), so the month's events need no /api/calendar
+       response first: both requests go out together (the early file sends them). `cache`: a return visit in
+       this tab shows the last data at once. -->
+  <sn-resource name="weekDays" when="view === 'week'" key="date_iso" type="DayEventsJson[]" cache
+               src="/api/events?start={weekStart}&end={addDays(weekStart, 6)}&tz={userTz()}"></sn-resource>
+  <sn-resource name="monthGrid" src="/api/calendar?month={gridMonth}&tz={userTz()}" type="MonthGridJson" cache></sn-resource>
+  <sn-resource name="monthDays" when="view === 'month'" key="date_iso" type="DayEventsJson[]" cache
+               src="/api/events?start={monthRange(gridMonth).start}&end={monthRange(gridMonth).end}&tz={userTz()}"></sn-resource>
+  <!-- the thread dialog's mails (src/components/thread-dialog.html), for an event imported from mail -->
+  <sn-resource name="threadNodes" when="threadRef" items="messages" key="account_id,mailbox,uid" type="ThreadNode[]"
+               src="/api/email/thread?account_id={threadRef.account_id}&mailbox={threadRef.mailbox}&uid={threadRef.uid}"></sn-resource>
+  <sn-resource name="threadEventGroups" when="threadRef" key="account_id,mailbox,uid" type="MessageEventGroupJson[]"
+               src="/api/email/thread-events?account_id={threadRef.account_id}&mailbox={threadRef.mailbox}&uid={threadRef.uid}"></sn-resource>
+  <sn-resource name="pickerGrid" when="view === 'month' && pickerAt" src="/api/calendar?month={pickerAt}&tz={userTz()}" type="MonthGridJson"></sn-resource>
+  <!-- The page's server events (shares the rail's connection). A changed event can move between
+       days, so the day lists reload rather than patch one item. -->
+  <sn-sync src="/api/events/stream">
+    <sn-event name="events_refetch" resource="weekDays" op="refetch"></sn-event>
+    <sn-event name="events_refetch" resource="monthDays" op="refetch"></sn-event>
+    <sn-event name="events_refetch" resource="monthGrid" op="refetch"></sn-event>
+    <sn-event name="event_updated" resource="weekDays" op="refetch"></sn-event>
+    <sn-event name="event_updated" resource="monthDays" op="refetch"></sn-event>
+    <sn-event name="event_updated" resource="monthGrid" op="refetch"></sn-event>
+    <sn-event name="event_removed" resource="weekDays" op="refetch" type="EventRemovedEvent"
+              then="detail = sameEvent(detail, {account_id, uid, calendar_href}) ? null : detail; !detail && close('event-detail')"></sn-event>
+    <sn-event name="event_removed" resource="monthDays" op="refetch"></sn-event>
+    <sn-event name="event_removed" resource="monthGrid" op="refetch"></sn-event>
+    <sn-event name="calendars_changed" resource="calendars" op="refetch"></sn-event>
+    <sn-event name="calendars_changed" resource="monthGrid" op="refetch"></sn-event>
+  </sn-sync>
+  <main data-layout="stack" data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
+        data-sn-on-calendar-chosen="defaultCal = $event.detail">
+    <div data-layout="stack" data-density="compact" data-grow data-sn-let="{ today: todayIso($now) }">
+      <event-form data-sn-on-event-saved="refresh('weekDays', 'monthGrid', 'monthDays')"
+                  data-sn-on-event-deleted="refresh('weekDays', 'monthGrid', 'monthDays')">
         <div class="cal" data-layout="stack" data-gap="sm" data-pad="sm" data-grow role="application"
              data-sn-on-touchstart="tx = $event.touches[0].clientX; ty = $event.touches[0].clientY"
-             data-sn-on-touchend="swipeStep(tx, ty, $event, view) && emit('cal-step', swipeStep(tx, ty, $event, view))">
+             data-sn-on-touchend="swipeStep(tx, ty, $event, view) && view === 'week' && (weekStart = addDays(weekStart, swipeStep(tx, ty, $event, view))); swipeStep(tx, ty, $event, view) && (gridMonth = view === 'week' ? monthOf(weekStart) : addMonths(gridMonth, swipeStep(tx, ty, $event, view)))">
           <div class="cal-toolbar" data-layout="row" data-gap="sm" data-justify="between">
             <div data-layout="row" data-gap="xs" data-wrap="none">
-              <sn-include src="../partials/nav-toggle.html"></sn-include>
+              <nav-toggle></nav-toggle>
               <template data-sn-if="view === 'month'">
                 <button type="button" data-variant="ghost" data-icon="chevron-left" data-shortcut="p" data-sn-attr="{'aria-label': m.cal_aria_prevMonth()}"
                         data-sn-on-click="gridMonth = addMonths(gridMonth, -1)"></button>
@@ -104,11 +85,9 @@
               </template>
             </div>
             <div data-layout="row" data-gap="sm" data-wrap="none">
-              <div role="group" data-layout="row" data-gap="xs" data-wrap="none" data-sn-attr="{'aria-label': m.cal_aria_view()}">
-                <button type="button" data-variant="outline" data-size="sm" data-sn-attr="{'aria-pressed': view === 'week' ? 'true' : 'false'}"
-                        data-sn-on-click="view = 'week'" data-sn-text="m.cal_view_week()"></button>
-                <button type="button" data-variant="outline" data-size="sm" data-sn-attr="{'aria-pressed': view === 'month' ? 'true' : 'false'}"
-                        data-sn-on-click="view = 'month'" data-sn-text="m.cal_view_month()"></button>
+              <div role="radiogroup" class="view-switch" data-sn-attr="{'aria-label': m.cal_aria_view()}">
+                <label><input type="radio" name="cal-view" value="week" data-sn-model="view" data-sn-persist="calendar-mode"><span data-sn-text="m.cal_view_week()"></span></label>
+                <label><input type="radio" name="cal-view" value="month" data-sn-model="view" data-sn-persist="calendar-mode"><span data-sn-text="m.cal_view_month()"></span></label>
               </div>
               <button type="button" data-variant="outline" data-size="sm" data-shortcut="t" data-sn-text="m.cal_today()"
                       data-sn-on-click="weekStart = mondayOf(today); gridMonth = monthOf(today); $el.closest('.cal')?.querySelector('.pane')?.scrollTo(0, 0)"></button>
@@ -210,7 +189,7 @@
                         <span class="narrow-only day-date" data-muted data-grow data-sn-text="dayLabel(iso, $locale, {month: 'short', day: 'numeric'})"></span>
                       </button>
                       <button type="button" class="day-add" data-variant="ghost" data-size="sm" data-icon="plus" data-sn-attr="{'aria-label': m.event_new()}"
-                              data-sn-on-click="focusDate = iso; eventDraft = newEventDraft(calendars, iso, defaultCal); showModal('event-form')"></button>
+                              data-sn-on-click="focusDate = iso; emit('event-new', newEventDraft(calendars, iso, defaultCal))"></button>
                     </div>
                     <template data-sn-if="!hasDay(weekDays, iso) && !$meta.weekDays.error">
                       <div class="events-placeholder" data-layout="stack" data-gap="xs" aria-hidden="true">
@@ -277,7 +256,7 @@
                       </div>
                     </template>
                   </div>
-                    <month-fit hidden data-sn-prop="{data: monthDays}" data-sn-on-fit="fit = $event.detail"></month-fit>
+                    <month-fit data-sn-prop="{ data: monthDays }" data-sn-on-fit="fit = $event.detail"></month-fit>
                 </div>
               </div>
             </template>
@@ -285,14 +264,14 @@
         </div>
 
         <button type="button" class="cal-new" data-fab data-icon="plus" data-shortcut="c" data-sn-attr="{'aria-label': m.event_new()}"
-                data-sn-on-click="eventDraft = newEventDraft(calendars, focusDate || today, defaultCal); showModal('event-form')"></button>
+                data-sn-on-click="emit('event-new', newEventDraft(calendars, focusDate || today, defaultCal))"></button>
 
         <!-- Day events dialog (month view; was DayEventsDialog.svelte) -->
         <dialog id="day-events" closedby="any" data-layout="stack" data-sn-on-toggle="$el.open && (focusDate = dayDate)">
           <header data-layout="row" data-gap="xs" data-wrap="none">
             <h2 data-grow data-sn-text="dayLabel(dayDate, $locale, {weekday: 'long', month: 'long', day: 'numeric'})"></h2>
             <button type="button" data-variant="ghost" data-icon="plus" data-sn-attr="{'aria-label': m.event_new()}"
-                    data-sn-on-click="close(); focusDate = dayDate; eventDraft = newEventDraft(calendars, dayDate, defaultCal); showModal('event-form')"></button>
+                    data-sn-on-click="close(); focusDate = dayDate; emit('event-new', newEventDraft(calendars, dayDate, defaultCal))"></button>
             <button type="button" commandfor="day-events" command="close" data-sn-attr="{'aria-label': m.cal_month_close()}"></button>
           </header>
           <!-- the wrapper scrolls, so the list keeps its natural height (rows of a scrolling flex list would shrink) -->
@@ -309,13 +288,15 @@
           </div>
         </dialog>
 
-        <event-reminders hidden data-sn-prop="{days: weekDays}"></event-reminders>
+        <event-reminders data-sn-prop="{ days: weekDays }"></event-reminders>
 
-        <sn-include src="../partials/event-detail.html"></sn-include>
-        <sn-include src="../partials/thread-dialog.html"></sn-include>
-        <sn-include src="../partials/event-form.html"></sn-include>
-      </div>
-    </main>
-    <script type="module" src="/src/main/calendar.ts"></script>
-  </body>
-</html>
+        <event-detail data-sn-prop="{ event: detail, threads: true }"
+                      data-sn-on-event-threads="threadRef = threadOfEmail($event.detail.email, $event.detail.event); showModal('thread-dialog')"></event-detail>
+        <thread-dialog data-sn-prop="{ nodes: threadNodes, eventGroups: threadEventGroups, current: threadRef, links: true,
+                                       loading: $meta.threadNodes.loading || $meta.threadEventGroups.loading }"
+                       data-sn-on-event-open="detail = $event.detail; showModal('event-detail')"></thread-dialog>
+      </event-form>
+    </div>
+  </main>
+  <script type="module" src="/src/main/calendar.ts"></script>
+</app-layout>

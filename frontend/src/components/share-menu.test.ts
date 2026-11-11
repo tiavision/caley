@@ -1,14 +1,14 @@
 import { expect, test } from 'vitest';
 import { render, mockRequests } from '@tiaforge-ui/sinter/testing';
 import { m } from '@tiaforge-ui/sinter/messages';
-import { messages } from '../src/test-messages.ts';
-import { contactShare, eventShare, type ShareItem } from '../src/lib/share.ts';
-import shareMenu from './share-menu.html?raw';
+import { messages } from '../test-messages.ts';
+import { contactShare, eventShare, type ShareItem } from '../lib/share.ts';
+import { app } from '../test-components.ts';
 
 const contact = { account_id: 'a1', uid: 'u 1', addressbook_href: '/ab/', fn_name: 'Ada Lovelace', emails: [], phones: [], addresses: [], org: '', has_photo: false };
 
-const page = `<div data-sn-state="{ item: null }" data-sn-let="{ shareItem: item }">
-  <sn-include src="./share-menu.html"></sn-include>
+const page = `<div data-sn-state="{ item: null }">
+  <share-menu data-sn-prop="{ item }"></share-menu>
 </div>`;
 
 function actions(nativeShare: boolean, log: Array<[string, ShareItem]>) {
@@ -25,7 +25,7 @@ function actions(nativeShare: boolean, log: Array<[string, ShareItem]>) {
 async function show(nativeShare: boolean, item: ShareItem) {
   const log: Array<[string, ShareItem]> = [];
   const html = page.replace('<div data-sn-state="{ item: null }"', `<div data-sn-state="{ item: ${JSON.stringify(item).replace(/"/g, "'")} }"`);
-  const r = await render(html, { requests: mockRequests({}), actions: actions(nativeShare, log), messages, files: { './share-menu.html': shareMenu } });
+  const r = await render(html, { requests: mockRequests({}), actions: actions(nativeShare, log), messages, ...app });
   await r.settle();
   return { ...r, log };
 }

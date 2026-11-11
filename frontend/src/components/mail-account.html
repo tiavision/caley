@@ -1,0 +1,181 @@
+<!-- Mail account and identity dialogs #mail-account, #mail-identities (/mail/). They wrap the part of the page that
+     opens them; an opener emits
+       - `account-edit` {acct: AccountForm, ui: AccountUi}: emit('account-edit', {acct: newAccount(), ui: accountUi('basic')});
+       - `identities-open` (an account id): the identities of that account.
+     State: acct, acctUi (AccountUi: the step, the autodiscovery result, whether the advanced settings are open, the
+     error, busy; set with accountUi()); idAccount (the account whose identities are shown), idForm (IdentityForm|null),
+     idError. Resources: accounts, identities, mailboxes. -->
+<template data-sn-component="" data-sn-emits="{ 'account-edit': { acct: AccountForm; ui: AccountUi }; 'identities-open': string }">
+  <div data-sn-state="{
+         acct: newAccount(),
+         acctUi: accountUi('basic'),
+         idAccount: '',
+         idForm: /** @type {IdentityForm|null} */ (null),
+         idError: '',
+       }"
+       data-sn-on-account-edit="acct = $event.detail.acct; acctUi = $event.detail.ui; showModal('mail-account')"
+       data-sn-on-identities-open="idAccount = $event.detail; idForm = null; idError = ''; showModal('mail-identities')">
+    <slot></slot>
+    <dialog id="mail-identities" closedby="any">
+      <header>
+        <h2 data-sn-text="m.mail_identities()"></h2>
+        <button type="button" commandfor="mail-identities" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
+      </header>
+      <template data-sn-if="identities.some(i => i.account_id === idAccount)">
+        <ul data-list>
+          <template data-sn-for="id in identities.filter(i => i.account_id === idAccount)">
+            <li data-layout="row" data-gap="xs" data-wrap="none" data-pad="xs">
+              <span data-layout="row" data-gap="xs" data-wrap="none" data-grow>
+                <strong data-truncate data-sn-text="id.name"></strong>
+                <small data-muted data-truncate data-sn-text="`<${id.email}>`"></small>
+                <template data-sn-if="id.is_default"><span data-badge data-tone="accent" data-sn-text="m.mail_identityDefault()"></span></template>
+              </span>
+              <template data-sn-if="!id.is_default">
+                <button type="button" data-variant="ghost" data-size="sm" data-icon="star" data-tooltip
+                        data-sn-post="/api/email/identity" data-sn-body="identityBody(id, true)" data-sn-then="refresh('identities')"
+                        data-sn-attr="{disabled: !!idForm, 'aria-label': m.mail_identitySetDefault()}"></button>
+              </template>
+              <button type="button" data-variant="ghost" data-size="sm" data-icon="pencil" data-tooltip
+                      data-sn-on-click="idForm = {identity_id: id.identity_id, account_id: id.account_id, name: id.name, email: id.email}; idError = ''"
+                      data-sn-attr="{disabled: !!idForm, 'aria-label': m.mail_update()}"></button>
+              <template data-sn-if="!id.is_default">
+                <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
+                        data-sn-delete="/api/email/identity?identity_id={id.identity_id}"
+                        data-sn-confirm="m.mail_removeIdentityConfirm({name: id.name, email: id.email})"
+                        data-sn-then="refresh('identities')"
+                        data-sn-attr="{disabled: !!idForm, 'aria-label': m.mail_removeAttachment()}"></button>
+              </template>
+            </li>
+          </template>
+        </ul>
+      </template>
+      <template data-sn-if="!idForm">
+        <div data-layout="row">
+          <button type="button" data-variant="link" data-icon="plus"
+                  data-sn-on-click="idForm = {identity_id: null, account_id: idAccount, name: '', email: ''}; idError = ''"
+                  data-sn-text="m.mail_addIdentity()"></button>
+        </div>
+      </template>
+      <template data-sn-else>
+        <form data-layout="stack" data-gap="md"
+              data-sn-post="/api/email/identity" data-sn-body="identityBody(idForm, false)"
+              data-sn-then="refresh('identities'); idForm = null"
+              data-sn-catch="idError = $error.detail ?? m.mail_saveIdentityError()">
+          <label>
+            <span data-sn-text="m.mail_name()"></span>
+            <input required data-sn-model="idForm.name" data-sn-attr="{placeholder: m.mail_namePlaceholder()}">
+          </label>
+          <label>
+            <span data-sn-text="m.mail_emailAddress()"></span>
+            <input type="email" required data-sn-model="idForm.email" data-sn-attr="{placeholder: m.mail_aliasPlaceholder()}">
+          </label>
+          <template data-sn-if="idError"><p data-callout data-tone="danger" role="alert" data-sn-text="idError"></p></template>
+          <footer>
+            <button type="button" data-variant="secondary" data-sn-on-click="idForm = null; idError = ''" data-sn-text="m.mail_cancel()"></button>
+            <button type="submit" data-sn-text="idForm.identity_id ? m.mail_update() : m.mail_add()"></button>
+          </footer>
+        </form>
+      </template>
+    </dialog>
+
+    <dialog id="mail-account" closedby="any">
+      <header>
+        <h2 data-sn-text="acct.account_id ? m.mail_editAccountHeading() : m.mail_addAccountHeading()"></h2>
+        <template data-sn-if="acct.account_id">
+          <a download role="button" data-variant="ghost" data-icon="download" data-tooltip
+             data-sn-attr="{href: `/api/email/export?account_id=${acct.account_id}`, 'aria-label': m.mail_exportAccount()}"></a>
+        </template>
+        <button type="button" commandfor="mail-account" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
+      </header>
+      <template data-sn-if="acctUi.step === 'basic'">
+        <form data-layout="stack" data-gap="md"
+              data-sn-get="/api/email/autodiscover?email={acct.username}"
+              data-sn-on-submit="acctUi.busy = true"
+              data-sn-then="acct = discovered(acct, $result); acctUi = accountUi('details', $result)"
+              data-sn-catch="acct = discovered(acct, null); acctUi = accountUi('details')">
+          <label>
+            <span data-sn-text="m.mail_yourName()"></span>
+            <input required data-sn-model="acct.sender_name" data-sn-attr="{placeholder: m.mail_namePlaceholder()}">
+          </label>
+          <label>
+            <span data-sn-text="m.mail_emailAddress()"></span>
+            <input type="email" required data-sn-model="acct.username" data-sn-attr="{placeholder: m.mail_emailPlaceholder()}">
+          </label>
+          <template data-sn-if="acctUi.busy"><p data-muted aria-busy="true" data-sn-text="m.mail_detectingSettings()"></p></template>
+          <footer>
+            <button type="button" data-variant="ghost" commandfor="mail-account" command="close" data-sn-text="m.mail_cancel()"></button>
+            <button type="submit" data-sn-attr="{disabled: acctUi.busy}" data-sn-text="m.mail_continue()"></button>
+          </footer>
+        </form>
+      </template>
+      <template data-sn-else>
+        <form data-layout="stack" data-gap="md"
+              data-sn-post="/api/email/account" data-sn-body="accountBody(acct)"
+              data-sn-on-submit="acctUi.busy = true; acctUi.error = ''"
+              data-sn-then="close('mail-account'); refresh('accounts', 'identities', 'mailboxes')"
+              data-sn-catch="acctUi.busy = false; acctUi.error = $error.detail ?? m.mail_saveAccountError()">
+          <template data-sn-if="acctUi.discovery?.provider_name">
+            <p data-muted data-sn-text="m.mail_settingsDetected({provider: acctUi.discovery.provider_name})"></p>
+          </template>
+          <template data-sn-else>
+            <template data-sn-if="!acct.account_id"><p data-muted data-sn-text="m.mail_enterServerDetails()"></p></template>
+          </template>
+          <label>
+            <span data-sn-text="m.mail_password()"></span>
+            <input type="password" autocomplete="current-password" data-sn-model="acct.password"
+                   data-sn-attr="{placeholder: acct.account_id ? m.mail_passwordPlaceholderKeep() : ''}">
+          </label>
+          <details data-sn-attr="{open: acctUi.advanced}" data-sn-on-toggle="acctUi.advanced = $el.open">
+            <summary data-sn-text="m.mail_advancedSettings()"></summary>
+            <div data-layout="stack" data-gap="md">
+              <label>
+                <span data-sn-text="m.mail_displayName()"></span>
+                <input data-sn-model="acct.display_name" data-sn-attr="{placeholder: m.mail_displayNamePlaceholder()}">
+              </label>
+              <label>
+                <span data-sn-text="m.mail_usernameEmail()"></span>
+                <input data-sn-model="acct.username" data-sn-attr="{placeholder: m.mail_emailPlaceholder()}">
+              </label>
+              <div class="server-fields" data-layout="grid" data-gap="sm">
+                <label>
+                  <span data-sn-text="m.mail_imapHost()"></span>
+                  <input required data-sn-model="acct.host" data-sn-attr="{placeholder: m.mail_imapHostPlaceholder()}">
+                </label>
+                <label>
+                  <span data-sn-text="m.mail_imapPort()"></span>
+                  <input type="number" required data-sn-model="acct.port">
+                </label>
+              </div>
+              <label><input type="checkbox" data-sn-model="acct.use_tls"> <span data-sn-text="m.mail_useTls()"></span></label>
+              <div class="server-fields" data-layout="grid" data-gap="sm">
+                <label>
+                  <span data-sn-text="m.mail_smtpHost()"></span>
+                  <input data-sn-model="acct.smtp_host" data-sn-attr="{placeholder: m.mail_smtpHostPlaceholder()}">
+                </label>
+                <label>
+                  <span data-sn-text="m.mail_smtpPort()"></span>
+                  <input type="number" data-sn-model="acct.smtp_port">
+                </label>
+              </div>
+            </div>
+          </details>
+          <template data-sn-if="acctUi.error"><p data-callout data-tone="danger" role="alert" data-sn-text="acctUi.error"></p></template>
+          <footer>
+            <template data-sn-if="!acct.account_id">
+              <button type="button" data-variant="secondary" data-sn-on-click="acctUi.step = 'basic'; acctUi.error = ''" data-sn-text="m.mail_back()"></button>
+            </template>
+            <template data-sn-else>
+              <button type="button" data-variant="ghost" commandfor="mail-account" command="close" data-sn-text="m.mail_cancel()"></button>
+            </template>
+            <button type="submit" data-sn-attr="{disabled: acctUi.busy}" data-sn-text="acctUi.busy ? m.mail_testingConnection() : m.mail_save()"></button>
+          </footer>
+        </form>
+      </template>
+    </dialog>
+  </div>
+</template>
+
+<!-- The root only holds the dialog's state and handlers: it takes no part in the layout. -->
+<style>
+  :scope { display: contents; }
+</style>

@@ -1,0 +1,112 @@
+<!-- ICS import dialog (#import-ics): preview the file's events, import them into a calendar or a new one.
+     It wraps the part of the page that opens it: an opener emits `ics-import` with a fresh draft (helper
+     importDraft, src/lib/import.ts; `file`/`ctx` for an attachment from mail, else null):
+       <button data-sn-on-click="emit('ics-import', importDraft(caldavAccounts, defaultCal, null, null))">
+     The page declares the `caldavAccounts` resource (GET /api/caldav/accounts, items="accounts", key="account_id",
+     type="CalDavAccountJson[]"), refetched on `calendars_changed`; the dialog refreshes it after an import.
+     It emits `ics-imported` with the ImportResult (`calendar` is calendarValue() of where it went), e.g. for the
+     remembered calendar: data-sn-on-ics-imported="$event.detail.errors === 0 && (defaultCal = $event.detail.calendar)".
+     It closes itself 1.5 s after an import without errors (<close-after>). The content stays while the dialog is
+     closed; closing resets the form, which empties the file input, the one control no binding sets. -->
+<template data-sn-component="" data-sn-emits="{ 'ics-import': ImportDraft; 'ics-imported': ImportResult }">
+  <div data-sn-state="{ imp: /** @type {ImportDraft|null} */ (null) }"
+       data-sn-on-ics-import="imp = $event.detail; showModal('import-ics')">
+    <slot></slot>
+    <dialog id="import-ics" closedby="any" aria-labelledby="import-ics-title" data-sn-on-close="imp = null; $el.querySelector('form').reset()">
+      <header>
+        <h2 id="import-ics-title" data-sn-text="m.cal_import()"></h2>
+        <button type="button" commandfor="import-ics" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
+      </header>
+      <template data-sn-if="imp.error">
+        <div data-callout data-tone="danger" role="alert" data-sn-text="imp.error"></div>
+      </template>
+      <template data-sn-if="imp.success">
+        <div data-callout data-tone="success" role="status" data-sn-text="imp.success"></div>
+      </template>
+      <template data-sn-if="imp.done">
+        <close-after data-sn-prop="{ ms: 1500 }"></close-after>
+      </template>
+
+      <form data-layout="stack" data-gap="md"
+            data-sn-call="ics.run(imp)"
+            data-sn-on-submit="imp.error = ''; imp.success = ''"
+            data-sn-then="imp.success = importSummary($result); imp.done = $result.errors === 0; emit('ics-imported', $result); refresh('caldavAccounts')"
+            data-sn-catch="imp.error = $error.status ? ($error.detail ?? m.cal_importError()) : m.cal_importError(); refresh('caldavAccounts')">
+        <label>
+          <span data-sn-text="m.cal_importFile()"></span>
+          <input type="file" accept=".ics,.ical,text/calendar" data-sn-attr="{required: !imp.file}"
+                 data-sn-on-change="imp.file = $el.files[0] ?? null; imp.preview = []; imp.error = ''; imp.success = ''">
+        </label>
+
+        <template data-sn-if="imp.file">
+          <div data-layout="row" data-gap="sm" data-wrap="none">
+            <small data-muted data-truncate data-grow data-sn-text="imp.file.name"></small>
+            <button type="button" data-variant="secondary" data-size="sm" data-sn-text="m.cal_importPreview()"
+                    data-sn-call="ics.preview(imp.file)" data-sn-concurrency="block"
+                    data-sn-on-click="imp.error = ''; imp.success = ''; imp.preview = []"
+                    data-sn-then="imp.preview = $result"
+                    data-sn-catch="imp.error = $error.status ? ($error.detail ?? m.cal_importPreviewError()) : m.cal_importPreviewError()"></button>
+          </div>
+        </template>
+
+        <template data-sn-if="imp.preview.length > 0">
+          <section data-layout="stack" data-gap="sm" aria-live="polite">
+            <h3 data-sn-text="m.cal_importPreviewHeading()"></h3>
+            <ul data-list>
+              <template data-sn-for="event in imp.preview" data-sn-key="event.uid">
+                <li data-layout="stack" data-gap="none">
+                  <strong data-sn-text="event.summary || m.cal_importUntitledEvent()"></strong>
+                  <small data-muted data-sn-text="importEventDate(event)"></small>
+                  <template data-sn-if="event.location"><small data-muted data-sn-text="event.location"></small></template>
+                </li>
+              </template>
+            </ul>
+          </section>
+        </template>
+
+        <label>
+          <span data-sn-text="m.cal_importCalendar()"></span>
+          <select data-sn-model="imp.target"
+                  data-sn-on-change="imp.target === '__new__' && (imp.accountId = caldavAccounts[0]?.account_id ?? '')">
+            <template data-sn-for="account in caldavAccounts">
+              <optgroup data-sn-attr="{label: account.display_name}">
+                <template data-sn-for="cal in account.calendars">
+                  <option data-sn-attr="{value: calendarValue(cal)}" data-sn-text="cal.name"></option>
+                </template>
+              </optgroup>
+            </template>
+            <option disabled>─────</option>
+            <option value="__new__" data-sn-text="m.cal_importNewCalendar()"></option>
+          </select>
+        </label>
+
+        <template data-sn-if="imp.target === '__new__'">
+          <template data-sn-if="caldavAccounts.length > 1">
+            <label>
+              <span data-sn-text="m.cal_createAccount()"></span>
+              <select data-sn-model="imp.accountId">
+                <template data-sn-for="account in caldavAccounts">
+                  <option data-sn-attr="{value: account.account_id}" data-sn-text="account.display_name"></option>
+                </template>
+              </select>
+            </label>
+          </template>
+          <label>
+            <span data-sn-text="m.cal_importNewCalendarName()"></span>
+            <input type="text" required data-sn-model="imp.newName">
+          </label>
+        </template>
+
+        <footer>
+          <button type="button" data-variant="ghost" commandfor="import-ics" command="close" data-sn-text="m.event_cancel()"></button>
+          <button type="submit" data-sn-text="m.cal_importSubmit()"></button>
+        </footer>
+      </form>
+    </dialog>
+  </div>
+</template>
+
+<!-- The root only holds the dialog's state and handlers: it takes no part in the layout. -->
+<style>
+  :scope { display: contents; }
+</style>

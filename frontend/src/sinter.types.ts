@@ -27,19 +27,19 @@ export interface ContactRemovedEvent {
   addressbook_href: string;
 }
 
-// Event partials, search and calendar pages.
+// Event components, search and calendar pages.
 export type { EventJson, CalendarJson, CalDavAccountJson, SourceEmailJson, MessageEventGroupJson } from './types/calendar.ts';
 export type { EventDraft } from './lib/events.ts';
 export type { ThreadRef, ThreadResponse } from './lib/thread.ts';
 
 // Settings page, import dialog and encryption tab (CalDavAccountJson is exported with the event types above).
-export type { ImportDraft } from './lib/import.ts';
+export type { ImportDraft, ImportResult } from './lib/import.ts';
 export type { VaultView } from './lib/pgp/vault-steps.ts';
 export type { StoredPublicKey } from './lib/pgp/public-keys.ts';
 
 export type { AccountDraft } from './lib/settings.ts';
 
-// Mail pages (mail/, mail/view/, partials/mail-*.html).
+// Mail pages (mail/, mail/view/, src/components/mail-*.html).
 export type {
   Account, Identity, Mailbox, VirtualFolder, Message, Attachment, MessageRef, MailView, UnreadCounts,
   MailboxEvent, AccountEvent, EmailUpdatedEvent, EmailRemovedEvent, SearchFilter, ComposeDraft, ComposeKeys,
@@ -52,7 +52,7 @@ export type { ThreadNode as MailThreadNode } from './lib/mail.ts';
 // Calendar page and thread dialog.
 export type { DayEventsJson, MonthGridJson } from './types/calendar.ts';
 export type { ThreadNode } from './lib/MailTypes.ts';
-export type { MonthFit } from './islands/calendar.ts';
+export type { MonthFit } from './components/month-fit.ts';
 
 /** event_removed on /api/events/stream. */
 export interface EventRemovedEvent {

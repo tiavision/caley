@@ -1,4 +1,4 @@
-// `mail` actions (mail/index.html, mail/view/index.html, partials/mail-*.html): the mail page's imperative work —
+// `mail` actions (mail/index.html, mail/view/index.html, src/components/mail-*.html): the mail page's imperative work —
 // MIME parsing, OpenPGP, the vault, building and sending raw MIME, sequential bulk requests, opening a window.
 // Each returns data; the markup puts it where it belongs (data-sn-then, <sn-resource call>).
 import type { CallContext } from '@tiaforge-ui/sinter';
@@ -32,7 +32,7 @@ function fetchMessage(ref: MessageRef, ctx: CallContext, fresh: boolean): Promis
   return lastFetch.message;
 }
 
-/** The full message, fetched again (body() shares the fetch). The reader marks it read (partials/mail-reader-data.html). */
+/** The full message, fetched again (body() shares the fetch). The reader marks it read (src/components/mail-reader-data.html). */
 export function open(ref: MessageRef, ctx: CallContext): Promise<Message> {
   return fetchMessage(ref, ctx, true);
 }
@@ -232,7 +232,7 @@ export async function importKey(msg: MessageRef, filename: string): Promise<stri
   }
 }
 
-/** A calendar attachment as a File, for the import dialog (partials/import-dialog.html). */
+/** A calendar attachment as a File, for the import dialog (src/components/import-dialog.html). */
 export async function icsFile(msg: MessageRef, filename: string, contentType: string): Promise<File> {
   try {
     const data = decryptedData.get(filename) ?? await bytes(attachmentUrl(msg, filename));

@@ -1,4 +1,4 @@
-// `pgpVault` actions: the synced OpenPGP private-key vault of the settings page (partials/pgp-settings.html).
+// `pgpVault` actions: the synced OpenPGP private-key vault of the settings page (src/components/pgp-settings.html).
 // Each one loads the steps (src/lib/pgp/vault-steps.ts, with openpgp) on first use and runs one there, so the
 // settings page renders without openpgp; a failed load rejects with pgp_loadError (src/lib/pgp/load.ts).
 import { lazyModule } from '../lib/pgp/load.ts';

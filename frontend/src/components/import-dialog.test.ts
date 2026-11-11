@@ -1,21 +1,21 @@
 import { expect, test } from 'vitest';
 import { render, mockRequests } from '@tiaforge-ui/sinter/testing';
 import { m } from '@tiaforge-ui/sinter/messages';
-import { messages } from '../src/test-messages.ts';
-import { calendarValue, importEventDate, importDraft, importSummary } from '../src/lib/import.ts';
-import * as ics from '../src/actions/ics.ts';
-import '../src/islands/common.ts';                 // <close-after>
-import importDialog from './import-dialog.html?raw';
+import { messages } from '../test-messages.ts';
+import { calendarValue, importEventDate, importDraft, importSummary } from '../lib/import.ts';
+import * as ics from '../actions/ics.ts';
+import { app, scripts } from '../test-components.ts';
 
 // The dialog as mail uses it: a calendar attachment opens it with the file already set (ics.draft from an action),
 // a plain button with an empty draft.
 const page = `
-<body data-sn-state="{ imp: /** @type {ImportDraft|null} */ (null) }">
+<body>
   <sn-resource name="caldavAccounts" src="/api/caldav/accounts" items="accounts" key="account_id" type="CalDavAccountJson[]"></sn-resource>
   <main data-sn-state="{ defaultCal: '' }">
-    <button type="button" id="attachment" data-sn-call="attachment.open(caldavAccounts)" data-sn-then="imp = $result; showModal('import-ics')">Attachment</button>
-    <button type="button" id="plain" data-sn-on-click="imp = importDraft(caldavAccounts, defaultCal, null, null); showModal('import-ics')">Plain</button>
-    <sn-include src="./import-dialog.html"></sn-include>
+    <import-dialog>
+      <button type="button" id="attachment" data-sn-call="attachment.open(caldavAccounts)" data-sn-then="emit('ics-import', $result)">Attachment</button>
+      <button type="button" id="plain" data-sn-on-click="emit('ics-import', importDraft(caldavAccounts, defaultCal, null, null))">Plain</button>
+    </import-dialog>
   </main>
 </body>`;
 
@@ -36,7 +36,7 @@ async function show() {
     ics,
     attachment: { open: (a: typeof accounts) => ics.draft(a as never, new File(['x'], 'invite.ics'), { account_id: 'mail', mailbox: 'INBOX', uid: 7 }) },
   };
-  const r = await render(page, { requests, actions, helpers: { calendarValue, importEventDate, importDraft, importSummary }, messages, files: { './import-dialog.html': importDialog } });
+  const r = await render(page, { requests, actions, helpers: { calendarValue, importEventDate, importDraft, importSummary }, messages, ...app, scripts: { 'close-after': scripts['close-after'] } });
   await r.settle();
   return { ...r, requests };
 }
@@ -55,7 +55,6 @@ test('an attachment opens it with the file set; after an import it closes and re
   await settle();
   expect(String(requests.calls.at(-2)!.body)).toContain('name="email_uid"');
   expect(dialog.querySelector('[role=status]')!.textContent).toBe(m.cal_importSuccess({ n: 3 }));
-  expect(dialog.querySelector('close-after')).not.toBeNull();
   await new Promise((resolve) => setTimeout(resolve, 1600));
   expect(dialog.open).toBe(false);
 
@@ -63,12 +62,11 @@ test('an attachment opens it with the file set; after an import it closes and re
   await settle();
   expect(dialog.open).toBe(true);
   expect(dialog.querySelector('[role=status]')).toBeNull();
-  expect(dialog.querySelector('close-after')).toBeNull();
   expect(dialog.querySelector('small[data-truncate]')).toBeNull();
   expect(input.required).toBe(true);
   expect(dialog.querySelector<HTMLSelectElement>('select')!.value).toBe('acc\0/cal/work/');
   await new Promise((resolve) => setTimeout(resolve, 1600));
-  expect(dialog.open).toBe(true);                             // the old <close-after> is gone
+  expect(dialog.open).toBe(true);                             // the old <close-after> is gone: no timer closes it
 
   // and once more from the attachment: the file is back
   dialog.close();

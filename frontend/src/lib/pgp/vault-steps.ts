@@ -1,4 +1,4 @@
-// The steps of the `pgpVault` actions (src/actions/pgp-vault.ts loads this module, with openpgp, on first use): the synced OpenPGP private-key vault of the settings page (partials/pgp-settings.html).
+// The steps of the `pgpVault` actions (src/actions/pgp-vault.ts loads this module, with openpgp, on first use): the synced OpenPGP private-key vault of the settings page (src/components/pgp-settings.html).
 // WebAuthn (PRF) and the vault crypto are src/lib/pgp/*; this module runs one user step each and returns a
 // VaultView, which the page upserts into its `vault` resource. Private keys and the vault key never leave
 // this browser and never enter sinter state: they live in src/lib/pgp/session.ts (unlocked keys) and here

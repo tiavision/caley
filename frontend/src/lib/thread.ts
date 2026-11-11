@@ -1,4 +1,4 @@
-// Pure helpers for partials/thread-dialog.html: the conversation of a message as indented rows, with the
+// Pure helpers for src/components/thread-dialog.html: the conversation of a message as indented rows, with the
 // calendar events imported from each message under it. Exported to templates through src/sinter.helpers.ts.
 import type { EventJson, MessageEventGroupJson } from '../types/calendar.ts';
 import type { ThreadNode, ThreadTreeNode } from './MailTypes.ts';

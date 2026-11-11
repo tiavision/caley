@@ -1,4 +1,4 @@
-// `ics` actions: the ICS import dialog (partials/import-dialog.html) reads the chosen file and posts it.
+// `ics` actions: the ICS import dialog (src/components/import-dialog.html) reads the chosen file and posts it.
 // The remembered calendar is page state (`defaultCal`, persisted), not handled here.
 import type { CallContext } from '@tiaforge-ui/sinter';
 import type { CalDavAccountJson, CalendarJson } from '../types/calendar.ts';

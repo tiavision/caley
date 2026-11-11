@@ -1,0 +1,18 @@
+<!-- The document of the app pages with the navigation rail (/calendar/, /contacts/, /mail/, /search/, /settings/):
+     the head, the fixed shell, the `user` resource and the rail (src/components/app-nav.html). A page is this tag:
+       <app-layout data-sn-prop="{ here: '/mail/', title: mailTitle(unread) }" data-sn-state="{ … }" data-sn-on-…>
+         …resources, <main>, <script type="module" src="/src/main/<page>.ts"></script>
+       </app-layout>
+     `here` marks the page's rail item. The page reads `user` (map_url, …) and never declares it again. -->
+<!doctype html>
+<html lang="en" data-sn-layout="{ here: string; title?: string }">
+<head>
+  <app-head data-sn-prop="{ title }"></app-head>
+  <slot name="head"></slot>
+</head>
+<body data-shell="fixed">
+  <sn-resource name="user" src="/api/user" type="User"></sn-resource>
+  <app-nav data-sn-prop="{ here }"></app-nav>
+  <slot></slot>
+</body>
+</html>

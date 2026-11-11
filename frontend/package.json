@@ -18,7 +18,7 @@
     "inspect": "vite build && node scripts/inspect.mjs"
   },
   "dependencies": {
-    "@tiaforge-ui/sinter": "^0.13.1",
+    "@tiaforge-ui/sinter": "^0.14.0",
     "@tiaforge-ui/temper": "^0.1.9",
     "dompurify": "^3.4.17",
     "openpgp": "^6.3.1"

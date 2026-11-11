@@ -5,16 +5,9 @@ import { render, mockRequests, mockStream, memoryStorage, type RouteResponse } f
 import * as helpers from '../src/sinter.helpers.ts';
 import '../src/islands/common.ts';                 // data-shortcut keys
 import { threadRows } from '../src/lib/thread.ts';
-import nav from '../partials/nav.html?raw';
-import navToggle from '../partials/nav-toggle.html?raw';
-import shareMenu from '../partials/share-menu.html?raw';
-import eventDetail from '../partials/event-detail.html?raw';
-import eventForm from '../partials/event-form.html?raw';
-import threadDialog from '../partials/thread-dialog.html?raw';
-import source from './index.html?raw';
+import page from './index.html?raw';
+import { app } from '../src/test-components.ts';
 
-// The test page lives at the root of sinter's virtual project: its partials sit next to it.
-const page = source.replaceAll('../partials/', './');
 const NOW = new Date(2026, 10, 11, 12, 0); // Wednesday, Nov 11 2026
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
@@ -45,10 +38,6 @@ if (!HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.close = function () { if (!this.open) return; this.open = false; this.dispatchEvent(new Event('toggle')); this.dispatchEvent(new Event('close')); };
 }
 if (!HTMLElement.prototype.hidePopover) HTMLElement.prototype.hidePopover = function () {};
-// The islands (src/islands/calendar.ts) measure layout and run timers; jsdom gets inert stand-ins.
-for (const name of ['month-fit', 'event-reminders']) {
-  if (!customElements.get(name)) customElements.define(name, class extends HTMLElement { set data(_: unknown) {} set days(_: unknown) {} });
-}
 
 beforeEach(() => configure({ confirm: () => true, urlSchemes: ['geo:'] }));
 afterEach(() => configure({ confirm: null as never, urlSchemes: [] }));
@@ -74,9 +63,8 @@ async function show(routes: Record<string, RouteResponse> = {}, storage = memory
     share: { native: () => false, send: async () => {}, download: async () => {}, email: async () => {} },
     maps: { open: async () => {} },
   };
-  const r = await render(page, {
+  const r = await render(page, { ...app,
     messages, requests, actions, helpers, now: NOW, storage, locale: 'en', streams: { '/api/events/stream': stream },
-    files: { './nav.html': nav, './nav-toggle.html': navToggle, './share-menu.html': shareMenu, './event-detail.html': eventDetail, './event-form.html': eventForm, './thread-dialog.html': threadDialog },
   });
   await r.settle();
   return { ...r, requests, stream, storage };
@@ -131,7 +119,7 @@ test('Shift+N/P move four weeks with the focus in the week grid; the arrows stay
 
 test('the month view shows the month grid, and is remembered across reloads', async () => {
   const first = await show();
-  [...first.root.querySelectorAll<HTMLButtonElement>('button[aria-pressed]')].find((b) => b.textContent === 'Month')!.click();
+  first.root.querySelector<HTMLInputElement>('input[name=cal-view][value=month]')!.click();
   await first.settle();
   expect(range(first.root)).toBe('November 2026');
   expect(first.root.querySelectorAll('.month-cell')).toHaveLength(42);
@@ -141,7 +129,7 @@ test('the month view shows the month grid, and is remembered across reloads', as
   const second = await show({}, first.storage);
   expect(range(second.root)).toBe('November 2026');
   expect(second.root.querySelectorAll('.month-cell')).toHaveLength(42);
-  expect([...second.root.querySelectorAll<HTMLButtonElement>('button[aria-pressed=true]')].map((b) => b.textContent)).toContain('Month');
+  expect(second.root.querySelector<HTMLInputElement>('input[name=cal-view]:checked')!.value).toBe('month');
 });
 
 test('a first visit starts in the week view', async () => {
@@ -212,4 +200,12 @@ test('threadRows: replies indent under their parent, imported events under their
   const n = (uid: number, id: string, parent: string | null) => ({ uid, account_id: 'm', mailbox: 'I', message_id: id, parent_message_id: parent, from: null, subject: null, sent_at: null, is_read: true });
   const rows = threadRows([n(1, 'a', null), n(2, 'b', 'a'), n(3, 'c', 'b')], [], { account_id: 'm', mailbox: 'I', uid: 2, current: true });
   expect(rows.map((r) => [r.node!.uid, r.depth, r.current])).toEqual([[1, 0, false], [2, 1, true], [3, 2, false]]);
+});
+
+test('a view saved by the old page (its whole <html> state, under calendar-view) is left alone: the week view', async () => {
+  const storage = memoryStorage();
+  storage.setItem('sn:calendar-view', JSON.stringify({ view: 'month' }));
+  const { root } = await show({}, storage);
+  expect(root.querySelector<HTMLInputElement>('input[name=cal-view]:checked')!.value).toBe('week');
+  expect(root.querySelectorAll('.month-cell')).toHaveLength(0);
 });

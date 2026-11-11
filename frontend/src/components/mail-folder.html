@@ -1,0 +1,55 @@
+<!-- Virtual folder dialog #mail-folder (/mail/): create or edit. It wraps the part of the page that opens it; an
+     opener emits `folder-edit` with the draft: emit('folder-edit', folderDraft(f)) (null for a new folder).
+     Resources: accounts, mailboxes, folders. -->
+<template data-sn-component="" data-sn-emits="{ 'folder-edit': FolderDraft }">
+  <div data-sn-state="{ draft: folderDraft(null) }"
+       data-sn-on-folder-edit="draft = $event.detail; showModal('mail-folder')">
+    <slot></slot>
+    <dialog id="mail-folder" closedby="any">
+      <header>
+        <h2 data-sn-text="draft.folder_id ? m.mail_editVirtualFolder() : m.mail_createVirtualFolder()"></h2>
+        <button type="button" commandfor="mail-folder" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
+      </header>
+      <form data-layout="stack" data-gap="md"
+            data-sn-call="mail.saveFolder(draft)"
+            data-sn-then="close('mail-folder'); refresh('folders')"
+            data-sn-catch="refresh('folders')">
+        <label>
+          <span data-sn-text="m.mail_name()"></span>
+          <input data-sn-model="draft.name" data-sn-attr="{placeholder: m.mail_folderNamePlaceholder()}">
+        </label>
+        <fieldset data-layout="stack" data-gap="xs">
+          <legend data-sn-text="m.mail_mailboxesToInclude()"></legend>
+          <div class="folder-mailbox-list" data-layout="stack" data-gap="sm" data-pad="sm" data-scroll="y">
+            <template data-sn-for="acc in accounts.filter(a => subscribed(mailboxes, a.account_id).length > 0)">
+              <div data-layout="stack" data-gap="xs">
+                <span data-caption data-sn-text="acc.display_name"></span>
+                <template data-sn-for="mb in subscribed(mailboxes, acc.account_id)">
+                  <label>
+                    <input type="checkbox" data-sn-attr="{value: `${acc.account_id}::${mb.name}`}" data-sn-model="draft.boxes">
+                    <span data-sn-text="folderName(mb.name)"></span>
+                  </label>
+                </template>
+              </div>
+            </template>
+            <template data-sn-if="accounts.length === 0"><p data-muted data-sn-text="m.mail_noEmailAccounts()"></p></template>
+          </div>
+          <small data-muted data-sn-text="m.mail_allMailboxesHint()"></small>
+        </fieldset>
+        <div data-layout="stack" data-gap="xs">
+          <label><input type="checkbox" data-sn-model="draft.only_flagged"> <span data-sn-text="m.mail_onlyFlagged()"></span></label>
+          <label><input type="checkbox" data-sn-model="draft.only_attachments"> <span data-sn-text="m.mail_onlyWithAttachments()"></span></label>
+        </div>
+        <footer>
+          <button type="button" data-variant="ghost" commandfor="mail-folder" command="close" data-sn-text="m.mail_cancel()"></button>
+          <button type="submit" data-sn-text="draft.folder_id ? m.mail_save() : m.mail_create()"></button>
+        </footer>
+      </form>
+    </dialog>
+  </div>
+</template>
+
+<!-- The root only holds the dialog's state and handlers: it takes no part in the layout. -->
+<style>
+  :scope { display: contents; }
+</style>

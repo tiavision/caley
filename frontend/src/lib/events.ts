@@ -1,4 +1,4 @@
-// Pure helpers for the event partials (partials/event-detail.html, partials/event-form.html) and the
+// Pure helpers for the event components (src/components/event-detail.html, event-form.html) and the
 // calendar and search pages. Exported to templates through src/sinter.helpers.ts; nothing here touches
 // the DOM, storage or the network.
 import { m } from '@tiaforge-ui/sinter/messages';
@@ -9,7 +9,7 @@ import { dateFromEventValue, localDateIso } from './format.ts';
 
 // ── Calendars ───────────────────────────────────────────────────────────────
 
-/** The "Create calendar" dialog (partials/create-calendar-dialog.html). */
+/** The "Create calendar" dialog (src/components/create-calendar-dialog.html). */
 export interface CalendarDraft { name: string; account_id: string; color: string; useColor: boolean }
 
 /** An empty draft in the first account. */
@@ -85,7 +85,7 @@ export function eventDateLong(dtstart: string, locale: string): string {
 
 // ── Event form ──────────────────────────────────────────────────────────────
 
-/** The recurrence builder's fields (partials/event-form.html). */
+/** The recurrence builder's fields (src/components/event-form.html). */
 export interface RecurrenceDraft {
   freq: string;
   interval: number | null;
@@ -99,7 +99,7 @@ export interface RecurrenceDraft {
   until: string;
 }
 
-/** What partials/event-form.html edits; eventFormBody() turns it into the POST /api/event form. */
+/** What src/components/event-form.html edits; eventFormBody() turns it into the POST /api/event form. */
 export interface EventDraft {
   mode: 'create' | 'edit';
   scope: 'series' | 'this_instance';

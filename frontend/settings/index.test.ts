@@ -8,23 +8,11 @@ import { newCalendarDraft, newCalendarBody } from '../src/lib/events.ts';
 import { m } from '@tiaforge-ui/sinter/messages';
 import { messages } from '../src/test-messages.ts';
 import * as ics from '../src/actions/ics.ts';
-import '../src/islands/common.ts';                 // <close-after>
-import nav from '../partials/nav.html?raw';
-import navToggle from '../partials/nav-toggle.html?raw';
-import createCalendar from '../partials/create-calendar-dialog.html?raw';
-import importDialog from '../partials/import-dialog.html?raw';
-import pgpSettings from '../partials/pgp-settings.html?raw';
-import source from './index.html?raw';
+import page from './index.html?raw';
+import { app, scripts } from '../src/test-components.ts';
 import type { VaultView } from '../src/actions/pgp-vault.ts';
 
-// The test page lives at the root of sinter's virtual project: its partials sit next to it.
-const page = source.replaceAll('../partials/', './');
-const files = {
-  './nav.html': nav, './nav-toggle.html': navToggle, './create-calendar-dialog.html': createCalendar,
-  './import-dialog.html': importDialog, './pgp-settings.html': pgpSettings,
-};
-
-// The helpers the page and its partials use (not the whole helpers module: other pages' helpers load more).
+// The helpers the page and its components use (not the whole helpers module: other pages' helpers load more).
 const helpers = { calendarValue, importEventDate, importDraft, importSummary, newCalendarDraft, newCalendarBody, caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText };
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
@@ -123,7 +111,7 @@ async function show(routes: Record<string, RouteResponse> = {}, vault: VaultView
     pgpVault: pgp.ns,
     pgpKeys: { keyFile, importPublic: async (armored: string) => ({ fingerprint: 'FFFF', email: armored, armored, is_own: false, source: 'imported', trust: 'trusted' }) },
   };
-  const r = await render(page, { messages, requests, actions, helpers, files, storage, streams: { '/api/events/stream': stream } });
+  const r = await render(page, { ...app, scripts: { 'close-after': scripts['close-after'] }, messages, requests, actions, helpers, storage, streams: { '/api/events/stream': stream } });
   await r.settle();
   return { ...r, requests, stream, pgp };
 }

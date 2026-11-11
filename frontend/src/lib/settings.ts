@@ -1,4 +1,4 @@
-// Settings page helpers (settings/index.html, partials/pgp-settings.html): pure, exported to templates through
+// Settings page helpers (settings/index.html, src/components/pgp-settings.html): pure, exported to templates through
 // src/sinter.helpers.ts.
 import { m } from '@tiaforge-ui/sinter/messages';
 import type { CalDavAccountJson } from '../types/calendar.ts';

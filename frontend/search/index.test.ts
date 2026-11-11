@@ -3,15 +3,9 @@ import { configure } from '@tiaforge-ui/sinter';
 import { messages } from '../src/test-messages.ts';
 import { render, mockRequests, mockStream, type RouteResponse } from '@tiaforge-ui/sinter/testing';
 import * as helpers from '../src/sinter.helpers.ts';
-import nav from '../partials/nav.html?raw';
-import navToggle from '../partials/nav-toggle.html?raw';
-import shareMenu from '../partials/share-menu.html?raw';
-import eventDetail from '../partials/event-detail.html?raw';
-import eventForm from '../partials/event-form.html?raw';
-import source from './index.html?raw';
+import page from './index.html?raw';
+import { app } from '../src/test-components.ts';
 
-// The test page lives at the root of sinter's virtual project: its partials sit next to it.
-const page = source.replaceAll('../partials/', './');
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
 const cal = (href: string, name: string, is_active = true) => ({ account_id: 'acc', href: `/cal/${href}/`, name, color: '#3a3', is_active });
@@ -53,9 +47,8 @@ async function show(routes: Record<string, RouteResponse> = {}, url?: string) {
     share: { native: () => false, send: async () => {}, download: async () => {}, email: async () => {} },
     maps: { open: async () => {} },
   };
-  const r = await render(page, {
+  const r = await render(page, { ...app,
     messages, requests, actions, helpers, streams: { '/api/events/stream': mockStream() }, url,
-    files: { './nav.html': nav, './nav-toggle.html': navToggle, './share-menu.html': shareMenu, './event-detail.html': eventDetail, './event-form.html': eventForm },
   });
   await r.settle();
   return { ...r, requests };

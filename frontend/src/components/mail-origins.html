@@ -1,0 +1,90 @@
+<!-- Image sources dialog #mail-origins (/mail/ and /mail/view/): the allowed and ignored image origins, or with
+     `only` those of the open message (blocked ones too). It wraps the part of the page that opens it; an opener emits
+     `origins-open` with whether to show only the open message's: emit('origins-open', true).
+     Resources: body, allowedOrigins, ignoredOrigins. -->
+<template data-sn-component="" data-sn-emits="{ 'origins-open': boolean }">
+  <div data-sn-state="{ only: false, q: '' }"
+       data-sn-on-origins-open="only = $event.detail; q = ''; showModal('mail-origins')">
+    <slot></slot>
+    <dialog id="mail-origins" closedby="any"
+            data-sn-let="{
+              allowed: allowedOrigins?.origins ?? [],
+              ignored: ignoredOrigins?.origins ?? [],
+              inMail: bodyOrigins(body?.origins ?? [], allowed, ignored),
+            }">
+      <header>
+        <h2 data-sn-text="only ? m.mail_imageSourcesThisEmail() : m.mail_imageSources()"></h2>
+        <button type="button" commandfor="mail-origins" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
+      </header>
+      <input type="search" data-sn-model="q" data-sn-attr="{placeholder: m.mail_originsFilter(), 'aria-label': m.mail_originsFilter()}">
+      <template data-sn-if="only">
+        <section data-layout="stack" data-gap="xs" data-sn-let="{ shownOrigins: matching(inMail.blocked, q) }">
+          <h3 data-caption data-sn-text="m.mail_originsBlocked()"></h3>
+          <template data-sn-if="shownOrigins.length === 0">
+            <p data-muted data-sn-text="q ? m.mail_originsNoMatches() : m.mail_originsNoneBlockedEmail()"></p>
+          </template>
+          <template data-sn-else>
+            <ul data-list>
+              <template data-sn-for="origin in shownOrigins" data-sn-key="origin">
+                <li data-layout="row" data-gap="sm" data-wrap="none" data-pad="xs">
+                  <span data-truncate data-grow data-sn-text="origin"></span>
+                  <button type="button" data-variant="outline" data-tone="accent" data-size="sm"
+                          data-sn-post="/api/email/image-origins" data-sn-body="{origin}" data-sn-then="refresh('allowedOrigins')"
+                          data-sn-text="m.mail_originsAllow()"></button>
+                  <button type="button" data-variant="ghost" data-size="sm" data-icon="ban" data-tooltip
+                          data-sn-post="/api/email/image-blacklist" data-sn-body="{origin}" data-sn-then="refresh('ignoredOrigins')"
+                          data-sn-attr="{'aria-label': m.mail_blockSilently()}"></button>
+                </li>
+              </template>
+            </ul>
+          </template>
+        </section>
+      </template>
+      <section data-layout="stack" data-gap="xs" data-sn-let="{ shownOrigins: matching(only ? inMail.allowed : allowed, q) }">
+        <h3 data-caption data-sn-text="m.mail_originsAllowed()"></h3>
+        <template data-sn-if="shownOrigins.length === 0">
+          <p data-muted data-sn-text="q ? m.mail_originsNoMatches() : m.mail_originsNoneYet()"></p>
+        </template>
+        <template data-sn-else>
+          <ul data-list>
+            <template data-sn-for="origin in shownOrigins" data-sn-key="origin">
+              <li data-layout="row" data-gap="sm" data-wrap="none" data-pad="xs">
+                <span data-truncate data-grow data-sn-text="origin"></span>
+                <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
+                        data-sn-delete="/api/email/image-origins?origin={origin}" data-sn-then="refresh('allowedOrigins')"
+                        data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
+              </li>
+            </template>
+          </ul>
+        </template>
+      </section>
+      <section data-layout="stack" data-gap="xs" data-sn-let="{ shownOrigins: matching(only ? inMail.ignored : ignored, q) }">
+        <h3 data-caption data-sn-text="m.mail_originsIgnored()"></h3>
+        <template data-sn-if="shownOrigins.length === 0">
+          <p data-muted data-sn-text="q ? m.mail_originsNoMatches() : m.mail_originsNoneYet()"></p>
+        </template>
+        <template data-sn-else>
+          <ul data-list>
+            <template data-sn-for="origin in shownOrigins" data-sn-key="origin">
+              <li data-layout="row" data-gap="sm" data-wrap="none" data-pad="xs">
+                <span data-truncate data-grow data-sn-text="origin"></span>
+                <!-- Allow: off the ignore list, onto the allow list. -->
+                <button type="button" data-variant="outline" data-tone="accent" data-size="sm"
+                        data-sn-call="mail.promoteOrigin(origin)" data-sn-then="refresh('allowedOrigins', 'ignoredOrigins')"
+                        data-sn-text="m.mail_originsAllow()"></button>
+                <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
+                        data-sn-delete="/api/email/image-blacklist?origin={origin}" data-sn-then="refresh('ignoredOrigins')"
+                        data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
+              </li>
+            </template>
+          </ul>
+        </template>
+      </section>
+    </dialog>
+  </div>
+</template>
+
+<!-- The root only holds the dialog's state and handlers: it takes no part in the layout. -->
+<style>
+  :scope { display: contents; }
+</style>

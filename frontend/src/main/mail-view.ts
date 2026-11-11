@@ -2,7 +2,6 @@
 import '../styles/temper.ts';
 import '../styles/events.scss';
 import '../styles/mail.scss';
-import '../islands/mail.ts';
 import { rememberCurrentAppUrl } from '../lib/return-url.ts';
 import { preloadPgp } from '../lib/pgp/load.ts';
 

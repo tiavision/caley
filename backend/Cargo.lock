@@ -3565,9 +3565,9 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "sinter-axum"
-version = "0.1.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cc8f417d5d7ba748a89d704969d69391b3715d0c3412ccc567e7f3b83c0310a"
+checksum = "6f6f157710edafc2d6a555d1717ffa4339d84c38b3aab2d718632844f727eb74"
 dependencies = [
  "axum",
  "bytes",

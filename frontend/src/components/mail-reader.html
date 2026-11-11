@@ -1,0 +1,289 @@
+<!-- The message reader, inside .message-detail on /mail/ and /mail/view/ (resources: <mail-reader-data>). Props:
+     `open` (MessageRef|null): the message to show;
+     `defaultCal`: the calendar a calendar attachment is imported into.
+     It reads the resources message, body, thread, threadEvents, mailboxes, identities, allowedOrigins, ignoredOrigins,
+     caldavAccounts. Changes to the message itself reach the page's lists through the server's events
+     (email_updated, email_removed). Events for the page and the dialogs around it:
+       `compose` (ComposeDraft): reply, reply all, forward (<mail-compose>);
+       `origins-open` (true): this message's image sources (<mail-origins>);
+       `ics-import` (ImportDraft): a calendar attachment (<import-dialog>);
+       `thread-open` (ThreadRef): the thread button (<thread-dialog>);
+       `mail-removed` (MessageRef): moved or deleted, the reader closes;
+       `decrypt`: decrypt again a message whose content was dropped.
+     Slots for what is the page's: `back` (before the subject: /mail/'s overlay back button), `popout` (after the
+     controls: /mail/'s pop-out button), `idle` (the text while no message is shown). /mail/view/ fills only `idle`.
+     Shortcuts (data-shortcut, src/islands/common.ts): r reply, a reply all, f forward, e archive, # delete,
+     Shift+I / Shift+U mark read / unread (on the read toggle, whichever it does). -->
+<template data-sn-component="{ open: MessageRef | null; defaultCal: string }"
+          data-sn-emits="{ compose: ComposeDraft; 'origins-open': boolean; 'ics-import': ImportDraft; 'thread-open': ThreadRef; 'mail-removed': MessageRef; decrypt: void }">
+  <div>
+    <template data-sn-if="open && message && isRef(message, open)">
+      <template data-sn-for="msg in [message]" data-sn-key="messageKey(msg)">
+        <div class="reader" data-layout="stack" data-gap="none" data-grow
+             data-sn-state="{ meta: false, attsOpen: false, notice: true, mode: '', moveOpen: false, keyNote: '', keyError: '', unlockError: '', frame: 0 }"
+             data-sn-let="{
+               b: bodyOf(body, msg),
+               sent: isSentMailbox(msg.mailbox),
+               encrypted: msg.is_encrypted || !!b?.encrypted,
+               html: b?.html ?? '',
+               viewMode: mode || (b?.mode ?? 'text'),
+               imgs: bodyOrigins(b?.origins ?? [], allowedOrigins?.origins ?? [], ignoredOrigins?.origins ?? []),
+               archive: archiveMailbox(msg, mailboxes),
+               shown: shownAttachments(msg, encrypted),
+               read: withFlag(msg, '\\Seen', !msg.is_read),
+               star: withFlag(msg, '\\Flagged', !msg.is_flagged),
+             }">
+          <div class="detail-header" data-pad="sm">
+            <mail-header-fit class="detail-subject-row">
+              <slot name="back"></slot>
+              <div class="detail-subject-line">
+                <h2 class="detail-subject" data-sn-text="b?.subject || msg.subject || m.mail_noSubject()"></h2>
+              </div>
+              <div class="detail-controls" data-layout="row" data-gap="xs" data-wrap="none">
+                <button type="button" class="star-btn" data-variant="ghost" data-icon="star" data-tooltip
+                        data-sn-class="{flagged: msg.is_flagged}"
+                        data-sn-attr="{'aria-label': msg.is_flagged ? m.mail_unflag() : m.mail_flag()}"
+                        data-sn-patch="/api/email/message/flags" data-sn-retry="flags" data-sn-body="flagBody(msg, '\\Flagged', !msg.is_flagged)"
+                        data-sn-optimistic="patch(message, star)"></button>
+                <button type="button" data-variant="ghost" data-icon="reply" data-tooltip data-shortcut="r"
+                        data-sn-on-click="emit('compose', composeDraft('reply', msg, identities, b?.text ?? '', b?.html ?? null))"
+                        data-sn-attr="{'aria-label': m.mail_reply()}"></button>
+                <button type="button" class="overlay-only" popovertarget="mail-actions-menu" data-variant="ghost" data-icon="ellipsis-vertical"
+                        data-sn-attr="{'aria-label': m.mail_messageActions()}"></button>
+                <button type="button" class="wide-only" popovertarget="mail-actions-menu" data-variant="outline" data-size="sm"
+                        data-sn-attr="{'aria-label': m.mail_messageActions()}" data-sn-text="m.mail_actions()"></button>
+                <div popover id="mail-actions-menu" data-menu role="menu" data-sn-on-toggle="$event.newState === 'closed' && (moveOpen = false)">
+                  <button type="button" role="menuitem" data-icon="reply-all" data-shortcut="a"
+                          data-sn-on-click="ancestor($el, '[popover]')?.hidePopover(); emit('compose', composeDraft('replyAll', msg, identities, b?.text ?? '', b?.html ?? null))"
+                          data-sn-text="m.mail_replyAll()"></button>
+                  <button type="button" role="menuitem" data-icon="forward" data-shortcut="f"
+                          data-sn-on-click="ancestor($el, '[popover]')?.hidePopover()"
+                          data-sn-call="mail.forwardFiles(msg, b?.html ?? '')"
+                          data-sn-then="emit('compose', composeDraft('forward', msg, identities, b?.text ?? '', $result.html, $result.files, '', $result.preview))"
+                          data-sn-text="m.mail_forward()"></button>
+                  <hr>
+                  <button type="button" role="menuitem" data-icon="mail"
+                          data-sn-attr="{'data-shortcut': msg.is_read ? 'shift-u' : 'shift-i'}"
+                          data-sn-on-click="ancestor($el, '[popover]')?.hidePopover()"
+                          data-sn-patch="/api/email/message/flags" data-sn-retry="flags" data-sn-body="flagBody(msg, '\\Seen', !msg.is_read)"
+                          data-sn-optimistic="patch(message, read)"
+                          data-sn-text="msg.is_read ? m.mail_markUnread() : m.mail_markRead()"></button>
+                  <template data-sn-if="htmlAddsValue(html)">
+                    <template data-sn-if="!encrypted && imgs.all.length > 0">
+                      <button type="button" role="menuitem" data-icon="image"
+                              data-sn-on-click="ancestor($el, '[popover]')?.hidePopover(); emit('origins-open', true)"
+                              data-sn-text="m.mail_imageSourcesEmail()"></button>
+                    </template>
+                    <hr>
+                    <button type="button" role="menuitemradio" data-sn-attr="{'aria-checked': viewMode === 'html' ? 'true' : 'false'}"
+                            data-sn-on-click="mode = 'html'; ancestor($el, '[popover]')?.hidePopover()">
+                      <span data-icon="check" aria-hidden="true" data-sn-class="{unchecked: viewMode !== 'html'}"></span><span data-sn-text="m.mail_viewAsHtml()"></span>
+                    </button>
+                    <button type="button" role="menuitemradio" data-sn-attr="{'aria-checked': viewMode === 'text' ? 'true' : 'false'}"
+                            data-sn-on-click="mode = 'text'; ancestor($el, '[popover]')?.hidePopover()">
+                      <span data-icon="check" aria-hidden="true" data-sn-class="{unchecked: viewMode !== 'text'}"></span><span data-sn-text="m.mail_viewAsText()"></span>
+                    </button>
+                  </template>
+                  <hr>
+                  <template data-sn-if="archive">
+                    <button type="button" role="menuitem" data-icon="archive" data-shortcut="e"
+                            data-sn-post="/api/email/message/move" data-sn-body="moveBody(msg, archive)"
+                            data-sn-then="emit('mail-removed', refOf(msg))"
+                            data-sn-text="m.mail_archive()"></button>
+                  </template>
+                  <button type="button" role="menuitem" data-icon="folder-input" data-sn-attr="{'aria-expanded': moveOpen ? 'true' : 'false'}"
+                          data-sn-on-click="moveOpen = !moveOpen">
+                    <span data-grow data-sn-text="m.mail_moveToFolder()"></span>
+                    <span class="caret" data-icon="chevron-down" aria-hidden="true"></span>
+                  </button>
+                  <template data-sn-if="moveOpen">
+                    <div class="move-submenu" role="group" data-layout="stack" data-gap="none" data-scroll="y" data-sn-attr="{'aria-label': m.mail_moveToFolder()}">
+                      <template data-sn-for="mb in moveTargets(mailboxes, msg.account_id, [msg.mailbox])">
+                        <button type="button" role="menuitem" data-sn-let="{ kind: folderKind(mb.name) }"
+                                data-sn-post="/api/email/message/move" data-sn-body="moveBody(msg, mb.name)"
+                                data-sn-then="emit('mail-removed', refOf(msg))">
+                          <mail-folder-icon data-sn-prop="{ kind }"></mail-folder-icon>
+                          <span data-truncate data-sn-text="folderName(mb.name)"></span>
+                        </button>
+                      </template>
+                    </div>
+                  </template>
+                  <hr>
+                  <button type="button" role="menuitem" data-icon="trash-2" data-tone="danger" data-shortcut="#"
+                          data-sn-delete="/api/email/message?account_id={msg.account_id}&mailbox={msg.mailbox}&uid={msg.uid}"
+                          data-sn-confirm="inTrash(msg) ? m.mail_deleteMessageConfirm() : null"
+                          data-sn-then="emit('mail-removed', refOf(msg))"
+                          data-sn-text="m.mail_delete()"></button>
+                </div>
+                <slot name="popout"></slot>
+              </div>
+            </mail-header-fit>
+          </div>
+
+          <div class="detail-meta" data-layout="stack" data-gap="xs" data-pad="sm">
+            <div data-layout="row" data-gap="xs" data-wrap="none">
+              <button type="button" class="meta-primary" data-variant="ghost" data-size="sm" data-layout="row" data-gap="xs" data-wrap="none" data-justify="start" data-grow
+                      data-sn-attr="{'aria-expanded': meta ? 'true' : 'false'}" data-sn-on-click="meta = !meta">
+                <strong data-sn-text="`${sent ? m.mail_metaTo() : m.mail_metaFrom()}:`"></strong>
+                <span data-truncate data-grow data-sn-text="sent ? msg.to.join(', ') : (msg.from || '')"></span>
+                <span class="caret" data-icon="chevron-down" aria-hidden="true"></span>
+              </button>
+              <template data-sn-if="b && b.badges.some(x => isIconBadge(x))">
+                <span data-layout="row" data-gap="xs" data-wrap="none">
+                  <template data-sn-for="badge in b.badges.filter(x => isIconBadge(x))" data-sn-key="badge">
+                    <span data-badge role="img" data-sn-attr="{'data-tone': badge === 'verified' ? 'success' : 'accent', title: pgpBadgeLabel(badge), 'aria-label': pgpBadgeLabel(badge)}">
+                      <span data-icon="lock" data-sn-show="badge === 'encrypted'"></span><span data-icon="signature" data-sn-show="badge === 'signed'"></span><span data-icon="badge-check" data-sn-show="badge === 'verified'"></span>
+                    </span>
+                  </template>
+                </span>
+              </template>
+              <template data-sn-if="(thread?.length ?? 0) > 1 || (threadEvents ?? []).some(g => g.events.length > 0)">
+                <button type="button" data-variant="ghost" data-size="sm" data-icon="list-tree" data-tooltip
+                        data-sn-on-click="emit('thread-open', {account_id: msg.account_id, mailbox: msg.mailbox, uid: msg.uid, current: true})"
+                        data-sn-attr="{'aria-label': m.mail_threads()}"></button>
+              </template>
+            </div>
+            <template data-sn-if="meta">
+              <dl class="meta-details" data-pairs>
+                <template data-sn-if="sent"><dt data-sn-text="m.mail_metaFrom()"></dt><dd data-sn-text="msg.from || ''"></dd></template>
+                <template data-sn-else><dt data-sn-text="m.mail_metaTo()"></dt><dd data-sn-text="msg.to.join(', ')"></dd></template>
+                <template data-sn-if="msg.cc.length > 0"><dt data-sn-text="m.mail_metaCc()"></dt><dd data-sn-text="msg.cc.join(', ')"></dd></template>
+                <dt data-sn-text="m.mail_metaDate()"></dt><dd data-sn-text="messageDateTime(msg.sent_at)"></dd>
+              </dl>
+            </template>
+          </div>
+
+          <template data-sn-for="group in [{files: shown, server: true}, {files: encrypted && b ? b.files : [], server: false}].filter(g => g.files.length > 0)">
+            <div class="attachments" data-layout="stack" data-gap="xs" data-pad="sm">
+              <button type="button" data-variant="ghost" data-size="sm" data-icon="paperclip" data-self="start"
+                      data-sn-attr="{'aria-expanded': attsOpen ? 'true' : 'false'}" data-sn-on-click="attsOpen = !attsOpen">
+                <span data-sn-text="attachmentCount(group.files.length)"></span>
+                <span class="caret" data-icon="chevron-down" aria-hidden="true"></span>
+              </button>
+              <template data-sn-if="attsOpen">
+                <div class="attachments-list" data-layout="row" data-gap="xs" data-scroll="y">
+                  <template data-sn-for="att in group.files" data-sn-key="att.filename">
+                    <span data-layout="row" data-gap="none" data-wrap="none">
+                      <a class="mail-attachment-chip" data-icon="paperclip"
+                         data-sn-attr="{
+                           href: group.server ? attachmentUrl(msg, att.filename) : att.url,
+                           download: canPreviewAttachment(att) ? null : att.filename,
+                           target: canPreviewAttachment(att) ? '_blank' : null,
+                           rel: canPreviewAttachment(att) ? 'noopener' : null,
+                         }">
+                        <span class="mail-attachment-name" data-truncate data-sn-attr="{title: att.filename}" data-sn-text="att.filename"></span>
+                        <span data-muted data-sn-text="humanSize(att.size)"></span>
+                      </a>
+                      <template data-sn-if="b && b.importable.includes(att.filename)">
+                        <button type="button" data-variant="ghost" data-size="sm" data-icon="import" data-tooltip
+                                data-sn-call="mail.importKey(msg, att.filename)"
+                                data-sn-then="keyNote = $result; keyError = ''; refresh('body')"
+                                data-sn-catch="keyError = $error.detail ?? m.pgp_publicKeyImportError(); keyNote = ''"
+                                data-sn-attr="{'aria-label': m.pgp_importPublicKeyButton()}"></button>
+                      </template>
+                      <template data-sn-if="isIcsAttachment(att)">
+                        <button type="button" data-variant="ghost" data-size="sm" data-icon="calendar-plus" data-tooltip
+                                data-sn-call="mail.icsFile(msg, att.filename, att.content_type)"
+                                data-sn-then="keyError = ''; emit('ics-import', importDraft(caldavAccounts, defaultCal, $result, refOf(msg)))"
+                                data-sn-catch="keyError = $error.detail ?? m.cal_importError(); keyNote = ''"
+                                data-sn-attr="{'aria-label': m.cal_import()}"></button>
+                      </template>
+                    </span>
+                  </template>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <div class="detail-body" data-layout="stack" data-gap="sm">
+            <template data-sn-if="(b && b.badges.some(x => !isIconBadge(x))) || keyNote || keyError">
+              <div data-layout="stack" data-gap="xs" data-pad="sm">
+                <template data-sn-if="b && b.badges.some(x => !isIconBadge(x))">
+                  <div data-layout="row" data-gap="xs">
+                    <template data-sn-for="badge in b.badges.filter(x => !isIconBadge(x))" data-sn-key="badge">
+                      <span data-badge data-sn-attr="{'data-tone': badge === 'verification_failed' || badge === 'decrypt_failed' ? 'danger' : 'neutral'}" data-sn-text="pgpBadgeLabel(badge)"></span>
+                    </template>
+                  </div>
+                </template>
+                <template data-sn-if="keyError"><p data-tone="danger" role="alert" data-sn-text="keyError"></p></template>
+                <template data-sn-if="keyNote"><p data-tone="success" role="status" data-sn-text="keyNote"></p></template>
+              </div>
+            </template>
+            <template data-sn-if="viewMode === 'html' && htmlAddsValue(html)">
+              <template data-sn-if="encrypted">
+                <!-- Decrypted HTML: no allow-same-origin (inline images are data: URLs). -->
+                <mail-frame class="html-body" data-sn-prop="{html, isolated: true, version: frame, label: m.nav_mail()}"></mail-frame>
+              </template>
+              <template data-sn-else>
+                <template data-sn-if="imgs.blocked.length > 0 && notice">
+                  <div class="images-notice" data-callout data-layout="row" data-gap="sm">
+                    <span data-icon="image" aria-hidden="true"></span>
+                    <span data-grow data-sn-text="m.mail_imagesBlocked()"></span>
+                    <template data-sn-for="origin in imgs.blocked" data-sn-key="origin">
+                      <span data-layout="row" data-gap="none" data-wrap="none">
+                        <button type="button" class="split-start" data-variant="outline" data-tone="accent" data-size="sm"
+                                data-sn-post="/api/email/image-origins" data-sn-body="{origin}"
+                                data-sn-then="refresh('allowedOrigins'); frame = frame + 1"
+                                data-sn-text="m.mail_allowOrigin({origin})"></button>
+                        <button type="button" class="split-end" data-variant="outline" data-tone="danger" data-size="sm" data-icon="ban" data-tooltip
+                                data-sn-post="/api/email/image-blacklist" data-sn-body="{origin}"
+                                data-sn-then="refresh('ignoredOrigins')"
+                                data-sn-attr="{'aria-label': m.mail_blockSilently()}"></button>
+                      </span>
+                    </template>
+                    <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-sn-on-click="notice = false"
+                            data-sn-attr="{'aria-label': m.mail_dismiss()}"></button>
+                  </div>
+                </template>
+                <mail-frame class="mail-html-frame" data-sn-prop="{html, isolated: false, version: frame, label: m.nav_mail()}"></mail-frame>
+              </template>
+            </template>
+            <template data-sn-else>
+              <template data-sn-if="b && b.text">
+                <pre class="body-text"><template data-sn-for="seg in textSegments(b.text)"><template data-sn-if="seg.href"><a target="_blank" rel="noopener noreferrer" data-sn-attr="{href: seg.href}" data-sn-text="seg.text"></a></template><template data-sn-else><span data-sn-text="seg.text"></span></template></template></pre>
+              </template>
+              <template data-sn-else>
+                <template data-sn-if="encrypted && !$meta.body.loading">
+                  <template data-sn-if="b && b.error">
+                    <p data-callout data-tone="danger" role="alert" data-sn-text="b.error"></p>
+                  </template>
+                  <template data-sn-else>
+                    <div data-layout="stack" data-gap="sm" data-align="center" data-pad="lg">
+                      <p data-sn-text="m.pgp_unlockToRead()"></p>
+                      <template data-sn-if="unlockError"><p data-tone="danger" role="alert" data-sn-text="unlockError"></p></template>
+                      <template data-sn-if="b && b.locked">
+                        <button type="button" data-icon="lock-open" data-sn-call="mail.unlock()"
+                                data-sn-then="unlockError = ''; refresh('body')" data-sn-catch="unlockError = $error.detail ?? m.pgp_unlockError()"
+                                data-sn-text="m.pgp_unlockVaultButton()"></button>
+                      </template>
+                      <template data-sn-else>
+                        <button type="button" data-icon="lock-open" data-sn-on-click="emit('decrypt'); refresh('body')" data-sn-text="m.pgp_decryptButton()"></button>
+                      </template>
+                    </div>
+                  </template>
+                </template>
+                <template data-sn-else>
+                  <p class="detail-status" data-muted aria-busy="true"
+                     data-sn-text="encrypted ? m.pgp_decrypting() : m.mail_loadingBody()"></p>
+                </template>
+              </template>
+            </template>
+          </div>
+        </div>
+      </template>
+    </template>
+    <template data-sn-else>
+      <template data-sn-if="open && $meta.message.loading">
+        <p class="detail-status" data-muted aria-busy="true" data-sn-text="m.mail_loading()"></p>
+      </template>
+      <template data-sn-else>
+        <slot name="idle"></slot>
+      </template>
+    </template>
+  </div>
+</template>
+
+<!-- The root only groups the reader's branches: it takes no part in the layout (.message-detail lays out .reader). -->
+<style>
+  :scope { display: contents; }
+</style>

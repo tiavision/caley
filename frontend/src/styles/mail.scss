@@ -1,4 +1,4 @@
-// Mail pages (mail/index.html, mail/view/index.html, partials/mail-*.html): the three-column layout, list rows,
+// Mail pages (mail/index.html, mail/view/index.html, src/components/mail-*.html): the three-column layout, list rows,
 // reader and compose dialog. temper tokens only. Below 1024px the reader is an overlay, below 640px the folders a drawer.
 
 $overlay: 1023px;
@@ -83,7 +83,7 @@ $phone: 639px;
 
   &:hover,
   &:focus-visible,
-  &[data-dragging] {
+  &.dragging {
     background: var(--tm-accent);
     outline: none;
   }
@@ -292,12 +292,12 @@ $phone: 639px;
   border-block-end: 1px solid var(--tm-border);
 }
 
-mail-header-fit.detail-subject-row {
+.detail-subject-row {
   display: flex;
   align-items: center;
   gap: var(--tm-space-sm);
 
-  &[stacked] {
+  &.stacked {
     display: grid;
     grid-template-columns: auto 1fr;
     gap: var(--tm-space-xs);
@@ -431,7 +431,7 @@ mail-header-fit.detail-subject-row {
   border-inline-start-width: 0;
 }
 
-mail-frame {
+.mail-frame {
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -611,7 +611,7 @@ mail-frame {
   }
 
   // The whole reader scrolls. Its body fills at least the rest of the screen, so the mail's frame has its full
-  // height before the mail has loaded (no jump), and the frame grows past that with the mail (islands/mail.ts).
+  // height before the mail has loaded (no jump), and the frame grows past that with the mail (src/components/mail-frame.ts).
   .reader {
     flex: 1 0 auto;
   }
@@ -621,13 +621,13 @@ mail-frame {
     overflow-y: visible;
   }
 
-  .detail-body mail-frame,
-  .detail-body mail-frame iframe {
+  .detail-body .mail-frame,
+  .detail-body .mail-frame iframe {
     flex: 1 0 auto;
   }
 
-  // The frame takes a wide mail's width (islands/mail.ts): the mail scrolls sideways here, the reader vertically.
-  .detail-body mail-frame {
+  // The frame takes a wide mail's width (src/components/mail-frame.ts): the mail scrolls sideways here, the reader vertically.
+  .detail-body .mail-frame {
     overflow-x: auto;
     overscroll-behavior-x: contain;
 

@@ -44,7 +44,7 @@ export function safeFilename(name: string, ext: string): string {
   return (name.replace(/[^\w\- ]/g, '_').trim() || 'file') + ext;
 }
 
-/** What partials/share-menu.html shares: a file fetched from `url` (src/actions/share.ts). */
+/** What src/components/share-menu.html shares: a file fetched from `url` (src/actions/share.ts). */
 export interface ShareItem {
   title: string;
   filename: string;

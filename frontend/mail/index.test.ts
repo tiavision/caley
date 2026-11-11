@@ -5,30 +5,9 @@ import { configure } from '@tiaforge-ui/sinter';
 import { render, memoryStorage, mockRequests, mockStream, type RouteResponse } from '@tiaforge-ui/sinter/testing';
 import * as helpers from '../src/sinter.helpers.ts';
 import '../src/islands/common.ts';                 // data-shortcut keys
-import nav from '../partials/nav.html?raw';
-import navToggle from '../partials/nav-toggle.html?raw';
-import reader from '../partials/mail-reader.html?raw';
-import readerData from '../partials/mail-reader-data.html?raw';
-import folderIcon from '../partials/mail-folder-icon.html?raw';
-import origins from '../partials/mail-origins.html?raw';
-import compose from '../partials/mail-compose.html?raw';
-import account from '../partials/mail-account.html?raw';
-import folder from '../partials/mail-folder.html?raw';
-import importDialog from '../partials/import-dialog.html?raw';
-import threadDialog from '../partials/thread-dialog.html?raw';
-import eventDetail from '../partials/event-detail.html?raw';
-import shareMenu from '../partials/share-menu.html?raw';
-import source from './index.html?raw';
+import page from './index.html?raw';
+import { app } from '../src/test-components.ts';
 import type { Message } from '../src/lib/mail.ts';
-
-// The test page lives at the root of sinter's virtual project: its partials sit next to it.
-const page = source.replaceAll('../partials/', './');
-const files = {
-  './nav.html': nav, './nav-toggle.html': navToggle, './mail-reader.html': reader, './mail-reader-data.html': readerData,
-  './mail-folder-icon.html': folderIcon, './mail-origins.html': origins, './mail-compose.html': compose,
-  './mail-account.html': account, './mail-folder.html': folder, './import-dialog.html': importDialog,
-  './thread-dialog.html': threadDialog, './event-detail.html': eventDetail, './share-menu.html': shareMenu,
-};
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
 const msg = (uid: number, subject: string, extra: Partial<Message> = {}): Message => ({
@@ -96,7 +75,7 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
       pendingCompose: () => { pendingCalls++; const p = pending; pending = null; return p; },
     },
   };
-  const r = await render(page, { messages, requests, actions, helpers, files, storage, streams: { '/api/events/stream': stream } });
+  const r = await render(page, { ...app, messages, requests, actions, helpers, storage, streams: { '/api/events/stream': stream } });
   await r.settle();
   return { ...r, requests, stream, storage, opened, pendingCalls: () => pendingCalls };
 }
@@ -105,7 +84,7 @@ const rows = (root: HTMLElement) => [...root.querySelectorAll<HTMLButtonElement>
 const subjects = (root: HTMLElement) => rows(root).map((r) => r.querySelector('.subject')!.textContent);
 
 test('shows the first inbox with its unread count, then opens a message in the reader and marks it read once', async () => {
-  const { root, settle, opened, requests } = await show({ 'PATCH /api/email/message/flags': null });
+  const { root, settle, opened, requests, stream } = await show({ 'PATCH /api/email/message/flags': null });
   const marks = () => requests.calls.filter((c) => c.method === 'PATCH').map((c) => c.body);
   expect(subjects(root)).toEqual(['Third', 'Second', 'First']);
   expect(root.querySelector('.message-list-header h2')!.textContent).toBe('Inbox');
@@ -117,6 +96,9 @@ test('shows the first inbox with its unread count, then opens a message in the r
   expect(opened).toEqual([{ account_id: 'work', mailbox: 'INBOX', uid: 3 }]);
   expect(root.querySelector('.reader .detail-subject')!.textContent).toBe('Third');
   expect(root.querySelector('.reader .body-text')!.textContent).toBe('body 3');
+  // the list shows it read once the server says so (the reader patched only its own message)
+  stream.emit('email_updated', { account_id: 'work', mailbox: 'INBOX', uid: 3, flags: ['\\Seen'] });
+  await settle();
   expect(rows(root)[0].classList.contains('unread')).toBe(false);
   expect(rows(root)[0].getAttribute('aria-current')).toBe('true');
   expect(marks()).toEqual([{ account_id: 'work', mailbox: 'INBOX', uid: 3, flags: ['\\Seen'], set: true }]);
@@ -192,8 +174,8 @@ test('server events: a mailbox refetch reloads the list when it is the one shown
   expect(lists()).toBe(before + 1);
 });
 
-test('the reader\'s star and read toggles stay on success, in the reader and the list', async () => {
-  const { root, settle, requests } = await show({ 'PATCH /api/email/message/flags': null });
+test('the reader\'s star and read toggles stay on success; the list follows the server\'s events', async () => {
+  const { root, settle, requests, stream } = await show({ 'PATCH /api/email/message/flags': null });
   const patched = () => requests.calls.filter((c) => c.method === 'PATCH').at(-1)!.body;
   rows(root)[1].click();
   await settle();
@@ -202,12 +184,16 @@ test('the reader\'s star and read toggles stay on success, in the reader and the
   await settle();
   expect(patched()).toEqual({ account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Flagged'], set: true });
   expect(star().classList.contains('flagged')).toBe(true);
+  stream.emit('email_updated', { account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Seen', '\\Flagged'] });
+  await settle();
   expect(rows(root)[1].querySelector('.flag-star')).not.toBeNull();
 
   root.querySelector<HTMLButtonElement>('#mail-actions-menu button[data-icon="mail"]')!.click();
   await settle();
   expect(patched()).toEqual({ account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Seen'], set: false });
   expect(root.querySelector('#mail-actions-menu button[data-icon="mail"]')!.textContent).toBe(m.mail_markRead());
+  stream.emit('email_updated', { account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Flagged'] });
+  await settle();
   expect(rows(root)[1].classList.contains('unread')).toBe(true);
 });
 

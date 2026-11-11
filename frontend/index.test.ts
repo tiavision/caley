@@ -3,6 +3,12 @@ import { render, mockRequests, memoryStorage, type RouteResponse } from '@tiafor
 import { m } from '@tiaforge-ui/sinter/messages';
 import { messages } from './src/test-messages.ts';
 import page from './index.html?raw';
+import { app } from './src/test-components.ts';
+
+// <auth-return>'s script navigates away: here it only counts that it ran.
+let returned = 0;
+const scripts = { 'auth-return': class { connected() { returned++; } } };
+const options = { ...app, scripts };
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
 
@@ -12,7 +18,8 @@ async function show(routes: Record<string, RouteResponse> = {}, storage?: Storag
     'GET /api/auth/config': { oidc_enabled: false },
     ...routes,
   });
-  const r = await render(page, { requests, messages, storage });
+  returned = 0;
+  const r = await render(page, { ...options, requests, messages, storage });
   await r.settle();
   return { ...r, requests };
 }
@@ -34,12 +41,12 @@ test('signed out: the form, without single sign-on', async () => {
   expect(root.querySelector('form')).not.toBeNull();
   expect(root.querySelector('[aria-busy]')).toBeNull();
   expect(root.querySelector('a[href="/auth/oidc"]')).toBeNull();
-  expect(root.querySelector('auth-return')).toBeNull();
+  expect(returned).toBe(0);
 });
 
 test('loading until both answers are in', async () => {
   const requests = mockRequests({ 'GET /api/user': null, 'GET /api/auth/config': { oidc_enabled: true } });
-  const { root, flush, settle } = await render(page, { requests, messages });
+  const { root, flush, settle } = await render(page, { ...options, requests, messages });
   await flush();
   expect(root.querySelector('p[aria-busy=true]')!.textContent).toBe('Loading...');
   expect(root.querySelector('form')).toBeNull();
@@ -50,7 +57,7 @@ test('loading until both answers are in', async () => {
 
 test('signed in already: straight to the app', async () => {
   const { root } = await show({ 'GET /api/user': user });
-  expect(root.querySelector('auth-return')).not.toBeNull();
+  expect(returned).toBe(1);
   expect(root.querySelector('form')).toBeNull();
 });
 
@@ -68,7 +75,7 @@ test('signs in with the form fields, then goes to the app', async () => {
   expect(Object.fromEntries(new URLSearchParams(String(post.body)))).toEqual({
     caldav_base_url: 'https://dav.example', caldav_username: 'ada', caldav_password: 'secret',
   });
-  expect(root.querySelector('auth-return')).not.toBeNull();
+  expect(returned).toBe(1);
 });
 
 test('a refused login shows the server reason and enables the button again', async () => {

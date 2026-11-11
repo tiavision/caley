@@ -1,0 +1,105 @@
+<!-- Event detail dialog #event-detail. Once per page, outside any <template>. Props:
+       - `event` (EventJson|null): the event shown; the page opens it with `detail = ev; showModal('event-detail')`
+         and passes `event: detail`;
+       - `threads`: offer the button for the mails the event came from.
+     It reads the `user` resource (src/layouts/app-layout.html, or the page's own): `user.map_url` for addresses no map app opens.
+     Events, from inside the dialog (handle them on an ancestor):
+       - `event-edit` {event, scope: 'series'|'this_instance'}: the edit button (src/components/event-form.html);
+       - `event-threads` {email: SourceEmailJson, event}: the threads button (src/components/thread-dialog.html).
+     Shortcut: e = edit (data-shortcut on the edit button). Uses <share-menu>, so the page must not have another one. -->
+<template data-sn-component="{ event: EventJson | null; threads?: boolean }"
+          data-sn-emits="{ 'event-edit': { event: EventJson; scope: 'series' | 'this_instance' }; 'event-threads': { email: SourceEmailJson; event: EventJson } }">
+  <dialog id="event-detail" closedby="any" data-sn-on-close="elementIn($el, '#event-edit-choice')?.hidePopover()">
+    <sn-resource name="eventEmails" type="SourceEmailJson[]" key="account_id,mailbox,uid" when="threads && event"
+                 src="/api/calendar/event-emails?cal_account_id={event.account_id}&calendar_href={event.calendar_href}&event_uid={event.uid}"></sn-resource>
+    <header data-layout="row" data-gap="xs" data-align="start">
+      <h2 data-grow data-sn-text="event?.summary || ''"></h2>
+      <div data-layout="row" data-gap="xs" data-wrap="none">
+        <template data-sn-if="event && threads && eventEmails.length > 0">
+          <button type="button" data-variant="ghost" data-icon="list-tree" data-tooltip
+                  data-sn-attr="{'aria-label': m.mail_threads()}"
+                  data-sn-on-click="close(); emit('event-threads', { email: eventEmails[0], event })"></button>
+        </template>
+        <share-menu data-sn-prop="{ item: event ? eventShare(event) : null }"></share-menu>
+        <template data-sn-if="event?.is_recurring">
+          <button type="button" class="event-edit" data-variant="ghost" data-icon="pencil" data-shortcut="e" popovertarget="event-edit-choice"
+                  data-sn-attr="{'aria-label': m.event_edit()}"></button>
+        </template>
+        <template data-sn-else>
+          <button type="button" class="event-edit" data-variant="ghost" data-icon="pencil" data-shortcut="e" data-tooltip
+                  data-sn-attr="{'aria-label': m.event_edit()}"
+                  data-sn-on-click="close(); emit('event-edit', { event, scope: 'series'})"></button>
+        </template>
+        <button type="button" commandfor="event-detail" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
+      </div>
+    </header>
+
+    <div popover id="event-edit-choice" data-menu>
+      <button type="button" popovertarget="event-edit-choice" popovertargetaction="hide"
+              data-sn-on-click="close('event-detail'); emit('event-edit', { event, scope: 'series'})"
+              data-sn-text="m.event_editSeries()"></button>
+      <button type="button" popovertarget="event-edit-choice" popovertargetaction="hide"
+              data-sn-on-click="close('event-detail'); emit('event-edit', { event, scope: 'this_instance' })"
+              data-sn-text="m.event_editInstance()"></button>
+    </div>
+
+    <template data-sn-if="event">
+      <dl data-pairs data-sn-let="{ times: formatEventTimes(event), repeats: event.is_recurring ? formatRecurrence(event.recurrence, $locale) : '' }">
+        <template data-sn-if="times.localText">
+          <div>
+            <dt data-sn-text="m.event_time()"></dt>
+            <dd>
+              <span data-sn-text="times.localText"></span>
+              <template data-sn-if="times.sourceText">
+                <br><small data-muted data-sn-text="`${m.event_originalTime()}: ${times.sourceText}`"></small>
+              </template>
+            </dd>
+          </div>
+        </template>
+        <template data-sn-if="event.location">
+          <div>
+            <dt data-sn-text="m.event_location()"></dt>
+            <!-- The device's map app, else the web map of the user's settings (src/actions/maps.ts). -->
+            <dd><a rel="noopener noreferrer" data-sn-attr="{href: geoUrl(event.location)}"
+                   data-sn-call="maps.open(event.location, user?.map_url)" data-sn-text="event.location"></a></dd>
+          </div>
+        </template>
+        <template data-sn-if="repeats">
+          <div>
+            <dt data-sn-text="m.event_repeats()"></dt>
+            <dd data-sn-text="repeats"></dd>
+          </div>
+        </template>
+        <template data-sn-if="event.description">
+          <div>
+            <dt data-sn-text="m.event_description()"></dt>
+            <dd class="event-description" data-sn-text="event.description"></dd>
+          </div>
+        </template>
+        <template data-sn-if="event.alarms.length > 0">
+          <div>
+            <dt data-sn-text="m.event_reminder()"></dt>
+            <dd data-layout="stack" data-gap="xs">
+              <template data-sn-for="(alarm, i) in event.alarms" data-sn-key="i">
+                <span data-sn-text="formatAlarm(alarm)"></span>
+              </template>
+            </dd>
+          </div>
+        </template>
+        <template data-sn-if="event.attendees.length > 0">
+          <div>
+            <dt data-sn-text="m.event_attendees()"></dt>
+            <dd data-layout="stack" data-gap="xs">
+              <template data-sn-for="(att, i) in event.attendees" data-sn-key="i">
+                <span data-layout="row" data-gap="sm">
+                  <span data-badge data-sn-attr="{'data-tone': partstatTone(att.partstat)}" data-sn-text="partstatLabel(att.partstat)"></span>
+                  <span data-sn-text="attendeeLabel(att)"></span>
+                </span>
+              </template>
+            </dd>
+          </div>
+        </template>
+      </dl>
+    </template>
+  </dialog>
+</template>

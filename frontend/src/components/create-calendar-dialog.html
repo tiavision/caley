@@ -1,0 +1,55 @@
+<!-- "Create calendar" dialog (#create-calendar-dialog). Open it with commandfor="create-calendar-dialog"
+     command="show-modal"; it starts empty each time it opens. The page declares the `caldavAccounts` resource
+     (GET /api/caldav/accounts, items="accounts", key="account_id"); it is refreshed when the calendar exists. -->
+<template data-sn-component="">
+  <dialog id="create-calendar-dialog" closedby="any" aria-labelledby="create-calendar-title"
+          data-sn-state="{ cal: newCalendarDraft([]), calError: '' }"
+          data-sn-on-toggle="$el.open && (cal = newCalendarDraft(caldavAccounts))"
+          data-sn-on-close="calError = ''">
+    <header>
+      <h2 id="create-calendar-title" data-sn-text="m.cal_createCalendar()"></h2>
+      <button type="button" commandfor="create-calendar-dialog" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
+    </header>
+
+    <template data-sn-if="calError">
+      <div data-callout data-tone="danger" role="alert" data-sn-text="calError"></div>
+    </template>
+
+    <form data-layout="stack" data-gap="md"
+          data-sn-post="/api/calendar" data-sn-encoding="form"
+          data-sn-body="newCalendarBody(cal)"
+          data-sn-on-submit="calError = ''"
+          data-sn-then="refresh('caldavAccounts'); close()"
+          data-sn-catch="calError = $error.status ? ($error.detail ?? m.cal_createCalendarError()) : m.cal_createCalendarError()">
+      <label>
+        <span data-sn-text="m.cal_createCalendarName()"></span>
+        <input type="text" required data-sn-model="cal.name">
+      </label>
+
+      <template data-sn-if="caldavAccounts.length > 1">
+        <label>
+          <span data-sn-text="m.cal_createAccount()"></span>
+          <select required data-sn-model="cal.account_id">
+            <template data-sn-for="account in caldavAccounts">
+              <option data-sn-attr="{value: account.account_id}" data-sn-text="account.display_name"></option>
+            </template>
+          </select>
+        </label>
+      </template>
+
+      <label>
+        <input type="checkbox" data-sn-model="cal.useColor">
+        <span data-sn-text="m.cal_createCalendarColor()"></span>
+      </label>
+
+      <template data-sn-if="cal.useColor">
+        <input type="color" data-sn-attr="{'aria-label': m.cal_createCalendarColor()}" data-sn-model="cal.color">
+      </template>
+
+      <footer>
+        <button type="button" data-variant="ghost" commandfor="create-calendar-dialog" command="close" data-sn-text="m.event_cancel()"></button>
+        <button type="submit" data-sn-text="m.cal_createCalendarSave()"></button>
+      </footer>
+    </form>
+  </dialog>
+</template>
