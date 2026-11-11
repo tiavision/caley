@@ -11,7 +11,7 @@
        `mail-removed` (MessageRef): moved or deleted, the reader closes;
        `decrypt`: decrypt again a message whose content was dropped.
      Slots for what is the page's: `back` (before the subject: /mail/'s overlay back button), `popout` (after the
-     controls: /mail/'s pop-out button), `idle` (the text while no message is shown). /mail/view/ fills only `idle`.
+     controls: /mail/'s pop-out button), `idle` (the text while no message is shown; "Select a message" by default). /mail/view/ fills only `idle`.
      Shortcuts (data-shortcut, src/islands/common.ts): r reply, a reply all, f forward, e archive, # delete,
      Shift+I / Shift+U mark read / unread (on the read toggle, whichever it does). -->
 <template data-sn-component="{ open: MessageRef | null; defaultCal: string }"
@@ -277,7 +277,7 @@
         <p class="detail-status" data-muted aria-busy="true" data-sn-text="m.mail_loading()"></p>
       </template>
       <template data-sn-else>
-        <slot name="idle"></slot>
+        <slot name="idle"><p class="detail-status" data-muted data-sn-text="m.mail_selectMessage()"></p></slot>
       </template>
     </template>
   </div>
