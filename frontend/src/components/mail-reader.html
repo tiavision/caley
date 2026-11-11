@@ -16,8 +16,7 @@
      Shift+I / Shift+U mark read / unread (on the read toggle, whichever it does). -->
 <template data-sn-component="{ open: MessageRef | null; defaultCal: string }"
           data-sn-emits="{ compose: ComposeDraft; 'origins-open': boolean; 'ics-import': ImportDraft; 'thread-open': ThreadRef; 'mail-removed': MessageRef; decrypt: void }">
-  <div>
-    <pgp-preload></pgp-preload>
+  <div data-sn-import="openpgp">
     <template data-sn-if="open && message && isRef(message, open)">
       <template data-sn-for="msg in [message]" data-sn-key="messageKey(msg)">
         <div class="reader" data-layout="stack" data-gap="none" data-grow

@@ -462,7 +462,7 @@
       <form data-layout="stack" data-gap="md"
             data-sn-call="pgpKeys.importPublic(pubArmored)" data-sn-on-submit="pubError = ''; pubSuccess = ''"
             data-sn-then="upsert('publicKeys', $result); pubArmored = ''; pubSuccess = m.pgp_publicKeyImported(); close()"
-            data-sn-catch="pubError = m.pgp_publicKeyImportError()">
+            data-sn-catch="pubError = $error.stale ? m.pgp_loadError() : m.pgp_publicKeyImportError()">
         <label>
           <span data-sn-text="m.pgp_keyFile()"></span>
           <input type="file" accept=".asc,.gpg,.pgp,.key,.txt,application/pgp-keys"

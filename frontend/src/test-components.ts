@@ -10,6 +10,6 @@ const name = (path: string) => path.replace(/^.*\//, '').replace(/\.(html|ts)$/,
 
 export const components: Record<string, string> = Object.fromEntries(Object.entries(html).map(([p, t]) => [name(p), t]));
 export const scripts: Record<string, unknown> = Object.fromEntries(Object.entries(ts).map(([p, mod]) => [name(p), mod]));
-export const files: Record<string, string> = Object.fromEntries(Object.entries(layouts).map(([p, t]) => [`src/layouts/${name(p)}.html`, t]));
+export const layoutFiles: Record<string, string> = Object.fromEntries(Object.entries(layouts).map(([p, t]) => [name(p), t]));
 
-export const app = { components, files };
+export const app = { components, layouts: layoutFiles };
