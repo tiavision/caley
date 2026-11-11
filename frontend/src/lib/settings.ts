@@ -2,6 +2,7 @@
 // src/sinter.helpers.ts.
 import { m } from '@tiaforge-ui/sinter/messages';
 import type { CalDavAccountJson } from '../types/calendar.ts';
+import { loadErrorOr } from './errors.ts';
 
 /** The CalDAV account dialog (POST /api/caldav/account); account_id '' adds one. */
 export interface AccountDraft {
@@ -31,14 +32,14 @@ export function withCalendarActive(account: CalDavAccountJson, href: string, act
   return { calendars: account.calendars.map((c) => (c.href === href ? { ...c, is_active: active } : c)) };
 }
 
-type ActionError = { detail?: string | null; message: string };
+type ActionError = { detail?: string | null; message: string; stale?: boolean };
 
 /** The private key import's error: a hint for Argon2-protected keys, else the server's or the library's message. */
 export function keyImportError(error: ActionError): string {
-  return (error.detail ?? '').toLowerCase().includes('argon2') ? m.pgp_importArgon2Error() : `${m.pgp_importError()}: ${error.detail ?? error.message}`;
+  return loadErrorOr(error, (error.detail ?? '').toLowerCase().includes('argon2') ? m.pgp_importArgon2Error() : `${m.pgp_importError()}: ${error.detail ?? error.message}`);
 }
 
 /** The passkey enrollment's error: a hint when the authenticator has no PRF, else the message. */
 export function enrollErrorText(error: ActionError): string {
-  return error.detail === 'prf_not_supported' ? m.pgp_enrollNoPrf() : `${m.pgp_enrollError()}: ${error.detail ?? error.message}`;
+  return loadErrorOr(error, error.detail === 'prf_not_supported' ? m.pgp_enrollNoPrf() : `${m.pgp_enrollError()}: ${error.detail ?? error.message}`);
 }

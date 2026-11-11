@@ -7,6 +7,8 @@ import {
   siblingRow, unmarked, type Account, type Mailbox, type Message, type VirtualFolder,
 } from './mail.ts';
 import { caldavBody, caldavDraft, enrollErrorText, keyImportError, withCalendarActive } from './settings.ts';
+import { loadErrorOr } from './errors.ts';
+import { m } from '@tiaforge-ui/sinter/messages';
 import { importSummary } from './import.ts';
 
 const msg = (uid: number, extra: Partial<Message> = {}) => ({ uid, account_id: 'a', mailbox: 'INBOX', flags: [], ...extra }) as unknown as Message;
@@ -157,5 +159,11 @@ describe('dialogs', () => {
     expect(keyImportError({ detail: null, message: 'bad key' })).toContain('bad key');
     expect(enrollErrorText({ detail: 'other', message: '' })).toContain('other');
     expect(enrollErrorText({ detail: 'prf_not_supported', message: '' })).not.toContain('prf_not_supported');
+    // a stale page (openpgp gone from the server after a deploy) says to reload instead
+    expect(keyImportError({ detail: null, message: 'out of date', stale: true })).toBe(m.pgp_loadError());
+    expect(enrollErrorText({ detail: null, message: 'out of date', stale: true })).toBe(m.pgp_loadError());
+    expect(loadErrorOr({ stale: true }, 'Unlock failed')).toBe(m.pgp_loadError());
+    expect(loadErrorOr({ stale: false }, 'Unlock failed')).toBe('Unlock failed');
+    expect(loadErrorOr({}, 'Unlock failed')).toBe('Unlock failed');
   });
 });

@@ -37,7 +37,7 @@
                 data-sn-on-submit="sending = true; composeError = ''"
                 data-sn-call="mail.send({...compose, encrypt: compose.encrypt && canEnc}, identities, signing)"
                 data-sn-then="sending = false; close('mail-compose')"
-                data-sn-catch="sending = false; composeError = $error.detail ?? m.mail_sendError()">
+                data-sn-catch="sending = false; composeError = loadErrorOr($error, $error.detail ?? m.mail_sendError())">
             <template data-sn-if="identities.length > 1">
               <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
                 <label class="compose-label" for="compose-from" data-sn-text="m.mail_composeFrom()"></label>

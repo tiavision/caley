@@ -1,6 +1,7 @@
 // openpgp.js wrappers for key import, decryption, and signature verification.
 // CSP constraint: no 'unsafe-eval', no wasm — Argon2 S2K is explicitly rejected.
 
+import { SinterError } from '@tiaforge-ui/sinter';
 import * as openpgp from 'openpgp';
 import { decodeText, extractDetachedSignedMime, extractPgpBlock, extractSignedBlock, hasAsciiMarker, parseDecryptedMime, parseHeaders, readParameter, splitMultipart, type DecryptedAttachment } from './mime.ts';
 
@@ -118,6 +119,7 @@ export async function decryptMessage(
   try {
     message = await openpgp.readMessage({ armoredMessage: pgpBlock.ciphertext });
   } catch (e) {
+    if (e instanceof SinterError) throw e;   // openpgp could not be loaded: not a message that failed to decrypt
     if (hasArgon2(e)) {
       return { text: null, html: null, badges: ['unsupported_alg'], attachments: [], subject: null };
     }
@@ -133,6 +135,7 @@ export async function decryptMessage(
       config: { allowUnauthenticatedMessages: false },
     });
   } catch (e) {
+    if (e instanceof SinterError) throw e;   // openpgp could not be loaded: not a message that failed to decrypt
     if (hasArgon2(e)) {
       return { text: null, html: null, badges: ['unsupported_alg'], attachments: [], subject: null };
     }
@@ -237,7 +240,8 @@ export async function verifySignedMessage(
     if (anyVerified) badges.push('verified');
     else if (anyFailed) badges.push('verification_failed');
     else badges.push('unverified');
-  } catch {
+  } catch (e) {
+    if (e instanceof SinterError) throw e;   // openpgp could not be loaded: not a bad signature
     badges.push('verification_failed');
   }
 

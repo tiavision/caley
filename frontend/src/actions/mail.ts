@@ -213,6 +213,7 @@ export async function unlock(): Promise<boolean> {
       eraseBytes(raw);
     }
   } catch (e) {
+    if (e instanceof SinterError) throw e;   // openpgp could not be loaded: the markup says to reload
     console.error('[pgp] unlock vault failed', e);
     throw new Error(`${m.pgp_unlockError()} ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -228,7 +229,8 @@ export async function importKey(msg: MessageRef, filename: string): Promise<stri
     const data = decryptedData.get(filename) ?? await bytes(attachmentUrl(msg, filename));
     await savePublicKey(await parsePublicKey(new TextDecoder().decode(data)), 'message_attachment');
     return m.pgp_publicKeyImported();
-  } catch {
+  } catch (e) {
+    if (e instanceof SinterError) throw e;   // openpgp could not be loaded: the markup says to reload
     throw new Error(m.pgp_publicKeyImportError());
   }
 }

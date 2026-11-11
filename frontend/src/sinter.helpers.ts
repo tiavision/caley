@@ -77,6 +77,8 @@ export { calendarValue, importEventDate, importDraft, importSummary } from './li
 
 // Settings page: the CalDAV account dialog, calendar toggles, encryption tab errors.
 export { caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText } from './lib/settings.ts';
+// Errors of calls that may load openpgp: "reload the page" for a stale one (encryption tab, mail reader, compose).
+export { loadErrorOr } from './lib/errors.ts';
 
 // Mail pages (mail/index.html, mail/view/index.html, src/components/mail-*.html).
 export {

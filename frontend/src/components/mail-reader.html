@@ -178,7 +178,7 @@
                         <button type="button" data-variant="ghost" data-size="sm" data-icon="import" data-tooltip
                                 data-sn-call="mail.importKey(msg, att.filename)"
                                 data-sn-then="keyNote = $result; keyError = ''; refresh('body')"
-                                data-sn-catch="keyError = $error.detail ?? m.pgp_publicKeyImportError(); keyNote = ''"
+                                data-sn-catch="keyError = loadErrorOr($error, $error.detail ?? m.pgp_publicKeyImportError()); keyNote = ''"
                                 data-sn-attr="{'aria-label': m.pgp_importPublicKeyButton()}"></button>
                       </template>
                       <template data-sn-if="isIcsAttachment(att)">
@@ -253,7 +253,7 @@
                       <template data-sn-if="unlockError"><p data-tone="danger" role="alert" data-sn-text="unlockError"></p></template>
                       <template data-sn-if="b && b.locked">
                         <button type="button" data-icon="lock-open" data-sn-call="mail.unlock()"
-                                data-sn-then="unlockError = ''; refresh('body')" data-sn-catch="unlockError = $error.detail ?? m.pgp_unlockError()"
+                                data-sn-then="unlockError = ''; refresh('body')" data-sn-catch="unlockError = loadErrorOr($error, $error.detail ?? m.pgp_unlockError())"
                                 data-sn-text="m.pgp_unlockVaultButton()"></button>
                       </template>
                       <template data-sn-else>

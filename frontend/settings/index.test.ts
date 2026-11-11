@@ -4,6 +4,8 @@ import { configure } from '@tiaforge-ui/sinter';
 import { render, mockRequests, mockStream, memoryStorage, type RouteResponse } from '@tiaforge-ui/sinter/testing';
 import { calendarValue, importEventDate, importDraft, importSummary } from '../src/lib/import.ts';
 import { caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText } from '../src/lib/settings.ts';
+import { loadErrorOr } from '../src/lib/errors.ts';
+import { SinterError } from '@tiaforge-ui/sinter';
 import { newCalendarDraft, newCalendarBody } from '../src/lib/events.ts';
 import { m } from '@tiaforge-ui/sinter/messages';
 import { messages } from '../src/test-messages.ts';
@@ -14,7 +16,7 @@ import type { VaultView } from '../src/actions/pgp-vault.ts';
 import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
 // The helpers the page and its components use (not the whole helpers module: other pages' helpers load more).
-const helpers = { calendarValue, importEventDate, importDraft, importSummary, newCalendarDraft, newCalendarBody, caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText };
+const helpers = { calendarValue, importEventDate, importDraft, importSummary, newCalendarDraft, newCalendarBody, caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText, loadErrorOr };
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
 const cal = (href: string, name: string, extra: object = {}) => ({ account_id: 'acc', href, name, color: '#ff0000', is_active: true, ...extra });
@@ -82,7 +84,10 @@ function fakeVault(initial: VaultView | null, failUnlock = false) {
   };
 }
 
-async function show(routes: Record<string, RouteResponse> = {}, vault: VaultView | null = lockedVault, failUnlock = false) {
+type ImportPublic = (armored: string) => Promise<unknown>;
+const importedKey: ImportPublic = async (armored) => ({ fingerprint: 'FFFF', email: armored, armored, is_own: false, source: 'imported', trust: 'trusted' });
+
+async function show(routes: Record<string, RouteResponse> = {}, vault: VaultView | null = lockedVault, failUnlock = false, importPublic = importedKey) {
   const requests = mockRequests({
     'GET /api/user': user,
     'GET /api/caldav/accounts': { accounts: [account()] },
@@ -98,7 +103,7 @@ async function show(routes: Record<string, RouteResponse> = {}, vault: VaultView
     notify: { status: () => ({ supported: false, permission: 'default', enabled: false }), toggle: async (s: unknown) => s },
     ics,
     pgpVault: pgp.ns,
-    pgpKeys: { keyFile, importPublic: async (armored: string) => ({ fingerprint: 'FFFF', email: armored, armored, is_own: false, source: 'imported', trust: 'trusted' }) },
+    pgpKeys: { keyFile, importPublic },
   };
   const r = await render(page, { ...app, scripts: { 'close-after': scripts['close-after'] }, messages, requests, actions, helpers, storage, streams: { '/api/events/stream': stream } });
   await r.settle();
@@ -530,4 +535,20 @@ test('encryption tab: a failed key removal brings the key back with the error', 
   await settle();
   expect(trusted()).toEqual(['bob@example.com']);
   expect(root.querySelector('#settings-panel-encryption')!.textContent).toContain(m.pgp_publicKeyRemoveError());
+});
+
+test('encryption tab: a key import whose openpgp is gone from the server (a deploy) says to reload, not that the key failed', async () => {
+  // what sinter's stub rejects with when the chunk is 404: a stale SinterError
+  const stale: ImportPublic = async () => { throw new SinterError(404, null, 'this page is out of date: reload it', null, true); };
+  const r = await show({}, lockedVault, false, stale);
+  button(r.root, m.pgp_tabEncryption()).click();
+  await r.settle();
+  button(r.root, m.pgp_importPublicKeyButton()).click();
+  await r.settle();
+  const dialog = r.root.querySelector<HTMLDialogElement>('#pgp-public-key-dialog')!;
+  type(dialog.querySelector('textarea')!, 'carol@example.com');
+  await r.settle();
+  dialog.querySelector('form')!.requestSubmit();
+  await r.settle();
+  expect(dialog.querySelector('[role=alert]')!.textContent).toBe(m.pgp_loadError());
 });
