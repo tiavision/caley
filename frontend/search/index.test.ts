@@ -5,6 +5,7 @@ import { render, mockRequests, mockStream, type RouteResponse } from '@tiaforge-
 import * as helpers from '../src/sinter.helpers.ts';
 import page from './index.html?raw';
 import { app } from '../src/test-components.ts';
+import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
@@ -20,12 +21,6 @@ const standup = event('s1', 'Standup', 'work', '2026-11-09', {
 });
 const dinner = event('d1', 'Dinner', 'home', '2026-11-12');
 
-// jsdom has no modal dialogs: open/close set `open` and fire `toggle` as browsers do.
-if (!HTMLDialogElement.prototype.showModal) {
-  HTMLDialogElement.prototype.showModal = function () { this.open = true; this.dispatchEvent(new Event('toggle')); };
-  HTMLDialogElement.prototype.close = function () { if (!this.open) return; this.open = false; this.dispatchEvent(new Event('toggle')); this.dispatchEvent(new Event('close')); };
-}
-if (!HTMLElement.prototype.hidePopover) HTMLElement.prototype.hidePopover = function () {};
 
 beforeEach(() => configure({ confirm: () => true, urlSchemes: ['geo:'] }));
 afterEach(() => configure({ confirm: null as never, urlSchemes: [] }));

@@ -1,5 +1,6 @@
 <!-- Event detail dialog #event-detail. Once per page, outside any <template>. Props:
-       - `event` (EventJson|null): the event shown; the page opens it with `detail = ev; showModal('event-detail')`
+       - `event` (EventJson|null): the event shown; the page opens it with a button
+         `commandfor="event-detail" command="show-modal" data-sn-on-click="detail = ev"`
          and passes `event: detail`;
        - `threads`: offer the button for the mails the event came from.
      It reads the `user` resource (src/layouts/app-layout.html, or the page's own): `user.map_url` for addresses no map app opens.
@@ -28,7 +29,7 @@
         <template data-sn-else>
           <button type="button" class="event-edit" data-variant="ghost" data-icon="pencil" data-shortcut="e" data-tooltip
                   data-sn-attr="{'aria-label': m.event_edit()}"
-                  data-sn-on-click="close(); emit('event-edit', { event, scope: 'series'})"></button>
+                  commandfor="event-form" command="show-modal" data-sn-on-click="close(); emit('event-edit', { event, scope: 'series'})"></button>
         </template>
         <button type="button" commandfor="event-detail" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
       </div>
@@ -36,10 +37,10 @@
 
     <div popover id="event-edit-choice" data-menu>
       <button type="button" popovertarget="event-edit-choice" popovertargetaction="hide"
-              data-sn-on-click="close('event-detail'); emit('event-edit', { event, scope: 'series'})"
+              commandfor="event-form" command="show-modal" data-sn-on-click="close('event-detail'); emit('event-edit', { event, scope: 'series'})"
               data-sn-text="m.event_editSeries()"></button>
       <button type="button" popovertarget="event-edit-choice" popovertargetaction="hide"
-              data-sn-on-click="close('event-detail'); emit('event-edit', { event, scope: 'this_instance' })"
+              commandfor="event-form" command="show-modal" data-sn-on-click="close('event-detail'); emit('event-edit', { event, scope: 'this_instance' })"
               data-sn-text="m.event_editInstance()"></button>
     </div>
 

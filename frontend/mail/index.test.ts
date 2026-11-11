@@ -8,6 +8,7 @@ import '../src/islands/common.ts';                 // data-shortcut keys
 import page from './index.html?raw';
 import { app } from '../src/test-components.ts';
 import type { Message } from '../src/lib/mail.ts';
+import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
 const msg = (uid: number, subject: string, extra: Partial<Message> = {}): Message => ({
@@ -18,12 +19,6 @@ const msg = (uid: number, subject: string, extra: Partial<Message> = {}): Messag
 });
 const inbox = [msg(3, 'Third', { flags: [], is_read: false }), msg(2, 'Second'), msg(1, 'First')];
 
-// jsdom has no modal dialogs or popovers: open/close set `open` and fire `toggle` as browsers do.
-if (!HTMLDialogElement.prototype.showModal) {
-  HTMLDialogElement.prototype.showModal = function () { this.open = true; this.dispatchEvent(new Event('toggle')); };
-  HTMLDialogElement.prototype.close = function () { if (!this.open) return; this.open = false; this.dispatchEvent(new Event('toggle')); this.dispatchEvent(new Event('close')); };
-}
-if (!HTMLElement.prototype.hidePopover) HTMLElement.prototype.hidePopover = function () {};
 
 beforeEach(() => { localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'] }); });
 afterEach(() => configure({ confirm: null as never, urlSchemes: [] }));

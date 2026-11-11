@@ -7,6 +7,7 @@ import { m } from '@tiaforge-ui/sinter/messages';
 import { messages } from '../src/test-messages.ts';
 import page from './index.html?raw';
 import { app } from '../src/test-components.ts';
+import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: 'https://maps.example/?q={q}' };
@@ -21,11 +22,6 @@ const ada = contact('1', 'Ada Lovelace', {
 const alan = contact('2', 'Alan Turing', { has_photo: true });
 const bob = contact('3', 'Bob Babbage', { addressbook_href: '/ab/work/' });
 
-// jsdom has no modal dialogs: open/close set `open` and fire `toggle` as browsers do.
-if (!HTMLDialogElement.prototype.showModal) {
-  HTMLDialogElement.prototype.showModal = function () { this.open = true; this.dispatchEvent(new Event('toggle')); };
-  HTMLDialogElement.prototype.close = function () { if (!this.open) return; this.open = false; this.dispatchEvent(new Event('toggle')); this.dispatchEvent(new Event('close')); };
-}
 
 let confirmAnswer = true;
 // As src/sinter.config.ts: geo: links for addresses.

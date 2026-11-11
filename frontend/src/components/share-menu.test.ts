@@ -4,6 +4,7 @@ import { m } from '@tiaforge-ui/sinter/messages';
 import { messages } from '../test-messages.ts';
 import { contactShare, eventShare, type ShareItem } from '../lib/share.ts';
 import { app } from '../test-components.ts';
+import '../test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
 const contact = { account_id: 'a1', uid: 'u 1', addressbook_href: '/ab/', fn_name: 'Ada Lovelace', emails: [], phones: [], addresses: [], org: '', has_photo: false };
 

@@ -7,6 +7,7 @@ import '../src/islands/common.ts';                 // data-shortcut keys
 import { threadRows } from '../src/lib/thread.ts';
 import page from './index.html?raw';
 import { app } from '../src/test-components.ts';
+import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
 const NOW = new Date(2026, 10, 11, 12, 0); // Wednesday, Nov 11 2026
 
@@ -32,12 +33,6 @@ const grid = (month: string) => ({
   }),
 });
 
-// jsdom has no modal dialogs: open/close set `open` and fire `toggle` as browsers do.
-if (!HTMLDialogElement.prototype.showModal) {
-  HTMLDialogElement.prototype.showModal = function () { this.open = true; this.dispatchEvent(new Event('toggle')); };
-  HTMLDialogElement.prototype.close = function () { if (!this.open) return; this.open = false; this.dispatchEvent(new Event('toggle')); this.dispatchEvent(new Event('close')); };
-}
-if (!HTMLElement.prototype.hidePopover) HTMLElement.prototype.hidePopover = function () {};
 
 beforeEach(() => configure({ confirm: () => true, urlSchemes: ['geo:'] }));
 afterEach(() => configure({ confirm: null as never, urlSchemes: [] }));

@@ -11,6 +11,7 @@ import * as ics from '../src/actions/ics.ts';
 import page from './index.html?raw';
 import { app, scripts } from '../src/test-components.ts';
 import type { VaultView } from '../src/actions/pgp-vault.ts';
+import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
 // The helpers the page and its components use (not the whole helpers module: other pages' helpers load more).
 const helpers = { calendarValue, importEventDate, importDraft, importSummary, newCalendarDraft, newCalendarBody, caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText };
@@ -24,18 +25,6 @@ const account = (extra: object = {}) => ({
   ...extra,
 });
 
-// jsdom has no modal dialogs: open/close set `open` and fire `toggle` as browsers do.
-if (!HTMLDialogElement.prototype.showModal) {
-  HTMLDialogElement.prototype.showModal = function () { this.open = true; this.dispatchEvent(new Event('toggle')); };
-  HTMLDialogElement.prototype.close = function () { if (!this.open) return; this.open = false; this.dispatchEvent(new Event('toggle')); this.dispatchEvent(new Event('close')); };
-}
-// jsdom has no command invokers either: a click on a [commandfor] button runs its command.
-document.addEventListener('click', (e) => {
-  const button = (e.target as Element).closest?.('button[commandfor]');
-  if (!button) return;
-  const dialog = document.getElementById(button.getAttribute('commandfor')!) as HTMLDialogElement;
-  queueMicrotask(() => (button.getAttribute('command') === 'show-modal' ? dialog.showModal() : dialog.close()));
-});
 
 let confirmAnswer = true;
 // localStorage of each render: `sn:event-default-calendar` is the default calendar shared with the event form.

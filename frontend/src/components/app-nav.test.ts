@@ -4,6 +4,7 @@ import { m } from '@tiaforge-ui/sinter/messages';
 import { messages } from '../test-messages.ts';
 import { app } from '../test-components.ts';
 import type { NotificationStatus } from '../actions/notify.ts';
+import '../test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
 // A page of the app layout (src/layouts/app-layout.html), which has the rail.
 const page = (here: string) => `

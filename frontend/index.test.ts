@@ -4,6 +4,7 @@ import { m } from '@tiaforge-ui/sinter/messages';
 import { messages } from './src/test-messages.ts';
 import page from './index.html?raw';
 import { app } from './src/test-components.ts';
+import './src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
 // <auth-return>'s script navigates away: here it only counts that it ran.
 let returned = 0;

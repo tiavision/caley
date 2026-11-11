@@ -5,6 +5,7 @@ import { messages } from '../test-messages.ts';
 import { calendarValue, importEventDate, importDraft, importSummary } from '../lib/import.ts';
 import * as ics from '../actions/ics.ts';
 import { app, scripts } from '../test-components.ts';
+import '../test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
 // The dialog as mail uses it: a calendar attachment opens it with the file already set (ics.draft from an action),
 // a plain button with an empty draft.
@@ -19,10 +20,6 @@ const page = `
   </main>
 </body>`;
 
-if (!HTMLDialogElement.prototype.showModal) {
-  HTMLDialogElement.prototype.showModal = function () { this.open = true; this.dispatchEvent(new Event('toggle')); };
-  HTMLDialogElement.prototype.close = function () { if (!this.open) return; this.open = false; this.dispatchEvent(new Event('toggle')); this.dispatchEvent(new Event('close')); };
-}
 
 const cal = (href: string, name: string) => ({ account_id: 'acc', href, name, color: null, is_active: true });
 const accounts = [{

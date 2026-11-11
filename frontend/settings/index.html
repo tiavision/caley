@@ -64,7 +64,7 @@
                       commandfor="create-calendar-dialog" command="show-modal"
                       data-sn-attr="{'aria-label': m.cal_createCalendar()}"></button>
               <button type="button" data-variant="ghost" data-size="sm" data-icon="upload" data-tooltip
-                      data-sn-on-click="emit('ics-import', importDraft(caldavAccounts, defaultCal, null, null))"
+                      commandfor="import-ics" command="show-modal" data-sn-on-click="emit('ics-import', importDraft(caldavAccounts, defaultCal, null, null))"
                       data-sn-attr="{'aria-label': m.cal_import()}"></button>
             </div>
           </div>
