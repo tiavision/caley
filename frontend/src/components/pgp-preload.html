@@ -1,4 +1,4 @@
-<!-- Fetches openpgp in the background once the page has loaded and the browser is idle (pgp-preload.ts), so the first
+<!-- Fetches openpgp in the background when the browser is idle (pgp-preload.ts), so the first
      encrypted or signed message (or an Autocrypt header) does not wait for the download. Used by <mail-reader>: every
      page that shows mail preloads it; other pages load openpgp only on first use (loadPgp(), src/lib/pgp/load.ts). -->
 <template data-sn-component="">
