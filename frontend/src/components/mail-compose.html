@@ -1,6 +1,5 @@
 <!-- Compose dialog #mail-compose (/mail/ and /mail/view/). It wraps the part of the page that opens it; an opener
-     emits `compose` with the draft: emit('compose', composeDraft(mode, msg, identities, text, html, files)); a button opener
-     also has commandfor="mail-compose" command="show-modal".
+     emits `compose` with the draft: emit('compose', composeDraft(mode, msg, identities, text, html, files)).
      With `pending`, it also opens a draft another page left (share menu → send by email).
      Sending builds the MIME message here (signed/encrypted with OpenPGP when chosen) and posts it raw.
      Resources: identities. -->

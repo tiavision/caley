@@ -164,7 +164,7 @@
                     <template data-sn-if="n > 0"><span data-badge data-tone="accent" data-sn-text="badgeCount(n)"></span></template>
                   </button>
                   <button type="button" data-variant="ghost" data-size="sm" data-icon="pencil" data-tooltip
-                          commandfor="mail-folder" command="show-modal" data-sn-on-click="sidebarOpen = false; emit('folder-edit', folderDraft(f))"
+                          data-sn-on-click="sidebarOpen = false; emit('folder-edit', folderDraft(f))"
                           data-sn-attr="{'aria-label': m.mail_editVirtualFolder()}"></button>
                   <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
                           data-sn-delete="/api/email/folder?folder_id={f.folder_id}"
@@ -191,10 +191,10 @@
                 <span data-caption data-truncate data-grow data-sn-attr="{title: acc.username}" data-sn-text="acc.display_name"></span>
                 <template data-sn-if="section.unread > 0"><span data-badge data-tone="accent" data-sn-text="badgeCount(section.unread)"></span></template>
                 <button type="button" data-variant="ghost" data-size="sm" data-icon="user" data-tooltip
-                        commandfor="mail-identities" command="show-modal" data-sn-on-click="sidebarOpen = false; emit('identities-open', acc.account_id)"
+                        data-sn-on-click="sidebarOpen = false; emit('identities-open', acc.account_id)"
                         data-sn-attr="{'aria-label': m.mail_identities()}"></button>
                 <button type="button" data-variant="ghost" data-size="sm" data-icon="pencil" data-tooltip
-                        commandfor="mail-account" command="show-modal" data-sn-on-click="sidebarOpen = false; emit('account-edit', {acct: editAccount(acc, identities), ui: accountUi('details')})"
+                        data-sn-on-click="sidebarOpen = false; emit('account-edit', {acct: editAccount(acc, identities), ui: accountUi('details')})"
                         data-sn-attr="{'aria-label': m.mail_editAccountHeading()}"></button>
                 <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
                         data-sn-delete="/api/email/account?account_id={acc.account_id}"
@@ -234,10 +234,10 @@
 
           <div class="sidebar-add" data-layout="stack" data-gap="none">
             <button type="button" data-variant="ghost" data-size="sm" data-icon="plus"
-                    commandfor="mail-account" command="show-modal" data-sn-on-click="sidebarOpen = false; emit('account-edit', {acct: newAccount(), ui: accountUi('basic')})"
+                    data-sn-on-click="sidebarOpen = false; emit('account-edit', {acct: newAccount(), ui: accountUi('basic')})"
                     data-sn-text="m.mail_addAccount()"></button>
             <button type="button" data-variant="ghost" data-size="sm" data-icon="plus"
-                    commandfor="mail-folder" command="show-modal" data-sn-on-click="sidebarOpen = false; emit('folder-edit', folderDraft(null))"
+                    data-sn-on-click="sidebarOpen = false; emit('folder-edit', folderDraft(null))"
                     data-sn-text="m.mail_addVirtualFolder()"></button>
           </div>
         </aside>
@@ -567,11 +567,11 @@
 
       <!-- Next to the FAB: the image sources dialog for every message. -->
       <button type="button" class="origins-trigger" data-variant="secondary" data-icon="image" data-tooltip
-              commandfor="mail-origins" command="show-modal" data-sn-on-click="emit('origins-open', false)"
+              data-sn-on-click="emit('origins-open', false)"
               data-sn-attr="{'aria-label': m.mail_manageImageSources()}"
               data-sn-text="(allowedOrigins?.origins.length ?? 0) + (ignoredOrigins?.origins.length ?? 0) || ''"></button>
       <button type="button" data-fab data-icon="plus"
-              commandfor="mail-compose" command="show-modal" data-sn-on-click="emit('compose', composeDraft('new', null, identities))"
+              data-sn-on-click="emit('compose', composeDraft('new', null, identities))"
               data-sn-attr="{'aria-label': m.mail_newMessage()}"></button>
     </div>
   </mail-folder>

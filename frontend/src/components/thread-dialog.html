@@ -38,7 +38,7 @@
                 <button type="button" data-variant="item" data-size="sm" data-layout="row" data-gap="sm" data-wrap="none" data-bar
                         data-sn-style="{'--tm-tone': r.event.color || null}"
                         data-sn-attr="{'aria-current': r.current ? 'true' : null}"
-                        commandfor="event-detail" command="show-modal" data-sn-on-click="close(); emit('event-open', r.event)">
+                        data-sn-on-click="close(); emit('event-open', r.event)">
                   <span data-icon="calendar" aria-hidden="true"></span>
                   <span data-truncate data-grow data-sn-text="r.event.summary || '—'"></span>
                   <small data-muted data-sn-text="formatEventTime(r.event)"></small>

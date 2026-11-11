@@ -1,6 +1,6 @@
 <!-- New/edit event dialog #event-form with the recurrence builder. It wraps the part of the page that opens it,
      and takes its draft (EventDraft, src/lib/events.ts) from the events its content emits:
-       - `event-new` (EventDraft): <button commandfor="event-form" command="show-modal" data-sn-on-click="emit('event-new', newEventDraft(calendars, date, defaultCal))">;
+       - `event-new` (EventDraft): emit('event-new', newEventDraft(calendars, date, defaultCal));
        - `event-edit` {event, scope} from <event-detail>.
      It declares the `calendars` (CalendarJson[]) and `caldavAccounts` resources: the page reads them, never redeclares them.
      Events: `event-saved` and `event-deleted` (the draft) after the server accepted the change; `calendar-chosen`

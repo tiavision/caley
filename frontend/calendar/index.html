@@ -189,7 +189,7 @@
                         <span class="narrow-only day-date" data-muted data-grow data-sn-text="dayLabel(iso, $locale, {month: 'short', day: 'numeric'})"></span>
                       </button>
                       <button type="button" class="day-add" data-variant="ghost" data-size="sm" data-icon="plus" data-sn-attr="{'aria-label': m.event_new()}"
-                              commandfor="event-form" command="show-modal" data-sn-on-click="focusDate = iso; emit('event-new', newEventDraft(calendars, iso, defaultCal))"></button>
+                              data-sn-on-click="focusDate = iso; emit('event-new', newEventDraft(calendars, iso, defaultCal))"></button>
                     </div>
                     <template data-sn-if="!hasDay(weekDays, iso) && !$meta.weekDays.error">
                       <div class="events-placeholder" data-layout="stack" data-gap="xs" aria-hidden="true">
@@ -202,7 +202,7 @@
                           <button type="button" class="event-trigger" data-variant="item" data-size="sm" data-bar
                                   data-sn-style="{'--tm-tone': event.color || null}"
                                   data-sn-attr="{tabindex: pos[eventKey(event)] === tabPos ? '0' : '-1', 'data-pos': pos[eventKey(event)]}"
-                                  commandfor="event-detail" command="show-modal" data-sn-on-click="detail = event">
+                                  data-sn-on-click="detail = event; showModal('event-detail')">
                             <small data-muted data-sn-text="eventTimeLabel(event)"></small>
                             <span data-clamp="2" data-sn-text="event.summary"></span>
                           </button>
@@ -241,7 +241,7 @@
                               <template data-sn-for="event in ce.shown" data-sn-key="eventKey(event)">
                                 <button type="button" class="event-trigger" data-variant="item" data-size="sm" data-bar tabindex="-1"
                                         data-sn-style="{'--tm-tone': event.color || null}"
-                                        commandfor="event-detail" command="show-modal" data-sn-on-click="$event.stopPropagation(); detail = event">
+                                        data-sn-on-click="$event.stopPropagation(); detail = event; showModal('event-detail')">
                                   <span class="chip-text" data-sn-text="event.summary"></span>
                                 </button>
                               </template>
@@ -249,7 +249,7 @@
                           </template>
                           <template data-sn-if="ce.hidden > 0">
                             <button type="button" class="cell-more" data-variant="link" data-size="sm" data-tone="neutral" data-self="start"
-                                    commandfor="day-events" command="show-modal" data-sn-on-click="$event.stopPropagation(); dayDate = cell.date_str"
+                                    data-sn-on-click="$event.stopPropagation(); dayDate = cell.date_str; showModal('day-events')"
                                     data-sn-text="`+${ce.hidden}`"></button>
                           </template>
                         </div>
@@ -264,14 +264,14 @@
         </div>
 
         <button type="button" class="cal-new" data-fab data-icon="plus" data-shortcut="c" data-sn-attr="{'aria-label': m.event_new()}"
-                commandfor="event-form" command="show-modal" data-sn-on-click="emit('event-new', newEventDraft(calendars, focusDate || today, defaultCal))"></button>
+                data-sn-on-click="emit('event-new', newEventDraft(calendars, focusDate || today, defaultCal))"></button>
 
         <!-- Day events dialog (month view; was DayEventsDialog.svelte) -->
         <dialog id="day-events" closedby="any" data-layout="stack" data-sn-on-toggle="$el.open && (focusDate = dayDate)">
           <header data-layout="row" data-gap="xs" data-wrap="none">
             <h2 data-grow data-sn-text="dayLabel(dayDate, $locale, {weekday: 'long', month: 'long', day: 'numeric'})"></h2>
             <button type="button" data-variant="ghost" data-icon="plus" data-sn-attr="{'aria-label': m.event_new()}"
-                    commandfor="event-form" command="show-modal" data-sn-on-click="close(); focusDate = dayDate; emit('event-new', newEventDraft(calendars, dayDate, defaultCal))"></button>
+                    data-sn-on-click="close(); focusDate = dayDate; emit('event-new', newEventDraft(calendars, dayDate, defaultCal))"></button>
             <button type="button" commandfor="day-events" command="close" data-sn-attr="{'aria-label': m.cal_month_close()}"></button>
           </header>
           <!-- the wrapper scrolls, so the list keeps its natural height (rows of a scrolling flex list would shrink) -->
@@ -279,7 +279,7 @@
             <div data-list>
               <template data-sn-for="event in eventsOn(monthDays, dayDate)" data-sn-key="eventKey(event)">
                 <button type="button" data-variant="item" data-bar data-sn-style="{'--tm-tone': event.color || null}"
-                        commandfor="event-detail" command="show-modal" data-sn-on-click="close(); detail = event">
+                        data-sn-on-click="close(); detail = event; showModal('event-detail')">
                   <small data-muted data-sn-text="eventTimeLabel(event)"></small>
                   <span data-clamp="2" data-sn-text="event.summary"></span>
                 </button>

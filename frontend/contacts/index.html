@@ -125,7 +125,7 @@
             <template data-sn-if="c">
               <button type="button" data-icon="pencil" data-variant="ghost" data-tooltip data-shortcut="e"
                       data-sn-attr="{'aria-label': m.contacts_edit()}"
-                      commandfor="contact-form" command="show-modal" data-sn-on-click="draft = editDraft(c); formError = ''; close()"></button>
+                      data-sn-on-click="draft = editDraft(c); formError = ''; close(); showModal('contact-form')"></button>
             </template>
             <button type="button" commandfor="contact-detail" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
           </div>

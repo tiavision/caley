@@ -79,7 +79,7 @@
                   <li data-pad="none">
                     <button type="button" class="search-result" data-variant="item" data-layout="stack" data-gap="none"
                             data-sn-attr="{'data-bar': item.color ? '' : null}" data-sn-style="{'--tm-tone': item.color || null}"
-                            commandfor="event-detail" command="show-modal" data-sn-on-click="detail = item">
+                            data-sn-on-click="detail = item; showModal('event-detail')">
                       <strong data-sn-text="item.summary"></strong>
                       <small data-muted data-sn-text="eventDateLong(item.dtstart, $locale) + (item.location ? ` · ${item.location}` : '')"></small>
                       <template data-sn-if="item.description">
