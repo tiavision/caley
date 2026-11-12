@@ -112,6 +112,47 @@ body[data-shell] > main {
   padding-inline: 0;
 }
 
+// TODO: drop once temper collapses the rail on short screens itself (requested upstream 2026-11-12). A screen wide
+// enough for the rail but short (a phone or small tablet held sideways) gets the icon-only rail, whatever the
+// collapse toggle says, so the page next to it keeps its width; the toggle is hidden there, it could not expand it.
+// These are temper's collapsed-rail rules (app.css, feedback.css for the tooltips) under that condition.
+@media (width >= 48rem) and (height < 30rem) {
+  [data-rail] {
+    --_w: var(--tm-rail-width-collapsed, calc(var(--tm-control-h) + 2 * var(--tm-space-sm) + 1px));
+
+    :where(a, button) > span:not([data-badge]),
+    [data-rail-label],
+    [data-rail-collapse] {
+      display: none;
+    }
+
+    > header {
+      flex-direction: column;
+      justify-content: center;
+      gap: var(--tm-space-xs);
+    }
+
+    :where(a, button):has(> [data-badge]) { position: relative; }
+    :where(a, button) > [data-badge] {
+      position: absolute;
+      inset-block-start: 0.3rem;
+      inset-inline-end: 0.3rem;
+      block-size: 0.5rem;
+      inline-size: 0.5rem;
+      padding: 0;
+      background: var(--tm-tone);
+      font-size: 0;
+    }
+
+    [data-tooltip]::after { display: inline; }
+
+    .nav-brand {
+      justify-content: center;
+      padding-inline: 0;
+    }
+  }
+}
+
 // Calendar color dot (was EventColorDot.svelte); temper has no color swatch. Pure CSS, no partial:
 //   <span class="event-color-dot" data-sn-show="cal.color" data-sn-style="{'--tm-tone': cal.color}"></span>
 // data-sn-show hides it when there is no color, as the Svelte {#if color} did (temper's [hidden] wins).
