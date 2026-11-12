@@ -32,6 +32,26 @@
 // Compact rows in the seven columns, with a little more room than the sm item size.
 .day .event-trigger { padding-block: var(--tm-space-sm); }
 
+// Event chips (week and month): no box around each one, the calendar's color as the bar and a faint wash of it.
+.day .event-trigger,
+.month-cell .event-trigger {
+  background: color-mix(in oklch, var(--tm-tone) 9%, transparent);
+
+  &:hover { background: color-mix(in oklch, var(--tm-tone) 18%, transparent); }
+}
+
+// Days before today and the other months' days in the month grid: dimmed by color, not opacity, so their text keeps
+// the muted text's contrast; the bar and the wash fade instead.
+@mixin dimmed-events {
+  .event-trigger {
+    color: var(--tm-text-muted);
+    border-inline-start-color: color-mix(in oklch, var(--tm-tone) 40%, transparent);
+    background: color-mix(in oklch, var(--tm-tone) 4%, transparent);
+
+    &:hover { background: color-mix(in oklch, var(--tm-tone) 12%, transparent); }
+  }
+}
+
 @media (width < 60rem) {
   .week { grid-template-columns: minmax(0, 1fr); }
   .day.past-empty { display: none; }
@@ -49,7 +69,25 @@
 
 @media (width >= 60rem) {
   .narrow-only { display: none; }
-  .day.past { opacity: 0.45; }
+  .day.past {
+    @include dimmed-events;
+    .day-heading { color: var(--tm-text-muted); }
+  }
+  // Today's column: a tinted band behind the day (the shadow widens it into the gap without moving the chips). It
+  // ends with the day's events (align-self), not with the week's longest day.
+  .day:has(> .day-head [aria-current='date']) {
+    align-self: start;
+    border-radius: var(--tm-radius);
+    background: color-mix(in oklch, var(--tm-accent) 6%, transparent);
+    box-shadow: 0 0 0 var(--tm-space-xs) color-mix(in oklch, var(--tm-accent) 6%, transparent);
+
+    // The column's tint marks the day, so its heading drops the item's own tinted box (two overlapping shapes) and
+    // takes the accent color instead.
+    .day-heading[aria-current='date'] {
+      background: none;
+      color: var(--tm-accent);
+    }
+  }
   .day-add { opacity: 0; }
   .day-head:hover .day-add, .day-add:focus-visible { opacity: 1; }
 }
@@ -77,41 +115,93 @@
 .month-cell {
   min-block-size: 0;
   overflow: hidden;
-  padding: var(--tm-space-xs) 2px 2px;
+  padding: 2px;
   border-inline-end: 1px solid var(--tm-border);
   border-block-start: 1px solid var(--tm-border);
 }
-.month-cell.other-month { opacity: 0.45; }
+.month-cell.other-month {
+  background: color-mix(in oklch, var(--tm-fill) 60%, transparent);
+  @include dimmed-events;
+}
 
 // Day number; today gets a filled accent circle.
+// Only as wide as its digits (today's circle keeps its round size below), so the first chip loses little width.
 .day-num {
-  flex-shrink: 0;
-  min-inline-size: 1.5em;
+  padding-inline: 2px;
   border-radius: var(--tm-radius-full);
   font-size: var(--tm-text-xs);
   font-weight: 500;
   line-height: 1.5;
   text-align: center;
-  color: var(--tm-text-muted);
+  color: var(--tm-text);
 }
+.other-month .day-num { color: var(--tm-text-muted); }
 .day-num[aria-current='date'] {
+  min-inline-size: 1.5em;
   --tm-tone: var(--tm-accent);
   background: var(--tm-tone);
   color: var(--tm-tone-on);
   font-weight: 700;
 }
 
-.cell-events { overflow: hidden; }
-.cell-events > * { flex-shrink: 0; }
-// Two lines at most, cut without ellipsis (chips are narrow).
-.chip-text {
-  max-block-size: 2.8em;
+// The day number takes no row of its own: .cell-events is a two-column grid, the number in the top corner, the first
+// chip (or the loading chip) beside it, and every later row across both columns. The chips' wrapper is
+// display: contents, so the chips are the grid's items.
+.cell-events {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  // Rows as tall as their chips: auto rows would shrink to the cell's height (the chips' minimum height is 0), so the
+  // cell would never overflow and <month-fit> would not see that a cell needs fewer lines or chips.
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 2px;
+  min-block-size: 0;
   overflow: hidden;
+
+  .chips { display: contents; }
+  > *, .chips > * { grid-column: 1 / -1; }
+  // The number sits on the first chip's first line, however many lines the title takes: at the top, moved down by
+  // the chip's top padding (temper's sm item: .25rem) less half the difference of the two line heights (1.5em here,
+  // 1.4em in the chip, same text size).
+  .day-num {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: start;
+    position: relative;
+    inset-block-start: calc(0.25rem - 0.05em);
+  }
+  .event-trigger:nth-child(1 of .event-trigger) { grid-column: 1; grid-row: 1; }
+  > .placeholder-chip { grid-column: 1; grid-row: 1; }
+}
+.cell-more { justify-self: start; }
+// A title takes --lines lines (1 unless <month-fit> found room to spare in its cell, up to 3), cut with an ellipsis:
+// a busy day keeps one line per event, a quiet day shows its long titles. Words break with hyphens in the page's
+// language, and anywhere when a word is still too long for a narrow cell. The whole title is the chip's tooltip, in
+// the day's list and in the event's detail.
+// The chip's grid column must be allowed to shrink below the title's width, or nothing would be cut. Half the item's
+// side padding: in a month cell every pixel goes to the title.
+// A block, not temper's item grid: Chrome sizes the grid row before the line clamp, and a clamped title of several
+// lines then overflows its chip.
+.month-cell .event-trigger { display: block; padding-inline: var(--tm-space-xs); }
+.chip-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--lines, 1);
+  overflow: hidden;
+  min-inline-size: 0;
   font-size: var(--tm-text-xs);
-  word-break: break-all;
+  hyphens: auto;
+  overflow-wrap: anywhere;
 }
 
 @media (width < 60rem) {
+  // Phones: a cell is ~50px wide and tall, so width is what titles lack: the number takes a row of its own above the
+  // chips (height the cell has) instead of a third of the first chip's width.
+  .cell-events {
+    .day-num { grid-column: 1 / -1; justify-self: end; inset-block-start: 0; }
+    .event-trigger:nth-child(1 of .event-trigger),
+    > .placeholder-chip { grid-column: 1 / -1; grid-row: auto; }
+  }
   // Edge to edge: no outer side rules, and narrow chips keep their width for the text.
   .month-grid { border-inline-start: 0; }
   .month-cell:nth-child(7n) { border-inline-end: 0; }
