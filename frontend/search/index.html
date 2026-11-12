@@ -12,7 +12,7 @@
   <sn-resource name="results" when="urlSearch($url).q"
                src="/api/search?q={urlSearch($url).q}&start={urlSearch($url).start}&end={urlSearch($url).end}&cal={urlSearch($url).cals}&active={urlSearch($url).active}"
                key="account_id,calendar_href,uid,dtstart" order="-dtstart" type="EventJson[]"></sn-resource>
-  <main data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
+  <main data-gutter data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
         data-sn-on-calendar-chosen="defaultCal = $event.detail">
     <event-form data-density="compact"
                 data-sn-on-event-saved="refresh('results')" data-sn-on-event-deleted="refresh('results')">

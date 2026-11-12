@@ -15,7 +15,7 @@
     <sn-event name="contacts_refetch" resource="caldavAccounts" op="refetch"></sn-event>
   </sn-sync>
   <!-- defaultCal: the calendar new events and imports go to, shared with the event form (calendar, search). -->
-  <main data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
+  <main data-gutter data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
         data-sn-on-ics-imported="$event.detail.errors === 0 && (defaultCal = $event.detail.calendar)">
     <import-dialog data-density="compact">
     <div class="settings" data-layout="center" data-gap="lg" data-pad="sm" style="--tm-measure: 40rem">

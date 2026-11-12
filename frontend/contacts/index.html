@@ -24,7 +24,7 @@
     <sn-event name="contacts_refetch" resource="contacts" op="refetch"></sn-event>
     <sn-event name="contacts_refetch" resource="addressbooks" op="refetch"></sn-event>
   </sn-sync>
-  <main data-sn-on-contact-saved="sel = $event.detail; showModal('contact-detail')">
+  <main data-gutter data-sn-on-contact-saved="sel = $event.detail; showModal('contact-detail')">
     <div data-density="compact"
          data-sn-let="{
            shown: filterContacts(contacts, addressbooks, hiddenBooks, q),

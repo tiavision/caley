@@ -31,6 +31,13 @@ a.mail-attachment-chip:hover {
   min-block-size: 0;
 }
 
+// TODO: drop after the next temper release (data-gutter, temper 7e87ede, unreleased). The pages whose <main> scrolls
+// itself (settings, search, contacts) reserve the scrollbar space, so their centered column does not shift when a
+// tab or loaded data makes it shorter or taller than the screen (classic scrollbars: Chrome on Linux and Windows).
+:where([data-gutter]) {
+  scrollbar-gutter: stable;
+}
+
 // Page transitions: cross-document view transitions between the app pages (same-origin navigations).
 // The rail keeps its place and cross-fades (only aria-current changes); <main> fades with a short lift.
 // temper turns the transitions on (`@view-transition`, not with reduced motion); these rules only shape them.
