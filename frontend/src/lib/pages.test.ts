@@ -1,7 +1,7 @@
 import '../test-messages.ts';
 // The small helpers the pages' handlers apply (`x = fn(…)`): calendar, search, contacts, create-calendar dialog.
 import { describe, expect, test } from 'vitest';
-import { farStep, hasDay, inWeek, monthCells, monthRange, swipeStep, weekDates } from './calendar.ts';
+import { farStep, hasDay, inWeek, monthCells, monthRange, monthRows, swipeStep, weekDates } from './calendar.ts';
 import { calendarKey, calendarsLabel, calsParam, chosenCalendars, newCalendarBody, newCalendarDraft, sameEvent, urlCals, urlSearch } from './events.ts';
 import { addressbooksLabel, sameContact } from './contacts.ts';
 import { elementIn } from './dom.ts';
@@ -14,6 +14,13 @@ const touch = (x: number, y: number) => ({ changedTouches: [{ clientX: x, client
 describe('calendar', () => {
   // The backend's grid (list_calendar in backend/src/calendar/mod.rs): from the Monday on or before the 1st, whole
   // weeks through the week of the last day. The page builds it itself, so both must agree.
+  test('monthRows: weeks without events get half a share of the height', () => {
+    const cells = monthCells('2027-02'); // 4 rows, Monday 1 Feb to Sunday 28 Feb
+    const day = (date_iso: string) => ({ date_iso, events: [{}] }) as never;
+    expect(monthRows(cells, [day('2027-02-10')])).toBe('minmax(0, 0.5fr) minmax(0, 1fr) minmax(0, 0.5fr) minmax(0, 0.5fr)');
+    expect(monthRows(cells, [])).toBe(Array(4).fill('minmax(0, 0.5fr)').join(' '));
+  });
+
   test('monthCells: whole weeks around the month, as /api/calendar builds them', () => {
     expect(monthRange('2026-11')).toEqual({ start: '2026-10-26', end: '2026-12-06' }); // starts on a Sunday: 6 rows
     expect(monthRange('2026-06')).toEqual({ start: '2026-06-01', end: '2026-07-05' }); // starts on a Monday

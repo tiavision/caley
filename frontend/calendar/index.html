@@ -223,7 +223,7 @@
                     </template>
                   </div>
                   <div class="month-grid" data-layout="grid" data-cols="7" data-gap="none" role="group"
-                       data-sn-style="{'--row-count': String(cells.length / 7)}"
+                       data-sn-style="{'--rows': monthRows(cells, monthDays)}"
                        data-sn-attr="{'aria-label': monthLabel(gridMonth, $locale)}">
                     <template data-sn-for="cell in cells" data-sn-key="cell.date_str">
                       <div class="month-cell" data-layout="stack" data-gap="none"

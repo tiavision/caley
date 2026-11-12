@@ -149,6 +149,19 @@ export interface MonthCell { date_str: string; day_number: number; is_current_mo
  * of the last day, as /api/calendar builds them (backend list_calendar), so the grid and its events request need
  * no response first.
  */
+/**
+ * The month grid's rows (`grid-template-rows`): a week without events gets half a share of the height, so the weeks
+ * with events have more room for their chips and titles. All rows equal while nothing has loaded.
+ */
+export function monthRows(cells: readonly MonthCell[], days: readonly DayEventsJson[]): string {
+  const rows: string[] = [];
+  for (let i = 0; i < cells.length; i += 7) {
+    const busy = cells.slice(i, i + 7).some((c) => eventsOn(days, c.date_str).length > 0);
+    rows.push(busy ? 'minmax(0, 1fr)' : 'minmax(0, 0.5fr)');
+  }
+  return rows.join(' ');
+}
+
 export function monthCells(ym: string): MonthCell[] {
   const [y, mo] = ym.split('-').map(Number);
   const first = new Date(y!, mo! - 1, 1);

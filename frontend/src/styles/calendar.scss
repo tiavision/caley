@@ -111,7 +111,8 @@
   }
 }
 .month-grid {
-  grid-template-rows: repeat(var(--row-count), minmax(0, 1fr));
+  // monthRows(): weeks without events get half a row's height, the busy weeks the rest.
+  grid-template-rows: var(--rows);
   flex: 1;
   min-block-size: 0;
   border-inline-start: 1px solid var(--tm-border);
@@ -124,8 +125,10 @@
   border-inline-end: 1px solid var(--tm-border);
   border-block-start: 1px solid var(--tm-border);
 }
+// The other months' days: a faint tint on wide screens; phones leave it out (below), where a row of them read as one
+// large gray block, bigger than it is. Their muted numbers and dimmed chips still set them apart.
 .month-cell.other-month {
-  background: color-mix(in oklch, var(--tm-fill) 60%, transparent);
+  background: color-mix(in oklch, var(--tm-fill) 35%, transparent);
   @include dimmed-events;
 }
 
@@ -207,6 +210,7 @@
     .event-trigger:nth-child(1 of .event-trigger),
     > .placeholder-chip { grid-column: 1 / -1; grid-row: auto; }
   }
+  .month-cell.other-month { background: none; }
   // Edge to edge: no outer side rules, and narrow chips keep their width for the text.
   .month-grid { border-inline-start: 0; }
   .month-cell:nth-child(7n) { border-inline-end: 0; }
