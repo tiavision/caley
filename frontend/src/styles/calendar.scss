@@ -143,7 +143,10 @@
   border-inline-start: 1px solid var(--tm-border);
   border-block-end: 1px solid var(--tm-border);
 }
+// --cell-bg: the cell's opaque background, which the day number's notch (.flow below) is painted in.
 .month-cell {
+  --cell-bg: var(--tm-bg);
+  background: var(--cell-bg);
   min-block-size: 0;
   overflow: hidden;
   padding: 2px;
@@ -153,23 +156,29 @@
 // The other months' days: a faint tint on wide screens; phones leave it out (below), where a row of them read as one
 // large gray block, bigger than it is. Their muted numbers and dimmed chips still set them apart.
 .month-cell.other-month {
-  background: color-mix(in oklch, var(--tm-fill) 35%, transparent);
+  --cell-bg: color-mix(in oklch, var(--tm-fill) 35%, var(--tm-bg));
   @include dimmed-events;
 }
 
 // Day number; today gets a filled accent circle.
 // Only as wide as its digits (today's circle keeps its round size below), so the first chip loses little width.
+// The box places the number (and is the notch in a .flow cell); the inner span is the number, today's in a circle.
 .day-num {
-  padding-inline: 2px;
-  border-radius: var(--tm-radius-full);
+  display: flex;
+  justify-content: end;
   font-size: var(--tm-text-xs);
   font-weight: 500;
   line-height: 1.5;
-  text-align: center;
   color: var(--tm-text);
+
+  > span {
+    padding-inline: 2px;
+    border-radius: var(--tm-radius-full);
+    text-align: center;
+  }
 }
 .other-month .day-num { color: var(--tm-text-muted); }
-.day-num[aria-current='date'] {
+.day-num[aria-current='date'] > span {
   min-inline-size: 1.5em;
   --tm-tone: var(--tm-accent);
   background: var(--tm-tone);
@@ -207,6 +216,63 @@
 }
 .cell-more { justify-self: start; }
 
+// A cell whose first title shows several lines (fit.flow, wide screens): the first chip spans the cell and only its
+// first line leaves room for the day number, so its later lines use the full width. The number sits in a notch cut
+// into the chip's top-right corner, painted in the cell's background: the notch's inner corner is rounded (its
+// bottom-start radius), and so are the two outer ones where the chip's top and end edges meet it (quarter circles in
+// the corners beside and under it), so the chip runs around the number in one shape. The notch is the number's width
+// plus the 2px the grid leaves between a chip and the number elsewhere; the title's first line leaves the same room
+// with an invisible float of the same digits (its data-day) in the number's type, so one and two digits both fit.
+@media (width >= 60rem) {
+  .month-cell.flow .cell-events {
+    --r: var(--tm-radius-sm);
+    --notch-h: calc(2 * var(--chip-pad) + var(--chip-font) * var(--chip-lh));
+
+    .event-trigger:nth-child(1 of .event-trigger) {
+      grid-column: 1 / -1;
+
+      // The notch's width less the chip's end padding, plus the text's usual distance from a chip's end (that same
+      // padding): the number's digits, its 2px on both sides and the 2px gap.
+      .chip-text::before {
+        content: attr(data-day);
+        float: inline-end;
+        visibility: hidden;
+        block-size: calc(var(--chip-font) * var(--chip-lh));
+        padding-inline: var(--tm-space-xs) 2px;
+        font-size: var(--tm-text-xs);
+        font-weight: 500;
+        line-height: var(--chip-lh);
+      }
+      .chip-text[data-today]::before {
+        min-inline-size: calc(1.5 * var(--tm-text-xs) + 6px);
+        font-weight: 700;
+      }
+    }
+
+    .day-num {
+      z-index: 1;
+      justify-self: end;
+      align-items: center;
+      padding-inline-start: 2px;
+      block-size: var(--notch-h);
+      inset-block-start: 0;
+      background: var(--cell-bg);
+      border-end-start-radius: var(--r);
+
+      &::before,
+      &::after {
+        content: '';
+        position: absolute;
+        inline-size: var(--r);
+        block-size: var(--r);
+        background: radial-gradient(circle at 0 100%, transparent var(--r), var(--cell-bg) calc(var(--r) + 0.5px));
+      }
+      &::before { inset-block-start: 0; inset-inline-end: 100%; }
+      &::after { inset-block-start: 100%; inset-inline-end: 0; }
+    }
+  }
+}
+
 // While <month-fit> fits a newly shown month (fit.settled false), its chips are laid out but invisible, so the cells
 // do not show each step (all chips, then "+N", then more lines); they fade in once the fit is done. A fallback
 // shows them after a second whatever happens, should the fit never report.
@@ -238,6 +304,8 @@
   line-height: var(--chip-lh);
   hyphens: auto;
   overflow-wrap: anywhere;
+  // Each line as full as it goes (not temper's balanced "pretty" wrapping): in a cell, room is what titles lack.
+  text-wrap: wrap;
 }
 
 @media (width < 60rem) {
@@ -248,7 +316,7 @@
     .event-trigger:nth-child(1 of .event-trigger),
     > .placeholder-chip { grid-column: 1 / -1; grid-row: auto; }
   }
-  .month-cell.other-month { background: none; }
+  .month-cell.other-month { --cell-bg: var(--tm-bg); }
   // Edge to edge: no outer side rules, and narrow chips keep their width for the text.
   .month-grid { border-inline-start: 0; }
   .month-cell:nth-child(7n) { border-inline-end: 0; }

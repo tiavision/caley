@@ -13,6 +13,9 @@ export interface MonthFit {
   narrow: boolean;
   /** false while a newly shown month is being fitted: the page keeps its chips invisible until then */
   settled: boolean;
+  /** dates whose first title takes more than one line (wide screens): the chip spans the cell and its first line
+   * leaves the corner to the day number, which it flows around (calendar.scss `.flow`) */
+  flow: Record<string, boolean>;
 }
 
 const MORE_H = 19; // px: the "+N" row's height until one has been measured
@@ -37,6 +40,7 @@ export default class extends MonthFitComponent {
   #events = '';
   #counts: Record<string, number> = {};
   #lines: Record<string, number> = {};
+  #flow: Record<string, boolean> = {};
   #moreH = MORE_H;
   #month = ''; // the dates the grid shows, to tell a new month from a change in the same one
   #hiding = false;
@@ -88,17 +92,32 @@ export default class extends MonthFitComponent {
   #onMedia = () => this.#schedule();
   #grid = () => this.root.parentElement?.querySelector<HTMLElement>('.month-grid') ?? null;
 
-  #report(counts: Record<string, number>, lines: Record<string, number> = {}) {
+  #report(counts: Record<string, number>, lines: Record<string, number> = {}, flow: Record<string, boolean> = {}) {
     this.#counts = counts;
     this.#lines = lines;
-    this.emit('fit', { counts, lines, narrow: !!this.#mql?.matches, settled: !this.#hiding });
+    this.#flow = flow;
+    this.emit('fit', { counts, lines, flow, narrow: !!this.#mql?.matches, settled: !this.#hiding });
   }
 
-  /** The last step: show the chips (again) with the counts and lines found. */
+  /**
+   * The last step: on wide screens, the cells whose first title takes more than one line flow it around the day
+   * number (its lines after the first get the cell's full width; they need no more room than before, so nothing
+   * overflows anew); then the chips are shown (again).
+   */
   #done() {
-    if (!this.#hiding) return;
+    const flow: Record<string, boolean> = {};
+    if (!this.#mql?.matches) {
+      for (const cell of this.#cells()) {
+        const text = cell.querySelector<HTMLElement>('.chip-text');
+        if (!text) continue;
+        const lineH = parseFloat(getComputedStyle(text).lineHeight) || 16;
+        // the lines it shows (clientHeight), not the text's whole height: a title cut to one line stays beside the number
+        if (text.clientHeight > lineH * 1.5) flow[cell.dataset.date!] = true;
+      }
+    }
+    const hiding = this.#hiding;
     this.#hiding = false;
-    this.#report(this.#counts, this.#lines);
+    if (hiding || Object.keys(flow).length) this.#report(this.#counts, this.#lines, flow);
   }
 
   /** After sinter has rendered the last report and the browser has laid it out (two frames). */
