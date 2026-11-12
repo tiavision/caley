@@ -258,6 +258,19 @@
                                     data-sn-on-click="$event.stopPropagation(); dayDate = cell.date_str; showModal('day-events')"
                                     data-sn-text="`+${ce.hidden}`"></button>
                           </template>
+                          <!-- Cells too short for chips (calendar.scss, a container query on the cell's height: a phone
+                               held sideways, a low window) show a dot per event in its calendar's color instead: a button
+                               that opens the day's list, at any width. -->
+                          <template data-sn-if="ce.all.length > 0">
+                            <button type="button" class="cell-dots" data-variant="ghost" tabindex="-1"
+                                    data-sn-attr="{'aria-label': dayLabel(cell.date_str, $locale, {dateStyle: 'long'})}"
+                                    data-sn-on-click="$event.stopPropagation(); dayDate = cell.date_str; showModal('day-events')">
+                              <template data-sn-for="event in ce.all.slice(0, 5)" data-sn-key="eventKey(event)">
+                                <span class="cell-dot" data-sn-style="{'--tm-tone': event.color || null}"></span>
+                              </template>
+                              <template data-sn-if="ce.all.length > 5"><span class="cell-dots-more">+</span></template>
+                            </button>
+                          </template>
                         </div>
                       </div>
                     </template>

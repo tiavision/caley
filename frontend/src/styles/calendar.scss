@@ -7,9 +7,15 @@
 // The view switch and Today sit at the toolbar's right edge.
 .cal-view-controls { margin-inline-start: auto; }
 
-// Phones: the menu and the view controls on the first line, the range on its own line below them, semibold (it is
-// the page's heading), with ‹ › at the line's end.
-@media (width < 48rem) {
+// A toolbar too narrow for one line (a phone held upright; it is the toolbar's own width that counts, so a phone held
+// sideways, with the rail as a drawer, keeps one line): the menu and the view controls on the first line, the range
+// on its own line below them, semibold (it is the page's heading), with ‹ › at the line's end. The two lines sit
+// close together: the toolbar takes as little of the month's height as its buttons allow.
+.cal-toolbar {
+  container-type: inline-size;
+  row-gap: 0;
+}
+@container (width < 32rem) {
   .cal-nav {
     order: 1;
     flex-basis: 100%;
@@ -21,8 +27,6 @@
     font-size: var(--tm-text-md);
     font-weight: 600;
   }
-  // The two lines close together: the toolbar takes as little of the month's height as its buttons allow.
-  .cal-toolbar { row-gap: 0; }
 }
 
 // The bar while the range shown reloads: a 2px band under the toolbar, nothing moves when it comes and goes.
@@ -215,6 +219,37 @@
   > .placeholder-chip { grid-column: 1; grid-row: 1; }
 }
 .cell-more { justify-self: start; }
+
+// Cells too short for two chip lines (a phone held sideways, a low window) show dots instead of chips: one per event
+// in its calendar's color (five at most, then a "+"), under the day number. A container query on the cell's own
+// height, so every cell of the same height switches together; a tap on a narrow cell opens the day's list.
+.month-cell { container-type: size; }
+.cell-dots { display: none; }
+@container (height < 4rem) {
+  .cell-events :is(.chips, .cell-more, .placeholder-chip) { display: none; }
+  .cell-dots {
+    display: flex;
+    grid-column: 1 / -1;
+    justify-content: end;
+    align-items: center;
+    gap: 3px;
+    min-block-size: 0;
+    block-size: auto;
+    padding: 2px;
+  }
+}
+.cell-dot {
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: var(--tm-tone);
+}
+.other-month .cell-dot { background: color-mix(in oklch, var(--tm-tone) 45%, transparent); }
+.cell-dots-more {
+  font-size: var(--tm-text-xs);
+  line-height: 1;
+  color: var(--tm-text-muted);
+}
 
 // A cell whose first title shows several lines (fit.flow, wide screens): the first chip spans the cell and only its
 // first line leaves room for the day number, so its later lines use the full width. The number sits in a notch cut
