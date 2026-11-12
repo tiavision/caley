@@ -15,7 +15,9 @@ export default defineConfig({
     sinter({ typecheck: true, embed: true, lazy: ['openpgp'] }),
     // temper check on all markup and CSS (errors fail the build); serves the Lucide icons the markup names.
     // Only existing paths: temper stops the build on a missing one (components and layouts are under src/).
-    temper({ paths: ['src', 'index.html', 'calendar', 'contacts', 'mail', 'search', 'settings'].map((p) => resolve(root, p)).filter(existsSync), icons: { lucide: true }, prune: true }),
+    // `inspect`: the dev server also audits the rendered page (overflow, contrast, clipped text, opened dialogs) and
+    // prints findings in its terminal; agents check the build with `npm run inspect` instead.
+    temper({ paths: ['src', 'index.html', 'calendar', 'contacts', 'mail', 'search', 'settings'].map((p) => resolve(root, p)).filter(existsSync), icons: { lucide: true }, prune: true, inspect: true }),
   ],
   css: {
     preprocessorOptions: {

@@ -5,61 +5,6 @@
 .month { block-size: 100%; }
 .cal-range { white-space: nowrap; }
 
-// Week/month switcher: a radio group (the choice is persisted with data-sn-model) drawn as a segmented control,
-// as tall as the toolbar's sm buttons. The radios stay in place, invisible, over their labels: arrow keys, screen
-// readers and taps work as on any radio group; the checked option is a raised chip on the track.
-.view-switch {
-  display: inline-flex;
-  flex-shrink: 0;
-  gap: 2px;
-  padding: 2px;
-  min-block-size: calc(var(--tm-control-h) * 0.8);
-  border: 1px solid var(--tm-border);
-  border-radius: var(--tm-radius);
-  background: var(--tm-fill);
-
-  label {
-    position: relative;
-    display: grid;
-    place-items: center;
-    padding-inline: calc(var(--tm-control-px) * 0.8);
-    border-radius: calc(var(--tm-radius) - 2px);
-    color: var(--tm-text-muted);
-    font-size: 0.8125rem;
-    line-height: 1;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: background-color var(--tm-duration) var(--tm-ease), color var(--tm-duration) var(--tm-ease);
-
-    &:hover { color: var(--tm-text); }
-
-    &:has(:checked) {
-      background: var(--tm-surface-raised);
-      color: var(--tm-text);
-      font-weight: 600;
-      box-shadow: 0 0 0 1px var(--tm-border-strong), var(--tm-shadow-sm);
-    }
-
-    &:has(:focus-visible) {
-      outline: 2px solid var(--tm-accent);
-      outline-offset: 1px;
-    }
-  }
-
-  input {
-    position: absolute;
-    inset: 0;
-    margin: 0;
-    opacity: 0;
-    cursor: inherit;
-  }
-
-  // Touch: the visible chip keeps the toolbar's height; its radio reaches past it for a ~40px tap target.
-  @media (pointer: coarse) {
-    input { inset: -0.4rem 0; }
-  }
-}
-
 // The bar while the range shown reloads: a 2px band under the toolbar, nothing moves when it comes and goes.
 .cal-progress {
   position: relative;
