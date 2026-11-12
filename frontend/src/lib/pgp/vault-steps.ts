@@ -170,11 +170,17 @@ async function uploadPublicKey(key: openpgp.PrivateKey, fingerprint: string) {
 
 /** Loads the vault, this browser's devices and the stored public copies of the own keys. */
 export async function status(): Promise<VaultView> {
-  vault = await readVault().catch(() => null);
+  // One round trip: the three requests do not depend on each other.
+  const [v, credentials, publicKeys] = await Promise.all([
+    readVault().catch(() => null),
+    listCredentials().catch(() => []),
+    listPublicKeys().catch(() => []),
+  ]);
+  vault = v;
   const localPending = vault ? localPendingDevices(vault)[0] : undefined;
   pairing = localPending ? await pairingSas(localPending) : '';
-  hasCredentials = (await listCredentials().catch(() => [])).length > 0;
-  await cacheOwnPublicKeys(await listPublicKeys().catch(() => []));
+  hasCredentials = credentials.length > 0;
+  await cacheOwnPublicKeys(publicKeys);
   return view();
 }
 

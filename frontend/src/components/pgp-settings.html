@@ -1,9 +1,10 @@
 <!-- Settings → Encryption: the synced OpenPGP private-key vault (passkeys with PRF, devices, keys, identities)
      and trusted senders' public keys. In the settings page's encryption tab panel:
-       <pgp-settings data-sn-prop="{ active: tab === 'encryption' }"></pgp-settings>
-     It loads its resources (`vault`, `publicKeys`) while `active`. All crypto and WebAuthn runs in
+       <pgp-settings data-sn-prop="{ opened: encOpened }"></pgp-settings>
+     It loads its resources (`vault`, `publicKeys`) once `opened` (the tab was opened at least once) and keeps them:
+     `when` empties a resource while it is false, so it must not follow the open tab. All crypto and WebAuthn runs in
      src/actions/pgp-vault.ts and pgp-keys.ts; `vault` is their VaultView (no private key material). -->
-<template data-sn-component="{ active: boolean }">
+<template data-sn-component="{ opened: boolean }">
   <!-- pk: the private key dialog (mode 'import': armored key, passphrase; mode 'create': name, email; device label;
        fingerprint once read or generated);
        ident: the identity dialog; ownPub: the own public key dialog; recovery: unlock dialog lists every approved device. -->
@@ -28,8 +29,8 @@
          localActive: vault ? vault.active.filter(d => d.local) : [],
          localPending: vault ? vault.pending.filter(d => d.local) : [],
        }">
-    <sn-resource name="vault" call="pgpVault.status()" when="active" type="VaultView"></sn-resource>
-    <sn-resource name="publicKeys" src="/api/pgp/keys" key="fingerprint" when="active" type="StoredPublicKey[]"></sn-resource>
+    <sn-resource name="vault" call="pgpVault.status()" when="opened" type="VaultView"></sn-resource>
+    <sn-resource name="publicKeys" src="/api/pgp/keys" key="fingerprint" when="opened" type="StoredPublicKey[]"></sn-resource>
     <template data-sn-if="vault">
       <template data-sn-if="vault.exists">
         <section data-layout="stack" data-gap="md">

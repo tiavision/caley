@@ -402,6 +402,20 @@ test('encryption tab: a locked vault, unlocked with this browser\'s passkey, the
   expect(panel.querySelector('[data-badge]')!.textContent).toBe(m.pgp_vaultLocked());
 });
 
+test('encryption tab: switching away and back keeps its data (no new load, no empty panel)', async () => {
+  const { root, settle, pgp, requests } = await encryptionTab();
+  const keyLoads = () => requests.calls.filter((c) => c.path === '/api/pgp/keys').length;
+  const loads = keyLoads();
+  expect(pgp.calls.filter(([name]) => name === 'status')).toHaveLength(1);
+  button(root, m.nav_settings()).click();
+  await settle();
+  button(root, m.pgp_tabEncryption()).click();
+  await settle();
+  expect(pgp.calls.filter(([name]) => name === 'status')).toHaveLength(1);
+  expect(keyLoads()).toBe(loads);
+  expect(root.querySelector('#settings-panel-encryption code')!.textContent).toBe('AAAA1111');
+});
+
 test('encryption tab: approving a pending device asks with its pairing code', async () => {
   const { root, settle, pgp } = await encryptionTab({ ...lockedVault, unlocked: true });
   const questions: string[] = [];

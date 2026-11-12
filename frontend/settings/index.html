@@ -1,9 +1,10 @@
 <!doctype html>
-<!-- tab: the open tab; draft: the CalDAV account dialog's fields (account_id '' for a new account). -->
+<!-- tab: the open tab; encOpened: the Encryption tab has been opened (its data loads then and stays); draft: the CalDAV account dialog's fields (account_id '' for a new account). -->
 <app-layout data-sn-prop="{ here: '/settings/', title: 'Caley - Settings' }"
             data-sn-state="{
               lang: ($locale ?? 'en').slice(0, 2),
               tab: 'settings',
+              encOpened: false,
               draft: /** @type {AccountDraft|null} */ (null),
               draftError: '',
             }">
@@ -28,7 +29,7 @@
                   data-sn-on-click="tab = 'settings'" data-sn-text="m.nav_settings()"></button>
           <button type="button" role="tab" id="settings-tab-encryption" aria-controls="settings-panel-encryption"
                   data-sn-attr="{'aria-selected': tab === 'encryption' ? 'true' : 'false'}"
-                  data-sn-on-click="tab = 'encryption'" data-sn-text="m.pgp_tabEncryption()"></button>
+                  data-sn-on-click="tab = 'encryption'; encOpened = true" data-sn-text="m.pgp_tabEncryption()"></button>
         </div>
       </div>
 
@@ -128,7 +129,7 @@
       <!-- Outside the template above: it does not wait for the CalDAV accounts, and declares its own resources. -->
       <div role="tabpanel" id="settings-panel-encryption" aria-labelledby="settings-tab-encryption"
            data-sn-show="tab === 'encryption'">
-        <pgp-settings data-sn-prop="{ active: tab === 'encryption' }"></pgp-settings>
+        <pgp-settings data-sn-prop="{ opened: encOpened }"></pgp-settings>
       </div>
     </div>
 
