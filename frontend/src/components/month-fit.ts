@@ -11,6 +11,8 @@ export interface MonthFit {
   lines: Record<string, number>;
   /** below 60rem: a tap on a cell opens the day's list instead of an event */
   narrow: boolean;
+  /** false while a newly shown month is being fitted: the page keeps its chips invisible until then */
+  settled: boolean;
 }
 
 const MORE_H = 19; // px: the "+N" row's height until one has been measured
@@ -24,6 +26,8 @@ const MAX_LINES = 3; // lines a title may take in a cell with room to spare
  * heights, then checks the result: a cell whose content still overflows (the "+N" row taller than estimated,
  * rounding, a chip that wrapped) loses one chip more, until none overflows. A reload with the same events
  * (a live update) keeps the counts, so the grid does not flash.
+ * A newly shown month (other dates, or the first data) is fitted with `settled: false`, so the page can keep the
+ * chips invisible until the last step instead of showing each one; a live update or a resize is fitted in view.
  */
 export default class extends MonthFitComponent {
   #ro: ResizeObserver | null = null;
@@ -34,16 +38,33 @@ export default class extends MonthFitComponent {
   #counts: Record<string, number> = {};
   #lines: Record<string, number> = {};
   #moreH = MORE_H;
+  #month = ''; // the dates the grid shows, to tell a new month from a change in the same one
+  #hiding = false;
+
+  #eventsKey() {
+    return (this.props.data ?? []).map((d) => `${d.date_iso}:${d.events.map((e) => eventKey(e) + e.summary).join('\u0001')}`).join('\n');
+  }
+
+  /** A new month starts hidden; the same month (a live update) is fitted in view. */
+  #newMonth() {
+    const data = this.props.data ?? [];
+    const month = data.length ? `${data[0]!.date_iso}..${data[data.length - 1]!.date_iso}` : '';
+    if (month === this.#month) return;
+    this.#month = month;
+    this.#hiding = month !== '';
+  }
 
   propsChanged() {
-    const events = (this.props.data ?? []).map((d) => `${d.date_iso}:${d.events.map((e) => eventKey(e) + e.summary).join('\u0001')}`).join('\n');
+    const events = this.#eventsKey();
     if (events === this.#events) return;
     this.#events = events;
+    this.#newMonth();
     this.#schedule();
   }
 
   connected() {
-    this.#events = (this.props.data ?? []).map((d) => `${d.date_iso}:${d.events.map((e) => eventKey(e) + e.summary).join('\u0001')}`).join('\n');
+    this.#events = this.#eventsKey();
+    this.#newMonth();
     this.#mql = window.matchMedia('(max-width: 959px)');
     this.#mql.addEventListener('change', this.#onMedia);
     this.#ro = new ResizeObserver(() => {
@@ -70,7 +91,14 @@ export default class extends MonthFitComponent {
   #report(counts: Record<string, number>, lines: Record<string, number> = {}) {
     this.#counts = counts;
     this.#lines = lines;
-    this.emit('fit', { counts, lines, narrow: !!this.#mql?.matches });
+    this.emit('fit', { counts, lines, narrow: !!this.#mql?.matches, settled: !this.#hiding });
+  }
+
+  /** The last step: show the chips (again) with the counts and lines found. */
+  #done() {
+    if (!this.#hiding) return;
+    this.#hiding = false;
+    this.#report(this.#counts, this.#lines);
   }
 
   /** After sinter has rendered the last report and the browser has laid it out (two frames). */
@@ -125,7 +153,7 @@ export default class extends MonthFitComponent {
       const n = Math.min(MAX_LINES, 1 + Math.floor(spare / (cut.length * lineH)));
       if (n > 1) lines[date] = n;
     }
-    if (!Object.keys(lines).length) return;
+    if (!Object.keys(lines).length) return this.#done();
     this.#report(this.#counts, lines);
     this.#later(() => this.#check(MAX_PASSES, false));
   }
@@ -156,6 +184,7 @@ export default class extends MonthFitComponent {
     }
     if (!changed || passes === 0) {
       if (grow) this.#grow();
+      else this.#done();
       return;
     }
     this.#report(counts, lines);

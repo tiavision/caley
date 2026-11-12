@@ -19,7 +19,7 @@
               flippedDays: /** @type {string[]} */ ([]),
               focusPos: '0:0',
               dayDate: '',
-              fit: /** @type {MonthFit} */ ({ counts: {}, lines: {}, narrow: false }),
+              fit: /** @type {MonthFit} */ ({ counts: {}, lines: {}, narrow: false, settled: false }),
               tx: 0,
               ty: 0,
               detail: /** @type {EventJson|null} */ (null),
@@ -66,9 +66,12 @@
         <div class="cal" data-layout="stack" data-gap="sm" data-pad="sm" data-grow role="application"
              data-sn-on-touchstart="tx = $event.touches[0].clientX; ty = $event.touches[0].clientY"
              data-sn-on-touchend="swipeStep(tx, ty, $event, view) && view === 'week' && (weekStart = addDays(weekStart, swipeStep(tx, ty, $event, view))); swipeStep(tx, ty, $event, view) && (gridMonth = view === 'week' ? monthOf(weekStart) : addMonths(gridMonth, swipeStep(tx, ty, $event, view)))">
+          <!-- One row on wide screens: menu, ‹ range ›, then the view switch and Today. Phones (calendar.scss) put the
+               menu and the switch on the first line and the range, larger, on the second, right above the grid, with
+               its arrows at the line's end, where a shorter or longer month name does not move them. -->
           <div class="cal-toolbar" data-layout="row" data-gap="sm" data-justify="between">
-            <div data-layout="row" data-gap="xs" data-wrap="none">
-              <nav-toggle></nav-toggle>
+            <nav-toggle></nav-toggle>
+            <div class="cal-nav" data-layout="row" data-gap="xs" data-wrap="none">
               <template data-sn-if="view === 'month'">
                 <button type="button" data-variant="ghost" data-icon="chevron-left" data-shortcut="p" data-sn-attr="{'aria-label': m.cal_aria_prevMonth()}"
                         data-sn-on-click="gridMonth = addMonths(gridMonth, -1)"></button>
@@ -84,7 +87,7 @@
                         data-sn-on-click="weekStart = addDays(weekStart, 7); gridMonth = monthOf(weekStart); $el.closest('.cal')?.querySelector('.pane')?.scrollTo(0, 0)"></button>
               </template>
             </div>
-            <div data-layout="row" data-gap="sm" data-wrap="none">
+            <div class="cal-view-controls" data-layout="row" data-gap="sm" data-wrap="none">
               <div role="radiogroup" data-segmented data-size="sm" data-sn-attr="{'aria-label': m.cal_aria_view()}">
                 <label><input type="radio" name="cal-view" value="week" data-sn-model="view" data-sn-persist="calendar-mode"><span data-sn-text="m.cal_view_week()"></span></label>
                 <label><input type="radio" name="cal-view" value="month" data-sn-model="view" data-sn-persist="calendar-mode"><span data-sn-text="m.cal_view_month()"></span></label>
@@ -222,7 +225,7 @@
                       <span data-caption data-sn-text="name"></span>
                     </template>
                   </div>
-                  <div class="month-grid" data-layout="grid" data-cols="7" data-gap="none" role="group"
+                  <div class="month-grid" data-layout="grid" data-cols="7" data-gap="none" role="group" data-sn-class="{fitting: !fit.settled}"
                        data-sn-style="{'--rows': monthRows(cells, monthDays)}"
                        data-sn-attr="{'aria-label': monthLabel(gridMonth, $locale)}">
                     <template data-sn-for="cell in cells" data-sn-key="cell.date_str">

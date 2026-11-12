@@ -4,6 +4,26 @@
 .cal { min-block-size: 0; }
 .month { block-size: 100%; }
 .cal-range { white-space: nowrap; }
+// The view switch and Today sit at the toolbar's right edge.
+.cal-view-controls { margin-inline-start: auto; }
+
+// Phones: the menu and the view controls on the first line, the range on its own line below them, semibold (it is
+// the page's heading), with ‹ › at the line's end.
+@media (width < 48rem) {
+  .cal-nav {
+    order: 1;
+    flex-basis: 100%;
+  }
+  .cal-nav .cal-range {
+    order: -1;
+    margin-inline-end: auto;
+    padding-inline-start: var(--tm-space-xs);
+    font-size: var(--tm-text-md);
+    font-weight: 600;
+  }
+  // The two lines close together: the toolbar takes as little of the month's height as its buttons allow.
+  .cal-toolbar { row-gap: 0; }
+}
 
 // The bar while the range shown reloads: a 2px band under the toolbar, nothing moves when it comes and goes.
 .cal-progress {
@@ -22,7 +42,7 @@
 
 // A day not loaded yet: chips of an event's size (week) or one (month).
 .placeholder-chip { block-size: 2.75rem; }
-.month-cell .placeholder-chip { block-size: 1.1rem; }
+.month-cell .placeholder-chip { block-size: calc(var(--chip-font) * var(--chip-lh) + 2 * var(--chip-pad)); }
 
 // Week grid: seven columns, one column with collapsible days on narrow screens.
 .day { min-inline-size: 0; }
@@ -111,6 +131,11 @@
   }
 }
 .month-grid {
+  // The chips' type: small and tight, a month is for an overview (the day's list and the detail have the full text).
+  // The day number's position on the first line is computed from these (.day-num below).
+  --chip-font: 0.6875rem;
+  --chip-lh: 1.25;
+  --chip-pad: 2px;
   // monthRows(): weeks without events get half a row's height, the busy weeks the rest.
   grid-template-rows: var(--rows);
   flex: 1;
@@ -169,19 +194,31 @@
   .chips { display: contents; }
   > *, .chips > * { grid-column: 1 / -1; }
   // The number sits on the first chip's first line, however many lines the title takes: at the top, moved down by
-  // the chip's top padding (temper's sm item: .25rem) less half the difference of the two line heights (1.5em here,
-  // 1.4em in the chip, same text size).
+  // the chip's top padding plus half the difference between the chip's line and the number's (1.5em).
   .day-num {
     grid-column: 2;
     grid-row: 1;
     align-self: start;
     position: relative;
-    inset-block-start: calc(0.25rem - 0.05em);
+    inset-block-start: calc(var(--chip-pad) + (var(--chip-font) * var(--chip-lh) - 1.5em) / 2);
   }
   .event-trigger:nth-child(1 of .event-trigger) { grid-column: 1; grid-row: 1; }
   > .placeholder-chip { grid-column: 1; grid-row: 1; }
 }
 .cell-more { justify-self: start; }
+
+// While <month-fit> fits a newly shown month (fit.settled false), its chips are laid out but invisible, so the cells
+// do not show each step (all chips, then "+N", then more lines); they fade in once the fit is done. A fallback
+// shows them after a second whatever happens, should the fit never report.
+.month-grid.fitting .cell-events :is(.chips, .cell-more) {
+  visibility: hidden;
+  animation: fit-fallback 0s 1s forwards;
+}
+.month-grid:not(.fitting) .cell-events .chips {
+  animation: fit-in 120ms ease-out;
+}
+@keyframes fit-fallback { to { visibility: visible; } }
+@keyframes fit-in { from { opacity: 0; } }
 // A title takes --lines lines (1 unless <month-fit> found room to spare in its cell, up to 3), cut with an ellipsis:
 // a busy day keeps one line per event, a quiet day shows its long titles. Words break with hyphens in the page's
 // language, and anywhere when a word is still too long for a narrow cell. The whole title is the chip's tooltip, in
@@ -190,14 +227,15 @@
 // side padding: in a month cell every pixel goes to the title.
 // A block, not temper's item grid: Chrome sizes the grid row before the line clamp, and a clamped title of several
 // lines then overflows its chip.
-.month-cell .event-trigger { display: block; padding-inline: var(--tm-space-xs); }
+.month-cell .event-trigger { display: block; padding: var(--chip-pad) var(--tm-space-xs); }
 .chip-text {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: var(--lines, 1);
   overflow: hidden;
   min-inline-size: 0;
-  font-size: var(--tm-text-xs);
+  font-size: var(--chip-font);
+  line-height: var(--chip-lh);
   hyphens: auto;
   overflow-wrap: anywhere;
 }
@@ -216,6 +254,7 @@
   .month-cell:nth-child(7n) { border-inline-end: 0; }
   .month-cell { padding-inline: 0; }
   // A tap on a narrow cell opens its day (#day-events), chips included: the chips take no clicks there.
+  .month-grid { --chip-font: 0.625rem; --chip-pad: 1px; }
   .month-cell .event-trigger { padding-inline: 2px; pointer-events: none; }
   .month-cell.has-events { cursor: pointer; }
   .month-cell.has-events:hover { background: var(--tm-fill); }
