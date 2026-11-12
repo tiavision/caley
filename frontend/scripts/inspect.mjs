@@ -16,7 +16,9 @@ const base = (process.env.INSPECT_BASE ?? 'http://localhost:3000').replace(/\/$/
 const APP_PAGES = ['/calendar/', '/contacts/', '/search/', '/settings/', '/mail/'];
 
 const args = process.argv.slice(2);
-const paths = args.filter((a, i) => a.startsWith('/') && !args[i - 1]?.startsWith('--'));
+// temper-inspect's options that take a value (`--sheet /tmp/x`); the others (`--no-overlays`) are switches.
+const VALUE_OPTIONS = ['--widths', '--schemes', '--settle', '--timeout', '--limit', '--sheet', '--browser', '--cookie', '--header'];
+const paths = args.filter((a, i) => a.startsWith('/') && !VALUE_OPTIONS.includes(args[i - 1]));
 const options = args.filter(a => !paths.includes(a));
 const pages = paths.length ? paths : ['/', ...APP_PAGES];
 
