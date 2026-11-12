@@ -1,0 +1,31 @@
+// Login page (index.html): the language picker in the corner, then a column centered in the rest of the screen:
+// the logo and the app's name over the sign-in card.
+
+body:has(> main.login) {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-block-size: 100dvh;
+}
+
+main.login {
+  align-content: center;
+  // A little above the middle: the eye reads the optical center higher than the geometric one.
+  padding-block-end: 12dvh;
+}
+
+.login-brand {
+  align-items: center;
+  text-align: center;
+
+  img {
+    inline-size: 4.5rem;
+    block-size: 4.5rem;
+  }
+
+  h1 {
+    font-size: calc(var(--tm-text-xl) * 1.6);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+  }
+}

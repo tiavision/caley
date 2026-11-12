@@ -4,4 +4,6 @@ import '@tiaforge-ui/temper/app.css';
 import '@tiaforge-ui/temper/menu.css';
 import '@tiaforge-ui/temper/feedback.css';
 import 'virtual:temper-icons.css';
+// The UI font (--tm-font-sans in app.scss), from npm: Vite bundles its files into the hashed assets.
+import '@fontsource-variable/figtree';
 import './app.scss';

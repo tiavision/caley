@@ -11,55 +11,63 @@
     <!-- Already signed in (or just signed in): straight to the app. -->
     <template data-sn-if="user"><auth-return></auth-return></template>
 
-    <main data-layout="center" data-pad="xl" style="--tm-measure: 26rem"
+    <!-- The language picker in the page's corner; the column below is the logo, the name and the sign-in card. -->
+    <header class="login-lang" data-layout="row" data-gap="sm" data-wrap="none" data-justify="end" data-pad="md">
+      <span data-icon="globe" data-muted></span>
+      <select data-size="sm" data-sn-attr="{'aria-label': m.settings_language()}"
+              data-sn-model="lang" data-sn-on-change="$locale = lang">
+        <option value="en">English</option>
+        <option value="de">Deutsch</option>
+      </select>
+    </header>
+
+    <main class="login" data-layout="center" data-pad="lg" style="--tm-measure: 24rem"
           data-sn-let="{ ready: ($meta.user.loadedAt || $meta.user.error) && !user && ($meta.authConfig.loadedAt || $meta.authConfig.error) }">
-      <div data-layout="stack" data-gap="lg">
-        <div data-layout="row" data-gap="sm" data-wrap="none">
-          <h2 data-grow data-sn-text="m.login_heading()"></h2>
-          <span data-icon="globe" data-muted></span>
-          <select data-size="sm" data-sn-attr="{'aria-label': m.settings_language()}"
-                  data-sn-model="lang" data-sn-on-change="$locale = lang">
-            <option value="en">English</option>
-            <option value="de">Deutsch</option>
-          </select>
+      <div data-layout="stack" data-gap="xl">
+        <div class="login-brand" data-layout="stack" data-gap="sm">
+          <img src="/icons/favicon-128x128.png" alt="" width="72" height="72">
+          <h1 data-sn-text="m.app_brand()"></h1>
+          <p data-muted data-sn-text="m.login_tagline()"></p>
         </div>
 
-        <template data-sn-if="ready">
-          <p data-muted data-sn-text="m.login_subtitle()"></p>
-          <form data-layout="stack" data-gap="md"
-                data-sn-post="/auth/login" data-sn-encoding="form"
-                data-sn-on-submit="saving = true; error = ''"
-                data-sn-then="refresh('user')"
-                data-sn-catch="saving = false; error = $error.detail ?? m.login_error()">
-            <label>
-              <span data-sn-text="m.settings_baseUrl()"></span>
-              <input type="url" name="caldav_base_url" required data-sn-attr="{placeholder: m.settings_baseUrlPlaceholder()}"
-                     data-sn-model="baseUrl" data-sn-persist="caldav_base_url">
-            </label>
-            <label>
-              <span data-sn-text="m.settings_username()"></span>
-              <input type="text" name="caldav_username" autocomplete="username" required data-sn-attr="{placeholder: m.settings_usernamePlaceholder()}">
-            </label>
-            <label>
-              <span data-sn-text="m.settings_password()"></span>
-              <input type="password" name="caldav_password" autocomplete="current-password" required data-sn-attr="{placeholder: m.settings_passwordPlaceholder()}">
-            </label>
+        <article data-layout="stack" data-gap="lg" data-pad="lg">
+          <template data-sn-if="ready">
+            <p data-muted data-sn-text="m.login_subtitle()"></p>
+            <form data-layout="stack" data-gap="md"
+                  data-sn-post="/auth/login" data-sn-encoding="form"
+                  data-sn-on-submit="saving = true; error = ''"
+                  data-sn-then="refresh('user')"
+                  data-sn-catch="saving = false; error = $error.detail ?? m.login_error()">
+              <label>
+                <span data-sn-text="m.settings_baseUrl()"></span>
+                <input type="url" name="caldav_base_url" required data-sn-attr="{placeholder: m.settings_baseUrlPlaceholder()}"
+                       data-sn-model="baseUrl" data-sn-persist="caldav_base_url">
+              </label>
+              <label>
+                <span data-sn-text="m.settings_username()"></span>
+                <input type="text" name="caldav_username" autocomplete="username" required data-sn-attr="{placeholder: m.settings_usernamePlaceholder()}">
+              </label>
+              <label>
+                <span data-sn-text="m.settings_password()"></span>
+                <input type="password" name="caldav_password" autocomplete="current-password" required data-sn-attr="{placeholder: m.settings_passwordPlaceholder()}">
+              </label>
 
-            <template data-sn-if="error">
-              <p data-callout data-tone="danger" role="alert" data-sn-text="error"></p>
+              <template data-sn-if="error">
+                <p data-callout data-tone="danger" role="alert" data-sn-text="error"></p>
+              </template>
+
+              <button type="submit" data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.login_submit()"></button>
+            </form>
+
+            <template data-sn-if="authConfig.oidc_enabled">
+              <p data-divider data-sn-text="m.login_or()"></p>
+              <a href="/auth/oidc" role="button" data-variant="outline" data-sn-on-click="emit('auth-return-pending')" data-sn-text="m.login_oidc_button()"></a>
             </template>
-
-            <button type="submit" data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.login_submit()"></button>
-          </form>
-
-          <template data-sn-if="authConfig.oidc_enabled">
-            <p data-divider data-sn-text="m.login_or()"></p>
-            <a href="/auth/oidc" role="button" data-variant="outline" data-sn-on-click="emit('auth-return-pending')" data-sn-text="m.login_oidc_button()"></a>
           </template>
-        </template>
-        <template data-sn-else>
-          <p aria-busy="true" data-sn-text="m.nav_loading()"></p>
-        </template>
+          <template data-sn-else>
+            <p aria-busy="true" data-sn-text="m.nav_loading()"></p>
+          </template>
+        </article>
       </div>
     </main>
     <script type="module" src="/src/main/login.ts"></script>

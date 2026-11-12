@@ -125,7 +125,12 @@
               <button type="button" class="meta-primary" data-variant="ghost" data-size="sm" data-layout="row" data-gap="xs" data-wrap="none" data-justify="start" data-grow
                       data-sn-attr="{'aria-expanded': meta ? 'true' : 'false'}" data-sn-on-click="meta = !meta">
                 <strong data-sn-text="`${sent ? m.mail_metaTo() : m.mail_metaFrom()}:`"></strong>
-                <span data-truncate data-grow data-sn-text="sent ? msg.to.join(', ') : (msg.from || '')"></span>
+                <!-- The date follows the address only while both fit on the line: otherwise it wraps onto a second line
+                     that .meta-line cuts off, and the address keeps the room (src/styles/mail.scss). -->
+                <span class="meta-line" data-grow>
+                  <span data-truncate data-sn-text="sent ? msg.to.join(', ') : (msg.from || '')"></span>
+                  <span class="meta-date" data-sn-attr="{title: messageDateTime(msg.sent_at)}" data-sn-text="formatDate(msg.sent_at)"></span>
+                </span>
                 <span class="caret" data-icon="chevron-down" aria-hidden="true"></span>
               </button>
               <template data-sn-if="b && b.badges.some(x => isIconBadge(x))">

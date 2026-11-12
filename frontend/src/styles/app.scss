@@ -1,5 +1,23 @@
 // App-wide rules on top of temper. Use temper tokens (--tm-*), never hard-coded colors.
 
+// Caley's look: the accent takes the violet of the logo's middle stroke (between its blue and cyan), and the main
+// buttons (submit, the floating add button) wear it instead of temper's black. Figtree (the npm package
+// @fontsource-variable/figtree, imported in src/styles/temper.ts) is round like the logo's C; tabular figures keep times, dates and counts in columns.
+$ui-font: 'Figtree Variable', system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif;
+
+:root {
+  --tm-hue: 280;
+  --tm-primary: var(--tm-accent);
+  --tm-font-sans: #{$ui-font};
+}
+
+// The family written out here too (temper's body reads --tm-font-sans): sinter 0.17's fonts.preload check looks for a
+// font-family naming the preloaded family and does not follow var() (reported upstream; drop once it does).
+body {
+  font-family: $ui-font;
+  font-variant-numeric: tabular-nums;
+}
+
 // Mail: attachment chip (message reader and compose dialog). temper has no chip/tag component.
 .mail-attachment-chip {
   display: inline-flex;

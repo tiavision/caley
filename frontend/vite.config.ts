@@ -12,7 +12,8 @@ export default defineConfig({
   plugins: [
     // Every HTML entry is compiled by sinter (src/components/, src/layouts/, src/sinter.{config,helpers,actions,types}.ts). Messages are
     // sinter's own: messages/{locale}.json of project.inlang (the inlang tooling edits the same files).
-    sinter({ typecheck: true, embed: true, lazy: ['openpgp'] }),
+    // fonts.preload: the UI font (Figtree, @fontsource-variable/figtree) is preloaded, so a first visit does not paint the fallback font first.
+    sinter({ typecheck: true, embed: true, lazy: ['openpgp'], fonts: { preload: ['Figtree Variable'] } }),
     // temper check on all markup and CSS (errors fail the build); serves the Lucide icons the markup names.
     // Only existing paths: temper stops the build on a missing one (components and layouts are under src/).
     // `inspect`: the dev server also audits the rendered page (overflow, contrast, clipped text, opened dialogs) and

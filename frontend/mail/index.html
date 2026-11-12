@@ -147,7 +147,9 @@
         <!-- ── Folders ───────────────────────────────────────────────────────── -->
         <button type="button" class="sidebar-backdrop" data-sn-show="sidebarOpen" data-sn-on-click="sidebarOpen = false"
                 data-sn-attr="{'aria-label': m.mail_aria_folders()}"></button>
+        <!-- menuAcc: the account whose "…" button opened #account-menu (one menu for every account). -->
         <aside class="mail-sidebar" data-layout="stack" data-gap="md" data-pad="sm" data-scroll="y"
+               data-sn-state="{ menuAcc: /** @type {Account|null} */ (null) }"
                data-sn-class="{open: sidebarOpen}" data-sn-attr="{'aria-label': m.mail_aria_folders()}">
           <template data-sn-if="folders.length > 0">
             <div data-layout="stack" data-gap="none">
@@ -190,17 +192,9 @@
                         data-sn-on-click="collapsed = toggled(collapsed, acc.account_id)"></button>
                 <span data-caption data-truncate data-grow data-sn-attr="{title: acc.username}" data-sn-text="acc.display_name"></span>
                 <template data-sn-if="section.unread > 0"><span data-badge data-tone="accent" data-sn-text="badgeCount(section.unread)"></span></template>
-                <button type="button" data-variant="ghost" data-size="sm" data-icon="user" data-tooltip
-                        data-sn-on-click="sidebarOpen = false; emit('identities-open', acc.account_id)"
-                        data-sn-attr="{'aria-label': m.mail_identities()}"></button>
-                <button type="button" data-variant="ghost" data-size="sm" data-icon="pencil" data-tooltip
-                        data-sn-on-click="sidebarOpen = false; emit('account-edit', {acct: editAccount(acc, identities), ui: accountUi('details')})"
-                        data-sn-attr="{'aria-label': m.mail_editAccountHeading()}"></button>
-                <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
-                        data-sn-delete="/api/email/account?account_id={acc.account_id}"
-                        data-sn-confirm="m.mail_removeAccountConfirm({name: acc.display_name})"
-                        data-sn-then="sidebarOpen = false; refresh('accounts'); collapsed = collapsed.filter(id => id !== acc.account_id); view.account_id === acc.account_id && emit('view-removed')"
-                        data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
+                <button type="button" data-variant="ghost" data-size="sm" data-icon="ellipsis" data-tooltip popovertarget="account-menu"
+                        data-sn-on-click="menuAcc = acc"
+                        data-sn-attr="{'aria-label': m.mail_accountActions({name: acc.display_name})}"></button>
               </div>
               <template data-sn-if="!section.collapsed && !section.mailboxes.length && ($meta.mailboxes.loading || (!$meta.mailboxes.loadedAt && !$meta.mailboxes.error))">
                 <div class="sidebar-placeholder" data-layout="stack" data-gap="none" aria-busy="true" data-sn-attr="{'aria-label': m.mail_loading()}">
@@ -231,6 +225,26 @@
               </template>
             </div>
           </template>
+
+          <!-- The actions of the account in menuAcc, under the "…" button that opened it. -->
+          <div popover id="account-menu" data-menu role="menu">
+            <template data-sn-if="menuAcc">
+              <button type="button" role="menuitem" data-icon="user"
+                      data-sn-on-click="ancestor($el, '[popover]')?.hidePopover(); sidebarOpen = false; emit('identities-open', menuAcc.account_id)"
+                      data-sn-text="m.mail_identities()"></button>
+              <button type="button" role="menuitem" data-icon="pencil"
+                      data-sn-on-click="ancestor($el, '[popover]')?.hidePopover(); sidebarOpen = false; emit('account-edit', {acct: editAccount(menuAcc, identities), ui: accountUi('details')})"
+                      data-sn-text="m.mail_editAccountHeading()"></button>
+              <hr>
+              <button type="button" role="menuitem" data-icon="trash-2" data-tone="danger"
+                      data-sn-let="{ acc: menuAcc }"
+                      data-sn-on-click="ancestor($el, '[popover]')?.hidePopover()"
+                      data-sn-delete="/api/email/account?account_id={acc.account_id}"
+                      data-sn-confirm="m.mail_removeAccountConfirm({name: acc.display_name})"
+                      data-sn-then="sidebarOpen = false; refresh('accounts'); collapsed = collapsed.filter(id => id !== acc.account_id); view.account_id === acc.account_id && emit('view-removed')"
+                      data-sn-text="m.mail_removeAccount()"></button>
+            </template>
+          </div>
 
           <div class="sidebar-add" data-layout="stack" data-gap="none">
             <button type="button" data-variant="ghost" data-size="sm" data-icon="plus"

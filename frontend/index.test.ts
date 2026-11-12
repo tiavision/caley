@@ -38,7 +38,7 @@ function fill(root: HTMLElement, url: string) {
 
 test('signed out: the form, without single sign-on', async () => {
   const { root } = await show();
-  expect(root.querySelector('h2')!.textContent).toBe('Sign in to Caley');
+  expect(root.querySelector('h1')!.textContent).toBe('Caley');
   expect(root.querySelector('form')).not.toBeNull();
   expect(root.querySelector('[aria-busy]')).toBeNull();
   expect(root.querySelector('a[href="/auth/oidc"]')).toBeNull();

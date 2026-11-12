@@ -385,6 +385,29 @@ $phone: 639px;
   }
 }
 
+// The From/To line: the address, then the date at the end when there is room for both (src/components/mail-reader.html).
+// The line wraps, and only its first row shows: a date that does not fit beside the address drops to the hidden row.
+.meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--tm-space-md);
+  min-inline-size: 0;
+  block-size: 1.5em;
+  line-height: 1.5;
+  overflow: hidden;
+
+  > [data-truncate] {
+    flex: 0 1 auto;
+    min-inline-size: 0;
+  }
+}
+
+.meta-date {
+  margin-inline-start: auto;
+  white-space: nowrap;
+}
+
 .meta-details {
   padding-inline: var(--tm-space-sm);
 }
@@ -414,6 +437,8 @@ $phone: 639px;
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  // A readable line length on wide screens; narrower screens are narrower than this anyway, so nothing changes there.
+  max-inline-size: calc(72ch + 2 * var(--tm-space-md));
 }
 
 .images-notice {
