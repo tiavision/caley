@@ -140,8 +140,7 @@
   --chip-font: 0.6875rem;
   --chip-lh: 1.25;
   --chip-pad: 2px;
-  // monthRows(): weeks without events get half a row's height, the busy weeks the rest.
-  grid-template-rows: var(--rows);
+  grid-template-rows: repeat(var(--row-count), minmax(0, 1fr));
   flex: 1;
   min-block-size: 0;
   border-inline-start: 1px solid var(--tm-border);
