@@ -262,7 +262,7 @@ test('imports an ICS file into the remembered calendar, after a preview', async 
   const { root, requests, settle } = await show({
     'GET /api/caldav/accounts': { accounts: [account({ calendars: [cal('/cal/work/', 'Work'), cal('/cal/private/', 'Private')] })] },
     'POST /api/import/preview': [{ uid: 'e1', summary: 'Standup', dtstart: '2026-11-09T09:00', dtend: '2026-11-09T09:15', is_all_day: false, location: 'Room 1' }],
-    'POST /api/import': { imported: 1, errors: 0 },
+    'POST /api/import': { account_id: 'acc', calendar_href: '/cal/work/', imported: 1, errors: 0 },
   });
   button(root, m.cal_import()).click();
   await settle();
@@ -293,10 +293,9 @@ test('imports an ICS file into the remembered calendar, after a preview', async 
   expect(dialog.open).toBe(false);
 });
 
-test('imports into a new calendar', async () => {
+test('imports into a new calendar, which the import creates (one request)', async () => {
   const { root, requests, settle } = await show({
-    'POST /api/calendar': cal('/cal/new/', 'Trips'),
-    'POST /api/import': { imported: 2, errors: 1 },
+    'POST /api/import': { account_id: 'acc', calendar_href: '/cal/new/', imported: 2, errors: 1 },
   });
   button(root, m.cal_import()).click();
   await settle();
@@ -309,8 +308,9 @@ test('imports into a new calendar', async () => {
   type(dialog.querySelector<HTMLInputElement>('input[type=text]')!, 'Trips');
   dialog.querySelector('form')!.requestSubmit();
   await settle();
-  expect(String(requests.calls.find((c) => c.path === '/api/calendar')!.body)).toBe('account_id=acc&name=Trips');
-  expect(multipart(requests.calls.find((c) => c.path === '/api/import')!.body).calendar_href).toBe('/cal/new/');
+  expect(requests.calls.some((c) => c.path === '/api/calendar')).toBe(false);
+  const body = multipart(requests.calls.find((c) => c.path === '/api/import')!.body);
+  expect([body.account_id, body.new_calendar_name, body.calendar_href]).toEqual(['acc', 'Trips', undefined]);
   expect(JSON.parse(storage.getItem('sn:event-default-calendar') ?? '{}').defaultCal ?? '').toBe('');   // not remembered after errors
   expect(dialog.querySelector('[role=status]')!.textContent).toBe(`${m.cal_importSuccess({ n: 2 })} · ${m.cal_importPartial({ n: 1 })}`);
   expect(dialog.open).toBe(true);

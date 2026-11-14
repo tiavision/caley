@@ -52,6 +52,51 @@ impl StatusOk {
     pub const OK: StatusOk = StatusOk { status: "ok" };
 }
 
+// ── Request helpers ──────────────────────────────────────────────────────────
+// Handlers take their requests as typed extractors (`axum_extra::extract::Query` / `Form`, which
+// read repeated keys into a `Vec`; `axum_typed_multipart::TypedMultipart`), and the same structs
+// are the spec's parameters and bodies.
+
+/// `#[serde(default, deserialize_with = "crate::api::empty_as_none")]`: an optional value parsed
+/// with `FromStr`, where an empty string (a form field left empty) is `None`.
+pub fn empty_as_none<'de, D, T>(de: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    use serde::Deserialize as _;
+    match Option::<String>::deserialize(de)?.as_deref() {
+        None | Some("") => Ok(None),
+        Some(s) => s.parse().map(Some).map_err(serde::de::Error::custom),
+    }
+}
+
+/// A multipart field holding JSON (`#[schema(value_type = String)]` on the field).
+pub struct JsonField<T>(pub T);
+
+#[axum_typed_multipart::async_trait]
+impl<T: serde::de::DeserializeOwned> axum_typed_multipart::TryFromChunks for JsonField<T> {
+    async fn try_from_chunks(
+        chunks: impl futures_util::Stream<
+            Item = Result<bytes::Bytes, axum_typed_multipart::TypedMultipartError>,
+        > + Send
+        + Sync
+        + Unpin,
+        metadata: axum_typed_multipart::FieldMetadata,
+    ) -> Result<Self, axum_typed_multipart::TypedMultipartError> {
+        let field_name = metadata.name.clone().unwrap_or_default();
+        let bytes = bytes::Bytes::try_from_chunks(chunks, metadata).await?;
+        serde_json::from_slice(&bytes).map(JsonField).map_err(|e| {
+            axum_typed_multipart::TypedMultipartError::WrongFieldType {
+                field_name,
+                wanted_type: "JSON".into(),
+                source: e.into(),
+            }
+        })
+    }
+}
+
 /// The routes that need a signed-in user (`RequireAuthLayer`), relative to `/api`.
 pub fn private() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()

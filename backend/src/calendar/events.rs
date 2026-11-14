@@ -1,13 +1,13 @@
 use axum::{
-    extract::{RawQuery, State},
+    extract::State,
     http::StatusCode,
     response::{IntoResponse, Json, Response},
 };
-use url::form_urlencoded;
+use axum_extra::extract::{Form, Query};
+use serde::Deserialize;
 
 use super::{
-    CalendarJson, build_event_json, extract_vevent, parse_alarm_from_fields, parse_event_form,
-    parse_form_field, require_account_client,
+    CalendarJson, build_event_json, extract_vevent, parse_alarm_from_fields, require_account_client,
 };
 use crate::caldav::{
     Alarm, Attendee, CalDavClient, PartStat, RecurrenceInfo, add_exdate, add_recurrence_override,
@@ -18,73 +18,135 @@ use crate::oidc::{AppState, CurrentUser};
 use crate::sync::SyncTrigger;
 use utoipa::{IntoParams, ToSchema};
 
-// The handlers parse their forms and queries by hand (fields repeat, missing ones have
-// defaults), so these structs only describe the requests.
+/// What an event write applies to.
+#[derive(Clone, Copy, PartialEq, Eq, ToSchema)]
+#[schema(rename_all = "snake_case")]
+pub(crate) enum EventScope {
+    /// the event (all occurrences of a recurring one)
+    Series,
+    /// one occurrence of a recurring event (`original_dtstart`)
+    ThisInstance,
+}
+
+impl std::str::FromStr for EventScope {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "series" => Ok(EventScope::Series),
+            "this_instance" => Ok(EventScope::ThisInstance),
+            _ => Err(format!(
+                "invalid scope `{s}` (expected `series` or `this_instance`)"
+            )),
+        }
+    }
+}
+
+/// `RecurrenceInfo` sent as JSON in a form field; empty or `{}` is none.
+fn recurrence_json<'de, D: serde::Deserializer<'de>>(
+    de: D,
+) -> Result<Option<RecurrenceInfo>, D::Error> {
+    use serde::Deserialize as _;
+    match Option::<String>::deserialize(de)?.as_deref() {
+        None | Some("") | Some("{}") => Ok(None),
+        Some(json) => serde_json::from_str(json)
+            .map(Some)
+            .map_err(|e| serde::de::Error::custom(format!("invalid recurrence: {e}"))),
+    }
+}
 
 /// An event to create (no `uid`) or save. The alarm and attendee fields repeat, once
-/// per alarm / attendee, in the same order.
-#[allow(dead_code)]
-#[derive(ToSchema)]
+/// per alarm / attendee, in the same order. Empty optional fields count as missing.
+#[derive(Deserialize, ToSchema)]
 pub(crate) struct EventForm {
-    /// empty or missing: a new event
+    /// missing: a new event
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
     uid: Option<String>,
     summary: String,
-    description: Option<String>,
-    location: Option<String>,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    location: String,
     /// `YYYY-MM-DD`
     date: String,
-    /// `HH:MM`
+    /// `HH:MM` (default `00:00`)
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
     start_time: Option<String>,
-    /// `HH:MM`
+    /// `HH:MM` (default `start_time`, or `01:00` without one)
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
     end_time: Option<String>,
     /// IANA timezone (default `UTC`)
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
     tz: Option<String>,
     /// `true` for an all-day event
-    is_all_day: Option<String>,
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
+    is_all_day: Option<bool>,
     calendar_href: String,
     account_id: String,
-    /// `series` (default) or `this_instance` (an override of one occurrence)
-    scope: Option<String>,
+    /// default `series`
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
+    scope: Option<EventScope>,
     /// the occurrence's original start (`this_instance`)
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
     original_dtstart: Option<String>,
     /// the timezone the recurring master was authored in (default `tz`)
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
     original_tz: Option<String>,
     /// the calendar the event was in, when it moves
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
     original_calendar_href: Option<String>,
     /// the account the event was in, when it moves
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
     original_account_id: Option<String>,
     /// `RecurrenceInfo` as JSON; empty or `{}` for none
-    recurrence: Option<String>,
+    #[serde(default, deserialize_with = "recurrence_json")]
+    #[schema(value_type = Option<String>)]
+    recurrence: Option<RecurrenceInfo>,
+    /// `before-start`, `after-start`, `before-end`, `after-end` or `absolute`
+    #[serde(default)]
     alarm_direction: Vec<String>,
+    /// the amount of `alarm_unit`s (relative alarms)
+    #[serde(default)]
     alarm_value: Vec<String>,
+    /// minutes per unit (default `1`)
+    #[serde(default)]
     alarm_unit: Vec<String>,
+    /// `YYYY-MM-DDTHH:MM` in `tz` (absolute alarms)
+    #[serde(default)]
     alarm_datetime: Vec<String>,
+    #[serde(default)]
     attendee_cn: Vec<String>,
+    /// an attendee without an address is left out
+    #[serde(default)]
     attendee_email: Vec<String>,
+    /// iCalendar PARTSTAT (default `NEEDS-ACTION`)
+    #[serde(default)]
     attendee_partstat: Vec<String>,
 }
 
-#[allow(dead_code)]
-#[derive(IntoParams)]
+#[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub(crate) struct DeleteEventQuery {
     uid: String,
     account_id: String,
     calendar_href: String,
     /// `this_instance` (with `original_dtstart`) deletes one occurrence; else the event
-    scope: Option<String>,
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
+    #[param(inline)]
+    scope: Option<EventScope>,
     /// the occurrence's original start (`this_instance`)
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
     original_dtstart: Option<String>,
     /// the occurrence's timezone (default `UTC`)
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
     tz: Option<String>,
 }
 
-#[allow(dead_code)]
-#[derive(ToSchema)]
+#[derive(Deserialize, ToSchema)]
 pub(crate) struct CreateCalendarForm {
     account_id: String,
     name: String,
-    /// CSS color; empty for none
+    /// CSS color; empty or missing for none
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
     color: Option<String>,
 }
 
@@ -102,108 +164,63 @@ pub(crate) struct CreateCalendarForm {
 pub async fn save_event(
     State(state): State<AppState>,
     user: CurrentUser,
-    body: String,
+    Form(EventForm {
+        uid,
+        summary,
+        description,
+        location,
+        date,
+        start_time,
+        end_time,
+        tz,
+        is_all_day,
+        calendar_href,
+        account_id,
+        scope,
+        original_dtstart,
+        original_tz,
+        original_calendar_href,
+        original_account_id,
+        recurrence,
+        alarm_direction,
+        alarm_value,
+        alarm_unit,
+        alarm_datetime,
+        attendee_cn,
+        attendee_email,
+        attendee_partstat,
+    }): Form<EventForm>,
 ) -> Response {
-    let form = parse_event_form(body);
-    let raw_uid = parse_form_field(&form, "uid").unwrap_or("").to_string();
-    let is_edit = !raw_uid.is_empty();
-    let mut uid = raw_uid;
-    if uid.is_empty() {
-        uid = generate_new_uid();
+    let is_edit = uid.is_some();
+    let uid = uid.unwrap_or_else(generate_new_uid);
+    let start_time = start_time.as_deref();
+    let end_time = end_time.as_deref();
+    let tz = tz.unwrap_or_else(|| "UTC".to_string());
+    let is_all_day = is_all_day.unwrap_or(false);
+    if account_id.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing account_id").into_response();
     }
-    let summary = parse_form_field(&form, "summary")
-        .unwrap_or_default()
-        .to_string();
-    let description = parse_form_field(&form, "description")
-        .unwrap_or_default()
-        .to_string();
-    let location = parse_form_field(&form, "location")
-        .unwrap_or_default()
-        .to_string();
-    let date = parse_form_field(&form, "date")
-        .unwrap_or_default()
-        .to_string();
-    let start_time = parse_form_field(&form, "start_time");
-    let end_time = parse_form_field(&form, "end_time");
-    let tz = parse_form_field(&form, "tz").unwrap_or("UTC").to_string();
-    let is_all_day = parse_form_field(&form, "is_all_day") == Some("true");
-    let calendar_href = match parse_form_field(&form, "calendar_href") {
-        Some(h) => h.to_string(),
-        None => return (StatusCode::BAD_REQUEST, "Missing calendar_href").into_response(),
-    };
-    let account_id = match parse_form_field(&form, "account_id") {
-        Some(id) if !id.is_empty() => id.to_string(),
-        _ => return (StatusCode::BAD_REQUEST, "Missing account_id").into_response(),
-    };
-    let scope = parse_form_field(&form, "scope")
-        .unwrap_or("series")
-        .to_string();
-    let original_dtstart = parse_form_field(&form, "original_dtstart");
+    let scope = scope.unwrap_or(EventScope::Series);
+    let original_dtstart = original_dtstart.as_deref();
     // Timezone the recurring master was authored in; the RECURRENCE-ID must
     // stay in that zone even when the edited override is saved in `tz`.
-    let original_tz = parse_form_field(&form, "original_tz")
-        .filter(|s| !s.is_empty())
-        .unwrap_or(&tz)
-        .to_string();
-    let original_calendar_href =
-        parse_form_field(&form, "original_calendar_href").map(|s| s.to_string());
-    let original_account_id = parse_form_field(&form, "original_account_id")
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
-    let recurrence: Option<RecurrenceInfo> = parse_form_field(&form, "recurrence")
-        .filter(|r| !r.is_empty() && *r != "{}")
-        .and_then(|r| serde_json::from_str(r).ok());
+    let original_tz = original_tz.unwrap_or_else(|| tz.clone());
 
-    let alarm_dirs: Vec<&str> = form
-        .iter()
-        .filter(|(k, _)| k == "alarm_direction")
-        .map(|(_, v)| v.as_str())
-        .collect();
-    let alarm_vals: Vec<&str> = form
-        .iter()
-        .filter(|(k, _)| k == "alarm_value")
-        .map(|(_, v)| v.as_str())
-        .collect();
-    let alarm_units: Vec<&str> = form
-        .iter()
-        .filter(|(k, _)| k == "alarm_unit")
-        .map(|(_, v)| v.as_str())
-        .collect();
-    let alarm_dts: Vec<&str> = form
-        .iter()
-        .filter(|(k, _)| k == "alarm_datetime")
-        .map(|(_, v)| v.as_str())
-        .collect();
-    let alarms: Vec<Alarm> = alarm_dirs
+    let alarms: Vec<Alarm> = alarm_direction
         .iter()
         .enumerate()
         .filter_map(|(i, dir)| {
             parse_alarm_from_fields(
                 dir,
-                alarm_vals.get(i).copied().unwrap_or(""),
-                alarm_units.get(i).copied().unwrap_or("1"),
-                alarm_dts.get(i).copied().unwrap_or(""),
+                alarm_value.get(i).map_or("", String::as_str),
+                alarm_unit.get(i).map_or("1", String::as_str),
+                alarm_datetime.get(i).map_or("", String::as_str),
                 &tz,
             )
         })
         .collect();
 
-    let att_cns: Vec<&str> = form
-        .iter()
-        .filter(|(k, _)| k == "attendee_cn")
-        .map(|(_, v)| v.as_str())
-        .collect();
-    let att_emails: Vec<&str> = form
-        .iter()
-        .filter(|(k, _)| k == "attendee_email")
-        .map(|(_, v)| v.as_str())
-        .collect();
-    let att_partstats: Vec<&str> = form
-        .iter()
-        .filter(|(k, _)| k == "attendee_partstat")
-        .map(|(_, v)| v.as_str())
-        .collect();
-    let attendees: Vec<Attendee> = att_emails
+    let attendees: Vec<Attendee> = attendee_email
         .iter()
         .enumerate()
         .filter_map(|(i, email)| {
@@ -212,9 +229,9 @@ pub async fn save_event(
                 return None;
             }
             Some(Attendee {
-                cn: att_cns.get(i).copied().unwrap_or("").to_string(),
+                cn: attendee_cn.get(i).cloned().unwrap_or_default(),
                 email: email.to_string(),
-                partstat: PartStat::from_ical(att_partstats.get(i).copied().unwrap_or("")),
+                partstat: PartStat::from_ical(attendee_partstat.get(i).map_or("", String::as_str)),
             })
         })
         .collect();
@@ -232,7 +249,7 @@ pub async fn save_event(
         Err(r) => return r,
     };
 
-    if scope == "this_instance" {
+    if scope == EventScope::ThisInstance {
         let raw_ical = match fetch_event_ical(&state, &client, &account_id, &calendar_href, &uid)
             .await
         {
@@ -475,27 +492,15 @@ pub async fn save_event(
 pub async fn delete_event(
     State(state): State<AppState>,
     user: CurrentUser,
-    RawQuery(raw_query): RawQuery,
+    Query(DeleteEventQuery {
+        uid,
+        account_id,
+        calendar_href,
+        scope,
+        original_dtstart,
+        tz,
+    }): Query<DeleteEventQuery>,
 ) -> Response {
-    let mut uid = String::new();
-    let mut account_id = String::new();
-    let mut calendar_href = String::new();
-    let mut scope = String::new();
-    let mut original_dtstart = String::new();
-    let mut tz = String::new();
-    if let Some(query) = raw_query {
-        for (key, value) in form_urlencoded::parse(query.as_bytes()) {
-            match key.as_ref() {
-                "uid" => uid = value.into_owned(),
-                "account_id" => account_id = value.into_owned(),
-                "calendar_href" => calendar_href = value.into_owned(),
-                "scope" => scope = value.into_owned(),
-                "original_dtstart" => original_dtstart = value.into_owned(),
-                "tz" => tz = value.into_owned(),
-                _ => {}
-            }
-        }
-    }
     if uid.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing uid").into_response();
     }
@@ -511,7 +516,7 @@ pub async fn delete_event(
         Err(r) => return r,
     };
 
-    if scope == "this_instance" && !original_dtstart.is_empty() {
+    if let (Some(EventScope::ThisInstance), Some(original_dtstart)) = (scope, original_dtstart) {
         let raw_ical =
             match fetch_event_ical(&state, &client, &account_id, &calendar_href, &uid).await {
                 Ok(Some(s)) => s,
@@ -525,8 +530,7 @@ pub async fn delete_event(
                         .into_response();
                 }
             };
-        let tz_ref = if tz.is_empty() { "UTC" } else { &tz };
-        let modified = add_exdate(&raw_ical, &original_dtstart, tz_ref);
+        let modified = add_exdate(&raw_ical, &original_dtstart, tz.as_deref().unwrap_or("UTC"));
         return match client.put_event(&calendar_href, &uid, &modified).await {
             Ok(_) => {
                 let event_href = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
@@ -681,25 +685,12 @@ pub(super) async fn optimistic_upsert(
 pub async fn create_calendar_handler(
     State(state): State<crate::oidc::AppState>,
     user: CurrentUser,
-    body: String,
+    Form(CreateCalendarForm {
+        account_id,
+        name,
+        color,
+    }): Form<CreateCalendarForm>,
 ) -> Response {
-    let mut account_id = String::new();
-    let mut name = String::new();
-    let mut color: Option<String> = None;
-    for (key, value) in form_urlencoded::parse(body.as_bytes()) {
-        match key.as_ref() {
-            "account_id" => account_id = value.into_owned(),
-            "name" => name = value.into_owned(),
-            "color" => {
-                let v = value.into_owned();
-                if !v.is_empty() {
-                    color = Some(v);
-                }
-            }
-            _ => {}
-        }
-    }
-
     let name = name.trim().to_string();
     if name.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing calendar name").into_response();
@@ -712,11 +703,33 @@ pub async fn create_calendar_handler(
         Err(r) => return r,
     };
 
-    match client.create_calendar(&name, color.as_deref()).await {
+    match create_calendar(&state, &user, &client, &account_id, &name, color.as_deref()).await {
+        Ok(href) => Json(CalendarJson {
+            account_id,
+            href,
+            name,
+            color,
+            is_active: true,
+        })
+        .into_response(),
+        Err(r) => r,
+    }
+}
+
+/// Creates a calendar on the account's CalDAV server (MKCALENDAR) and caches it: its href, or a
+/// 502 with the server's error.
+pub(super) async fn create_calendar(
+    state: &AppState,
+    user: &CurrentUser,
+    client: &CalDavClient,
+    account_id: &str,
+    name: &str,
+    color: Option<&str>,
+) -> Result<String, Response> {
+    match client.create_calendar(name, color).await {
         Ok(href) => {
             if let Err(e) =
-                db::upsert_cached_calendar(&state.db, &account_id, &href, &name, color.as_deref())
-                    .await
+                db::upsert_cached_calendar(&state.db, account_id, &href, name, color).await
             {
                 eprintln!("Failed to cache new calendar: {e}");
             }
@@ -724,18 +737,11 @@ pub async fn create_calendar_handler(
                 .sse_broadcaster
                 .send(&user.user_id, crate::sse::SseMessage::CalendarsChanged);
             state.sync_manager.trigger(&user.user_id, SyncTrigger::Full);
-            Json(CalendarJson {
-                account_id,
-                href,
-                name,
-                color,
-                is_active: true,
-            })
-            .into_response()
+            Ok(href)
         }
         Err(e) => {
             eprintln!("MKCALENDAR failed: {e}");
-            (StatusCode::BAD_GATEWAY, format!("{e}")).into_response()
+            Err((StatusCode::BAD_GATEWAY, format!("{e}")).into_response())
         }
     }
 }

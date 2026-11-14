@@ -1,10 +1,11 @@
 use axum::{
-    extract::{Multipart, Query, RawQuery, State},
+    extract::{Query, State},
     http::{StatusCode, header},
     response::{IntoResponse, Json, Response},
 };
+use axum_typed_multipart::{TryFromMultipart, TypedMultipart};
 use chrono::NaiveDate;
-use url::form_urlencoded;
+use serde::Deserialize;
 
 use crate::caldav::{CalDavClient, preview_events_from_raw_ical, split_vcalendar_into_events};
 use crate::db;
@@ -19,6 +20,9 @@ use super::{EventJson, build_event_json, require_account_client};
 
 #[derive(serde::Serialize, ToSchema)]
 pub(crate) struct ImportResult {
+    /// the calendar the events went to (a new one for `new_calendar_name`)
+    account_id: String,
+    calendar_href: String,
     /// events written to the calendar
     imported: usize,
     /// events the CalDAV server refused
@@ -36,66 +40,50 @@ pub(crate) struct ImportPreviewEvent {
     location: String,
 }
 
-async fn read_ics_multipart(mut multipart: Multipart) -> Result<String, Response> {
-    let mut ics_content: Option<String> = None;
-
-    while let Ok(Some(field)) = multipart.next_field().await {
-        if field.name() == Some("file") {
-            match field.text().await {
-                Ok(text) => ics_content = Some(text),
-                Err(e) => {
-                    return Err(
-                        (StatusCode::BAD_REQUEST, format!("Failed to read file: {e}"))
-                            .into_response(),
-                    );
-                }
-            }
-        }
-    }
-
-    ics_content.ok_or_else(|| (StatusCode::BAD_REQUEST, "Missing ICS file").into_response())
-}
-
-// The multipart forms and the search query are parsed by hand, so these structs only
-// describe the requests.
-
-#[allow(dead_code)]
-#[derive(ToSchema)]
+#[derive(TryFromMultipart, ToSchema)]
 pub(crate) struct IcsFileForm {
-    /// the ICS file
+    /// the ICS file (UTF-8)
     #[schema(value_type = String, format = Binary)]
-    file: Vec<u8>,
+    file: String,
 }
 
-/// An ICS file to import into a calendar; the `email_*` fields name the message it came
-/// from, so the message shows the events and the events their source message.
-#[allow(dead_code)]
-#[derive(ToSchema)]
+/// An ICS file to import into a calendar: an existing one (`calendar_href`) or a new one of the
+/// account (`new_calendar_name`). The `email_*` fields name the message it came from, so the
+/// message shows the events and the events their source message.
+#[derive(TryFromMultipart, ToSchema)]
 pub(crate) struct ImportForm {
     account_id: String,
-    calendar_href: String,
-    /// the ICS file
+    /// the calendar to import into
+    calendar_href: Option<String>,
+    /// without `calendar_href`: the name of a calendar to create for the import
+    new_calendar_name: Option<String>,
+    /// the ICS file (UTF-8)
     #[schema(value_type = String, format = Binary)]
-    file: Vec<u8>,
+    file: String,
     email_account_id: Option<String>,
     email_mailbox: Option<String>,
-    email_uid: Option<i64>,
+    email_uid: Option<u32>,
 }
 
-#[allow(dead_code)]
-#[derive(IntoParams)]
+#[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub(crate) struct SearchQuery {
     /// the search text (at most 200 characters are used)
     q: String,
     /// earliest start, `YYYY-MM-DD`
-    start: Option<String>,
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
+    #[param(value_type = Option<String>, format = Date)]
+    start: Option<NaiveDate>,
     /// latest start, `YYYY-MM-DD`
-    end: Option<String>,
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
+    #[param(value_type = Option<String>, format = Date)]
+    end: Option<NaiveDate>,
     /// `1`: only the active calendars (when no `cal` is given)
-    active: Option<String>,
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
+    active: Option<u8>,
     /// calendars to search, each `account_id` and `href` joined by NUL or `|` (default: all)
-    cal: Option<Vec<String>>,
+    #[serde(default)]
+    cal: Vec<String>,
 }
 
 #[utoipa::path(
@@ -110,13 +98,8 @@ pub(crate) struct SearchQuery {
 pub async fn preview_ics_import(
     State(_state): State<crate::oidc::AppState>,
     _user: CurrentUser,
-    multipart: Multipart,
+    TypedMultipart(IcsFileForm { file: ics }): TypedMultipart<IcsFileForm>,
 ) -> Response {
-    let ics = match read_ics_multipart(multipart).await {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-
     let events = split_vcalendar_into_events(&ics);
     if events.is_empty() {
         return (StatusCode::BAD_REQUEST, "No events found in ICS file").into_response();
@@ -157,70 +140,48 @@ pub async fn preview_ics_import(
     responses(
         (status = 200, body = ImportResult),
         (status = 400, description = "a required field is missing, or no events in the file (plain text)"),
-        (status = 404, description = "no such CalDAV account (plain text)")
+        (status = 404, description = "no such CalDAV account (plain text)"),
+        (status = 502, description = "the CalDAV server refused to create the new calendar (plain text)")
     )
 )]
 pub async fn import_ics(
     State(state): State<crate::oidc::AppState>,
     user: CurrentUser,
-    mut multipart: Multipart,
+    TypedMultipart(ImportForm {
+        account_id,
+        calendar_href,
+        new_calendar_name,
+        file: ics,
+        email_account_id,
+        email_mailbox,
+        email_uid,
+    }): TypedMultipart<ImportForm>,
 ) -> Response {
-    let mut account_id = String::new();
-    let mut calendar_href = String::new();
-    let mut ics_content: Option<String> = None;
-    let mut email_account_id: Option<String> = None;
-    let mut email_mailbox: Option<String> = None;
-    let mut email_uid: Option<i64> = None;
-
-    while let Ok(Some(field)) = multipart.next_field().await {
-        match field.name() {
-            Some("account_id") => {
-                account_id = field.text().await.unwrap_or_default();
-            }
-            Some("calendar_href") => {
-                calendar_href = field.text().await.unwrap_or_default();
-            }
-            Some("file") => match field.text().await {
-                Ok(text) => ics_content = Some(text),
-                Err(e) => {
-                    return (StatusCode::BAD_REQUEST, format!("Failed to read file: {e}"))
-                        .into_response();
-                }
-            },
-            Some("email_account_id") => {
-                email_account_id = Some(field.text().await.unwrap_or_default());
-            }
-            Some("email_mailbox") => {
-                email_mailbox = Some(field.text().await.unwrap_or_default());
-            }
-            Some("email_uid") => {
-                email_uid = field.text().await.ok().and_then(|s| s.parse().ok());
-            }
-            _ => {}
-        }
-    }
-
-    if calendar_href.is_empty() {
-        return (StatusCode::BAD_REQUEST, "Missing calendar_href").into_response();
-    }
     if account_id.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing account_id").into_response();
     }
-    let ics = match ics_content {
-        Some(c) => c,
-        None => return (StatusCode::BAD_REQUEST, "Missing ICS file").into_response(),
-    };
+    let calendar_href = calendar_href.filter(|h| !h.is_empty());
+    let new_calendar_name = new_calendar_name
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty());
+    if calendar_href.is_none() && new_calendar_name.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Missing calendar_href or new_calendar_name",
+        )
+            .into_response();
+    }
+    let events = split_vcalendar_into_events(&ics);
+    if events.is_empty() {
+        return (StatusCode::BAD_REQUEST, "No events found in ICS file").into_response();
+    }
     let source_message_identity =
         if let (Some(ea), Some(em), Some(eu)) = (&email_account_id, &email_mailbox, email_uid) {
-            if let Ok(uid) = u32::try_from(eu) {
-                email_db::get_message(&state.db, ea, em, uid)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|msg| (msg.message_id, msg.thread_id))
-            } else {
-                None
-            }
+            email_db::get_message(&state.db, ea, em, eu)
+                .await
+                .ok()
+                .flatten()
+                .map(|msg| (msg.message_id, msg.thread_id))
         } else {
             None
         };
@@ -228,11 +189,18 @@ pub async fn import_ics(
         Ok(c) => c,
         Err(r) => return r,
     };
-
-    let events = split_vcalendar_into_events(&ics);
-    if events.is_empty() {
-        return (StatusCode::BAD_REQUEST, "No events found in ICS file").into_response();
-    }
+    let calendar_href = match (calendar_href, new_calendar_name) {
+        (Some(href), _) => href,
+        (None, Some(name)) => {
+            match super::events::create_calendar(&state, &user, &client, &account_id, &name, None)
+                .await
+            {
+                Ok(href) => href,
+                Err(r) => return r,
+            }
+        }
+        (None, None) => unreachable!("checked above"),
+    };
 
     let mut imported = 0usize;
     let mut errors = 0usize;
@@ -271,7 +239,7 @@ pub async fn import_ics(
                     )
                     .bind(ea)
                     .bind(em)
-                    .bind(eu)
+                    .bind(i64::from(eu))
                     .bind(email_message_id)
                     .bind(email_thread_id)
                     .bind(&account_id)
@@ -299,7 +267,13 @@ pub async fn import_ics(
         .sync_manager
         .trigger(&user.user_id, SyncTrigger::Incremental);
 
-    Json(ImportResult { imported, errors }).into_response()
+    Json(ImportResult {
+        account_id,
+        calendar_href,
+        imported,
+        errors,
+    })
+    .into_response()
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────
@@ -316,35 +290,24 @@ pub async fn import_ics(
 pub async fn search_events(
     State(state): State<AppState>,
     user: CurrentUser,
-    RawQuery(raw_query): RawQuery,
+    axum_extra::extract::Query(SearchQuery {
+        q,
+        start,
+        end,
+        active,
+        cal,
+    }): axum_extra::extract::Query<SearchQuery>,
 ) -> Response {
-    let mut q = String::new();
-    let mut start: Option<String> = None;
-    let mut end: Option<String> = None;
-    let mut cal_keys: Vec<(String, String)> = Vec::new();
+    let start = start.map(|d| d.format("%Y-%m-%d").to_string());
+    let end = end.map(|d| d.format("%Y-%m-%d").to_string());
+    let mut cal_keys: Vec<(String, String)> = cal
+        .iter()
+        .filter_map(|key| key.split_once('\0').or_else(|| key.split_once('|')))
+        .map(|(account_id, href)| (account_id.to_string(), href.to_string()))
+        .collect();
     // `active=1` without `cal`: the calendars shown in the calendar (not deactivated), as the search page's
     // default; it needs no calendar list in the browser, so the request can leave before the page has one.
-    let mut active_only = false;
-
-    if let Some(query) = raw_query {
-        for (key, value) in form_urlencoded::parse(query.as_bytes()) {
-            match key.as_ref() {
-                "q" => q = value.into_owned(),
-                "start" => start = Some(value.into_owned()),
-                "end" => end = Some(value.into_owned()),
-                "active" => active_only = value == "1",
-                "cal" => {
-                    let value = value.into_owned();
-                    if let Some((account_id, href)) = value.split_once('\0') {
-                        cal_keys.push((account_id.to_string(), href.to_string()));
-                    } else if let Some((account_id, href)) = value.split_once('|') {
-                        cal_keys.push((account_id.to_string(), href.to_string()));
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
+    let active_only = active == Some(1);
 
     let q = q.trim().to_string();
     if q.is_empty() {
