@@ -17,7 +17,7 @@ use crate::oidc::AppState;
 #[openapi(
     info(title = "Caley", description = "Caley's JSON API: calendars, contacts, mail and OpenPGP keys."),
     servers((url = "/api")),
-    components(schemas(ApiError, StatusOk))
+    components(schemas(ApiError, StatusOk, Binary))
 )]
 struct ApiDoc;
 
@@ -41,6 +41,12 @@ pub struct StatusOk {
     /// always `ok`
     pub status: &'static str,
 }
+
+/// Raw bytes: a binary response (an image, a file), `type: string, format: binary`.
+/// (`Vec<u8>` would be described as an array of integers.)
+#[derive(ToSchema)]
+#[schema(value_type = String, format = Binary)]
+pub struct Binary(#[allow(dead_code)] Vec<u8>);
 
 impl StatusOk {
     pub const OK: StatusOk = StatusOk { status: "ok" };

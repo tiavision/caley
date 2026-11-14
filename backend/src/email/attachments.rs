@@ -113,7 +113,7 @@ fn detect_allowed_image(data: &[u8]) -> Option<AllowedImage> {
     path = "/email/proxy-image",
     params(ProxyImageQuery),
     responses(
-        (status = 200, description = "the image (PNG, JPEG, GIF, WebP or AVIF), or a 1×1 transparent GIF", body = Vec<u8>, content_type = "image/*"),
+        (status = 200, description = "the image (PNG, JPEG, GIF, WebP or AVIF), or a 1×1 transparent GIF", body = crate::api::Binary, content_type = "image/*"),
         (status = 400, description = "`url` missing or not http(s) (plain text)", body = String, content_type = "text/plain")
     )
 )]
@@ -296,7 +296,7 @@ pub struct DownloadAttachmentQuery {
     path = "/email/attachment",
     params(DownloadAttachmentQuery),
     responses(
-        (status = 200, description = "the attachment's bytes, as its declared content type (`application/octet-stream` without one)", body = Vec<u8>, content_type = "application/octet-stream"),
+        (status = 200, description = "the attachment's bytes, as its declared content type (`application/octet-stream` without one)", body = crate::api::Binary, content_type = "application/octet-stream"),
         (status = 404, description = "no such account, attachment or part (plain text)", body = String, content_type = "text/plain"),
         (status = 500, description = "database or file error (plain text)", body = String, content_type = "text/plain")
     )
@@ -411,7 +411,7 @@ pub struct ExportQuery {
     path = "/email/export",
     params(ExportQuery),
     responses(
-        (status = 200, description = "a .tar.gz of the account's messages", body = Vec<u8>, content_type = "application/gzip"),
+        (status = 200, description = "a .tar.gz of the account's messages", body = crate::api::Binary, content_type = "application/gzip"),
         (status = 404, description = "no such account (plain text)", body = String, content_type = "text/plain"),
         (status = 500, description = "database error (plain text)", body = String, content_type = "text/plain")
     )

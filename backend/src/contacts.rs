@@ -404,7 +404,7 @@ pub struct PhotoQuery {
     path = "/contact/photo",
     params(PhotoQuery),
     responses(
-        (status = 200, body = Vec<u8>, content_type = "image/*", description = "the photo, in its own image type"),
+        (status = 200, body = crate::api::Binary, content_type = "image/*", description = "the photo, in its own image type"),
         (status = 304, description = "unchanged (`If-None-Match`)"),
         (status = 404, description = "no such contact, or no photo served")
     )

@@ -14,6 +14,49 @@
     }
   ],
   "paths": {
+    "/account": {
+      "delete": {
+        "summary": "Deletes the user with all their data (accounts, caches, mail files) and ends the session.",
+        "operationId": "delete_account",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountDeleted"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/config": {
+      "get": {
+        "summary": "Public endpoint so the login page can decide whether to offer OIDC.",
+        "operationId": "auth_config",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthConfig"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/caldav/account": {
       "put": {
         "summary": "Adds (no `account_id`) or updates a CalDAV account after testing the connection; an empty\npassword keeps the stored one. PUT is the same.",
@@ -128,6 +171,2560 @@
         }
       }
     },
+    "/calendar": {
+      "get": {
+        "operationId": "list_calendar",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "description": "`YYYY-MM` (default: the current month)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "description": "the viewer's IANA timezone (default: the server's)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonthGridJson"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_calendar_handler",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCalendarForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarJson"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "missing `name` or `account_id` (plain text)"
+          },
+          "404": {
+            "description": "no such CalDAV account (plain text)"
+          },
+          "502": {
+            "description": "the CalDAV server refused MKCALENDAR (plain text)"
+          }
+        }
+      }
+    },
+    "/calendar/event-emails": {
+      "get": {
+        "operationId": "get_event_source_emails",
+        "parameters": [
+          {
+            "name": "cal_account_id",
+            "in": "query",
+            "description": "the CalDAV account",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "calendar_href",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "event_uid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SourceEmailJson"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "a parameter is missing (plain text)"
+          }
+        }
+      }
+    },
+    "/calendar/toggle": {
+      "post": {
+        "operationId": "toggle_calendar",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/ToggleCalendarForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "saved (empty body)"
+          },
+          "400": {
+            "description": "missing `href` or `account_id` (plain text)"
+          },
+          "404": {
+            "description": "no such CalDAV account (plain text)"
+          }
+        }
+      }
+    },
+    "/calendars": {
+      "get": {
+        "operationId": "list_calendars",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CalendarJson"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/contact": {
+      "post": {
+        "summary": "Creates (no `uid`) or updates a contact on the CardDAV server, keeping the vCard's other\nproperties, and in the cache; sends `contact_updated`.",
+        "operationId": "save_contact",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveContactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "the saved contact",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactJson"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such CalDAV account or contact (plain text)"
+          },
+          "500": {
+            "description": "database or configuration error (plain text)"
+          },
+          "502": {
+            "description": "the CardDAV server did not save it (plain text)"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Deletes a contact on the CardDAV server and from the cache; sends `contact_removed`.",
+        "operationId": "delete_contact",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteContactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "deleted"
+          },
+          "404": {
+            "description": "no such CalDAV account or contact (plain text)"
+          },
+          "500": {
+            "description": "database or configuration error (plain text)"
+          },
+          "502": {
+            "description": "the CardDAV server did not delete it (plain text)"
+          }
+        }
+      }
+    },
+    "/contact/photo": {
+      "get": {
+        "summary": "The contact's embedded photo (raster images only, never SVG or a remote URL). With `v` the\ncurrent version it is cached for good, else revalidated by `ETag` (`If-None-Match` → 304).",
+        "operationId": "get_contact_photo",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "addressbook_href",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "description": "The photo's version (ContactJson.photo_rev): with it the response may be kept for good\n(photo only; ignored by the vCard).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the photo, in its own image type",
+            "content": {
+              "image/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/Binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "unchanged (`If-None-Match`)"
+          },
+          "404": {
+            "description": "no such contact, or no photo served"
+          }
+        }
+      }
+    },
+    "/contact/vcf": {
+      "get": {
+        "summary": "The contact's vCard as stored on the server.",
+        "operationId": "get_contact_vcf",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "addressbook_href",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "description": "The photo's version (ContactJson.photo_rev): with it the response may be kept for good\n(photo only; ignored by the vCard).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the vCard",
+            "content": {
+              "text/vcard": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such contact"
+          }
+        }
+      }
+    },
+    "/contacts": {
+      "get": {
+        "summary": "All address books and their contacts (from the cache).",
+        "operationId": "list_contacts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "database error (plain text)"
+          }
+        }
+      }
+    },
+    "/email/account": {
+      "put": {
+        "summary": "Adds (no `account_id`) or updates an IMAP account; PUT is the same.",
+        "operationId": "save_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSaved"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "password required for new account (plain text)"
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Adds (no `account_id`) or updates an IMAP account; PUT is the same.",
+        "operationId": "save_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSaved"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "password required for new account (plain text)"
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Deletes an IMAP account with its cached mail.",
+        "operationId": "delete_account",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "deleted"
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      }
+    },
+    "/email/accounts": {
+      "get": {
+        "summary": "The IMAP accounts.",
+        "operationId": "list_accounts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountsResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      }
+    },
+    "/email/attachment": {
+      "get": {
+        "summary": "An attachment of a cached message, with its declared content type. Content-Disposition is\n`inline` for previewable types (PDF, plain text, raster images, audio, video), else `attachment`.",
+        "operationId": "download_attachment",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "filename",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the attachment's bytes, as its declared content type (`application/octet-stream` without one)",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/Binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such account, attachment or part (plain text)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "database or file error (plain text)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email/autodiscover": {
+      "get": {
+        "summary": "The IMAP and SMTP servers of an address (Thunderbird's ISPDB, then the domain's autoconfig).",
+        "operationId": "autodiscover_handler",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "query",
+            "description": "the address to find the servers of",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Autodiscovery"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email/export": {
+      "get": {
+        "summary": "Every cached message of an account as a gzipped tar archive (`<mailbox>/<uid>.eml`), named\n`<account display name>.tar.gz`; streamed.",
+        "operationId": "export_account",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "a .tar.gz of the account's messages",
+            "content": {
+              "application/gzip": {
+                "schema": {
+                  "$ref": "#/components/schemas/Binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such account (plain text)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "database error (plain text)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email/folder": {
+      "put": {
+        "operationId": "update_virtual_folder",
+        "parameters": [
+          {
+            "name": "folder_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VirtualFolderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "updated"
+          },
+          "404": {
+            "description": "not found (plain text)"
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_virtual_folder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VirtualFolderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualFolderCreated"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_virtual_folder",
+        "parameters": [
+          {
+            "name": "folder_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "deleted"
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      }
+    },
+    "/email/folders": {
+      "get": {
+        "operationId": "list_virtual_folders",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualFoldersResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      }
+    },
+    "/email/identities": {
+      "get": {
+        "summary": "The sender identities of all accounts.",
+        "operationId": "list_identities",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentitiesResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      }
+    },
+    "/email/identity": {
+      "put": {
+        "summary": "Adds (no `identity_id`) or updates a sender identity; PUT is the same.",
+        "operationId": "save_identity",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentitySaved"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "account not found (plain text)"
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Adds (no `identity_id`) or updates a sender identity; PUT is the same.",
+        "operationId": "save_identity",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentitySaved"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "account not found (plain text)"
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_identity",
+        "parameters": [
+          {
+            "name": "identity_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "deleted"
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      }
+    },
+    "/email/image-blacklist": {
+      "get": {
+        "summary": "The origins whose remote images are ignored (not offered for loading).",
+        "operationId": "list_image_blacklist",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageOrigins"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "database error (plain text)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Ignores the remote images of an origin.",
+        "operationId": "add_image_blacklist_origin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageOriginBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "added"
+          },
+          "400": {
+            "description": "not an http(s) origin (plain text)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "database error (plain text)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "remove_image_blacklist_origin",
+        "parameters": [
+          {
+            "name": "origin",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "removed (also when it was not listed)"
+          },
+          "500": {
+            "description": "database error (plain text)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email/image-origins": {
+      "get": {
+        "summary": "The origins whose remote images are loaded.",
+        "operationId": "list_image_origins",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageOrigins"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "database error (plain text)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Allows the remote images of an origin.",
+        "operationId": "add_image_origin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageOriginBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "added"
+          },
+          "400": {
+            "description": "not an http(s) origin (plain text)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "database error (plain text)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "remove_image_origin",
+        "parameters": [
+          {
+            "name": "origin",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "removed (also when it was not listed)"
+          },
+          "500": {
+            "description": "database error (plain text)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email/mailboxes": {
+      "get": {
+        "summary": "The cached mailboxes of an account.",
+        "operationId": "list_mailboxes",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailboxesResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "account not found (plain text)"
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      }
+    },
+    "/email/message": {
+      "get": {
+        "summary": "A message with its cached body and attachments.",
+        "operationId": "get_message",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such account or message (plain text)"
+          },
+          "500": {
+            "description": "database error (plain text)"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Moves a message to the trash (deletes it outright in the trash); `email_removed` reports it.",
+        "operationId": "delete_message",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "deleted"
+          },
+          "404": {
+            "description": "no such account (plain text)"
+          },
+          "500": {
+            "description": "database error (plain text)"
+          }
+        }
+      }
+    },
+    "/email/message-events": {
+      "get": {
+        "operationId": "get_message_events",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "description": "the mail account",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the events imported from the message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EventJson"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "a parameter is missing or invalid (plain text)"
+          }
+        }
+      }
+    },
+    "/email/message/flags": {
+      "patch": {
+        "summary": "Sets or clears flags on the server and in the cache; `email_updated` reports the new flags.",
+        "operationId": "update_flags",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlagsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "applied (empty body)"
+          },
+          "404": {
+            "description": "no such account (plain text)"
+          },
+          "500": {
+            "description": "database error (plain text)"
+          }
+        }
+      }
+    },
+    "/email/message/move": {
+      "post": {
+        "summary": "Moves a message; `email_removed` and `emails_refetch` (of the destination) report it.",
+        "operationId": "move_message",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveMessageBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "moved"
+          },
+          "404": {
+            "description": "no such account (plain text)"
+          },
+          "500": {
+            "description": "database error (plain text)"
+          }
+        }
+      }
+    },
+    "/email/message/raw": {
+      "get": {
+        "summary": "The message's MIME source (for PGP processing).",
+        "operationId": "get_raw_message",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the cached .eml",
+            "content": {
+              "message/rfc822": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary",
+                  "description": "A MIME message as bytes (only described: the handler sends the bytes themselves)."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such account or no cached source (plain text)"
+          },
+          "500": {
+            "description": "database error (plain text)"
+          }
+        }
+      }
+    },
+    "/email/messages": {
+      "get": {
+        "summary": "A page of a mailbox or virtual folder.",
+        "operationId": "list_messages",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "description": "the account of `mailbox` (required without `folder_id`)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox",
+            "in": "query",
+            "description": "the IMAP mailbox name (required without `folder_id`)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "folder_id",
+            "in": "query",
+            "description": "a virtual folder instead of a mailbox",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "page size, default 50, at most 200",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "cursor_sent_at",
+            "in": "query",
+            "description": "keyset cursor: `sent_at` of the row the page starts after (or before, `backward`)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "cursor_rowid",
+            "in": "query",
+            "description": "keyset cursor: `rowid` of that row (no cursor without it)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "description": "`forward` (default: older than the cursor), `backward` (newer) or `last` (the oldest page)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "rows to skip instead of a cursor",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "neither `folder_id` nor `account_id` and `mailbox` (plain text)"
+          },
+          "500": {
+            "description": "database error (plain text)"
+          }
+        }
+      }
+    },
+    "/email/navigate": {
+      "get": {
+        "summary": "A warning page before an external link of a message: the destination, Continue and Cancel.",
+        "operationId": "navigate",
+        "parameters": [
+          {
+            "name": "to",
+            "in": "query",
+            "description": "the external http(s) URL",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the warning page",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`to` not an http(s) URL (plain text)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email/proxy-image": {
+      "get": {
+        "summary": "An image of a message: an inline part by Content-ID, or a remote image of a whitelisted origin.\nOnly PNG, JPEG, GIF, WebP and AVIF (sniffed from the bytes) are served; anything else, an\norigin not whitelisted, an unsafe address or a failed fetch is a 1×1 transparent GIF.",
+        "operationId": "proxy_image",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "description": "the remote image's http(s) URL",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cid",
+            "in": "query",
+            "description": "the inline part's Content-ID, with or without angle brackets",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the image (PNG, JPEG, GIF, WebP or AVIF), or a 1×1 transparent GIF",
+            "content": {
+              "image/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/Binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`url` missing or not http(s) (plain text)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email/raw": {
+      "get": {
+        "summary": "A cached message as it came from the server (for PGP/MIME decryption and signature checks).",
+        "operationId": "raw_email",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the raw message (RFC 5322)",
+            "content": {
+              "message/rfc822": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "plain text: account not found or message not cached"
+          },
+          "500": {
+            "description": "plain text: database, read or decompress error"
+          }
+        }
+      }
+    },
+    "/email/search": {
+      "get": {
+        "summary": "Searches messages; no text and no filter is an empty result.",
+        "operationId": "search",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "the search text (may be empty when a filter is set)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "account_id",
+            "in": "query",
+            "description": "with `mailbox`: search that mailbox",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox",
+            "in": "query",
+            "description": "with `account_id`: search that mailbox",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "folder_id",
+            "in": "query",
+            "description": "search a virtual folder (takes precedence over `account_id`/`mailbox`)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "addrs",
+            "in": "query",
+            "description": "comma-separated addresses the message must be from or to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "description": "`YYYY-MM-DD`: sent on or after",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "description": "`YYYY-MM-DD`: sent on or before",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "unread_only",
+            "in": "query",
+            "description": "only unread messages",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor_sent_at",
+            "in": "query",
+            "description": "keyset cursor: `sent_at` of the row the page starts after",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "cursor_rowid",
+            "in": "query",
+            "description": "keyset cursor: `rowid` of that row",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "description": "`forward` (default) or `backward`",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "page size, default 51, at most 200",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "search error (plain text)"
+          }
+        }
+      }
+    },
+    "/email/send-raw": {
+      "post": {
+        "summary": "Sends a MIME message the client built (signed, encrypted) through the identity's SMTP server to\nthe envelope's recipients (at most 100), then appends it to the Sent mailbox.",
+        "operationId": "send_raw_email",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/SendRawForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "sent (empty body)"
+          },
+          "400": {
+            "description": "an invalid form, message or recipient (plain text)"
+          },
+          "404": {
+            "description": "identity or account not found (plain text)"
+          },
+          "500": {
+            "description": "database error"
+          },
+          "502": {
+            "description": "the SMTP server refused it (plain text)"
+          }
+        }
+      }
+    },
+    "/email/suggest-addrs": {
+      "get": {
+        "summary": "Up to five addresses from the user's mail that contain `q` (none for an empty `q` or on error).",
+        "operationId": "suggest_addrs",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "part of an address",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddrSuggestions"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email/sync": {
+      "post": {
+        "summary": "Starts a sync of one mailbox; its progress arrives on the event stream.",
+        "operationId": "trigger_mailbox_sync",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "sync started (empty body)"
+          },
+          "404": {
+            "description": "account not found (plain text)"
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      }
+    },
+    "/email/thread": {
+      "get": {
+        "summary": "The conversation of a message.",
+        "operationId": "get_thread",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such account (plain text)"
+          },
+          "500": {
+            "description": "database error (plain text)"
+          }
+        }
+      }
+    },
+    "/email/thread-events": {
+      "get": {
+        "operationId": "get_thread_events",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "description": "the mail account",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the thread's messages with imported events, in thread order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MessageEventGroupJson"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "a parameter is missing or invalid (plain text)"
+          },
+          "404": {
+            "description": "no such mail account (empty body)"
+          }
+        }
+      }
+    },
+    "/email/trash/empty": {
+      "post": {
+        "summary": "Empties a trash mailbox of old messages (IMAP SAVEDATE); `emails_refetch` reports it.",
+        "operationId": "empty_trash",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyTrashBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrashEmptied"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`days` out of range or not a trash mailbox (plain text)"
+          },
+          "404": {
+            "description": "no such account (plain text)"
+          },
+          "412": {
+            "description": "`savedate_unsupported`: the server cannot tell when messages were trashed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "database error (plain text)"
+          },
+          "502": {
+            "description": "the IMAP server failed (plain text)"
+          }
+        }
+      }
+    },
+    "/email/unread-counts": {
+      "get": {
+        "summary": "Unread counts; a database error gives empty maps.",
+        "operationId": "get_unread_counts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCounts"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/event": {
+      "post": {
+        "operationId": "save_event",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/EventForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "saved (empty body); the event arrives as an `event_updated` SSE event"
+          },
+          "400": {
+            "description": "a required field is missing (plain text)"
+          },
+          "404": {
+            "description": "no such CalDAV account or event (plain text)"
+          },
+          "500": {
+            "description": "the CalDAV server refused it (plain text)"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_event",
+        "parameters": [
+          {
+            "name": "uid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "calendar_href",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "`this_instance` (with `original_dtstart`) deletes one occurrence; else the event",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "original_dtstart",
+            "in": "query",
+            "description": "the occurrence's original start (`this_instance`)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "description": "the occurrence's timezone (default `UTC`)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "deleted (empty body)"
+          },
+          "400": {
+            "description": "a required parameter is missing (plain text)"
+          },
+          "404": {
+            "description": "no such CalDAV account or event (plain text)"
+          },
+          "500": {
+            "description": "the CalDAV server refused it (plain text)"
+          }
+        }
+      }
+    },
+    "/event/ics": {
+      "get": {
+        "operationId": "get_event_ics",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "description": "the CalDAV account",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "calendar_href",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the event's iCalendar data as stored",
+            "content": {
+              "text/calendar": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "a parameter is missing (plain text)"
+          },
+          "404": {
+            "description": "no such account or event (empty body)"
+          }
+        }
+      }
+    },
+    "/events": {
+      "get": {
+        "operationId": "list_events",
+        "parameters": [
+          {
+            "name": "start",
+            "in": "query",
+            "description": "first day, `YYYY-MM-DD` (default: Monday of the current week)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "description": "last day, `YYYY-MM-DD` (default: Sunday of the current week)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "description": "the viewer's IANA timezone (default: the server's)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "one entry per day from `start` to `end`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DayEventsJson"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/events/stream": {
+      "get": {
+        "summary": "The live updates of the signed-in user (server-sent events; a `heartbeat` comment every 30 s).\nStarts the user's CalDAV and email sync tasks.",
+        "operationId": "events_stream",
+        "responses": {
+          "200": {
+            "description": "Server-sent events, each an `event:` name with a `data:` line. With data `1` (re-fetch): `events_refetch` (/api/events), `calendars_changed` (/api/calendars), `contacts_refetch` (/api/contacts), `accounts_changed` (the email accounts). With JSON data: `event_updated` `{account_id, uid, calendar_href, event?: EventJson}`, `event_removed` `{account_id, uid, calendar_href}`, `contact_updated` `{account_id, uid, addressbook_href, contact?: ContactJson}`, `contact_removed` `{account_id, uid, addressbook_href}`, `emails_refetch` `{account_id, mailbox}`, `email_updated` `{account_id, uid: number, mailbox, flags: string[]}`, `email_removed` `{account_id, uid: number, mailbox}`, `new_email` `{account_id, uid: number, mailbox, from: string|null, subject: string|null}`, `mailboxes_changed` `{account_id}`, `sync_started` and `sync_completed` `{account_id, mailbox}`.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/import": {
+      "post": {
+        "operationId": "import_ics",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "a required field is missing, or no events in the file (plain text)"
+          },
+          "404": {
+            "description": "no such CalDAV account (plain text)"
+          }
+        }
+      }
+    },
+    "/import/preview": {
+      "post": {
+        "operationId": "preview_ics_import",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/IcsFileForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ImportPreviewEvent"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "no file, or no importable events in it (plain text)"
+          }
+        }
+      }
+    },
+    "/pgp/devices/pending": {
+      "post": {
+        "summary": "Adds a device waiting for approval by an active device (`approve_device` of `PUT /pgp/vault`).",
+        "operationId": "create_pending_device",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PendingDeviceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "added"
+          },
+          "400": {
+            "description": "plain text: invalid device credential"
+          },
+          "409": {
+            "description": "plain text: vault not initialized or device already registered"
+          }
+        }
+      }
+    },
+    "/pgp/key": {
+      "post": {
+        "summary": "Adds or replaces a public key (stored as trusted).",
+        "operationId": "save_public_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavePublicKeyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "saved"
+          },
+          "400": {
+            "description": "plain text: invalid public key"
+          },
+          "500": {
+            "description": "plain text: database error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Deletes a stored public key.",
+        "operationId": "delete_public_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeletePublicKeyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "deleted (also when there was no such key)"
+          },
+          "500": {
+            "description": "plain text: database error"
+          }
+        }
+      }
+    },
+    "/pgp/keys": {
+      "get": {
+        "summary": "The stored public keys, optionally of one address.",
+        "operationId": "list_public_keys",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "query",
+            "description": "only the keys of this address",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StoredPublicKey"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "plain text: database error"
+          }
+        }
+      }
+    },
+    "/pgp/vault": {
+      "get": {
+        "summary": "The user's vault, or 204 when none is initialized.",
+        "operationId": "get_vault",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultData"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "no vault initialized"
+          },
+          "500": {
+            "description": "plain text: database error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Applies a change to the vault in one transaction if it is still at `expected_revision`.",
+        "operationId": "update_vault",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateVaultBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultRevision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "plain text: invalid vault update (e.g. no such pending device)"
+          },
+          "409": {
+            "description": "plain text: vault revision conflict"
+          },
+          "500": {
+            "description": "plain text: database error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Deletes the whole vault: its manifest, the encrypted private keys, and the user's WebAuthn\ncredentials with their devices and wraps.",
+        "operationId": "reset_vault",
+        "responses": {
+          "204": {
+            "description": "deleted"
+          },
+          "500": {
+            "description": "plain text: database error"
+          }
+        }
+      }
+    },
+    "/pgp/vault/initialize": {
+      "post": {
+        "summary": "Creates the vault (revision 1) with its first key and first device (active, with its wrap);\nthe device's credential must be the user's.",
+        "operationId": "initialize_vault",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitializeVaultBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "created"
+          },
+          "400": {
+            "description": "plain text: invalid device credential"
+          },
+          "409": {
+            "description": "plain text: vault already exists"
+          },
+          "500": {
+            "description": "plain text: database error"
+          }
+        }
+      }
+    },
+    "/push/webhook": {
+      "post": {
+        "summary": "Webhook endpoint for WebDAV-Push notifications.\nValidates the per-calendar token, then triggers an incremental sync.",
+        "operationId": "push_webhook",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "description": "the push subscription's token (of a calendar or an address book)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "accepted (also for an unknown token, so tokens cannot be probed)"
+          },
+          "400": {
+            "description": "missing token (plain text)"
+          }
+        }
+      }
+    },
+    "/search": {
+      "get": {
+        "operationId": "search_events",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "the search text (at most 200 characters are used)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "description": "earliest start, `YYYY-MM-DD`",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "description": "latest start, `YYYY-MM-DD`",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "active",
+            "in": "query",
+            "description": "`1`: only the active calendars (when no `cal` is given)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cal",
+            "in": "query",
+            "description": "calendars to search, each `account_id` and `href` joined by NUL or `|` (default: all)",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "at most 100 events, latest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EventJson"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "no search text (plain text)"
+          }
+        }
+      }
+    },
     "/settings": {
       "post": {
         "summary": "Saves the single CalDAV login after testing it; an empty password keeps the stored one.",
@@ -179,12 +2776,416 @@
           }
         }
       }
+    },
+    "/user": {
+      "get": {
+        "summary": "The signed-in user; starts the user's sync task.",
+        "operationId": "user_info",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webauthn/authenticate/finish": {
+      "post": {
+        "summary": "Finishes the passkey authentication started in the session and updates the credential's\ncounter: the credential that was used.",
+        "operationId": "authenticate_finish",
+        "requestBody": {
+          "description": "WebAuthn `PublicKeyCredential`: the result of `navigator.credentials.get()`",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebAuthnCredentialId"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "plain text: no authentication in progress or invalid credential"
+          },
+          "401": {
+            "description": "plain text: authentication failed"
+          },
+          "500": {
+            "description": "plain text: database error"
+          }
+        }
+      }
+    },
+    "/webauthn/authenticate/start": {
+      "post": {
+        "summary": "Starts a passkey authentication with the user's credentials: the challenge to pass to\n`navigator.credentials.get()`, evaluating the `prf` extension with `prf_salt`. The state is kept\nin the session for `/webauthn/authenticate/finish`.",
+        "operationId": "authenticate_start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthStartBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "WebAuthn `RequestChallengeResponse` (`{ publicKey: PublicKeyCredentialRequestOptions }`), its `extensions` set to `{ prf: { eval: { first: prf_salt } } }`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "plain text: no credentials enrolled"
+          },
+          "500": {
+            "description": "plain text: database, WebAuthn or session error"
+          }
+        }
+      }
+    },
+    "/webauthn/credential": {
+      "delete": {
+        "summary": "Deletes one of the user's WebAuthn credentials (with its vault device and wrap).",
+        "operationId": "delete_credential",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteCredentialBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "deleted (also when there was no such credential)"
+          },
+          "500": {
+            "description": "plain text: database error"
+          }
+        }
+      }
+    },
+    "/webauthn/credentials": {
+      "get": {
+        "summary": "The signed-in user's WebAuthn credentials.",
+        "operationId": "list_credentials",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CredentialInfo"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "plain text: database error"
+          }
+        }
+      }
+    },
+    "/webauthn/register/finish": {
+      "post": {
+        "summary": "Finishes the passkey registration started in the session and stores the credential.",
+        "operationId": "register_finish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterFinishBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebAuthnCredentialId"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "plain text: no registration in progress, invalid credential or registration failed"
+          },
+          "500": {
+            "description": "plain text: database error"
+          }
+        }
+      }
+    },
+    "/webauthn/register/start": {
+      "post": {
+        "summary": "Starts a passkey registration for the signed-in user (excluding the credentials already\nenrolled): the challenge to pass to `navigator.credentials.create()`. The registration state is\nkept in the session for `/webauthn/register/finish`.",
+        "operationId": "register_start",
+        "responses": {
+          "200": {
+            "description": "WebAuthn `CreationChallengeResponse` (`{ publicKey: PublicKeyCredentialCreationOptions }`), with a required resident key and the `prf` extension requested",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "plain text: WebAuthn or session error"
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "Account": {
+        "type": "object",
+        "description": "An IMAP account (its password is never sent).",
+        "required": [
+          "account_id",
+          "display_name",
+          "host",
+          "port",
+          "username",
+          "use_tls",
+          "sort_order"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string",
+            "description": "IMAP server"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "username": {
+            "type": "string"
+          },
+          "use_tls": {
+            "type": "boolean"
+          },
+          "smtp_host": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "SMTP server; `null`: the IMAP host"
+          },
+          "smtp_port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "`null`: 587"
+          },
+          "sort_order": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "AccountBody": {
+        "type": "object",
+        "description": "An IMAP account to add (no `account_id`) or update.",
+        "required": [
+          "display_name",
+          "host",
+          "port",
+          "username"
+        ],
+        "properties": {
+          "account_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "empty or missing: keep the stored one (required for a new account)"
+          },
+          "use_tls": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "default true"
+          },
+          "smtp_host": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "smtp_port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "sender_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "a new account's default identity gets this name (none without it)"
+          }
+        }
+      },
+      "AccountDeleted": {
+        "type": "object",
+        "description": "The account was deleted and the session ended.",
+        "required": [
+          "redirect"
+        ],
+        "properties": {
+          "redirect": {
+            "type": "string",
+            "description": "where to go next: always `/`, the login page"
+          }
+        }
+      },
+      "AccountSaved": {
+        "type": "object",
+        "required": [
+          "account_id"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AccountsResponse": {
+        "type": "object",
+        "required": [
+          "accounts"
+        ],
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Account"
+            }
+          }
+        }
+      },
+      "AddrSuggestions": {
+        "type": "object",
+        "description": "Addresses seen in the user's mail that contain the query.",
+        "required": [
+          "addrs"
+        ],
+        "properties": {
+          "addrs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AddressEntry": {
+        "type": "object",
+        "required": [
+          "street",
+          "city",
+          "region",
+          "postal",
+          "country",
+          "type_label"
+        ],
+        "properties": {
+          "street": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "postal": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "type_label": {
+            "type": "string"
+          }
+        }
+      },
       "AddressbookJson": {
         "type": "object",
+        "description": "A cached CardDAV address book.",
         "required": [
           "account_id",
           "href",
@@ -202,6 +3203,34 @@
           }
         }
       },
+      "AlarmFields": {
+        "type": "object",
+        "description": "An alarm as the event form edits it.",
+        "required": [
+          "direction",
+          "value",
+          "unit",
+          "datetime"
+        ],
+        "properties": {
+          "direction": {
+            "type": "string",
+            "description": "`before-start`, `after-start`, `before-end`, `after-end` or `absolute`"
+          },
+          "value": {
+            "type": "string",
+            "description": "the amount of `unit`s (relative alarms; empty for absolute ones)"
+          },
+          "unit": {
+            "type": "string",
+            "description": "minutes per unit: `1`, `60` or `1440` (empty for absolute alarms)"
+          },
+          "datetime": {
+            "type": "string",
+            "description": "UTC, `YYYYMMDDTHHMMSSZ` (absolute alarms; empty for relative ones)"
+          }
+        }
+      },
       "ApiError": {
         "type": "object",
         "description": "An error the API explains: `{\"error\": \"...\"}` (4xx; a 5xx is plain text).",
@@ -213,6 +3242,151 @@
             "type": "string"
           }
         }
+      },
+      "ApproveDeviceBody": {
+        "type": "object",
+        "description": "A pending device made active, with the vault key wrapped for it.",
+        "required": [
+          "cred_id",
+          "wrap"
+        ],
+        "properties": {
+          "cred_id": {
+            "type": "string"
+          },
+          "wrap": {
+            "$ref": "#/components/schemas/VaultWrap"
+          }
+        }
+      },
+      "Attachment": {
+        "type": "object",
+        "description": "An attachment of a message (GET /email/attachment downloads it).",
+        "properties": {
+          "filename": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "bytes"
+          },
+          "content_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the Content-ID of an inline part (`cid:` images)"
+          }
+        }
+      },
+      "AttendeeFields": {
+        "type": "object",
+        "required": [
+          "cn",
+          "email",
+          "partstat"
+        ],
+        "properties": {
+          "cn": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "partstat": {
+            "$ref": "#/components/schemas/PartStat"
+          }
+        }
+      },
+      "AuthConfig": {
+        "type": "object",
+        "description": "What the login page offers.",
+        "required": [
+          "oidc_enabled"
+        ],
+        "properties": {
+          "oidc_enabled": {
+            "type": "boolean",
+            "description": "whether OIDC sign-in is configured"
+          }
+        }
+      },
+      "AuthStartBody": {
+        "type": "object",
+        "required": [
+          "prf_salt"
+        ],
+        "properties": {
+          "prf_salt": {
+            "type": "string",
+            "description": "the salt for the `prf` extension's `eval.first`, base64url"
+          },
+          "credential_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "only this credential (base64url ID) is allowed; all the user's credentials without it"
+          }
+        }
+      },
+      "Autodiscovery": {
+        "type": "object",
+        "description": "What autodiscovery found for an address: `{\"found\": false}`, or `found` with all the servers'\nfields (`provider_name` may be `null`).",
+        "required": [
+          "found"
+        ],
+        "properties": {
+          "found": {
+            "type": "boolean"
+          },
+          "provider_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imap_host": {
+            "type": "string"
+          },
+          "imap_port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "imap_use_tls": {
+            "type": "boolean"
+          },
+          "imap_username": {
+            "type": "string"
+          },
+          "smtp_host": {
+            "type": "string"
+          },
+          "smtp_port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "Binary": {
+        "type": "string",
+        "format": "binary",
+        "description": "Raw bytes: a binary response (an image, a file), `type: string, format: binary`.\n(`Vec<u8>` would be described as an array of integers.)"
       },
       "CalDavAccountForm": {
         "type": "object",
@@ -329,6 +3503,7 @@
           "account_id",
           "href",
           "name",
+          "color",
           "is_active"
         ],
         "properties": {
@@ -349,6 +3524,1486 @@
           },
           "is_active": {
             "type": "boolean"
+          }
+        }
+      },
+      "ContactJson": {
+        "type": "object",
+        "description": "A cached contact.",
+        "required": [
+          "account_id",
+          "uid",
+          "addressbook_href",
+          "fn_name",
+          "emails",
+          "phones",
+          "addresses",
+          "org",
+          "has_photo"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "uid": {
+            "type": "string"
+          },
+          "addressbook_href": {
+            "type": "string"
+          },
+          "fn_name": {
+            "type": "string"
+          },
+          "emails": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TypedEntry"
+            }
+          },
+          "phones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TypedEntry"
+            }
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressEntry"
+            }
+          },
+          "org": {
+            "type": "string"
+          },
+          "has_photo": {
+            "type": "boolean"
+          },
+          "photo_rev": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Version of the photo (a hash of it), sent as `v` with the photo URL so the browser may keep the photo\nuntil it changes. None when there is no photo GET /api/contact/photo would serve."
+          }
+        }
+      },
+      "ContactsResponse": {
+        "type": "object",
+        "description": "All address books and contacts of the user.",
+        "required": [
+          "addressbooks",
+          "contacts"
+        ],
+        "properties": {
+          "addressbooks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressbookJson"
+            }
+          },
+          "contacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContactJson"
+            }
+          }
+        }
+      },
+      "CreateCalendarForm": {
+        "type": "object",
+        "required": [
+          "account_id",
+          "name"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "CSS color; empty for none"
+          }
+        }
+      },
+      "CredentialInfo": {
+        "type": "object",
+        "description": "An enrolled WebAuthn credential (passkey).",
+        "required": [
+          "cred_id",
+          "device_label",
+          "has_prf"
+        ],
+        "properties": {
+          "cred_id": {
+            "type": "string",
+            "description": "the credential ID, base64url without padding"
+          },
+          "device_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "null when none was given"
+          },
+          "has_prf": {
+            "type": "boolean",
+            "description": "whether the credential supports the `prf` extension (needed to unlock the vault)"
+          }
+        }
+      },
+      "DayEventsJson": {
+        "type": "object",
+        "description": "A day of the week view with its events, all-day ones first.",
+        "required": [
+          "date_iso",
+          "day_name",
+          "is_today",
+          "events"
+        ],
+        "properties": {
+          "date_iso": {
+            "type": "string",
+            "description": "`YYYY-MM-DD`"
+          },
+          "day_name": {
+            "type": "string"
+          },
+          "is_today": {
+            "type": "boolean"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventJson"
+            }
+          }
+        }
+      },
+      "DeleteContactRequest": {
+        "type": "object",
+        "description": "The contact to delete.",
+        "required": [
+          "account_id",
+          "uid",
+          "addressbook_href"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "uid": {
+            "type": "string"
+          },
+          "addressbook_href": {
+            "type": "string"
+          }
+        }
+      },
+      "DeleteCredentialBody": {
+        "type": "object",
+        "required": [
+          "cred_id"
+        ],
+        "properties": {
+          "cred_id": {
+            "type": "string"
+          }
+        }
+      },
+      "DeletePublicKeyBody": {
+        "type": "object",
+        "required": [
+          "fingerprint"
+        ],
+        "properties": {
+          "fingerprint": {
+            "type": "string"
+          }
+        }
+      },
+      "DeviceBundle": {
+        "type": "object",
+        "description": "A device's public key material and its own private key encrypted with its passkey's PRF output\n(opaque to the server).",
+        "required": [
+          "cred_id",
+          "public_jwk",
+          "encrypted_private_jwk",
+          "private_iv",
+          "prf_salt",
+          "hkdf_salt",
+          "pairing_nonce"
+        ],
+        "properties": {
+          "cred_id": {
+            "type": "string",
+            "description": "the device's WebAuthn credential ID"
+          },
+          "public_jwk": {
+            "type": "object",
+            "description": "the device's public ECDH key, a JWK"
+          },
+          "encrypted_private_jwk": {
+            "type": "string",
+            "description": "the device's private JWK, encrypted with its PRF-derived key"
+          },
+          "private_iv": {
+            "type": "string"
+          },
+          "prf_salt": {
+            "type": "string"
+          },
+          "hkdf_salt": {
+            "type": "string"
+          },
+          "pairing_nonce": {
+            "type": "string"
+          }
+        }
+      },
+      "DeviceRecord": {
+        "type": "object",
+        "description": "A device of the vault, as stored: its bundle, status and wrap.",
+        "required": [
+          "cred_id",
+          "device_label",
+          "status",
+          "public_jwk",
+          "encrypted_private_jwk",
+          "private_iv",
+          "prf_salt",
+          "hkdf_salt",
+          "pairing_nonce",
+          "wrap"
+        ],
+        "properties": {
+          "cred_id": {
+            "type": "string"
+          },
+          "device_label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending` (waiting for approval by an active device) or `active`"
+          },
+          "public_jwk": {
+            "type": "object",
+            "description": "the device's public ECDH key, a JWK (null if the stored one could not be read)"
+          },
+          "encrypted_private_jwk": {
+            "type": "string"
+          },
+          "private_iv": {
+            "type": "string"
+          },
+          "prf_salt": {
+            "type": "string"
+          },
+          "hkdf_salt": {
+            "type": "string"
+          },
+          "pairing_nonce": {
+            "type": "string"
+          },
+          "wrap": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VaultWrap",
+                "description": "the vault key wrapped for this device; null for a pending one"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "EmptyTrashBody": {
+        "type": "object",
+        "description": "Deletes the messages of a trash mailbox put there more than `days` ago.",
+        "required": [
+          "account_id",
+          "mailbox",
+          "days"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "mailbox": {
+            "type": "string",
+            "description": "a trash mailbox"
+          },
+          "days": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1 to 3650"
+          }
+        }
+      },
+      "EncryptedBlob": {
+        "type": "object",
+        "description": "An opaque AES-GCM ciphertext encrypted in the browser (the vault manifest); the server cannot\ndecrypt it.",
+        "required": [
+          "iv",
+          "ciphertext"
+        ],
+        "properties": {
+          "iv": {
+            "type": "string",
+            "description": "the AES-GCM nonce, base64url"
+          },
+          "ciphertext": {
+            "type": "string",
+            "description": "base64url"
+          }
+        }
+      },
+      "EventForm": {
+        "type": "object",
+        "description": "An event to create (no `uid`) or save. The alarm and attendee fields repeat, once\nper alarm / attendee, in the same order.",
+        "required": [
+          "summary",
+          "date",
+          "calendar_href",
+          "account_id",
+          "alarm_direction",
+          "alarm_value",
+          "alarm_unit",
+          "alarm_datetime",
+          "attendee_cn",
+          "attendee_email",
+          "attendee_partstat"
+        ],
+        "properties": {
+          "uid": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "empty or missing: a new event"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "description": "`YYYY-MM-DD`"
+          },
+          "start_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`HH:MM`"
+          },
+          "end_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`HH:MM`"
+          },
+          "tz": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "IANA timezone (default `UTC`)"
+          },
+          "is_all_day": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`true` for an all-day event"
+          },
+          "calendar_href": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`series` (default) or `this_instance` (an override of one occurrence)"
+          },
+          "original_dtstart": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the occurrence's original start (`this_instance`)"
+          },
+          "original_tz": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the timezone the recurring master was authored in (default `tz`)"
+          },
+          "original_calendar_href": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the calendar the event was in, when it moves"
+          },
+          "original_account_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the account the event was in, when it moves"
+          },
+          "recurrence": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`RecurrenceInfo` as JSON; empty or `{}` for none"
+          },
+          "alarm_direction": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "alarm_value": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "alarm_unit": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "alarm_datetime": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "attendee_cn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "attendee_email": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "attendee_partstat": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "EventJson": {
+        "type": "object",
+        "description": "An event (one occurrence of a recurring one), times in the viewer's timezone.",
+        "required": [
+          "account_id",
+          "uid",
+          "time_range",
+          "summary",
+          "color",
+          "dtstart",
+          "dtend",
+          "is_all_day",
+          "tz",
+          "location",
+          "description",
+          "is_recurring",
+          "recurrence",
+          "calendar_href",
+          "master_dtstart",
+          "alarms",
+          "attendees"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "uid": {
+            "type": "string"
+          },
+          "time_range": {
+            "type": "string",
+            "description": "`HH:MM-HH:MM`, `HH:MM` or `All day`"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string",
+            "description": "the calendar's color, or a CSS variable for calendars without one"
+          },
+          "dtstart": {
+            "type": "string"
+          },
+          "dtend": {
+            "type": "string"
+          },
+          "is_all_day": {
+            "type": "boolean"
+          },
+          "tz": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "is_recurring": {
+            "type": "boolean"
+          },
+          "recurrence": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RecurrenceInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "calendar_href": {
+            "type": "string"
+          },
+          "master_dtstart": {
+            "type": "string"
+          },
+          "alarms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlarmFields"
+            }
+          },
+          "attendees": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttendeeFields"
+            }
+          }
+        }
+      },
+      "FlagsBody": {
+        "type": "object",
+        "description": "Sets or clears IMAP flags on a message.",
+        "required": [
+          "account_id",
+          "mailbox",
+          "uid",
+          "flags",
+          "set"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "mailbox": {
+            "type": "string"
+          },
+          "uid": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "e.g. `\\Seen`, `\\Flagged`"
+          },
+          "set": {
+            "type": "boolean",
+            "description": "true adds the flags, false removes them"
+          }
+        }
+      },
+      "IcsFileForm": {
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "description": "the ICS file"
+          }
+        }
+      },
+      "IdentitiesResponse": {
+        "type": "object",
+        "required": [
+          "identities"
+        ],
+        "properties": {
+          "identities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Identity"
+            }
+          }
+        }
+      },
+      "Identity": {
+        "type": "object",
+        "description": "A sender identity (name and address) of an account.",
+        "required": [
+          "identity_id",
+          "account_id",
+          "name",
+          "email",
+          "is_default",
+          "sort_order"
+        ],
+        "properties": {
+          "identity_id": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "sort_order": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "IdentityBody": {
+        "type": "object",
+        "description": "A sender identity to add (no `identity_id`) or update.",
+        "required": [
+          "account_id",
+          "name",
+          "email"
+        ],
+        "properties": {
+          "identity_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "is_default": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "default false"
+          }
+        }
+      },
+      "IdentitySaved": {
+        "type": "object",
+        "required": [
+          "identity_id"
+        ],
+        "properties": {
+          "identity_id": {
+            "type": "string"
+          }
+        }
+      },
+      "ImageOriginBody": {
+        "type": "object",
+        "required": [
+          "origin"
+        ],
+        "properties": {
+          "origin": {
+            "type": "string",
+            "description": "an http(s) URL; stored as its `scheme://host`"
+          }
+        }
+      },
+      "ImageOrigins": {
+        "type": "object",
+        "description": "A list of image origins (`scheme://host`): the allowed ones or the ignored ones.",
+        "required": [
+          "origins"
+        ],
+        "properties": {
+          "origins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ImportForm": {
+        "type": "object",
+        "description": "An ICS file to import into a calendar; the `email_*` fields name the message it came\nfrom, so the message shows the events and the events their source message.",
+        "required": [
+          "account_id",
+          "calendar_href",
+          "file"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "calendar_href": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "description": "the ICS file"
+          },
+          "email_account_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email_mailbox": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email_uid": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "ImportPreviewEvent": {
+        "type": "object",
+        "description": "An event of an ICS file, before the import.",
+        "required": [
+          "uid",
+          "summary",
+          "dtstart",
+          "dtend",
+          "is_all_day",
+          "location"
+        ],
+        "properties": {
+          "uid": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "dtstart": {
+            "type": "string"
+          },
+          "dtend": {
+            "type": "string"
+          },
+          "is_all_day": {
+            "type": "boolean"
+          },
+          "location": {
+            "type": "string"
+          }
+        }
+      },
+      "ImportResult": {
+        "type": "object",
+        "required": [
+          "imported",
+          "errors"
+        ],
+        "properties": {
+          "imported": {
+            "type": "integer",
+            "description": "events written to the calendar",
+            "minimum": 0
+          },
+          "errors": {
+            "type": "integer",
+            "description": "events the CalDAV server refused",
+            "minimum": 0
+          }
+        }
+      },
+      "InitializeVaultBody": {
+        "type": "object",
+        "required": [
+          "manifest",
+          "key",
+          "device",
+          "wrap"
+        ],
+        "properties": {
+          "manifest": {
+            "$ref": "#/components/schemas/EncryptedBlob"
+          },
+          "key": {
+            "$ref": "#/components/schemas/PrivateKeyBlob"
+          },
+          "device": {
+            "$ref": "#/components/schemas/DeviceBundle"
+          },
+          "wrap": {
+            "$ref": "#/components/schemas/VaultWrap"
+          }
+        }
+      },
+      "Mailbox": {
+        "type": "object",
+        "description": "An IMAP mailbox of an account.",
+        "required": [
+          "account_id",
+          "name",
+          "subscribed"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "the full IMAP name"
+          },
+          "delimiter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the hierarchy delimiter (`/`, `.`), `null` for a flat namespace"
+          },
+          "subscribed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MailboxesResponse": {
+        "type": "object",
+        "required": [
+          "mailboxes"
+        ],
+        "properties": {
+          "mailboxes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Mailbox"
+            }
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "description": "A message, as the list, search and the message endpoint send it.",
+        "required": [
+          "uid",
+          "account_id",
+          "mailbox",
+          "rowid",
+          "to",
+          "cc",
+          "reply_to",
+          "flags",
+          "has_attachments",
+          "body_cached",
+          "autocrypt_headers",
+          "is_read",
+          "is_flagged",
+          "is_encrypted",
+          "is_signed",
+          "attachments"
+        ],
+        "properties": {
+          "uid": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "mailbox": {
+            "type": "string"
+          },
+          "rowid": {
+            "type": "integer",
+            "format": "int64",
+            "description": "the cache row; with `sent_at` the list's keyset cursor"
+          },
+          "message_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "thread_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the From header"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reply_to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sent_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Unix seconds"
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IMAP flags (`\\Seen`, `\\Flagged`, ...)"
+          },
+          "has_attachments": {
+            "type": "boolean"
+          },
+          "body_cached": {
+            "type": "boolean",
+            "description": "whether the body was cached (GET /email/message only; false in lists)"
+          },
+          "body_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "body_html": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "autocrypt_headers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "is_read": {
+            "type": "boolean"
+          },
+          "is_flagged": {
+            "type": "boolean"
+          },
+          "is_encrypted": {
+            "type": "boolean"
+          },
+          "is_signed": {
+            "type": "boolean"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attachment"
+            },
+            "description": "GET /email/message only; empty in lists"
+          }
+        }
+      },
+      "MessageEventGroupJson": {
+        "type": "object",
+        "description": "A message of a thread and the events imported from it.",
+        "required": [
+          "account_id",
+          "mailbox",
+          "uid",
+          "events"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "mailbox": {
+            "type": "string"
+          },
+          "uid": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventJson"
+            }
+          }
+        }
+      },
+      "MessagesResponse": {
+        "type": "object",
+        "description": "A page of messages (list rows: no body, no attachments).",
+        "required": [
+          "messages",
+          "total"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "the number of messages in the mailbox or folder"
+          }
+        }
+      },
+      "MonthDayJson": {
+        "type": "object",
+        "description": "A cell of the month grid.",
+        "required": [
+          "day_number",
+          "date_str",
+          "is_current_month",
+          "event_colors"
+        ],
+        "properties": {
+          "day_number": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "date_str": {
+            "type": "string"
+          },
+          "is_current_month": {
+            "type": "boolean"
+          },
+          "event_colors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "the distinct colors of the day's events"
+          }
+        }
+      },
+      "MonthGridJson": {
+        "type": "object",
+        "description": "A month as whole weeks (Monday first).",
+        "required": [
+          "month",
+          "month_name",
+          "month_number",
+          "year",
+          "days",
+          "prev_month",
+          "next_month"
+        ],
+        "properties": {
+          "month": {
+            "type": "string",
+            "description": "`YYYY-MM`"
+          },
+          "month_name": {
+            "type": "string"
+          },
+          "month_number": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "year": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MonthDayJson"
+            }
+          },
+          "prev_month": {
+            "type": "string"
+          },
+          "next_month": {
+            "type": "string"
+          }
+        }
+      },
+      "MoveMessageBody": {
+        "type": "object",
+        "description": "Moves a message to another mailbox of its account.",
+        "required": [
+          "account_id",
+          "mailbox",
+          "uid",
+          "dest_mailbox"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "mailbox": {
+            "type": "string"
+          },
+          "uid": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "dest_mailbox": {
+            "type": "string"
+          }
+        }
+      },
+      "PartStat": {
+        "type": "string",
+        "enum": [
+          "NEEDS-ACTION",
+          "ACCEPTED",
+          "DECLINED",
+          "TENTATIVE"
+        ]
+      },
+      "PendingDeviceBody": {
+        "type": "object",
+        "required": [
+          "device"
+        ],
+        "properties": {
+          "device": {
+            "$ref": "#/components/schemas/DeviceBundle"
+          }
+        }
+      },
+      "PrivateKeyBlob": {
+        "type": "object",
+        "description": "An OpenPGP private key of the vault, encrypted in the browser with the vault key (opaque to\nthe server). The frontend's `VaultKeyRecord`.",
+        "required": [
+          "fingerprint",
+          "iv",
+          "ciphertext"
+        ],
+        "properties": {
+          "fingerprint": {
+            "type": "string",
+            "description": "the key's fingerprint (hex)"
+          },
+          "iv": {
+            "type": "string",
+            "description": "the AES-GCM nonce, base64url"
+          },
+          "ciphertext": {
+            "type": "string",
+            "description": "the encrypted armored private key, base64url"
+          }
+        }
+      },
+      "RecurrenceInfo": {
+        "type": "object",
+        "required": [
+          "freq",
+          "interval",
+          "by_day",
+          "by_month_day",
+          "by_month",
+          "by_set_pos"
+        ],
+        "properties": {
+          "freq": {
+            "type": "string"
+          },
+          "interval": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "until": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "by_day": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "by_month_day": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          "by_month": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          "by_set_pos": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        }
+      },
+      "RegisterFinishBody": {
+        "type": "object",
+        "required": [
+          "credential"
+        ],
+        "properties": {
+          "credential": {
+            "type": "object",
+            "description": "WebAuthn `RegisterPublicKeyCredential`: the result of `navigator.credentials.create()`"
+          },
+          "device_label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_prf": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "whether the authenticator reported the `prf` extension as enabled (default false)"
+          }
+        }
+      },
+      "SaveContactRequest": {
+        "type": "object",
+        "description": "A contact to create (no `uid`) or update.",
+        "required": [
+          "account_id",
+          "addressbook_href",
+          "fn_name",
+          "emails",
+          "phones",
+          "addresses",
+          "org"
+        ],
+        "properties": {
+          "uid": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the contact to update; none creates one"
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "addressbook_href": {
+            "type": "string"
+          },
+          "fn_name": {
+            "type": "string"
+          },
+          "emails": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TypedEntry"
+            }
+          },
+          "phones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TypedEntry"
+            }
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressEntry"
+            }
+          },
+          "org": {
+            "type": "string"
+          }
+        }
+      },
+      "SavePublicKeyBody": {
+        "type": "object",
+        "required": [
+          "fingerprint",
+          "email",
+          "armored"
+        ],
+        "properties": {
+          "fingerprint": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "armored": {
+            "type": "string",
+            "description": "an ASCII-armored public key block"
+          },
+          "is_own": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "default false"
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "default `imported`"
+          }
+        }
+      },
+      "SearchResponse": {
+        "type": "object",
+        "description": "Search results (a page; no `total`).",
+        "required": [
+          "messages"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        }
+      },
+      "SendRawForm": {
+        "type": "object",
+        "description": "The multipart form of a raw send (only for the spec: the handler reads the fields one by one).",
+        "required": [
+          "identity_id",
+          "raw_mime"
+        ],
+        "properties": {
+          "identity_id": {
+            "type": "string",
+            "description": "the identity to send as: its account's SMTP server, its address the envelope sender\n(must be the message's only From)"
+          },
+          "envelope_to": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "JSON array of the envelope's To addresses"
+          },
+          "envelope_cc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "JSON array of the envelope's Cc addresses"
+          },
+          "envelope_bcc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "JSON array of the envelope's Bcc addresses"
+          },
+          "raw_mime": {
+            "type": "string",
+            "format": "binary",
+            "description": "the message (`message/rfc822`): ASCII only, no Bcc header"
           }
         }
       },
@@ -391,6 +5046,49 @@
           }
         }
       },
+      "SourceEmailJson": {
+        "type": "object",
+        "description": "A mail message an event was imported from.",
+        "required": [
+          "account_id",
+          "mailbox",
+          "uid",
+          "from",
+          "subject",
+          "sent_at"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "mailbox": {
+            "type": "string"
+          },
+          "uid": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sent_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "StatusOk": {
         "type": "object",
         "description": "A write that has nothing else to say: `{\"status\": \"ok\"}`.",
@@ -401,6 +5099,497 @@
           "status": {
             "type": "string",
             "description": "always `ok`"
+          }
+        }
+      },
+      "StoredPublicKey": {
+        "type": "object",
+        "description": "A stored OpenPGP public key: the user's own or a trusted sender's.",
+        "required": [
+          "fingerprint",
+          "email",
+          "armored",
+          "is_own",
+          "source",
+          "trust"
+        ],
+        "properties": {
+          "fingerprint": {
+            "type": "string",
+            "description": "the key's fingerprint (hex)"
+          },
+          "email": {
+            "type": "string"
+          },
+          "armored": {
+            "type": "string",
+            "description": "the ASCII-armored public key"
+          },
+          "is_own": {
+            "type": "boolean",
+            "description": "whether it is the public half of one of the user's own keys"
+          },
+          "source": {
+            "type": "string",
+            "description": "where it came from, e.g. `imported` or `autocrypt`"
+          },
+          "trust": {
+            "type": "string",
+            "description": "e.g. `trusted`"
+          }
+        }
+      },
+      "ThreadNode": {
+        "type": "object",
+        "description": "A message of a conversation.",
+        "required": [
+          "uid",
+          "account_id",
+          "mailbox",
+          "is_read"
+        ],
+        "properties": {
+          "uid": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "mailbox": {
+            "type": "string"
+          },
+          "message_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parent_message_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the message this one replies to (its Message-ID)"
+          },
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sent_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Unix seconds"
+          },
+          "is_read": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ThreadResponse": {
+        "type": "object",
+        "description": "The conversation of a message, oldest first, one entry per Message-ID.",
+        "required": [
+          "messages"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ThreadNode"
+            }
+          }
+        }
+      },
+      "ToggleCalendarForm": {
+        "type": "object",
+        "required": [
+          "account_id",
+          "href"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "href": {
+            "type": "string"
+          },
+          "active": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`false` hides the calendar; anything else (or missing) shows it"
+          }
+        }
+      },
+      "TrashEmptied": {
+        "type": "object",
+        "required": [
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "integer",
+            "description": "the number of messages deleted",
+            "minimum": 0
+          }
+        }
+      },
+      "TypedEntry": {
+        "type": "object",
+        "required": [
+          "value",
+          "type_label"
+        ],
+        "properties": {
+          "value": {
+            "type": "string"
+          },
+          "type_label": {
+            "type": "string"
+          }
+        }
+      },
+      "UnreadCounts": {
+        "type": "object",
+        "description": "The unread messages per account and mailbox, and per virtual folder.",
+        "required": [
+          "mailboxes",
+          "folders"
+        ],
+        "properties": {
+          "mailboxes": {
+            "type": "object",
+            "description": "account id → mailbox name → unread count",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "propertyNames": {
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "folders": {
+            "type": "object",
+            "description": "folder id → unread count",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "UpdateVaultBody": {
+        "type": "object",
+        "description": "A change of the vault, applied only if the vault is still at `expected_revision`. The\nfrontend's `VaultUpdate`.",
+        "required": [
+          "expected_revision",
+          "manifest"
+        ],
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/EncryptedBlob",
+            "description": "the new encrypted manifest"
+          },
+          "upsert_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrivateKeyBlob"
+            },
+            "description": "keys added or replaced"
+          },
+          "delete_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "fingerprints of keys to delete"
+          },
+          "approve_device": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ApproveDeviceBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "remove_device": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "a credential ID whose credential, device and wrap are deleted"
+          },
+          "replace_wraps": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/VaultWrap"
+            },
+            "description": "when given, replaces all wraps"
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "description": "The signed-in user (an OIDC or a CalDAV-login session alike).",
+        "required": [
+          "display_name",
+          "has_settings",
+          "has_caldav",
+          "oidc_enabled",
+          "map_url"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "the name to show; the user ID when there is none"
+          },
+          "has_settings": {
+            "type": "boolean",
+            "description": "whether a CalDAV account is set up"
+          },
+          "has_caldav": {
+            "type": "boolean",
+            "description": "the same as `has_settings`"
+          },
+          "oidc_enabled": {
+            "type": "boolean"
+          },
+          "map_url": {
+            "type": "string",
+            "description": "the map URL template for locations, `{q}` the query (`MAP_URL`)"
+          }
+        }
+      },
+      "VaultData": {
+        "type": "object",
+        "description": "The synced vault: opaque encrypted records and the devices' public material.",
+        "required": [
+          "revision",
+          "manifest",
+          "keys",
+          "devices"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "incremented by each update"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/EncryptedBlob"
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrivateKeyBlob"
+            },
+            "description": "ordered by fingerprint"
+          },
+          "devices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceRecord"
+            },
+            "description": "in the order they were added"
+          }
+        }
+      },
+      "VaultRevision": {
+        "type": "object",
+        "description": "The vault's revision after an update.",
+        "required": [
+          "revision"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "VaultWrap": {
+        "type": "object",
+        "description": "The vault key wrapped for one device (ECDH with an ephemeral key, then AES-GCM); opaque to the\nserver.",
+        "required": [
+          "cred_id",
+          "ephemeral_public_jwk",
+          "hkdf_salt",
+          "iv",
+          "ciphertext"
+        ],
+        "properties": {
+          "cred_id": {
+            "type": "string",
+            "description": "the device's WebAuthn credential ID"
+          },
+          "ephemeral_public_jwk": {
+            "type": "object",
+            "description": "the ephemeral public ECDH key, a JWK (null if the stored one could not be read)"
+          },
+          "hkdf_salt": {
+            "type": "string"
+          },
+          "iv": {
+            "type": "string"
+          },
+          "ciphertext": {
+            "type": "string"
+          }
+        }
+      },
+      "VirtualFolder": {
+        "type": "object",
+        "description": "A virtual folder: the messages of the mailboxes its rules match.",
+        "required": [
+          "folder_id",
+          "display_name",
+          "sort_order",
+          "only_flagged",
+          "only_attachments",
+          "rules"
+        ],
+        "properties": {
+          "folder_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "sort_order": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "only_flagged": {
+            "type": "boolean"
+          },
+          "only_attachments": {
+            "type": "boolean"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VirtualFolderRule"
+            }
+          }
+        }
+      },
+      "VirtualFolderBody": {
+        "type": "object",
+        "description": "A virtual folder to create or update.",
+        "required": [
+          "display_name",
+          "rules"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VirtualFolderRule"
+            }
+          },
+          "only_flagged": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "default false"
+          },
+          "only_attachments": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "default false"
+          }
+        }
+      },
+      "VirtualFolderCreated": {
+        "type": "object",
+        "required": [
+          "folder_id"
+        ],
+        "properties": {
+          "folder_id": {
+            "type": "string"
+          }
+        }
+      },
+      "VirtualFolderRule": {
+        "type": "object",
+        "description": "Which mailboxes a virtual folder takes: `null` matches any account or mailbox.",
+        "properties": {
+          "account_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mailbox_pattern": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "VirtualFoldersResponse": {
+        "type": "object",
+        "required": [
+          "folders"
+        ],
+        "properties": {
+          "folders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VirtualFolder"
+            }
+          }
+        }
+      },
+      "WebAuthnCredentialId": {
+        "type": "object",
+        "description": "The WebAuthn credential a registration or an authentication ended with.",
+        "required": [
+          "cred_id"
+        ],
+        "properties": {
+          "cred_id": {
+            "type": "string",
+            "description": "the credential ID, base64url without padding"
           }
         }
       }

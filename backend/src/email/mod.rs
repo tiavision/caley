@@ -18,16 +18,6 @@ pub(crate) mod attachments;
 pub(crate) mod messages;
 pub(crate) mod send;
 
-pub use attachments::{
-    add_image_blacklist_origin, add_image_origin, download_attachment, export_account,
-    list_image_blacklist, list_image_origins, navigate, proxy_image, remove_image_blacklist_origin,
-    remove_image_origin,
-};
-pub use messages::{
-    delete_message, empty_trash, get_message, get_raw_message, get_thread, list_messages,
-    move_message, search, suggest_addrs, update_flags,
-};
-
 // ── Accounts ──────────────────────────────────────────────────────────────────
 
 /// An IMAP account (its password is never sent).
