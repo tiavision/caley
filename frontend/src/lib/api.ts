@@ -1,10 +1,9 @@
-import { rememberCurrentAppUrl } from './return-url.ts';
+import { loginUrl } from './return-url.ts';
 
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const res = await fetch(input, init);
   if (res.status === 401) {
-    rememberCurrentAppUrl();
-    window.location.href = '/';
+    window.location.href = loginUrl();
     return new Promise(() => {});
   }
   return res;

@@ -12,6 +12,7 @@ mod email_autodiscover;
 mod email_db;
 mod email_sync;
 mod imap_client;
+mod landing;
 mod local_auth;
 mod oidc;
 mod pgp;

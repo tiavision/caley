@@ -8,7 +8,7 @@
     <sn-resource name="user" src="/api/user" type="User"></sn-resource>
     <sn-resource name="authConfig" src="/api/auth/config" type="AuthConfig"></sn-resource>
 
-    <!-- Already signed in (or just signed in): straight to the app. -->
+    <!-- Just signed in: on to the app. (Already signed in, the server redirects `/` before this page is sent.) -->
     <template data-sn-if="user"><auth-return></auth-return></template>
 
     <!-- The language picker in the page's corner; the column below is the logo, the name and the sign-in card. -->
@@ -61,7 +61,7 @@
 
             <template data-sn-if="authConfig.oidc_enabled">
               <p data-divider data-sn-text="m.login_or()"></p>
-              <a href="/auth/oidc" role="button" data-variant="outline" data-sn-on-click="emit('auth-return-pending')" data-sn-text="m.login_oidc_button()"></a>
+              <a href="/auth/oidc" role="button" data-variant="outline" data-sn-text="m.login_oidc_button()"></a>
             </template>
           </template>
           <template data-sn-else>

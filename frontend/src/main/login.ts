@@ -1,4 +1,3 @@
-// Login page (index.html, sinter): styles and the page's islands.
+// Login page (index.html, sinter): styles.
 import '../styles/temper.ts';
-import '../islands/login.ts';
 import '../styles/login.scss';

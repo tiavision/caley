@@ -1,19 +1,18 @@
 // sinter app configuration, imported by every page before it mounts.
 import { configure, onUnauthorized } from '@tiaforge-ui/sinter';
 import { retry } from '@tiaforge-ui/sinter/retry';
-import { rememberCurrentAppUrl } from './lib/return-url.ts';
+import { loginUrl } from './lib/return-url.ts';
 import './islands/common.ts';
 
 configure({
   request: [
-    // The same 401 handling as apiFetch (src/lib/api.ts): remember where we were, go to the login page.
+    // The same 401 handling as apiFetch (src/lib/api.ts): to the login page, which takes us back here after the sign-in.
     // On the login page itself a 401 from /api/user only means "not signed in": the user resource is null.
     onUnauthorized(async (req, res) => {
       if (location.pathname === '/') {
         return new URL(req.url).pathname === '/api/user' ? Response.json(null) : res;
       }
-      rememberCurrentAppUrl();
-      location.href = '/';
+      location.href = loginUrl();
       return new Promise<Response>(() => {});
     }),
   ],

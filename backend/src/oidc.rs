@@ -1,10 +1,11 @@
 use crate::db;
+use crate::landing;
 use crate::email_sync::EmailSyncManager;
 use crate::search::SearchMode;
 use axum::{
     body::Body,
     extract::{FromRequestParts, Query, State},
-    http::{Request, StatusCode, request::Parts},
+    http::{Method, Request, StatusCode, request::Parts},
     response::{IntoResponse, Json, Redirect, Response},
 };
 use clap::ValueEnum;
@@ -307,7 +308,8 @@ pub async fn oidc_handler(
 
         let _ = state.sync_manager.ensure_task_for(&user_id);
 
-        return Redirect::to("/calendar/").into_response();
+        // the page wanted before the sign-in, else the last one used (landing.rs)
+        return Redirect::to(&crate::landing::take(&session).await).into_response();
     }
 
     // Initiate leg: generate PKCE + state and redirect to IdP.
@@ -383,11 +385,10 @@ where
         let oidc_enabled = self.oidc_enabled;
 
         let path = request.uri().path().to_string();
-        // Always-public paths: the login page, auth endpoints, and static assets
-        // referenced before authentication, such as the web app manifest and icons.
+        // Always-public paths: auth endpoints and static assets referenced before authentication,
+        // such as the web app manifest and icons. (`/`, the login page, is public too: below.)
         let is_static = is_public_static_asset(&path);
-        if path == "/"
-            || path.starts_with("/auth/")
+        if path.starts_with("/auth/")
             || path == "/logout"
             || path == "/api/auth/config"
             || is_static
@@ -401,7 +402,28 @@ where
                 Some(s) => s.get::<String>("user_id").await.ok().flatten().is_some(),
                 None => false,
             };
+            // The login page: signed in, a redirect to the page wanted or last used (landing.rs), so
+            // the login page is never painted on the way; signed out, the page, keeping `?next=`.
+            if path == "/" {
+                if let (Some(s), true) = (&session, request.method() == Method::GET) {
+                    let next = landing::next_param(request.uri().query());
+                    if authenticated {
+                        if let Some(next) = next {
+                            landing::remember_next(s, &next).await;
+                        }
+                        let to = landing::take(s).await;
+                        return Ok(Redirect::to(&to).into_response());
+                    }
+                    if let Some(next) = next {
+                        landing::remember_next(s, &next).await;
+                    }
+                }
+                return inner.call(request).await;
+            }
             if authenticated {
+                if let Some(s) = &session {
+                    landing::record(s, request.method(), request.headers(), &path).await;
+                }
                 return inner.call(request).await;
             }
             if path.starts_with("/api/") {
@@ -411,14 +433,28 @@ where
                 )
                     .into_response());
             }
+            // A page, signed out: keep it for after the sign-in.
+            let wanted = match request.uri().query() {
+                Some(q) => format!("{path}?{q}"),
+                None => path.clone(),
+            };
             // Silent re-auth: if OIDC is enabled, redirect to the OIDC handler with
             // prompt=none so users who are still logged into the IdP are re-authenticated
             // without seeing the login page. The IdP returns error=login_required if no
             // session exists, and oidc_handler falls back to showing the login page.
             if oidc_enabled {
+                if let Some(s) = &session {
+                    landing::remember_next(s, &wanted).await;
+                }
                 return Ok(Redirect::temporary("/auth/oidc?auto=1").into_response());
             }
-            Ok(Redirect::temporary("/").into_response())
+            if !landing::valid_next(&wanted) {
+                return Ok(Redirect::temporary("/").into_response());
+            }
+            let to: String = url::form_urlencoded::Serializer::for_suffix(String::from("/?"), 2)
+                .append_pair("next", &wanted)
+                .finish();
+            Ok(Redirect::temporary(&to).into_response())
         })
     }
 }

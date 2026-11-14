@@ -1,9 +1,9 @@
-// The script of <auth-return>: the navigation after sign-in (src/lib/return-url.ts).
-import { redirectToReturnUrl } from '../lib/return-url.ts';
+// The script of <auth-return>: just signed in on the login page, ask `/` again; the server now redirects to
+// the page wanted or last used (backend/src/landing.rs).
 import { AuthReturnComponent } from './auth-return.html';
 
 export class AuthReturn extends AuthReturnComponent {
   connected() {
-    redirectToReturnUrl();
+    location.replace('/');
   }
 }
