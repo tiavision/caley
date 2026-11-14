@@ -29,12 +29,6 @@ export async function listPublicKeys(): Promise<StoredPublicKey[]> {
   return res.json() as Promise<StoredPublicKey[]>;
 }
 
-export async function listPublicKeysForEmail(email: string): Promise<StoredPublicKey[]> {
-  const res = await apiFetch(`/api/pgp/keys?email=${encodeURIComponent(email)}`);
-  if (!res.ok) throw new Error('list public keys failed');
-  return res.json() as Promise<StoredPublicKey[]>;
-}
-
 export async function readVerificationKeys(records: StoredPublicKey[]): Promise<openpgp.PublicKey[]> {
   const keys: openpgp.PublicKey[] = [];
   for (const record of records) {
@@ -48,32 +42,21 @@ export async function readVerificationKeys(records: StoredPublicKey[]): Promise<
   return keys;
 }
 
-export async function savePublicKey(
-  key: openpgp.PublicKey,
-  source: 'imported' | 'message_attachment' | 'harvested_attachment' | 'harvested_autocrypt',
-  associatedEmail?: string,
-): Promise<StoredPublicKey> {
-  const fields = { ...describePublicKey(key), ...(associatedEmail ? { email: associatedEmail } : {}) };
-  const record: StoredPublicKey = {
-    ...fields,
-    is_own: false,
-    source,
-    trust: 'trusted',
-  };
+export type PublicKeySource = 'imported' | 'message_attachment' | 'harvested_attachment' | 'harvested_autocrypt';
+
+/** The body of POST /api/pgp/key for a sender's key (stored as trusted). */
+export interface PublicKeyBody { fingerprint: string; email: string; armored: string; is_own: false; source: PublicKeySource }
+
+export function publicKeyBody(key: openpgp.PublicKey, source: PublicKeySource, associatedEmail?: string): PublicKeyBody {
+  return { ...describePublicKey(key), ...(associatedEmail ? { email: associatedEmail } : {}), is_own: false, source };
+}
+
+/** Stores a sender's key found in the background (Autocrypt); the markup stores the keys a user imports. */
+export async function savePublicKey(key: openpgp.PublicKey, source: PublicKeySource, associatedEmail?: string): Promise<void> {
   const res = await apiFetch('/api/pgp/key', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(record),
+    body: JSON.stringify(publicKeyBody(key, source, associatedEmail)),
   });
   if (!res.ok) throw new Error('save public key failed');
-  return record;
-}
-
-export async function deletePublicKey(fingerprint: string): Promise<void> {
-  const res = await apiFetch('/api/pgp/key', {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fingerprint }),
-  });
-  if (!res.ok) throw new Error('delete public key failed');
 }

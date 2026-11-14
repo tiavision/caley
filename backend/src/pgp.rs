@@ -1069,13 +1069,13 @@ pub struct SavePublicKeyBody {
     pub source: Option<String>,
 }
 
-/// Adds or replaces a public key (stored as trusted).
+/// Adds or replaces a public key (stored as trusted); answers the stored key.
 #[utoipa::path(
     post,
     path = "/pgp/key",
     request_body = SavePublicKeyBody,
     responses(
-        (status = 204, description = "saved"),
+        (status = 200, body = StoredPublicKey, description = "saved"),
         (status = 400, description = "plain text: invalid public key"),
         (status = 500, description = "plain text: database error")
     )
@@ -1093,15 +1093,16 @@ pub async fn save_public_key(
         return (StatusCode::BAD_REQUEST, "invalid public key").into_response();
     }
 
-    let source = body.source.as_deref().unwrap_or("imported");
+    let source = body.source.unwrap_or_else(|| "imported".to_string());
+    let is_own = body.is_own.unwrap_or(false);
     if let Err(e) = db::upsert_pgp_public_key(
         &state.db,
         &user.user_id,
         &body.fingerprint,
         &body.email,
         &body.armored,
-        body.is_own.unwrap_or(false),
-        source,
+        is_own,
+        &source,
         "trusted",
     )
     .await
@@ -1110,7 +1111,15 @@ pub async fn save_public_key(
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
 
-    StatusCode::NO_CONTENT.into_response()
+    Json(StoredPublicKey {
+        fingerprint: body.fingerprint,
+        email: body.email,
+        armored: body.armored,
+        is_own,
+        source,
+        trust: "trusted".to_string(),
+    })
+    .into_response()
 }
 
 #[derive(Deserialize, ToSchema)]

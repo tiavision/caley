@@ -68,9 +68,9 @@
             <template data-sn-for="origin in shownOrigins" data-sn-key="origin">
               <li data-layout="row" data-gap="sm" data-wrap="none" data-pad="xs">
                 <span data-truncate data-grow data-sn-text="origin"></span>
-                <!-- Allow: off the ignore list, onto the allow list. -->
+                <!-- Allow: onto the allow list, which takes it off the ignore list (POST /email/image-origins). -->
                 <button type="button" data-variant="outline" data-tone="accent" data-size="sm"
-                        data-sn-call="mail.promoteOrigin(origin)" data-sn-then="refresh('allowedOrigins', 'ignoredOrigins')"
+                        data-sn-post="/email/image-origins" data-sn-body="{origin}" data-sn-then="refresh('allowedOrigins', 'ignoredOrigins')"
                         data-sn-text="m.mail_originsAllow()"></button>
                 <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
                         data-sn-delete="/email/image-blacklist?origin={origin}" data-sn-then="refresh('ignoredOrigins')"

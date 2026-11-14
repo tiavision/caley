@@ -86,8 +86,8 @@ export { loadErrorOr } from './lib/errors.ts';
 // Mail pages (mail/index.html, mail/view/index.html, src/components/mail-*.html).
 export {
   currentView, folderView, mailboxView, sameView, folderName, viewTitle, badgeCount, mailboxKey, sidebarSections, mailTitle,
-  toggled, refOf, isRef, urlRef, filterActive, markRange, neighbor, archiveMailbox, archiveTargets, moveTargets, bulkOf,
-  withFlag, flagBody, moveBody, inTrash, emptyTrashDays, validTrashDays, clampWidth,
+  toggled, refOf, isRef, urlRef, filterActive, markRange, neighbor, archiveMailbox, moveTargets, bulkOf,
+  withFlag, flagBody, moveBody, bulkFlagsBody, bulkMoveBody, bulkBody, inTrash, emptyTrashDays, validTrashDays, clampWidth,
   keyWidth, isSentMailbox, messageDateTime, shownAttachments, attachmentUrl, attachmentCount, pgpBadgeLabel, isIconBadge,
   bodyOrigins, matching, isThreadCurrent, composeDraft, composeTitle, recipientToken, withRecipient, contactAddresses,
   recipientHits, senderHits, senderLabel, canSign, canEncrypt, signs, newAccount, editAccount, discovered, accountBody, accountUi,

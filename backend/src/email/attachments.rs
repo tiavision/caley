@@ -664,7 +664,7 @@ pub struct ImageOriginBody {
     pub origin: String,
 }
 
-/// Allows the remote images of an origin.
+/// Allows the remote images of an origin (and takes it off the ignore list).
 #[utoipa::path(
     post,
     path = "/email/image-origins",
@@ -753,7 +753,7 @@ pub async fn list_image_blacklist(
     }
 }
 
-/// Ignores the remote images of an origin.
+/// Ignores the remote images of an origin (and takes it off the allow list).
 #[utoipa::path(
     post,
     path = "/email/image-blacklist",

@@ -11,7 +11,7 @@
         <button type="button" commandfor="mail-folder" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
       </header>
       <form data-layout="stack" data-gap="md"
-            data-sn-call="mail.saveFolder(draft)"
+            data-sn-post="/email/folder" data-sn-body="folderBody(draft)"
             data-sn-then="close('mail-folder'); refresh('folders')"
             data-sn-catch="refresh('folders')">
         <label>

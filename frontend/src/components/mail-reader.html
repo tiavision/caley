@@ -179,11 +179,11 @@
                         <span class="mail-attachment-name" data-truncate data-sn-attr="{title: att.filename}" data-sn-text="att.filename"></span>
                         <span data-muted data-sn-text="humanSize(att.size)"></span>
                       </a>
-                      <template data-sn-if="b && b.importable.includes(att.filename)">
+                      <template data-sn-if="b && b.importable[att.filename]">
                         <button type="button" data-variant="ghost" data-size="sm" data-icon="import" data-tooltip
-                                data-sn-call="mail.importKey(msg, att.filename)"
-                                data-sn-then="keyNote = $result; keyError = ''; refresh('body')"
-                                data-sn-catch="keyError = loadErrorOr($error, $error.detail ?? m.pgp_publicKeyImportError()); keyNote = ''"
+                                data-sn-post="/pgp/key" data-sn-body="b.importable[att.filename]"
+                                data-sn-then="keyNote = m.pgp_publicKeyImported(); keyError = ''; refresh('body')"
+                                data-sn-catch="keyError = m.pgp_publicKeyImportError(); keyNote = ''"
                                 data-sn-attr="{'aria-label': m.pgp_importPublicKeyButton()}"></button>
                       </template>
                       <template data-sn-if="isIcsAttachment(att)">

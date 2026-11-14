@@ -1,6 +1,5 @@
 // Types that `type="…"` on <sn-resource> and <sn-event> may name (`sinter check` runs in `vite build`).
 // Re-export the app's existing types rather than redefining them.
-export type { User } from './lib/user.ts';
 export type { NotificationStatus } from './actions/notify.ts';
 export type { ContactJson, AddressbookJson } from './types/calendar.ts';
 export type { ContactDraft } from './lib/contacts.ts';
@@ -35,7 +34,7 @@ export type { ThreadRef, ThreadResponse } from './lib/thread.ts';
 // Settings page, import dialog and encryption tab (CalDavAccountJson is exported with the event types above).
 export type { ImportDraft, ImportResult } from './lib/import.ts';
 export type { VaultView } from './lib/pgp/vault-steps.ts';
-export type { StoredPublicKey } from './lib/pgp/public-keys.ts';
+export type { StoredPublicKey, PublicKeyBody } from './lib/pgp/public-keys.ts';
 
 export type { AccountDraft } from './lib/settings.ts';
 

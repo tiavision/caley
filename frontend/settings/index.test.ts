@@ -85,10 +85,10 @@ function fakeVault(initial: VaultView | null, failUnlock = false) {
   };
 }
 
-type ImportPublic = (armored: string) => Promise<unknown>;
-const importedKey: ImportPublic = async (armored) => ({ fingerprint: 'FFFF', email: armored, armored, is_own: false, source: 'imported', trust: 'trusted' });
+type ReadPublicKey = (armored: string) => Promise<unknown>;
+const readKey: ReadPublicKey = async (armored) => ({ fingerprint: 'FFFF', email: armored, armored, is_own: false, source: 'imported' });
 
-async function show(routes: Record<string, RouteResponse> = {}, vault: VaultView | null = lockedVault, failUnlock = false, importPublic = importedKey) {
+async function show(routes: Record<string, RouteResponse> = {}, vault: VaultView | null = lockedVault, failUnlock = false, publicKey = readKey) {
   const requests = mockRequests({
     'GET /api/user': user,
     'GET /api/caldav/accounts': { accounts: [account()] },
@@ -104,7 +104,7 @@ async function show(routes: Record<string, RouteResponse> = {}, vault: VaultView
     notify: { status: () => ({ supported: false, permission: 'default', enabled: false }), toggle: async (s: unknown) => s },
     ics,
     pgpVault: pgp.ns,
-    pgpKeys: { keyFile, importPublic },
+    pgpKeys: { keyFile, publicKey },
   };
   const r = await render(page, { ...app, scripts: { 'close-after': scripts['close-after'] }, messages, requests, actions, helpers, storage, streams: { '/api/events/stream': stream } });
   await r.settle();
@@ -517,7 +517,10 @@ test('encryption tab: a key file fills the import dialog; a file without a key s
 });
 
 test('encryption tab: trusted sender keys, import and remove', async () => {
-  const { root, settle, requests } = await encryptionTab(lockedVault, { 'DELETE /api/pgp/key': null });
+  const { root, settle, requests } = await encryptionTab(lockedVault, {
+    'DELETE /api/pgp/key': null,
+    'POST /api/pgp/key': (call) => ({ ...(call.body as object), trust: 'trusted' }),
+  });
   const trusted = () => [...root.querySelectorAll('#settings-panel-encryption li span[data-truncate]')].map((s) => s.textContent);
   expect(trusted()).toEqual(['bob@example.com']);           // own keys are not listed here
   expect(root.querySelector('#settings-panel-encryption small code')!.textContent).toBe('CCCC3333DDDD4444…');
@@ -530,6 +533,9 @@ test('encryption tab: trusted sender keys, import and remove', async () => {
   dialog.querySelector('form')!.requestSubmit();
   await settle();
   expect(dialog.open).toBe(false);
+  // read by pgpKeys.publicKey, stored by the markup's POST
+  expect(requests.calls.at(-1)).toMatchObject({ method: 'POST', path: '/api/pgp/key' });
+  expect(requests.calls.at(-1)!.body).toEqual({ fingerprint: 'FFFF', email: 'carol@example.com', armored: 'carol@example.com', is_own: false, source: 'imported' });
   expect(trusted()).toEqual(['bob@example.com', 'carol@example.com']);
   expect(root.querySelector('#settings-panel-encryption [role=status]')!.textContent).toBe(m.pgp_publicKeyImported());
 
@@ -552,7 +558,7 @@ test('encryption tab: a failed key removal brings the key back with the error', 
 
 test('encryption tab: a key import whose openpgp is gone from the server (a deploy) says to reload, not that the key failed', async () => {
   // what sinter's stub rejects with when the chunk is 404: a stale SinterError
-  const stale: ImportPublic = async () => { throw new SinterError(404, null, 'this page is out of date: reload it', null, true); };
+  const stale: ReadPublicKey = async () => { throw new SinterError(404, null, 'this page is out of date: reload it', null, true); };
   const r = await show({}, lockedVault, false, stale);
   button(r.root, m.pgp_tabEncryption()).click();
   await r.settle();

@@ -472,26 +472,31 @@
               <template data-sn-if="sel.error"><p data-callout data-tone="danger" role="alert" data-sn-text="sel.error"></p></template>
               <div class="bulk-menu" data-menu data-self="start">
                 <button type="button" data-icon="mail-open" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
-                        data-sn-call="mail.bulk('flag', bulk.messages, {flag: '\\Seen', set: true})"
-                        data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results', 'unread')"
+                        data-sn-patch="/email/messages/flags" data-sn-body="bulkFlagsBody(bulk.messages, '\\Seen', true)"
+                        data-sn-then="sel = afterBulk(sel, $result.failed)"
+                        data-sn-catch="sel = afterBulk(sel, bulk.messages)"
                         data-sn-text="m.mail_markRead()"></button>
                 <button type="button" data-icon="mail" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
-                        data-sn-call="mail.bulk('flag', bulk.messages, {flag: '\\Seen', set: false})"
-                        data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results', 'unread')"
+                        data-sn-patch="/email/messages/flags" data-sn-body="bulkFlagsBody(bulk.messages, '\\Seen', false)"
+                        data-sn-then="sel = afterBulk(sel, $result.failed)"
+                        data-sn-catch="sel = afterBulk(sel, bulk.messages)"
                         data-sn-text="m.mail_markUnread()"></button>
                 <button type="button" data-icon="star" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
-                        data-sn-call="mail.bulk('flag', bulk.messages, {flag: '\\Flagged', set: true})"
-                        data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results')"
+                        data-sn-patch="/email/messages/flags" data-sn-body="bulkFlagsBody(bulk.messages, '\\Flagged', true)"
+                        data-sn-then="sel = afterBulk(sel, $result.failed)"
+                        data-sn-catch="sel = afterBulk(sel, bulk.messages)"
                         data-sn-text="m.mail_flag()"></button>
                 <button type="button" data-icon="star-off" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
-                        data-sn-call="mail.bulk('flag', bulk.messages, {flag: '\\Flagged', set: false})"
-                        data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results')"
+                        data-sn-patch="/email/messages/flags" data-sn-body="bulkFlagsBody(bulk.messages, '\\Flagged', false)"
+                        data-sn-then="sel = afterBulk(sel, $result.failed)"
+                        data-sn-catch="sel = afterBulk(sel, bulk.messages)"
                         data-sn-text="m.mail_unflag()"></button>
                 <hr>
                 <template data-sn-if="bulk.canArchive">
                   <button type="button" data-icon="archive" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
-                          data-sn-call="mail.bulk('move', bulk.messages, {archive: archiveTargets(bulk.messages, mailboxes)})"
-                          data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results', 'unread')"
+                          data-sn-post="/email/messages/move" data-sn-body="bulkMoveBody(bulk.messages, null, mailboxes)"
+                          data-sn-then="sel = afterBulk(sel, $result.failed)"
+                          data-sn-catch="sel = afterBulk(sel, bulk.messages)"
                           data-sn-text="m.mail_archive()"></button>
                 </template>
                 <template data-sn-if="bulk.targets.length > 0">
@@ -503,16 +508,18 @@
                 <template data-sn-if="bulk.canArchive || bulk.targets.length > 0"><hr></template>
                 <button type="button" data-icon="trash-2" data-tone="danger" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
                         data-sn-confirm="bulk.inTrash ? m.mail_bulkDeleteConfirm() : null"
-                        data-sn-call="mail.bulk('delete', bulk.messages, {})"
-                        data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results', 'unread')"
+                        data-sn-post="/email/messages/delete" data-sn-body="bulkBody(bulk.messages)"
+                        data-sn-then="sel = afterBulk(sel, $result.failed)"
+                        data-sn-catch="sel = afterBulk(sel, bulk.messages)"
                         data-sn-text="m.mail_delete()"></button>
               </div>
               <template data-sn-if="sel.move && bulk.targets.length > 0">
                 <div class="bulk-menu" data-menu data-self="start" role="group" data-sn-attr="{'aria-label': m.mail_moveToFolder()}">
                   <template data-sn-for="mb in bulk.targets">
                     <button type="button" data-sn-let="{ kind: folderKind(mb.name) }" data-sn-attr="{disabled: sel.busy}" data-sn-on-click="sel.busy = true"
-                            data-sn-call="mail.bulk('move', bulk.messages, {dest: mb.name})"
-                            data-sn-then="sel = afterBulk(sel, $result); refresh('messages', 'results', 'unread')">
+                            data-sn-post="/email/messages/move" data-sn-body="bulkMoveBody(bulk.messages, mb.name, mailboxes)"
+                            data-sn-then="sel = afterBulk(sel, $result.failed)"
+                            data-sn-catch="sel = afterBulk(sel, bulk.messages)">
                       <mail-folder-icon data-sn-prop="{ kind }"></mail-folder-icon>
                       <span data-truncate data-sn-text="folderName(mb.name)"></span>
                     </button>

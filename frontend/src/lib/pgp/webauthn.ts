@@ -172,49 +172,6 @@ export async function listCredentials(): Promise<CredentialInfo[]> {
   return res.json() as Promise<CredentialInfo[]>;
 }
 
-export async function deleteCredential(credId: string): Promise<void> {
-  const res = await apiFetch('/api/webauthn/credential', {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cred_id: credId }),
-  });
-  if (!res.ok) throw new Error('delete credential failed: ' + await res.text());
-}
-
-/**
- * Resume enrollment — authenticate only (no registration).
- * Used when a previous enrollment registered the credential but failed before writing the vault.
- * prfSalt is a fresh random value (will be stored in the new vault).
- */
-export async function resumeEnroll(prfSaltB64: string): Promise<EnrollResult> {
-  const authStartRes = await apiFetch('/api/webauthn/authenticate/start', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prf_salt: prfSaltB64 }),
-  });
-  if (!authStartRes.ok) throw new Error('authenticate/start failed: ' + await authStartRes.text());
-  const authJson = await authStartRes.json() as Record<string, unknown>;
-
-  const requestOptions = decodeRequestOptions(authJson);
-  const authCred = await navigator.credentials.get({ publicKey: requestOptions });
-  if (!authCred) throw new Error('WebAuthn get() returned null');
-
-  const extResults = (authCred as PublicKeyCredential).getClientExtensionResults() as Record<string, unknown>;
-  const prf = extResults?.prf as Record<string, unknown> | undefined;
-  const prfOutput = (prf?.results as Record<string, unknown>)?.first as ArrayBuffer | undefined;
-
-  if (!prfOutput) throw new Error('prf_not_supported');
-
-  const finishRes = await apiFetch('/api/webauthn/authenticate/finish', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(credentialToJson(authCred as PublicKeyCredential)),
-  });
-  if (!finishRes.ok) throw new Error('authenticate/finish failed: ' + await finishRes.text());
-
-  return { credentialId: (authCred as PublicKeyCredential).id, prfSalt: prfSaltB64, prfOutput, hasPrf: true };
-}
-
 export interface UnlockResult {
   prfOutput: ArrayBuffer;
   prfSaltUsed: string;   // base64url, so the caller can verify it matches vault.prfSalt

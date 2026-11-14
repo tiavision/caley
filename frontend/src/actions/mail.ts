@@ -1,10 +1,11 @@
 // `mail` actions (mail/index.html, mail/view/index.html, src/components/mail-*.html): the mail page's imperative work —
-// MIME parsing, OpenPGP, the vault, building and sending raw MIME, sequential bulk requests, opening a window.
+// MIME parsing, OpenPGP, the vault, building and sending raw MIME, opening a window. Plain requests (flags, moves,
+// deletions, bulk changes, folders, image origins, storing a key) are in the markup.
 // Each returns data; the markup puts it where it belongs (data-sn-then, <sn-resource call>).
 import type { CallContext } from '@tiaforge-ui/sinter';
 import { apiFetch } from '../lib/api.ts';
 import {
-  attachmentUrl, canEncrypt, composeDraft, folderBody, messageKey, type ComposeDraft, type FolderDraft, type ComposeKeys, type Identity, type Message, type MessageRef,
+  attachmentUrl, canEncrypt, composeDraft, messageKey, type ComposeDraft, type ComposeKeys, type Identity, type Message, type MessageRef,
 } from '../lib/mail.ts';
 import { cidReferencesFromHtml, htmlToPlainText, imageOriginsFromHtml, prepareEmailHtml, restoreForwardedImageSources } from '../lib/mail-html.ts';
 import { canPreviewContentType, htmlAddsValue, insertDecryptedInlineImages, isPgpPublicKeyAttachment, bareMailbox, keyHasEmail } from '../lib/mailUtils.ts';
@@ -13,7 +14,7 @@ import { canPreviewContentType, htmlAddsValue, insertDecryptedInlineImages, isPg
 import { detectPgpMessage, parseMimeMessage } from '../lib/pgp/mime.ts';
 import { getKeys, isUnlocked, openVault } from '../lib/pgp/session.ts';
 import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
-import { listPublicKeys, parsePublicKey, readVerificationKeys, savePublicKey } from '../lib/pgp/public-keys.ts';
+import { listPublicKeys, parsePublicKey, publicKeyBody, readVerificationKeys, savePublicKey, type PublicKeyBody } from '../lib/pgp/public-keys.ts';
 import { decryptMessage, verifySignedMessage } from '../lib/pgp/keyring.ts';
 import { decryptPrivateKeys, eraseBytes, localActiveDevice, readVault, rememberLocalDevice, unwrapVaultKey, validateVault } from '../lib/pgp/vault.ts';
 import { unlock as webauthnUnlock } from '../lib/pgp/webauthn.ts';
@@ -25,7 +26,9 @@ import { pagePath } from '../lib/locale-path.ts';
 
 // ── Reading ───────────────────────────────────────────────────────────────────
 
-const messageUrl = (path: string, ref: MessageRef) =>
+// The URLs this module requests itself (the bytes of a message, an attachment or an inline image): attachmentUrl() and
+// these.
+const messageUrl = (path: 'message' | 'message/raw' | 'proxy-image', ref: MessageRef) =>
   `/api/email/${path}?account_id=${encodeURIComponent(ref.account_id)}&mailbox=${encodeURIComponent(ref.mailbox)}&uid=${ref.uid}`;
 
 // The last message fetched, shared by open() and body(), which load together when a message is opened.
@@ -63,8 +66,8 @@ export interface ReaderBody {
   error: string;
   /** decrypted attachments, as blob: URLs */
   files: DecryptedFile[];
-  /** attachment file names that hold a public key not stored yet */
-  importable: string[];
+  /** the public keys not stored yet, by the name of the attachment that holds them: the bodies of POST /pgp/key */
+  importable: Record<string, PublicKeyBody>;
   /** remote image origins of the HTML body */
   origins: string[];
 }
@@ -94,16 +97,16 @@ async function harvestAutocrypt(headers: string[], msg: Message) {
   }
 }
 
-async function importableKeys(msg: Message, files: { filename: string; content_type: string }[]): Promise<string[]> {
+async function importableKeys(msg: Message, files: { filename: string; content_type: string }[]): Promise<Record<string, PublicKeyBody>> {
   const candidates = files.filter((f) => isPgpPublicKeyAttachment({ ...f, size: 0, content_id: null }));
-  if (candidates.length === 0) return [];
+  if (candidates.length === 0) return {};
   const stored = new Set((await listPublicKeys()).map((r) => r.fingerprint.toUpperCase()));
-  const out: string[] = [];
+  const out: Record<string, PublicKeyBody> = {};
   for (const c of candidates) {
     try {
       const data = decryptedData.get(c.filename) ?? await bytes(attachmentUrl(msg, c.filename));
       const key = await parsePublicKey(new TextDecoder().decode(data));
-      if (!stored.has(key.getFingerprint().toUpperCase())) out.push(c.filename);
+      if (!stored.has(key.getFingerprint().toUpperCase())) out[c.filename] = publicKeyBody(key, 'message_attachment');
     } catch { /* only parsed public keys get an import button */ }
   }
   return out;
@@ -147,7 +150,7 @@ export async function body(ref: MessageRef, ctx: CallContext): Promise<ReaderBod
   const context = { accountId: msg.account_id, mailbox: msg.mailbox, uid: msg.uid };
   let out: ReaderBody = {
     key: messageKey(msg), html: '', text: '', mode: 'text', encrypted: msg.is_encrypted, signed: msg.is_signed,
-    locked: false, badges: [], subject: '', error: '', files: [], importable: [], origins: [],
+    locked: false, badges: [], subject: '', error: '', files: [], importable: {}, origins: [],
   };
   if (msg.body_cached && !msg.is_encrypted) {
     out.html = msg.body_html ? prepareEmailHtml(msg.body_html, context) : '';
@@ -224,18 +227,6 @@ export function unlocked(): boolean {
   return isUnlocked();
 }
 
-/** Stores the public key of an attachment (a server one, or a decrypted one by name). */
-export async function importKey(msg: MessageRef, filename: string): Promise<string> {
-  try {
-    const data = decryptedData.get(filename) ?? await bytes(attachmentUrl(msg, filename));
-    await savePublicKey(await parsePublicKey(new TextDecoder().decode(data)), 'message_attachment');
-    return m.pgp_publicKeyImported();
-  } catch (e) {
-    if (e instanceof SinterError) throw e;   // openpgp could not be loaded: the markup says to reload
-    throw new Error(m.pgp_publicKeyImportError());
-  }
-}
-
 /** A calendar attachment as a File, for the import dialog (src/components/import-dialog.html). */
 export async function icsFile(msg: MessageRef, filename: string, contentType: string): Promise<File> {
   try {
@@ -250,32 +241,6 @@ export async function icsFile(msg: MessageRef, filename: string, contentType: st
 export function popout(msg: MessageRef): void {
   const params = new URLSearchParams({ account_id: msg.account_id, mailbox: msg.mailbox, uid: String(msg.uid) });
   window.open(pagePath(`/mail/view/?${params}`), '_blank', 'popup=yes,width=980,height=760,noopener,noreferrer');
-}
-
-// ── Bulk actions ──────────────────────────────────────────────────────────────
-
-/**
- * Runs one request per marked message, in order (`flag`: [flag, set]; `move`: a mailbox, or null for each one's
- * archive; `delete`); returns the keys of the messages that failed.
- */
-export async function bulk(op: 'flag' | 'move' | 'delete', messages: Message[], arg: { flag?: string; set?: boolean; dest?: string | null; archive?: Record<string, string | null> }, ctx: CallContext): Promise<string[]> {
-  const failed: string[] = [];
-  for (const msg of messages) {
-    try {
-      if (op === 'flag') {
-        await ctx.request('/api/email/message/flags', { method: 'PATCH', body: { account_id: msg.account_id, mailbox: msg.mailbox, uid: msg.uid, flags: [arg.flag], set: arg.set } });
-      } else if (op === 'move') {
-        const dest = arg.dest ?? arg.archive?.[msg.account_id] ?? null;
-        if (!dest) throw new Error('no destination');
-        await ctx.request('/api/email/message/move', { method: 'POST', body: { account_id: msg.account_id, mailbox: msg.mailbox, uid: msg.uid, dest_mailbox: dest } });
-      } else {
-        await ctx.request(messageUrl('message', msg), { method: 'DELETE' });
-      }
-    } catch {
-      failed.push(messageKey(msg));
-    }
-  }
-  return failed;
 }
 
 // ── Compose ───────────────────────────────────────────────────────────────────
@@ -355,7 +320,7 @@ export async function send(draft: ComposeDraft, identities: Identity[], sign: bo
     for (const cid of cidReferencesFromHtml(draft.forwardHtml)) {
       try {
         const ref = draft.forwardRef;
-        const res = await apiFetch(`/api/email/proxy-image?account_id=${encodeURIComponent(ref.account_id)}&mailbox=${encodeURIComponent(ref.mailbox)}&uid=${ref.uid}&cid=${encodeURIComponent(cid)}`);
+        const res = await apiFetch(`${messageUrl('proxy-image', ref)}&cid=${encodeURIComponent(cid)}`);
         if (res.ok) inlineImages.push({ cid, contentType: res.headers.get('content-type') ?? 'image/jpeg', bytes: new Uint8Array(await res.arrayBuffer()) });
       } catch { /* skip the image */ }
     }
@@ -397,21 +362,4 @@ export function pendingCompose(): { subject: string; files: File[] } | null {
   } catch {
     return null;
   }
-}
-
-// ── Small things ──────────────────────────────────────────────────────────────
-
-/** Moves an image origin from the ignore list to the allow list. */
-export async function promoteOrigin(origin: string, ctx: CallContext): Promise<null> {
-  await ctx.request(`/api/email/image-blacklist?origin=${encodeURIComponent(origin)}`, { method: 'DELETE' });
-  await ctx.request('/api/email/image-origins', { method: 'POST', body: { origin } });
-  return null;
-}
-
-/** Creates (POST) or updates (PUT) a virtual folder. */
-export async function saveFolder(draft: FolderDraft, ctx: CallContext): Promise<null> {
-  const body = folderBody(draft);
-  if (draft.folder_id) await ctx.request(`/api/email/folder?folder_id=${encodeURIComponent(draft.folder_id)}`, { method: 'PUT', body });
-  else await ctx.request('/api/email/folder', { method: 'POST', body });
-  return null;
 }

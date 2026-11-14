@@ -179,12 +179,20 @@ pub async fn is_origin_whitelisted(pool: &SqlitePool, user_id: &str, origin: &st
     Ok(count > 0)
 }
 
+/// Allows an origin's images; it leaves the ignore list (an origin is on one list at most).
 pub async fn add_image_origin(pool: &SqlitePool, user_id: &str, origin: &str) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM email_image_blacklist WHERE user_id = ? AND origin = ?")
+        .bind(user_id)
+        .bind(origin)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("INSERT OR IGNORE INTO email_image_whitelist (user_id, origin) VALUES (?, ?)")
         .bind(user_id)
         .bind(origin)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -208,12 +216,20 @@ pub async fn get_image_blacklist(pool: &SqlitePool, user_id: &str) -> Result<Vec
     Ok(rows.iter().map(|r| r.get(0)).collect())
 }
 
+/// Ignores an origin's images; it leaves the allow list (an origin is on one list at most).
 pub async fn add_image_blacklist(pool: &SqlitePool, user_id: &str, origin: &str) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM email_image_whitelist WHERE user_id = ? AND origin = ?")
+        .bind(user_id)
+        .bind(origin)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("INSERT OR IGNORE INTO email_image_blacklist (user_id, origin) VALUES (?, ?)")
         .bind(user_id)
         .bind(origin)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(())
 }
 

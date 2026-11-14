@@ -268,8 +268,9 @@ export function opensRow(e: MouseEvent): boolean {
 }
 
 /** After a bulk action: the messages it failed for stay marked, with the error. */
-export function afterBulk(sel: Selection, failed: string[]): Selection {
-  return { ...sel, busy: false, keys: failed, anchor: failed[0] ?? null, error: failed.length ? m.mail_bulkActionError() : '', move: false };
+export function afterBulk(sel: Selection, failed: MessageRef[]): Selection {
+  const keys = failed.map(messageKey);
+  return { ...sel, busy: false, keys, anchor: keys[0] ?? null, error: keys.length ? m.mail_bulkActionError() : '', move: false };
 }
 
 /** The search box and filters: `input` while typing, `q` the search (debounced), `addrInput`/`addrQ` the sender box. */
@@ -360,6 +361,23 @@ export function flagBody(msg: MessageRef, flag: string, set: boolean) {
 
 export function moveBody(msg: MessageRef, dest_mailbox: string) {
   return { account_id: msg.account_id, mailbox: msg.mailbox, uid: msg.uid, dest_mailbox };
+}
+
+const refOfMessage = (msg: MessageRef): MessageRef => ({ account_id: msg.account_id, mailbox: msg.mailbox, uid: msg.uid });
+
+/** The body of PATCH /email/messages/flags (the bulk menu). */
+export function bulkFlagsBody(messages: MessageRef[], flag: string, set: boolean) {
+  return { messages: messages.map(refOfMessage), flags: [flag], set };
+}
+
+/** The body of POST /email/messages/move: each message to `dest`, or with `dest` null to its account's archive. */
+export function bulkMoveBody(messages: MessageRef[], dest: string | null, mailboxes: Mailbox[]) {
+  return { messages: messages.map((msg) => moveBody(msg, dest ?? archiveMailbox(msg, mailboxes) ?? '')) };
+}
+
+/** The body of POST /email/messages/delete. */
+export function bulkBody(messages: MessageRef[]) {
+  return { messages: messages.map(refOfMessage) };
 }
 
 export function inTrash(msg: MessageRef | null): boolean {
@@ -785,7 +803,7 @@ export function folderBody(d: FolderDraft) {
         const sep = key.indexOf('::');
         return { account_id: key.slice(0, sep) || null, mailbox_pattern: key.slice(sep + 2) || null };
       });
-  return { display_name: d.name || m.mail_folderNamePlaceholder(), rules, only_flagged: d.only_flagged, only_attachments: d.only_attachments };
+  return { folder_id: d.folder_id, display_name: d.name || m.mail_folderNamePlaceholder(), rules, only_flagged: d.only_flagged, only_attachments: d.only_attachments };
 }
 
 export function subscribed(mailboxes: Mailbox[], account_id: string): Mailbox[] {
@@ -793,9 +811,6 @@ export function subscribed(mailboxes: Mailbox[], account_id: string): Mailbox[] 
 }
 
 /** Each account's archive mailbox for the marked messages (bulk archive). */
-export function archiveTargets(messages: Message[], mailboxes: Mailbox[]): Record<string, string | null> {
-  return Object.fromEntries(messages.map((msg) => [msg.account_id, archiveMailbox(msg, mailboxes)]));
-}
 
 
 /** What the mail page reads of GET /api/contacts: names and e-mail addresses. */
