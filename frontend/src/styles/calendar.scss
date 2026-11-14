@@ -3,30 +3,60 @@
 // The page fills main: toolbar on top, the calendar scrolls in .pane below it.
 .cal { min-block-size: 0; }
 .month { block-size: 100%; }
-.cal-range { white-space: nowrap; }
-// The view switch and Today sit at the toolbar's right edge.
-.cal-view-controls { margin-inline-start: auto; }
-
-// A toolbar too narrow for one line (a phone held upright; it is the toolbar's own width that counts, so a phone held
-// sideways, with the rail as a drawer, keeps one line): the menu and the view controls on the first line, the range
-// on its own line below them, semibold (it is the page's heading), with ‹ › at the line's end. The two lines sit
-// close together: the toolbar takes as little of the month's height as its buttons allow.
+// The toolbar is one line at every width: the calendar below needs the height. Where it still runs short, the range
+// is the part that gives (cut with …), everything else keeps its size.
 .cal-toolbar {
   container-type: inline-size;
-  row-gap: 0;
+  align-items: center;
 }
-@container (width < 32rem) {
-  .cal-nav {
-    order: 1;
-    flex-basis: 100%;
+.cal-nav { min-inline-size: 0; }
+.cal-range {
+  min-inline-size: 0;
+  > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
+}
+// The view switch and Today sit at the toolbar's right edge.
+.cal-view-controls {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+}
+// The menu of the narrow toolbar, below, stands in for the switch; the short month name for the long one.
+.cal-view-menu, .cal-short { display: none; }
+
+// A toolbar too narrow for all of it (a phone held upright; it is the toolbar's own width that counts, so a phone
+// held sideways, with the rail as a drawer, keeps the switch): the week/month switch becomes a menu showing the
+// current view, and the range comes first, semibold (it is the page's heading), with ‹ › right after it, together
+// with the controls at the end, where a longer or shorter range does not move them.
+@container (width < 31rem) {
+  .cal-toolbar, .cal-view-controls { gap: var(--tm-space-xs); }
+  .cal-view-switch { display: none; }
+  .cal-view-menu { display: inline-flex; }
+  .cal-nav {
+    flex: 1 1 auto;
+    gap: 0;
+  }
+  // No ▾ here: the range is the line's heading, and a tap on it still opens the month picker.
   .cal-nav .cal-range {
     order: -1;
     margin-inline-end: auto;
     padding-inline-start: var(--tm-space-xs);
     font-size: var(--tm-text-md);
     font-weight: 600;
+    &::after { display: none; }
   }
+}
+// Phones (up to the width of a large one held upright): "Nov 2026" instead of "November 2026".
+@container (width < 26rem) {
+  .cal-long { display: none; }
+  .cal-short { display: inline; }
+}
+// Phones up to 360px wide: the view menu and the arrows a little tighter (the ▾ stays: it makes "Week" a button).
+@container (width < 23rem) {
+  .cal-view-menu { padding-inline: var(--tm-space-xs); }
+  .cal-nav > button:not(.cal-range) { min-inline-size: 0; padding-inline: var(--tm-space-xs); }
 }
 
 // The bar while the range shown reloads: a 2px band under the toolbar, nothing moves when it comes and goes.

@@ -43,11 +43,10 @@ export function addMonths(ym: string, n: number): string {
 export function weekRangeText(weekStart: string, locale: string, today: string): string {
   const start = parse(weekStart), end = parse(addDays(weekStart, 6));
   const cy = parse(today).getFullYear();
-  const so: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-  const eo: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-  if (start.getFullYear() !== cy) so.year = 'numeric';
-  if (end.getFullYear() !== cy || start.getFullYear() !== end.getFullYear()) eo.year = 'numeric';
-  return start.toLocaleDateString(locale, so) + ' – ' + end.toLocaleDateString(locale, eo);
+  // formatRange leaves out what both ends share ("Nov 9 – 15", "9.–15. Nov."), which keeps the toolbar on one line.
+  const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+  if (start.getFullYear() !== cy || end.getFullYear() !== cy) options.year = 'numeric';
+  return new Intl.DateTimeFormat(locale, options).formatRange(start, end);
 }
 
 /** A day's date formatted with `options` (weekday, "Nov 9", long date …). */
@@ -136,9 +135,9 @@ export function monthTitle(grid: MonthGridJson | null): string {
 }
 
 /** "November 2026" for a month (YYYY-MM), in `locale`. */
-export function monthLabel(ym: string, locale: string): string {
+export function monthLabel(ym: string, locale: string, month: 'long' | 'short' = 'long'): string {
   const [y, mo] = ym.split('-').map(Number);
-  return new Date(y!, mo! - 1, 1).toLocaleDateString(locale, { month: 'long', year: 'numeric' });
+  return new Date(y!, mo! - 1, 1).toLocaleDateString(locale, { month, year: 'numeric' });
 }
 
 /** A cell of the month grid, as the browser builds it (no data needed). */

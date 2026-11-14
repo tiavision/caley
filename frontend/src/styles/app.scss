@@ -188,3 +188,6 @@ body[data-shell] > main {
   50% { opacity: 0.5; }
 }
 
+
+// The check of a menu item that is not the chosen one (role="menuitemradio"): its space kept, so the labels line up.
+.unchecked { visibility: hidden; }

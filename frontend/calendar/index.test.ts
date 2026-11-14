@@ -66,11 +66,13 @@ async function show(routes: Record<string, RouteResponse> = {}, storage = memory
 }
 
 const key = (target: Element, k: string) => target.dispatchEvent(new KeyboardEvent('keydown', { key: k, shiftKey: k !== k.toLowerCase(), bubbles: true }));
-const range = (root: HTMLElement) => root.querySelector('.cal-range')!.textContent;
+// The range as shown on a wide toolbar (month view: the long month name; phones show the short one, calendar.scss),
+// thin spaces (Intl's, around the dash) as plain ones.
+const range = (root: HTMLElement) => (root.querySelector('.cal-range .cal-long') ?? root.querySelector('.cal-range'))!.textContent.replace(/\s/g, ' ');
 
 test('shows the current week; n, p and t move it', async () => {
   const { root, settle, requests } = await show();
-  expect(range(root)).toBe('Nov 9 – Nov 15');
+  expect(range(root)).toBe('Nov 9 – 15');
   expect(requests.calls.find((c) => c.path === '/api/events')!.url).toMatch(/^\/api\/events\?start=2026-11-09&end=2026-11-15&tz=/);
   expect([...root.querySelectorAll('.week .event-trigger span')].map((s) => s.textContent)).toEqual(['Lunch']);
   expect(root.querySelector('.day[data-date="2026-11-11"] .day-heading')!.getAttribute('aria-current')).toBe('date');
@@ -78,13 +80,13 @@ test('shows the current week; n, p and t move it', async () => {
 
   key(root, 'n');
   await settle();
-  expect(range(root)).toBe('Nov 16 – Nov 22');
+  expect(range(root)).toBe('Nov 16 – 22');
   key(root, 'P');
   await settle();
-  expect(range(root)).toBe('Oct 19 – Oct 25');
+  expect(range(root)).toBe('Oct 19 – 25');
   key(root, 't');
   await settle();
-  expect(range(root)).toBe('Nov 9 – Nov 15');
+  expect(range(root)).toBe('Nov 9 – 15');
 });
 
 test('Shift+N/P move four weeks with the focus in the week grid; the arrows stay the grid\'s', async () => {
@@ -102,14 +104,14 @@ test('Shift+N/P move four weeks with the focus in the week grid; the arrows stay
   expect(press(chip('Lunch'), 'ArrowRight')).toBe(false);          // taken by the grid: the next chip
   await settle();
   expect(document.activeElement).toBe(chip('v060-Dinner'));
-  expect(range(root)).toBe('Nov 9 – Nov 15');
+  expect(range(root)).toBe('Nov 9 – 15');
 
   press(chip('v060-Dinner'), 'N', true);                            // not the grid's: the page moves four weeks
   await settle();
-  expect(range(root)).toBe('Dec 7 – Dec 13');
+  expect(range(root)).toBe('Dec 7 – 13');
   press(chip('v060-Later'), 'P', true);
   await settle();
-  expect(range(root)).toBe('Nov 9 – Nov 15');
+  expect(range(root)).toBe('Nov 9 – 15');
 });
 
 test('the month view shows the month grid, and is remembered across reloads', async () => {
@@ -129,7 +131,7 @@ test('the month view shows the month grid, and is remembered across reloads', as
 
 test('a first visit starts in the week view', async () => {
   const { root } = await show();
-  expect(range(root)).toBe('Nov 9 – Nov 15');
+  expect(range(root)).toBe('Nov 9 – 15');
   expect(root.querySelectorAll('.month-cell')).toHaveLength(0);
 });
 

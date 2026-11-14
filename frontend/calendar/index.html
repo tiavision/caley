@@ -66,31 +66,44 @@
         <div class="cal" data-layout="stack" data-gap="sm" data-pad="sm" data-grow role="application"
              data-sn-on-touchstart="tx = $event.touches[0].clientX; ty = $event.touches[0].clientY"
              data-sn-on-touchend="swipeStep(tx, ty, $event, view) && view === 'week' && (weekStart = addDays(weekStart, swipeStep(tx, ty, $event, view))); swipeStep(tx, ty, $event, view) && (gridMonth = view === 'week' ? monthOf(weekStart) : addMonths(gridMonth, swipeStep(tx, ty, $event, view)))">
-          <!-- One row on wide screens: menu, ‹ range ›, then the view switch and Today. Phones (calendar.scss) put the
-               menu and the switch on the first line and the range, larger, on the second, right above the grid, with
-               its arrows at the line's end, where a shorter or longer month name does not move them. -->
-          <div class="cal-toolbar" data-layout="row" data-gap="sm" data-justify="between">
+          <!-- One line at every width (the calendar needs the height): menu, ‹ range ›, then the view switch and Today.
+               A toolbar too narrow for that (calendar.scss) puts ‹ › after the range, where a longer or shorter range
+               does not move them, and turns the week/month switch into a menu showing the current view. -->
+          <div class="cal-toolbar" data-layout="row" data-gap="sm" data-wrap="none">
             <nav-toggle></nav-toggle>
             <div class="cal-nav" data-layout="row" data-gap="xs" data-wrap="none">
               <template data-sn-if="view === 'month'">
                 <button type="button" data-variant="ghost" data-icon="chevron-left" data-shortcut="p" data-sn-attr="{'aria-label': m.cal_aria_prevMonth()}"
                         data-sn-on-click="gridMonth = addMonths(gridMonth, -1)"></button>
-                <button type="button" class="cal-range" data-variant="ghost" popovertarget="month-picker" data-sn-text="monthLabel(gridMonth, $locale)"></button>
+                <button type="button" class="cal-range" data-variant="ghost" popovertarget="month-picker"><span class="cal-long" data-sn-text="monthLabel(gridMonth, $locale)"></span><span class="cal-short" data-sn-text="monthLabel(gridMonth, $locale, 'short')"></span></button>
                 <button type="button" data-variant="ghost" data-icon="chevron-right" data-shortcut="n" data-sn-attr="{'aria-label': m.cal_aria_nextMonth()}"
                         data-sn-on-click="gridMonth = addMonths(gridMonth, 1)"></button>
               </template>
               <template data-sn-else>
                 <button type="button" data-variant="ghost" data-icon="chevron-left" data-shortcut="p" data-sn-attr="{'aria-label': m.cal_aria_prevWeek()}"
                         data-sn-on-click="weekStart = addDays(weekStart, -7); gridMonth = monthOf(weekStart); $el.closest('.cal')?.querySelector('.pane')?.scrollTo(0, 0)"></button>
-                <button type="button" class="cal-range" data-variant="ghost" popovertarget="month-picker" data-sn-text="weekRangeText(weekStart, $locale, today)"></button>
+                <button type="button" class="cal-range" data-variant="ghost" popovertarget="month-picker"><span data-sn-text="weekRangeText(weekStart, $locale, today)"></span></button>
                 <button type="button" data-variant="ghost" data-icon="chevron-right" data-shortcut="n" data-sn-attr="{'aria-label': m.cal_aria_nextWeek()}"
                         data-sn-on-click="weekStart = addDays(weekStart, 7); gridMonth = monthOf(weekStart); $el.closest('.cal')?.querySelector('.pane')?.scrollTo(0, 0)"></button>
               </template>
             </div>
             <div class="cal-view-controls" data-layout="row" data-gap="sm" data-wrap="none">
-              <div role="radiogroup" data-segmented data-size="sm" data-sn-attr="{'aria-label': m.cal_aria_view()}">
+              <div class="cal-view-switch" role="radiogroup" data-segmented data-size="sm" data-sn-attr="{'aria-label': m.cal_aria_view()}">
                 <label><input type="radio" name="cal-view" value="week" data-sn-model="view" data-sn-persist="calendar-mode"><span data-sn-text="m.cal_view_week()"></span></label>
                 <label><input type="radio" name="cal-view" value="month" data-sn-model="view" data-sn-persist="calendar-mode"><span data-sn-text="m.cal_view_month()"></span></label>
+              </div>
+              <button type="button" class="cal-view-menu" data-variant="ghost" data-size="sm" popovertarget="cal-view-menu"
+                      data-sn-attr="{'aria-label': m.cal_aria_view() + ': ' + (view === 'month' ? m.cal_view_month() : m.cal_view_week())}"
+                      data-sn-text="view === 'month' ? m.cal_view_month() : m.cal_view_week()"></button>
+              <div popover id="cal-view-menu" data-menu role="menu">
+                <button type="button" role="menuitemradio" data-sn-attr="{'aria-checked': view === 'week' ? 'true' : 'false'}"
+                        popovertarget="cal-view-menu" popovertargetaction="hide" data-sn-on-click="view = 'week'">
+                  <span data-icon="check" aria-hidden="true" data-sn-class="{unchecked: view !== 'week'}"></span><span data-sn-text="m.cal_view_week()"></span>
+                </button>
+                <button type="button" role="menuitemradio" data-sn-attr="{'aria-checked': view === 'month' ? 'true' : 'false'}"
+                        popovertarget="cal-view-menu" popovertargetaction="hide" data-sn-on-click="view = 'month'">
+                  <span data-icon="check" aria-hidden="true" data-sn-class="{unchecked: view !== 'month'}"></span><span data-sn-text="m.cal_view_month()"></span>
+                </button>
               </div>
               <button type="button" data-variant="outline" data-size="sm" data-shortcut="t" data-sn-text="m.cal_today()"
                       data-sn-on-click="weekStart = mondayOf(today); gridMonth = monthOf(today); $el.closest('.cal')?.querySelector('.pane')?.scrollTo(0, 0)"></button>
