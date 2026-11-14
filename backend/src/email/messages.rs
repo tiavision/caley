@@ -7,8 +7,10 @@ use axum::{
 };
 use chrono::{Datelike, Duration, Utc};
 use serde::Deserialize;
-use serde_json::json;
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::{router::OpenApiRouter, routes};
 
+use crate::api::ApiError;
 use crate::email_db;
 use crate::email_sync::eml_path;
 use crate::imap_client;
@@ -17,16 +19,119 @@ use crate::sse::SseMessage;
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+/// A page of a mailbox (`account_id` + `mailbox`) or of a virtual folder (`folder_id`), newest first.
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListMessagesQuery {
+    /// the account of `mailbox` (required without `folder_id`)
     pub account_id: Option<String>,
+    /// the IMAP mailbox name (required without `folder_id`)
     pub mailbox: Option<String>,
+    /// a virtual folder instead of a mailbox
     pub folder_id: Option<String>,
+    /// page size, default 50, at most 200
     pub limit: Option<i64>,
+    /// keyset cursor: `sent_at` of the row the page starts after (or before, `backward`)
     pub cursor_sent_at: Option<i64>,
+    /// keyset cursor: `rowid` of that row (no cursor without it)
     pub cursor_rowid: Option<i64>,
+    /// `forward` (default: older than the cursor), `backward` (newer) or `last` (the oldest page)
     pub direction: Option<String>,
+    /// rows to skip instead of a cursor
     pub offset: Option<i64>,
+}
+
+/// A page of messages (list rows: no body, no attachments).
+#[derive(serde::Serialize, ToSchema)]
+pub struct MessagesResponse {
+    pub messages: Vec<Message>,
+    /// the number of messages in the mailbox or folder
+    pub total: i64,
+}
+
+/// A message, as the list, search and the message endpoint send it.
+#[derive(serde::Serialize, ToSchema)]
+pub struct Message {
+    pub uid: i64,
+    pub account_id: String,
+    pub mailbox: String,
+    /// the cache row; with `sent_at` the list's keyset cursor
+    pub rowid: i64,
+    pub message_id: Option<String>,
+    pub thread_id: Option<String>,
+    /// the From header
+    pub from: Option<String>,
+    pub to: Vec<String>,
+    pub cc: Vec<String>,
+    pub reply_to: Vec<String>,
+    pub subject: Option<String>,
+    /// Unix seconds
+    pub sent_at: Option<i64>,
+    /// IMAP flags (`\Seen`, `\Flagged`, ...)
+    pub flags: Vec<String>,
+    pub has_attachments: bool,
+    /// whether the body was cached (GET /email/message only; false in lists)
+    pub body_cached: bool,
+    pub body_text: Option<String>,
+    pub body_html: Option<String>,
+    pub autocrypt_headers: Vec<String>,
+    pub is_read: bool,
+    pub is_flagged: bool,
+    pub is_encrypted: bool,
+    pub is_signed: bool,
+    /// GET /email/message only; empty in lists
+    pub attachments: Vec<Attachment>,
+}
+
+/// An attachment of a message (GET /email/attachment downloads it).
+#[derive(serde::Serialize, ToSchema)]
+pub struct Attachment {
+    pub filename: Option<String>,
+    pub content_type: Option<String>,
+    /// bytes
+    pub size: Option<i64>,
+    /// the Content-ID of an inline part (`cid:` images)
+    pub content_id: Option<String>,
+}
+
+/// A message of a conversation.
+#[derive(serde::Serialize, ToSchema)]
+pub struct ThreadNode {
+    pub uid: i64,
+    pub account_id: String,
+    pub mailbox: String,
+    pub message_id: Option<String>,
+    /// the message this one replies to (its Message-ID)
+    pub parent_message_id: Option<String>,
+    pub from: Option<String>,
+    pub subject: Option<String>,
+    /// Unix seconds
+    pub sent_at: Option<i64>,
+    pub is_read: bool,
+}
+
+/// The conversation of a message, oldest first, one entry per Message-ID.
+#[derive(serde::Serialize, ToSchema)]
+pub struct ThreadResponse {
+    pub messages: Vec<ThreadNode>,
+}
+
+/// Search results (a page; no `total`).
+#[derive(serde::Serialize, ToSchema)]
+pub struct SearchResponse {
+    pub messages: Vec<Message>,
+}
+
+/// Addresses seen in the user's mail that contain the query.
+#[derive(serde::Serialize, ToSchema)]
+pub struct AddrSuggestions {
+    pub addrs: Vec<String>,
+}
+
+#[derive(serde::Serialize, ToSchema)]
+pub struct TrashEmptied {
+    /// the number of messages deleted
+    pub deleted: usize,
 }
 
 fn parse_direction(s: Option<&str>) -> email_db::PageDirection {
@@ -41,6 +146,17 @@ fn parse_cursor(sent_at: Option<i64>, rowid: Option<i64>) -> Option<email_db::Pa
     rowid.map(|r| email_db::PageCursor { sent_at, rowid: r })
 }
 
+/// A page of a mailbox or virtual folder.
+#[utoipa::path(
+    get,
+    path = "/email/messages",
+    params(ListMessagesQuery),
+    responses(
+        (status = 200, body = MessagesResponse),
+        (status = 400, description = "neither `folder_id` nor `account_id` and `mailbox` (plain text)"),
+        (status = 500, description = "database error (plain text)")
+    )
+)]
 pub async fn list_messages(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -88,8 +204,8 @@ pub async fn list_messages(
 
     match result {
         Ok((messages, total)) => {
-            let list: Vec<_> = messages.iter().map(message_to_json).collect();
-            Json(json!({ "messages": list, "total": total })).into_response()
+            let messages = messages.iter().map(message_to_json).collect();
+            Json(MessagesResponse { messages, total }).into_response()
         }
         Err(e) => {
             eprintln!("[email] list_messages error: {e}");
@@ -98,13 +214,26 @@ pub async fn list_messages(
     }
 }
 
-#[derive(Deserialize)]
+/// Where a message lives.
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct GetMessageQuery {
     pub account_id: String,
     pub mailbox: String,
     pub uid: u32,
 }
 
+/// A message with its cached body and attachments.
+#[utoipa::path(
+    get,
+    path = "/email/message",
+    params(GetMessageQuery),
+    responses(
+        (status = 200, body = Message),
+        (status = 404, description = "no such account or message (plain text)"),
+        (status = 500, description = "database error (plain text)")
+    )
+)]
 pub async fn get_message(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -183,6 +312,23 @@ async fn load_raw_eml(
     Some(raw)
 }
 
+/// A MIME message as bytes (only described: the handler sends the bytes themselves).
+#[derive(ToSchema)]
+#[allow(dead_code)]
+#[schema(value_type = String, format = Binary)]
+struct RawMessage(Vec<u8>);
+
+/// The message's MIME source (for PGP processing).
+#[utoipa::path(
+    get,
+    path = "/email/message/raw",
+    params(GetMessageQuery),
+    responses(
+        (status = 200, body = inline(RawMessage), content_type = "message/rfc822", description = "the cached .eml"),
+        (status = 404, description = "no such account or no cached source (plain text)"),
+        (status = 500, description = "database error (plain text)")
+    )
+)]
 pub async fn get_raw_message(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -221,6 +367,17 @@ pub async fn get_raw_message(
     }
 }
 
+/// The conversation of a message.
+#[utoipa::path(
+    get,
+    path = "/email/thread",
+    params(GetMessageQuery),
+    responses(
+        (status = 200, body = ThreadResponse),
+        (status = 404, description = "no such account (plain text)"),
+        (status = 500, description = "database error (plain text)")
+    )
+)]
 pub async fn get_thread(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -245,8 +402,8 @@ pub async fn get_thread(
     match email_db::list_thread_messages(&state.db, &q.account_id, &q.mailbox, q.uid).await {
         Ok(messages) => {
             let messages = dedupe_thread_messages(messages, &q.account_id, &q.mailbox, q.uid);
-            let list: Vec<_> = messages.iter().map(thread_message_to_json).collect();
-            Json(json!({ "messages": list })).into_response()
+            let messages = messages.iter().map(thread_message_to_json).collect();
+            Json(ThreadResponse { messages }).into_response()
         }
         Err(e) => {
             eprintln!("[email] get_thread error: {e}");
@@ -283,15 +440,29 @@ fn dedupe_thread_messages(
     result
 }
 
-#[derive(Deserialize)]
+/// Sets or clears IMAP flags on a message.
+#[derive(Deserialize, ToSchema)]
 pub struct FlagsBody {
     pub account_id: String,
     pub mailbox: String,
     pub uid: u32,
+    /// e.g. `\Seen`, `\Flagged`
     pub flags: Vec<String>,
+    /// true adds the flags, false removes them
     pub set: bool,
 }
 
+/// Sets or clears flags on the server and in the cache; `email_updated` reports the new flags.
+#[utoipa::path(
+    patch,
+    path = "/email/message/flags",
+    request_body = FlagsBody,
+    responses(
+        (status = 200, description = "applied (empty body)"),
+        (status = 404, description = "no such account (plain text)"),
+        (status = 500, description = "database error (plain text)")
+    )
+)]
 pub async fn update_flags(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -381,13 +552,25 @@ pub async fn update_flags(
     StatusCode::OK.into_response()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct DeleteMessageQuery {
     pub account_id: String,
     pub mailbox: String,
     pub uid: u32,
 }
 
+/// Moves a message to the trash (deletes it outright in the trash); `email_removed` reports it.
+#[utoipa::path(
+    delete,
+    path = "/email/message",
+    params(DeleteMessageQuery),
+    responses(
+        (status = 204, description = "deleted"),
+        (status = 404, description = "no such account (plain text)"),
+        (status = 500, description = "database error (plain text)")
+    )
+)]
 pub async fn delete_message(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -466,13 +649,30 @@ pub async fn delete_message(
     StatusCode::NO_CONTENT.into_response()
 }
 
-#[derive(Deserialize)]
+/// Deletes the messages of a trash mailbox put there more than `days` ago.
+#[derive(Deserialize, ToSchema)]
 pub struct EmptyTrashBody {
     pub account_id: String,
+    /// a trash mailbox
     pub mailbox: String,
+    /// 1 to 3650
     pub days: i64,
 }
 
+/// Empties a trash mailbox of old messages (IMAP SAVEDATE); `emails_refetch` reports it.
+#[utoipa::path(
+    post,
+    path = "/email/trash/empty",
+    request_body = EmptyTrashBody,
+    responses(
+        (status = 200, body = TrashEmptied),
+        (status = 400, description = "`days` out of range or not a trash mailbox (plain text)"),
+        (status = 404, description = "no such account (plain text)"),
+        (status = 412, body = ApiError, description = "`savedate_unsupported`: the server cannot tell when messages were trashed"),
+        (status = 500, description = "database error (plain text)"),
+        (status = 502, description = "the IMAP server failed (plain text)")
+    )
+)]
 pub async fn empty_trash(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -551,7 +751,7 @@ pub async fn empty_trash(
             Ok(None) => {
                 return (
                     StatusCode::PRECONDITION_FAILED,
-                    Json(json!({ "error": "savedate_unsupported" })),
+                    Json(ApiError::new("savedate_unsupported")),
                 )
                     .into_response();
             }
@@ -578,7 +778,10 @@ pub async fn empty_trash(
         },
     );
 
-    Json(json!({ "deleted": deleted_uids.len() })).into_response()
+    Json(TrashEmptied {
+        deleted: deleted_uids.len(),
+    })
+    .into_response()
 }
 
 fn is_trash_mailbox_name(mailbox: &str) -> bool {
@@ -626,7 +829,8 @@ async fn delete_cached_messages_and_files(
 
 // ── Move ──────────────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+/// Moves a message to another mailbox of its account.
+#[derive(Deserialize, ToSchema)]
 pub struct MoveMessageBody {
     pub account_id: String,
     pub mailbox: String,
@@ -634,6 +838,17 @@ pub struct MoveMessageBody {
     pub dest_mailbox: String,
 }
 
+/// Moves a message; `email_removed` and `emails_refetch` (of the destination) report it.
+#[utoipa::path(
+    post,
+    path = "/email/message/move",
+    request_body = MoveMessageBody,
+    responses(
+        (status = 204, description = "moved"),
+        (status = 404, description = "no such account (plain text)"),
+        (status = 500, description = "database error (plain text)")
+    )
+)]
 pub async fn move_message(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -719,27 +934,50 @@ pub async fn move_message(
 
 // ── Search ────────────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+/// A full-text search with filters, in one mailbox, one virtual folder or all mail.
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct SearchQuery {
+    /// the search text (may be empty when a filter is set)
     pub q: Option<String>,
+    /// with `mailbox`: search that mailbox
     pub account_id: Option<String>,
+    /// with `account_id`: search that mailbox
     pub mailbox: Option<String>,
+    /// search a virtual folder (takes precedence over `account_id`/`mailbox`)
     pub folder_id: Option<String>,
+    /// comma-separated addresses the message must be from or to
     pub addrs: Option<String>,
+    /// `YYYY-MM-DD`: sent on or after
     pub date_from: Option<String>,
+    /// `YYYY-MM-DD`: sent on or before
     pub date_to: Option<String>,
+    /// only unread messages
     pub unread_only: Option<bool>,
+    /// keyset cursor: `sent_at` of the row the page starts after
     pub cursor_sent_at: Option<i64>,
+    /// keyset cursor: `rowid` of that row
     pub cursor_rowid: Option<i64>,
+    /// `forward` (default) or `backward`
     pub direction: Option<String>,
+    /// page size, default 51, at most 200
     pub limit: Option<i64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct SuggestAddrsQuery {
+    /// part of an address
     q: Option<String>,
 }
 
+/// Up to five addresses from the user's mail that contain `q` (none for an empty `q` or on error).
+#[utoipa::path(
+    get,
+    path = "/email/suggest-addrs",
+    params(SuggestAddrsQuery),
+    responses((status = 200, body = AddrSuggestions))
+)]
 pub async fn suggest_addrs(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -747,14 +985,24 @@ pub async fn suggest_addrs(
 ) -> Response {
     let query = q.q.unwrap_or_default();
     if query.trim().is_empty() {
-        return Json(json!({ "addrs": [] })).into_response();
+        return Json(AddrSuggestions { addrs: Vec::new() }).into_response();
     }
-    match email_db::suggest_addrs(&state.db, &user.user_id, &query, 5).await {
-        Ok(addrs) => Json(json!({ "addrs": addrs })).into_response(),
-        Err(_) => Json(json!({ "addrs": [] })).into_response(),
-    }
+    let addrs = email_db::suggest_addrs(&state.db, &user.user_id, &query, 5)
+        .await
+        .unwrap_or_default();
+    Json(AddrSuggestions { addrs }).into_response()
 }
 
+/// Searches messages; no text and no filter is an empty result.
+#[utoipa::path(
+    get,
+    path = "/email/search",
+    params(SearchQuery),
+    responses(
+        (status = 200, body = SearchResponse),
+        (status = 500, description = "search error (plain text)")
+    )
+)]
 pub async fn search(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -780,7 +1028,10 @@ pub async fn search(
     };
 
     if raw_q.is_empty() && filters.is_empty() {
-        return Json(json!({ "messages": [] })).into_response();
+        return Json(SearchResponse {
+            messages: Vec::new(),
+        })
+        .into_response();
     }
 
     let fts_query = if raw_q.is_empty() {
@@ -797,7 +1048,10 @@ pub async fn search(
     } else if let (Some(account_id), Some(mailbox)) =
         (q.account_id.as_deref(), q.mailbox.as_deref())
     {
-        email_db::SearchScope::Mailbox { account_id, mailbox }
+        email_db::SearchScope::Mailbox {
+            account_id,
+            mailbox,
+        }
     } else {
         email_db::SearchScope::All
     };
@@ -815,8 +1069,8 @@ pub async fn search(
 
     match result {
         Ok(messages) => {
-            let list: Vec<_> = messages.iter().map(message_to_json).collect();
-            Json(json!({ "messages": list })).into_response()
+            let messages = messages.iter().map(message_to_json).collect();
+            Json(SearchResponse { messages }).into_response()
         }
         Err(e) => {
             eprintln!("[email] search error: {e}");
@@ -847,7 +1101,12 @@ fn parse_date_end(s: Option<&str>) -> Option<i64> {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-pub(super) fn message_to_json(m: &email_db::MessageRow) -> serde_json::Value {
+fn json_strings(s: Option<&str>) -> Vec<String> {
+    s.and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default()
+}
+
+pub(super) fn message_to_json(m: &email_db::MessageRow) -> Message {
     message_to_json_with_attachments(m, &[], None)
 }
 
@@ -855,102 +1114,72 @@ pub(super) fn message_to_json_with_attachments(
     m: &email_db::MessageRow,
     attachments: &[email_db::AttachmentRow],
     render_body: Option<&email_db::MessageBodyRow>,
-) -> serde_json::Value {
-    let to: Vec<String> = m
-        .to_addrs
-        .as_deref()
-        .and_then(|s| serde_json::from_str(s).ok())
-        .unwrap_or_default();
-    let cc: Vec<String> = m
-        .cc_addrs
-        .as_deref()
-        .and_then(|s| serde_json::from_str(s).ok())
-        .unwrap_or_default();
-    let reply_to: Vec<String> = m
-        .reply_to_addrs
-        .as_deref()
-        .and_then(|s| serde_json::from_str(s).ok())
-        .unwrap_or_default();
-    let flags: Vec<String> = m
-        .flags
-        .as_deref()
-        .and_then(|s| serde_json::from_str(s).ok())
-        .unwrap_or_default();
-
-    let att_list: Vec<serde_json::Value> = attachments
-        .iter()
-        .map(|a| {
-            json!({
-                "filename": a.filename,
-                "content_type": a.content_type,
-                "size": a.size,
-                "content_id": a.content_id,
+) -> Message {
+    let flags = json_strings(m.flags.as_deref());
+    Message {
+        uid: m.uid,
+        account_id: m.account_id.clone(),
+        mailbox: m.mailbox.clone(),
+        rowid: m.rowid,
+        message_id: m.message_id.clone(),
+        thread_id: m.thread_id.clone(),
+        from: m.from_addr.clone(),
+        to: json_strings(m.to_addrs.as_deref()),
+        cc: json_strings(m.cc_addrs.as_deref()),
+        reply_to: json_strings(m.reply_to_addrs.as_deref()),
+        subject: m.subject.clone(),
+        sent_at: m.sent_at,
+        has_attachments: m.has_attachments,
+        body_cached: render_body.is_some(),
+        body_text: render_body.and_then(|body| body.body_text.clone()),
+        body_html: render_body.and_then(|body| body.body_html.clone()),
+        autocrypt_headers: render_body
+            .map(|body| body.autocrypt_headers.clone())
+            .unwrap_or_default(),
+        is_read: flags.iter().any(|f| f == "\\Seen"),
+        is_flagged: flags.iter().any(|f| f == "\\Flagged"),
+        is_encrypted: m.is_encrypted,
+        is_signed: render_body.map(|body| body.is_signed).unwrap_or(false),
+        attachments: attachments
+            .iter()
+            .map(|a| Attachment {
+                filename: a.filename.clone(),
+                content_type: a.content_type.clone(),
+                size: a.size,
+                content_id: a.content_id.clone(),
             })
-        })
-        .collect();
-
-    json!({
-        "uid": m.uid,
-        "account_id": m.account_id,
-        "mailbox": m.mailbox,
-        "rowid": m.rowid,
-        "message_id": m.message_id,
-        "thread_id": m.thread_id,
-        "from": m.from_addr,
-        "to": to,
-        "cc": cc,
-        "reply_to": reply_to,
-        "subject": m.subject,
-        "sent_at": m.sent_at,
-        "flags": flags,
-        "has_attachments": m.has_attachments,
-        "body_cached": render_body.is_some(),
-        "body_text": render_body.and_then(|body| body.body_text.as_deref()),
-        "body_html": render_body.and_then(|body| body.body_html.as_deref()),
-        "autocrypt_headers": render_body.map(|body| body.autocrypt_headers.as_slice()).unwrap_or_default(),
-        "is_read": flags.iter().any(|f| f == "\\Seen"),
-        "is_flagged": flags.iter().any(|f| f == "\\Flagged"),
-        "is_encrypted": m.is_encrypted,
-        "is_signed": render_body.map(|body| body.is_signed).unwrap_or(false),
-        "attachments": att_list,
-    })
+            .collect(),
+        flags,
+    }
 }
 
-pub(super) fn thread_message_to_json(m: &email_db::MessageRow) -> serde_json::Value {
-    let flags: Vec<String> = m
-        .flags
-        .as_deref()
-        .and_then(|s| serde_json::from_str(s).ok())
-        .unwrap_or_default();
-
-    json!({
-        "uid": m.uid,
-        "account_id": m.account_id,
-        "mailbox": m.mailbox,
-        "message_id": m.message_id,
-        "parent_message_id": m.thread_id,
-        "from": m.from_addr,
-        "subject": m.subject,
-        "sent_at": m.sent_at,
-        "is_read": flags.iter().any(|f| f == "\\Seen"),
-    })
+pub(super) fn thread_message_to_json(m: &email_db::MessageRow) -> ThreadNode {
+    let flags = json_strings(m.flags.as_deref());
+    ThreadNode {
+        uid: m.uid,
+        account_id: m.account_id.clone(),
+        mailbox: m.mailbox.clone(),
+        message_id: m.message_id.clone(),
+        parent_message_id: m.thread_id.clone(),
+        from: m.from_addr.clone(),
+        subject: m.subject.clone(),
+        sent_at: m.sent_at,
+        is_read: flags.iter().any(|f| f == "\\Seen"),
+    }
 }
 
-
-/// This file's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
-#[allow(unused_imports)]
-pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
-    use axum::routing::{delete, get, patch, post, put};
-    utoipa_axum::router::OpenApiRouter::new()
-        .route("/email/messages", get(list_messages))
-        .route("/email/message", get(get_message).delete(delete_message))
-        .route("/email/message/raw", get(get_raw_message))
-        .route("/email/thread", get(get_thread))
-        .route("/email/message/flags", patch(update_flags))
-        .route("/email/message/move", post(move_message))
-        .route("/email/trash/empty", post(empty_trash))
-        .route("/email/search", get(search))
-        .route("/email/suggest-addrs", get(suggest_addrs))
+/// This file's routes that need a signed-in user, relative to `/api` (api.rs).
+pub fn routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(list_messages))
+        .routes(routes!(get_message, delete_message))
+        .routes(routes!(get_raw_message))
+        .routes(routes!(get_thread))
+        .routes(routes!(update_flags))
+        .routes(routes!(move_message))
+        .routes(routes!(empty_trash))
+        .routes(routes!(search))
+        .routes(routes!(suggest_addrs))
 }
 
 #[cfg(test)]
@@ -1002,7 +1231,9 @@ mod tests {
             is_signed: false,
         };
 
-        let json = message_to_json_with_attachments(&message, &[], Some(&body));
+        let json =
+            serde_json::to_value(message_to_json_with_attachments(&message, &[], Some(&body)))
+                .unwrap();
 
         assert_eq!(json["body_cached"], true);
         assert_eq!(json["body_text"], "Hello");
