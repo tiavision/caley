@@ -1,4 +1,4 @@
-// What jsdom lacks for the pages' dialogs, as browsers do it. Imported by the page and component tests.
+// What jsdom lacks for the pages' dialogs and uploads, as browsers do it. Imported by the page and component tests.
 
 // Modal dialogs: open/close set `open` and fire `toggle` (and `close`).
 if (!HTMLDialogElement.prototype.showModal) {
@@ -17,3 +17,14 @@ document.addEventListener('click', (e) => {
   const command = button.getAttribute('command');
   queueMicrotask(() => (command === 'show-modal' ? dialog.showModal() : command === 'close' ? dialog.close() : undefined));
 });
+
+// Blob.stream (jsdom 31 has none): Node's Request reads a FormData body's files through it, and without it the
+// body of an upload (the ICS import's file) never finishes, so the request never reaches the mock.
+if (!Blob.prototype.stream) {
+  Blob.prototype.stream = function (this: Blob) {
+    const blob = this;
+    return new ReadableStream<Uint8Array>({
+      async start(controller) { controller.enqueue(new Uint8Array(await blob.arrayBuffer())); controller.close(); },
+    }) as ReturnType<Blob['stream']>;
+  };
+}

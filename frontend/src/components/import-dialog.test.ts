@@ -5,7 +5,7 @@ import { messages } from '../test-messages.ts';
 import { calendarValue, importEventDate, importDraft, importSummary } from '../lib/import.ts';
 import * as ics from '../actions/ics.ts';
 import { app, scripts } from '../test-components.ts';
-import '../test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
+import '../test-dom.ts';                 // jsdom: dialogs, popovers, commandfor, Blob.stream
 
 // The dialog as mail uses it: a calendar attachment opens it with the file already set (ics.draft from an action),
 // a plain button with an empty draft.

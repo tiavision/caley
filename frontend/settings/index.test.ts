@@ -14,7 +14,7 @@ import * as ics from '../src/actions/ics.ts';
 import page from './index.html?raw';
 import { app, scripts } from '../src/test-components.ts';
 import type { VaultView } from '../src/actions/pgp-vault.ts';
-import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
+import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor, Blob.stream
 
 // The helpers the page and its components use (not the whole helpers module: other pages' helpers load more).
 const helpers = { calendarValue, importEventDate, importDraft, importSummary, newCalendarDraft, newCalendarBody, caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText, loadErrorOr, localeUrl };
