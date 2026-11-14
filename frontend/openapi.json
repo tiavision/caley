@@ -187,7 +187,7 @@
           {
             "name": "tz",
             "in": "query",
-            "description": "the viewer's IANA timezone (default: the server's)",
+            "description": "the viewer's IANA timezone (default, also for an unknown one: the server's)",
             "required": false,
             "schema": {
               "type": "string"
@@ -2199,7 +2199,12 @@
             "description": "`this_instance` (with `original_dtstart`) deletes one occurrence; else the event",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "description": "What an event write applies to.",
+              "enum": [
+                "series",
+                "this_instance"
+              ]
             }
           },
           {
@@ -2297,7 +2302,8 @@
             "description": "first day, `YYYY-MM-DD` (default: Monday of the current week)",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
@@ -2306,13 +2312,14 @@
             "description": "last day, `YYYY-MM-DD` (default: Sunday of the current week)",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
             "name": "tz",
             "in": "query",
-            "description": "the viewer's IANA timezone (default: the server's)",
+            "description": "the viewer's IANA timezone (default, also for an unknown one: the server's)",
             "required": false,
             "schema": {
               "type": "string"
@@ -2382,6 +2389,9 @@
           },
           "404": {
             "description": "no such CalDAV account (plain text)"
+          },
+          "502": {
+            "description": "the CalDAV server refused to create the new calendar (plain text)"
           }
         }
       }
@@ -2671,7 +2681,8 @@
             "description": "earliest start, `YYYY-MM-DD`",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
@@ -2680,7 +2691,8 @@
             "description": "latest start, `YYYY-MM-DD`",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "date"
             }
           },
           {
@@ -2689,7 +2701,9 @@
             "description": "`1`: only the active calendars (when no `cal` is given)",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
             }
           },
           {
@@ -3636,7 +3650,7 @@
               "string",
               "null"
             ],
-            "description": "CSS color; empty for none"
+            "description": "CSS color; empty or missing for none"
           }
         }
       },
@@ -3879,19 +3893,12 @@
       },
       "EventForm": {
         "type": "object",
-        "description": "An event to create (no `uid`) or save. The alarm and attendee fields repeat, once\nper alarm / attendee, in the same order.",
+        "description": "An event to create (no `uid`) or save. The alarm and attendee fields repeat, once\nper alarm / attendee, in the same order. Empty optional fields count as missing.",
         "required": [
           "summary",
           "date",
           "calendar_href",
-          "account_id",
-          "alarm_direction",
-          "alarm_value",
-          "alarm_unit",
-          "alarm_datetime",
-          "attendee_cn",
-          "attendee_email",
-          "attendee_partstat"
+          "account_id"
         ],
         "properties": {
           "uid": {
@@ -3899,22 +3906,16 @@
               "string",
               "null"
             ],
-            "description": "empty or missing: a new event"
+            "description": "missing: a new event"
           },
           "summary": {
             "type": "string"
           },
           "description": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "location": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "date": {
             "type": "string",
@@ -3925,14 +3926,14 @@
               "string",
               "null"
             ],
-            "description": "`HH:MM`"
+            "description": "`HH:MM` (default `00:00`)"
           },
           "end_time": {
             "type": [
               "string",
               "null"
             ],
-            "description": "`HH:MM`"
+            "description": "`HH:MM` (default `start_time`, or `01:00` without one)"
           },
           "tz": {
             "type": [
@@ -3943,7 +3944,7 @@
           },
           "is_all_day": {
             "type": [
-              "string",
+              "boolean",
               "null"
             ],
             "description": "`true` for an all-day event"
@@ -3955,11 +3956,15 @@
             "type": "string"
           },
           "scope": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "`series` (default) or `this_instance` (an override of one occurrence)"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EventScope",
+                "description": "default `series`"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "original_dtstart": {
             "type": [
@@ -4000,25 +4005,29 @@
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "`before-start`, `after-start`, `before-end`, `after-end` or `absolute`"
           },
           "alarm_value": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "the amount of `alarm_unit`s (relative alarms)"
           },
           "alarm_unit": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "minutes per unit (default `1`)"
           },
           "alarm_datetime": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "`YYYY-MM-DDTHH:MM` in `tz` (absolute alarms)"
           },
           "attendee_cn": {
             "type": "array",
@@ -4030,13 +4039,15 @@
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "an attendee without an address is left out"
           },
           "attendee_partstat": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "iCalendar PARTSTAT (default `NEEDS-ACTION`)"
           }
         }
       },
@@ -4131,6 +4142,14 @@
           }
         }
       },
+      "EventScope": {
+        "type": "string",
+        "description": "What an event write applies to.",
+        "enum": [
+          "series",
+          "this_instance"
+        ]
+      },
       "FlagsBody": {
         "type": "object",
         "description": "Sets or clears IMAP flags on a message.",
@@ -4175,7 +4194,7 @@
           "file": {
             "type": "string",
             "format": "binary",
-            "description": "the ICS file"
+            "description": "the ICS file (UTF-8)"
           }
         }
       },
@@ -4299,10 +4318,9 @@
       },
       "ImportForm": {
         "type": "object",
-        "description": "An ICS file to import into a calendar; the `email_*` fields name the message it came\nfrom, so the message shows the events and the events their source message.",
+        "description": "An ICS file to import into a calendar: an existing one (`calendar_href`) or a new one of the\naccount (`new_calendar_name`). The `email_*` fields name the message it came from, so the\nmessage shows the events and the events their source message.",
         "required": [
           "account_id",
-          "calendar_href",
           "file"
         ],
         "properties": {
@@ -4310,12 +4328,23 @@
             "type": "string"
           },
           "calendar_href": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the calendar to import into"
+          },
+          "new_calendar_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "without `calendar_href`: the name of a calendar to create for the import"
           },
           "file": {
             "type": "string",
             "format": "binary",
-            "description": "the ICS file"
+            "description": "the ICS file (UTF-8)"
           },
           "email_account_id": {
             "type": [
@@ -4334,7 +4363,8 @@
               "integer",
               "null"
             ],
-            "format": "int64"
+            "format": "int32",
+            "minimum": 0
           }
         }
       },
@@ -4373,10 +4403,19 @@
       "ImportResult": {
         "type": "object",
         "required": [
+          "account_id",
+          "calendar_href",
           "imported",
           "errors"
         ],
         "properties": {
+          "account_id": {
+            "type": "string",
+            "description": "the calendar the events went to (a new one for `new_calendar_name`)"
+          },
+          "calendar_href": {
+            "type": "string"
+          },
           "imported": {
             "type": "integer",
             "description": "events written to the calendar",
@@ -4988,7 +5027,7 @@
       },
       "SendRawForm": {
         "type": "object",
-        "description": "The multipart form of a raw send (only for the spec: the handler reads the fields one by one).",
+        "description": "The multipart form of a raw send.",
         "required": [
           "identity_id",
           "raw_mime"
@@ -5251,10 +5290,10 @@
           },
           "active": {
             "type": [
-              "string",
+              "boolean",
               "null"
             ],
-            "description": "`false` hides the calendar; anything else (or missing) shows it"
+            "description": "`false` hides the calendar, `true` (or missing) shows it"
           }
         }
       },
