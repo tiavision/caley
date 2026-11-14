@@ -39,6 +39,7 @@ async-trait = "0.1"
 rmp-serde = "1"
 time = "0.3"
 url = "2"
+ipnet = "2"
 uuid = { version = "1", features = ["v4"] }
 p256 = { version = "0.14", features = ["ecdh"] }
 rust-stemmers = "1.2"

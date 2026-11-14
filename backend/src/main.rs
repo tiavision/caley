@@ -6,21 +6,22 @@ mod crypto;
 mod db;
 mod demo;
 mod email;
-mod embed;
-mod etag;
 mod email_autodiscover;
 mod email_db;
 mod email_sync;
+mod embed;
+mod etag;
 mod imap_client;
 mod landing;
 mod local_auth;
 mod oidc;
 mod pgp;
+mod public_origin;
 mod search;
 mod session_store;
 mod settings;
-mod static_files;
 mod sse;
+mod static_files;
 mod sync;
 mod version;
 mod xml_util;
@@ -77,6 +78,10 @@ struct Cli {
         default_value = "https://www.openstreetmap.org/search?query={q}"
     )]
     map_url: String,
+    /// Reverse proxies (IPs or CIDRs, comma-separated) whose `Forwarded` / `X-Forwarded-Proto` /
+    /// `X-Forwarded-Host` headers give the URL a request was made to (public_origin.rs).
+    #[arg(long, env = "TRUSTED_PROXIES", value_delimiter = ',')]
+    trusted_proxies: Vec<String>,
     #[arg(long, env = "WEBAUTHN_EXTRA_ORIGINS")]
     webauthn_extra_origins: Vec<String>,
     #[arg(long, env = "DEMO_MODE", default_value_t = false)]
@@ -223,7 +228,10 @@ async fn main() -> anyhow::Result<()> {
         webauthn,
         demo_mode: args.demo_mode,
         oidc_provider,
-        app_base_url: args.app_base_url.clone(),
+        origin: Arc::new(public_origin::OriginConfig::new(
+            &args.app_base_url,
+            &args.trusted_proxies,
+        )?),
     };
 
     if args.demo_mode {
@@ -421,7 +429,12 @@ async fn main() -> anyhow::Result<()> {
         .tap_io(|tcp| {
             let _ = tcp.set_nodelay(true);
         });
-    axum::serve(listener, app).await?;
+    // the peer address tells a trusted proxy from a direct request (public_origin.rs)
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }

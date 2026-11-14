@@ -525,6 +525,7 @@ dependencies = [
  "ical",
  "idna",
  "infer",
+ "ipnet",
  "lettre",
  "mail-parser",
  "openidconnect",

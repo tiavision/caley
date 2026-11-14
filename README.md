@@ -50,11 +50,13 @@ All backend configuration is via environment variables. `backend/.env` is loaded
 | `SEARCH_MODE` | Full-text strategy: `default`, `trigram`, or a Snowball algorithm name such as `English` or `German`. Changing it rebuilds FTS indexes on startup. Default: `default`. | No |
 | `MAP_URL` | Fallback map URL template. Use `{q}` for the URL-encoded query. Default: `https://www.openstreetmap.org/search?query={q}`. | No |
 | `WEBAUTHN_EXTRA_ORIGINS` | Additional allowed WebAuthn origins. | No |
+| `TRUSTED_PROXIES` | Reverse proxies (IPs or CIDRs, comma-separated, e.g. `10.0.0.1,172.16.0.0/12`) whose `Forwarded` / `X-Forwarded-Proto` / `X-Forwarded-Host` headers are trusted. Default: none. | No |
 
-OIDC is enabled only when all three OIDC variables are set. If OIDC is enabled, register this redirect URI with the provider:
+OIDC is enabled only when all three OIDC variables are set. The OIDC redirect and post-logout URLs are built from the URL the app was opened at, so one instance can be used both through a reverse proxy and directly. A request from a `TRUSTED_PROXIES` peer takes its scheme and host from the forwarding headers; any other request is `http://` plus its `Host` header (the app does not terminate TLS); `APP_BASE_URL` is the fallback. Register the redirect URI of every URL you use with the provider:
 
 ```text
-{APP_BASE_URL}/auth/oidc
+https://calendar.example.com/auth/oidc
+http://10.0.0.5:3000/auth/oidc
 ```
 
 ## Try It — Demo Mode

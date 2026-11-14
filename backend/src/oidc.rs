@@ -1,6 +1,7 @@
 use crate::db;
-use crate::landing;
 use crate::email_sync::EmailSyncManager;
+use crate::landing;
+use crate::public_origin::RequestOrigin;
 use crate::search::SearchMode;
 use axum::{
     body::Body,
@@ -13,11 +14,12 @@ use futures_util::future::BoxFuture;
 use openidconnect::core::{CoreAuthenticationFlow, CoreClient};
 use openidconnect::{
     AuthorizationCode, CsrfToken, EndSessionUrl, EndpointMaybeSet, EndpointNotSet, EndpointSet,
-    LogoutRequest, Nonce, PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl, Scope,
-    TokenResponse,
+    LogoutRequest, Nonce, PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl, RedirectUrl,
+    Scope, TokenResponse,
 };
 use serde_json::json;
 use std::{
+    borrow::Cow,
     collections::HashMap,
     path::PathBuf,
     sync::Arc,
@@ -96,7 +98,7 @@ pub struct AppState {
     pub webauthn: Arc<Webauthn>,
     pub demo_mode: bool,
     pub oidc_provider: Option<Arc<OidcProvider>>,
-    pub app_base_url: String,
+    pub origin: Arc<crate::public_origin::OriginConfig>,
 }
 
 pub struct CurrentUser {
@@ -173,7 +175,11 @@ pub async fn auth_config(State(state): State<AppState>) -> impl IntoResponse {
 
 /// Unified logout. For OIDC sessions, performs RP-initiated logout using the
 /// end_session_endpoint from discovery. CalDAV sessions just get a flush.
-pub async fn logout_handler(State(state): State<AppState>, session: Session) -> Response {
+pub async fn logout_handler(
+    State(state): State<AppState>,
+    RequestOrigin(origin): RequestOrigin,
+    session: Session,
+) -> Response {
     let is_oidc = session
         .get::<bool>("oidc_session")
         .await
@@ -186,7 +192,7 @@ pub async fn logout_handler(State(state): State<AppState>, session: Session) -> 
     if is_oidc && state.do_oidc_logout {
         if let Some(provider) = &state.oidc_provider {
             if let Some(end_session_endpoint) = &provider.end_session_endpoint {
-                let post_logout = format!("{}/", state.app_base_url);
+                let post_logout = format!("{origin}/");
                 let redirect_uri = PostLogoutRedirectUrl::new(post_logout)
                     .unwrap_or_else(|_| PostLogoutRedirectUrl::new("/".to_owned()).unwrap());
                 let mut url = LogoutRequest::from(end_session_endpoint.clone())
@@ -210,6 +216,7 @@ pub async fn logout_handler(State(state): State<AppState>, session: Session) -> 
 /// - Callback leg: `code` + `state` present → exchange code, verify token, write session.
 pub async fn oidc_handler(
     State(state): State<AppState>,
+    RequestOrigin(origin): RequestOrigin,
     session: Session,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
@@ -238,11 +245,15 @@ pub async fn oidc_handler(
                 Some(v) => v,
                 None => return Redirect::to("/").into_response(),
             };
+        // the redirect URI of the authorization request (the token request must repeat it)
+        let redirect_uri: Option<RedirectUrl> =
+            session.get("oidc_redirect_uri").await.ok().flatten();
 
         // Remove one-time-use keys before making any network calls.
         session.remove_value("oidc_csrf").await.ok();
         session.remove_value("oidc_nonce").await.ok();
         session.remove_value("oidc_pkce_verifier").await.ok();
+        session.remove_value("oidc_redirect_uri").await.ok();
 
         // Validate state parameter to prevent CSRF.
         if params.get("state").map(|s| s.as_str()) != Some(csrf_token.secret()) {
@@ -250,7 +261,11 @@ pub async fn oidc_handler(
         }
 
         let code_req = match provider.client.exchange_code(AuthorizationCode::new(code)) {
-            Ok(req) => req.set_pkce_verifier(pkce_verifier),
+            Ok(req) => match &redirect_uri {
+                Some(uri) => req.set_redirect_uri(Cow::Borrowed(uri)),
+                None => req,
+            }
+            .set_pkce_verifier(pkce_verifier),
             Err(e) => {
                 eprintln!("OIDC token endpoint not available: {e}");
                 return Redirect::to("/").into_response();
@@ -314,6 +329,14 @@ pub async fn oidc_handler(
 
     // Initiate leg: generate PKCE + state and redirect to IdP.
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+    // back to the origin the sign-in started from (public_origin.rs), which must be registered at the IdP
+    let redirect_uri = match RedirectUrl::new(format!("{origin}/auth/oidc")) {
+        Ok(uri) => uri,
+        Err(e) => {
+            eprintln!("OIDC redirect URI invalid: {e}");
+            return Redirect::to("/").into_response();
+        }
+    };
 
     let mut auth_req = provider
         .client
@@ -323,7 +346,8 @@ pub async fn oidc_handler(
             Nonce::new_random,
         )
         .add_scope(Scope::new("profile".to_owned()))
-        .set_pkce_challenge(pkce_challenge);
+        .set_pkce_challenge(pkce_challenge)
+        .set_redirect_uri(Cow::Borrowed(&redirect_uri));
 
     // Silent re-auth: RequireAuthLayer appends ?auto=1 for unauthenticated page requests
     // when OIDC is enabled. If the IdP has an active session it redirects back immediately;
@@ -338,6 +362,10 @@ pub async fn oidc_handler(
     session.insert("oidc_nonce", &nonce).await.ok();
     session
         .insert("oidc_pkce_verifier", &pkce_verifier)
+        .await
+        .ok();
+    session
+        .insert("oidc_redirect_uri", &redirect_uri)
         .await
         .ok();
 
