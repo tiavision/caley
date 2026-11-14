@@ -1,0 +1,409 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Caley",
+    "description": "Caley's JSON API: calendars, contacts, mail and OpenPGP keys.",
+    "license": {
+      "name": ""
+    },
+    "version": "1.1.0"
+  },
+  "servers": [
+    {
+      "url": "/api"
+    }
+  ],
+  "paths": {
+    "/caldav/account": {
+      "put": {
+        "summary": "Adds (no `account_id`) or updates a CalDAV account after testing the connection; an empty\npassword keeps the stored one. PUT is the same.",
+        "operationId": "save_caldav_account",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/CalDavAccountForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalDavAccountSaved"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Adds (no `account_id`) or updates a CalDAV account after testing the connection; an empty\npassword keeps the stored one. PUT is the same.",
+        "operationId": "save_caldav_account",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/CalDavAccountForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalDavAccountSaved"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_caldav_account",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOk"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such account"
+          }
+        }
+      }
+    },
+    "/caldav/accounts": {
+      "get": {
+        "summary": "The CalDAV accounts, each with its calendars and address books.",
+        "operationId": "list_caldav_accounts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalDavAccounts"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings": {
+      "post": {
+        "summary": "Saves the single CalDAV login after testing it; an empty password keeps the stored one.",
+        "operationId": "save_settings",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOk"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings/form": {
+      "get": {
+        "operationId": "settings_form",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsFormJson"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AddressbookJson": {
+        "type": "object",
+        "required": [
+          "account_id",
+          "href",
+          "name"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "href": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "ApiError": {
+        "type": "object",
+        "description": "An error the API explains: `{\"error\": \"...\"}` (4xx; a 5xx is plain text).",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "CalDavAccountForm": {
+        "type": "object",
+        "required": [
+          "caldav_base_url",
+          "caldav_username",
+          "caldav_password"
+        ],
+        "properties": {
+          "account_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "caldav_base_url": {
+            "type": "string"
+          },
+          "caldav_username": {
+            "type": "string"
+          },
+          "caldav_password": {
+            "type": "string"
+          }
+        }
+      },
+      "CalDavAccountJson": {
+        "type": "object",
+        "description": "A CalDAV account with its cached calendars and address books.",
+        "required": [
+          "account_id",
+          "display_name",
+          "caldav_base_url",
+          "caldav_username",
+          "has_password",
+          "sort_order",
+          "calendars",
+          "addressbooks"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "caldav_base_url": {
+            "type": "string"
+          },
+          "caldav_username": {
+            "type": "string"
+          },
+          "has_password": {
+            "type": "boolean",
+            "description": "always true: a saved account has a password (it is never sent)"
+          },
+          "sort_order": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "calendars": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CalendarJson"
+            }
+          },
+          "addressbooks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressbookJson"
+            }
+          }
+        }
+      },
+      "CalDavAccountSaved": {
+        "type": "object",
+        "required": [
+          "status",
+          "account_id"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "always `ok`"
+          },
+          "account_id": {
+            "type": "string"
+          }
+        }
+      },
+      "CalDavAccounts": {
+        "type": "object",
+        "required": [
+          "accounts"
+        ],
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CalDavAccountJson"
+            }
+          }
+        }
+      },
+      "CalendarJson": {
+        "type": "object",
+        "required": [
+          "account_id",
+          "href",
+          "name",
+          "is_active"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "href": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_active": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SettingsForm": {
+        "type": "object",
+        "required": [
+          "caldav_base_url",
+          "caldav_username",
+          "caldav_password"
+        ],
+        "properties": {
+          "caldav_base_url": {
+            "type": "string"
+          },
+          "caldav_username": {
+            "type": "string"
+          },
+          "caldav_password": {
+            "type": "string"
+          }
+        }
+      },
+      "SettingsFormJson": {
+        "type": "object",
+        "description": "The single CalDAV login of the settings form (the first account).",
+        "required": [
+          "caldav_base_url",
+          "caldav_username",
+          "has_password"
+        ],
+        "properties": {
+          "caldav_base_url": {
+            "type": "string"
+          },
+          "caldav_username": {
+            "type": "string"
+          },
+          "has_password": {
+            "type": "boolean"
+          }
+        }
+      },
+      "StatusOk": {
+        "type": "object",
+        "description": "A write that has nothing else to say: `{\"status\": \"ok\"}`.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "always `ok`"
+          }
+        }
+      }
+    }
+  }
+}

@@ -3,20 +3,24 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json, Response},
 };
-use serde_json::json;
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::{router::OpenApiRouter, routes};
 
+use crate::api::{ApiError, StatusOk};
+use crate::calendar::CalendarJson;
+use crate::contacts::AddressbookJson;
 use crate::db::{CalDavAccount, UserSettings};
 use crate::oidc::{AppState, CurrentUser};
 use crate::sync::SyncTrigger;
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, ToSchema)]
 pub(crate) struct SettingsForm {
     caldav_base_url: String,
     caldav_username: String,
     caldav_password: String,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, ToSchema)]
 pub(crate) struct CalDavAccountForm {
     account_id: Option<String>,
     display_name: Option<String>,
@@ -25,9 +29,44 @@ pub(crate) struct CalDavAccountForm {
     caldav_password: String,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub(crate) struct DeleteCalDavAccountQuery {
     account_id: String,
+}
+
+/// A CalDAV account with its cached calendars and address books.
+#[derive(serde::Serialize, ToSchema)]
+pub struct CalDavAccountJson {
+    pub account_id: String,
+    pub display_name: String,
+    pub caldav_base_url: String,
+    pub caldav_username: String,
+    /// always true: a saved account has a password (it is never sent)
+    pub has_password: bool,
+    pub sort_order: i64,
+    pub calendars: Vec<CalendarJson>,
+    pub addressbooks: Vec<AddressbookJson>,
+}
+
+#[derive(serde::Serialize, ToSchema)]
+pub struct CalDavAccounts {
+    pub accounts: Vec<CalDavAccountJson>,
+}
+
+#[derive(serde::Serialize, ToSchema)]
+pub struct CalDavAccountSaved {
+    /// always `ok`
+    pub status: &'static str,
+    pub account_id: String,
+}
+
+/// The single CalDAV login of the settings form (the first account).
+#[derive(serde::Serialize, ToSchema)]
+pub struct SettingsFormJson {
+    pub caldav_base_url: String,
+    pub caldav_username: String,
+    pub has_password: bool,
 }
 
 fn account_label(account: &CalDavAccount) -> String {
@@ -38,6 +77,8 @@ fn account_label(account: &CalDavAccount) -> String {
         .unwrap_or_else(|| account.caldav_username.clone())
 }
 
+/// The CalDAV accounts, each with its calendars and address books.
+#[utoipa::path(get, path = "/caldav/accounts", responses((status = 200, body = CalDavAccounts)))]
 pub async fn list_caldav_accounts(State(state): State<AppState>, user: CurrentUser) -> Response {
     let accounts = match crate::db::list_caldav_accounts(
         &state.db,
@@ -71,42 +112,46 @@ pub async fn list_caldav_accounts(State(state): State<AppState>, user: CurrentUs
         let account_calendars: Vec<_> = calendars
             .iter()
             .filter(|c| c.account_id == account.account_id)
-            .map(|c| {
-                json!({
-                    "account_id": c.account_id,
-                    "href": c.href,
-                    "name": c.name,
-                    "color": c.color,
-                    "is_active": !deactivated.contains(&c.href),
-                })
+            .map(|c| CalendarJson {
+                account_id: c.account_id.clone(),
+                href: c.href.clone(),
+                name: c.name.clone(),
+                color: c.color.clone(),
+                is_active: !deactivated.contains(&c.href),
             })
             .collect();
         let account_addressbooks: Vec<_> = addressbooks
             .iter()
             .filter(|a| a.account_id == account.account_id)
-            .map(|a| {
-                json!({
-                    "account_id": a.account_id,
-                    "href": a.href,
-                    "name": a.name,
-                })
+            .map(|a| AddressbookJson {
+                account_id: a.account_id.clone(),
+                href: a.href.clone(),
+                name: a.name.clone(),
             })
             .collect();
-        result.push(json!({
-            "account_id": account.account_id,
-            "display_name": account_label(&account),
-            "caldav_base_url": account.caldav_base_url,
-            "caldav_username": account.caldav_username,
-            "has_password": true,
-            "sort_order": account.sort_order,
-            "calendars": account_calendars,
-            "addressbooks": account_addressbooks,
-        }));
+        result.push(CalDavAccountJson {
+            display_name: account_label(&account),
+            account_id: account.account_id,
+            caldav_base_url: account.caldav_base_url,
+            caldav_username: account.caldav_username,
+            has_password: true,
+            sort_order: account.sort_order,
+            calendars: account_calendars,
+            addressbooks: account_addressbooks,
+        });
     }
 
-    Json(json!({ "accounts": result })).into_response()
+    Json(CalDavAccounts { accounts: result }).into_response()
 }
 
+/// Adds (no `account_id`) or updates a CalDAV account after testing the connection; an empty
+/// password keeps the stored one. PUT is the same.
+#[utoipa::path(
+    method(post, put),
+    path = "/caldav/account",
+    request_body(content = CalDavAccountForm, content_type = "application/x-www-form-urlencoded"),
+    responses((status = 200, body = CalDavAccountSaved), (status = 400, body = ApiError))
+)]
 pub async fn save_caldav_account(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -127,7 +172,7 @@ pub async fn save_caldav_account(
                 _ => {
                     return (
                         StatusCode::BAD_REQUEST,
-                        Json(json!({"error": "Password is required for new connections."})),
+                        Json(ApiError::new("Password is required for new connections.")),
                     )
                         .into_response();
                 }
@@ -135,7 +180,7 @@ pub async fn save_caldav_account(
             None => {
                 return (
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "Password is required for new connections."})),
+                    Json(ApiError::new("Password is required for new connections.")),
                 )
                     .into_response();
             }
@@ -162,7 +207,7 @@ pub async fn save_caldav_account(
             Err(e) => {
                 return (
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("Connection failed: {e}")})),
+                    Json(ApiError::new(format!("Connection failed: {e}"))),
                 )
                     .into_response();
             }
@@ -171,7 +216,7 @@ pub async fn save_caldav_account(
         if let Err(e) = client.calendars().await {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": format!("Connection test failed: {e}")})),
+                Json(ApiError::new(format!("Connection test failed: {e}"))),
             )
                 .into_response();
         }
@@ -219,9 +264,19 @@ pub async fn save_caldav_account(
         .sse_broadcaster
         .send(&user.user_id, crate::sse::SseMessage::ContactsRefetch);
 
-    Json(json!({"status": "ok", "account_id": saved_id})).into_response()
+    Json(CalDavAccountSaved {
+        status: "ok",
+        account_id: saved_id,
+    })
+    .into_response()
 }
 
+#[utoipa::path(
+    delete,
+    path = "/caldav/account",
+    params(DeleteCalDavAccountQuery),
+    responses((status = 200, body = StatusOk), (status = 404, description = "no such account"))
+)]
 pub async fn delete_caldav_account(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -235,7 +290,7 @@ pub async fn delete_caldav_account(
             state
                 .sse_broadcaster
                 .send(&user.user_id, crate::sse::SseMessage::ContactsRefetch);
-            Json(json!({"status": "ok"})).into_response()
+            Json(StatusOk::OK).into_response()
         }
         Ok(false) => (StatusCode::NOT_FOUND, "Account not found").into_response(),
         Err(e) => {
@@ -249,6 +304,7 @@ pub async fn delete_caldav_account(
     }
 }
 
+#[utoipa::path(get, path = "/settings/form", responses((status = 200, body = SettingsFormJson)))]
 pub async fn settings_form(State(state): State<AppState>, user: CurrentUser) -> Response {
     let existing =
         match crate::db::get_settings(&state.db, &user.user_id, &state.encryption_key).await {
@@ -264,14 +320,21 @@ pub async fn settings_form(State(state): State<AppState>, user: CurrentUser) -> 
         None => (String::new(), String::new(), false),
     };
 
-    Json(json!({
-        "caldav_base_url": base_url,
-        "caldav_username": username,
-        "has_password": has_password,
-    }))
+    Json(SettingsFormJson {
+        caldav_base_url: base_url,
+        caldav_username: username,
+        has_password,
+    })
     .into_response()
 }
 
+/// Saves the single CalDAV login after testing it; an empty password keeps the stored one.
+#[utoipa::path(
+    post,
+    path = "/settings",
+    request_body(content = SettingsForm, content_type = "application/x-www-form-urlencoded"),
+    responses((status = 200, body = StatusOk), (status = 400, body = ApiError))
+)]
 pub async fn save_settings(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -283,7 +346,7 @@ pub async fn save_settings(
             _ => {
                 return (
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "Password is required for new connections."})),
+                    Json(ApiError::new("Password is required for new connections.")),
                 )
                     .into_response();
             }
@@ -308,7 +371,7 @@ pub async fn save_settings(
             Err(e) => {
                 return (
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("Connection failed: {e}")})),
+                    Json(ApiError::new(format!("Connection failed: {e}"))),
                 )
                     .into_response();
             }
@@ -317,7 +380,7 @@ pub async fn save_settings(
         if let Err(e) = client.calendars().await {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": format!("Connection test failed: {e}")})),
+                Json(ApiError::new(format!("Connection test failed: {e}"))),
             )
                 .into_response();
         }
@@ -341,5 +404,14 @@ pub async fn save_settings(
     state.sync_manager.ensure_task_for(&user.user_id);
     state.sync_manager.trigger(&user.user_id, SyncTrigger::Full);
 
-    Json(json!({"status": "ok"})).into_response()
+    Json(StatusOk::OK).into_response()
+}
+
+/// This module's routes, relative to `/api` (api.rs).
+pub fn routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(settings_form))
+        .routes(routes!(save_settings))
+        .routes(routes!(list_caldav_accounts))
+        .routes(routes!(save_caldav_account, delete_caldav_account))
 }

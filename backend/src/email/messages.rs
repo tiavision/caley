@@ -936,6 +936,23 @@ pub(super) fn thread_message_to_json(m: &email_db::MessageRow) -> serde_json::Va
     })
 }
 
+
+/// This file's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
+#[allow(unused_imports)]
+pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
+    use axum::routing::{delete, get, patch, post, put};
+    utoipa_axum::router::OpenApiRouter::new()
+        .route("/email/messages", get(list_messages))
+        .route("/email/message", get(get_message).delete(delete_message))
+        .route("/email/message/raw", get(get_raw_message))
+        .route("/email/thread", get(get_thread))
+        .route("/email/message/flags", patch(update_flags))
+        .route("/email/message/move", post(move_message))
+        .route("/email/trash/empty", post(empty_trash))
+        .route("/email/search", get(search))
+        .route("/email/suggest-addrs", get(suggest_addrs))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{dedupe_thread_messages, message_to_json_with_attachments};

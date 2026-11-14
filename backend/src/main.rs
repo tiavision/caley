@@ -1,3 +1,4 @@
+mod api;
 mod caldav;
 mod calendar;
 mod carddav;
@@ -31,7 +32,7 @@ use axum::extract::Request;
 use axum::http::HeaderValue;
 use axum::middleware::{self, Next};
 use axum::response::Response;
-use axum::routing::{delete, get, patch, post, put};
+use axum::routing::{get, post};
 use axum::serve::ListenerExt;
 use clap::Parser;
 use dotenvy::dotenv;
@@ -246,135 +247,15 @@ async fn main() -> anyhow::Result<()> {
         .with_same_site(SameSite::Lax)
         .with_expiry(Expiry::OnInactivity(time::Duration::days(7)));
 
+    // The JSON API (api.rs): every route under /api, described by frontend/openapi.json.
     // Public — no authentication required
     let public = Router::new()
-        .route("/api/push/webhook", post(sse::push_webhook))
-        .route("/api/email/navigate", get(email::navigate))
-        .route("/api/auth/config", get(oidc::auth_config))
+        .nest("/api", api::public().split_for_parts().0)
         .with_state(state.clone());
 
     // Shared private routes (both auth modes)
-    let shared_private = Router::new()
-        .route("/api/calendars", get(calendar::list_calendars))
-        .route("/api/calendar/toggle", post(calendar::toggle_calendar))
-        .route("/api/events", get(calendar::list_events))
-        .route("/api/events/stream", get(sse::events_stream))
-        .route("/api/calendar", get(calendar::list_calendar))
-        .route("/api/calendar", post(calendar::create_calendar_handler))
-        .route(
-            "/api/import",
-            post(calendar::import_ics)
-                .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
-        )
-        .route(
-            "/api/import/preview",
-            post(calendar::preview_ics_import)
-                .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
-        )
-        .route("/api/user", get(oidc::user_info))
-        .route("/api/settings/form", get(settings::settings_form))
-        .route("/api/settings", post(settings::save_settings))
-        .route("/api/caldav/accounts", get(settings::list_caldav_accounts))
-        .route("/api/caldav/account", post(settings::save_caldav_account))
-        .route("/api/caldav/account", put(settings::save_caldav_account))
-        .route(
-            "/api/caldav/account",
-            delete(settings::delete_caldav_account),
-        )
-        .route("/api/event", post(calendar::save_event))
-        .route("/api/event", delete(calendar::delete_event))
-        .route("/api/event/ics", get(calendar::get_event_ics))
-        .route(
-            "/api/email/message-events",
-            get(calendar::get_message_events),
-        )
-        .route("/api/email/thread-events", get(calendar::get_thread_events))
-        .route(
-            "/api/calendar/event-emails",
-            get(calendar::get_event_source_emails),
-        )
-        .route("/api/search", get(calendar::search_events))
-        .route("/api/contacts", get(contacts::list_contacts))
-        .route("/api/contact", post(contacts::save_contact))
-        .route("/api/contact", delete(contacts::delete_contact))
-        .route("/api/contact/photo", get(contacts::get_contact_photo))
-        .route("/api/contact/vcf", get(contacts::get_contact_vcf))
-        .route("/api/account", delete(local_auth::delete_account))
-        // Email routes
-        .route("/api/email/autodiscover", get(email::autodiscover_handler))
-        .route("/api/email/accounts", get(email::list_accounts))
-        .route("/api/email/account", post(email::save_account))
-        .route("/api/email/account", put(email::save_account))
-        .route("/api/email/account", delete(email::delete_account))
-        .route("/api/email/mailboxes", get(email::list_mailboxes))
-        .route("/api/email/sync", post(email::trigger_mailbox_sync))
-        .route("/api/email/unread-counts", get(email::get_unread_counts))
-        .route("/api/email/folders", get(email::list_virtual_folders))
-        .route("/api/email/folder", post(email::create_virtual_folder))
-        .route("/api/email/folder", put(email::update_virtual_folder))
-        .route("/api/email/folder", delete(email::delete_virtual_folder))
-        .route("/api/email/messages", get(email::list_messages))
-        .route("/api/email/message", get(email::get_message))
-        .route("/api/email/message/raw", get(email::get_raw_message))
-        .route("/api/email/thread", get(email::get_thread))
-        .route("/api/email/message/flags", patch(email::update_flags))
-        .route("/api/email/message/move", post(email::move_message))
-        .route("/api/email/message", delete(email::delete_message))
-        .route("/api/email/trash/empty", post(email::empty_trash))
-        .route(
-            "/api/email/send-raw",
-            post(email::send_raw_email)
-                .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
-        )
-        .route("/api/email/search", get(email::search))
-        .route("/api/email/suggest-addrs", get(email::suggest_addrs))
-        .route("/api/email/proxy-image", get(email::proxy_image))
-        .route("/api/email/attachment", get(email::download_attachment))
-        .route("/api/email/export", get(email::export_account))
-        .route("/api/email/image-origins", get(email::list_image_origins))
-        .route("/api/email/image-origins", post(email::add_image_origin))
-        .route(
-            "/api/email/image-origins",
-            delete(email::remove_image_origin),
-        )
-        .route(
-            "/api/email/image-blacklist",
-            get(email::list_image_blacklist),
-        )
-        .route(
-            "/api/email/image-blacklist",
-            post(email::add_image_blacklist_origin),
-        )
-        .route(
-            "/api/email/image-blacklist",
-            delete(email::remove_image_blacklist_origin),
-        )
-        .route("/api/email/identities", get(email::list_identities))
-        .route("/api/email/identity", post(email::save_identity))
-        .route("/api/email/identity", put(email::save_identity))
-        .route("/api/email/identity", delete(email::delete_identity))
-        // WebAuthn + PGP endpoints
-        .route("/api/webauthn/register/start", post(pgp::register_start))
-        .route("/api/webauthn/register/finish", post(pgp::register_finish))
-        .route(
-            "/api/webauthn/authenticate/start",
-            post(pgp::authenticate_start),
-        )
-        .route(
-            "/api/webauthn/authenticate/finish",
-            post(pgp::authenticate_finish),
-        )
-        .route("/api/webauthn/credentials", get(pgp::list_credentials))
-        .route("/api/webauthn/credential", delete(pgp::delete_credential))
-        .route("/api/pgp/vault", get(pgp::get_vault))
-        .route("/api/pgp/vault", delete(pgp::reset_vault))
-        .route("/api/pgp/vault/initialize", post(pgp::initialize_vault))
-        .route("/api/pgp/vault", put(pgp::update_vault))
-        .route("/api/pgp/devices/pending", post(pgp::create_pending_device))
-        .route("/api/pgp/keys", get(pgp::list_public_keys))
-        .route("/api/pgp/key", post(pgp::save_public_key))
-        .route("/api/pgp/key", delete(pgp::delete_public_key))
-        .route("/api/email/raw", get(pgp::raw_email));
+    let shared_private: Router<oidc::AppState> =
+        Router::new().nest("/api", api::private().split_for_parts().0);
 
     // Protected routes: OIDC handler + CalDAV login + unified logout + everything else.
     // RequireAuthLayer allows public paths and requires a session user_id for all others.

@@ -12,7 +12,7 @@ use crate::db;
 use crate::oidc::{AppState, CurrentUser};
 use crate::sse::SseMessage;
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, utoipa::ToSchema)]
 pub struct AddressbookJson {
     pub account_id: String,
     pub href: String,
@@ -461,6 +461,18 @@ pub async fn get_contact_vcf(
         contact.raw_vcard,
     )
         .into_response()
+}
+
+
+/// This module's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
+#[allow(unused_imports)]
+pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
+    use axum::routing::{delete, get, patch, post, put};
+    utoipa_axum::router::OpenApiRouter::new()
+        .route("/contacts", get(list_contacts))
+        .route("/contact", post(save_contact).delete(delete_contact))
+        .route("/contact/photo", get(get_contact_photo))
+        .route("/contact/vcf", get(get_contact_vcf))
 }
 
 #[cfg(test)]

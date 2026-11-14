@@ -279,3 +279,19 @@ pub async fn push_webhook(
         }
     }
 }
+
+/// This module's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
+#[allow(unused_imports)]
+pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
+    use axum::routing::{delete, get, patch, post, put};
+    utoipa_axum::router::OpenApiRouter::new()
+        .route("/events/stream", get(events_stream))
+}
+
+/// This module's public routes, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
+#[allow(unused_imports)]
+pub fn public_routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
+    use axum::routing::{delete, get, patch, post, put};
+    utoipa_axum::router::OpenApiRouter::new()
+        .route("/push/webhook", post(push_webhook))
+}

@@ -697,6 +697,27 @@ pub async fn remove_image_blacklist_origin(
     }
 }
 
+
+/// This file's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
+#[allow(unused_imports)]
+pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
+    use axum::routing::{delete, get, patch, post, put};
+    utoipa_axum::router::OpenApiRouter::new()
+        .route("/email/proxy-image", get(proxy_image))
+        .route("/email/attachment", get(download_attachment))
+        .route("/email/export", get(export_account))
+        .route("/email/image-origins", get(list_image_origins).post(add_image_origin).delete(remove_image_origin))
+        .route("/email/image-blacklist", get(list_image_blacklist).post(add_image_blacklist_origin).delete(remove_image_blacklist_origin))
+}
+
+/// This file's public routes, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
+#[allow(unused_imports)]
+pub fn public_routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
+    use axum::routing::{delete, get, patch, post, put};
+    utoipa_axum::router::OpenApiRouter::new()
+        .route("/email/navigate", get(navigate))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

@@ -915,3 +915,22 @@ pub async fn raw_email(
         .body(Body::from(raw))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
+
+/// This module's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
+#[allow(unused_imports)]
+pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
+    use axum::routing::{delete, get, patch, post, put};
+    utoipa_axum::router::OpenApiRouter::new()
+        .route("/webauthn/register/start", post(register_start))
+        .route("/webauthn/register/finish", post(register_finish))
+        .route("/webauthn/authenticate/start", post(authenticate_start))
+        .route("/webauthn/authenticate/finish", post(authenticate_finish))
+        .route("/webauthn/credentials", get(list_credentials))
+        .route("/webauthn/credential", delete(delete_credential))
+        .route("/pgp/vault", get(get_vault).delete(reset_vault).put(update_vault))
+        .route("/pgp/vault/initialize", post(initialize_vault))
+        .route("/pgp/devices/pending", post(create_pending_device))
+        .route("/pgp/keys", get(list_public_keys))
+        .route("/pgp/key", post(save_public_key).delete(delete_public_key))
+        .route("/email/raw", get(raw_email))
+}

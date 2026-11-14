@@ -514,3 +514,27 @@ pub async fn delete_virtual_folder(
     }
     StatusCode::NO_CONTENT.into_response()
 }
+
+/// The mail routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
+#[allow(unused_imports)]
+pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
+    use axum::routing::{delete, get, patch, post, put};
+    utoipa_axum::router::OpenApiRouter::new()
+        .route("/email/accounts", get(list_accounts))
+        .route("/email/account", post(save_account).put(save_account).delete(delete_account))
+        .route("/email/mailboxes", get(list_mailboxes))
+        .route("/email/sync", post(trigger_mailbox_sync))
+        .route("/email/unread-counts", get(get_unread_counts))
+        .route("/email/folders", get(list_virtual_folders))
+        .route("/email/folder", post(create_virtual_folder).put(update_virtual_folder).delete(delete_virtual_folder))
+        .route("/email/identities", get(list_identities))
+        .route("/email/identity", post(save_identity).put(save_identity).delete(delete_identity))
+        .merge(messages::routes())
+        .merge(attachments::routes())
+        .merge(send::routes())
+}
+
+/// The public mail routes, relative to `/api` (api.rs).
+pub fn public_routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
+    attachments::public_routes()
+}

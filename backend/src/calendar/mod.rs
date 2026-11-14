@@ -25,7 +25,7 @@ pub(super) const NEUTRAL_DOT_COLOR: &str = "var(--tm-text-muted)";
 
 // ── JSON response types ────────────────────────────────────────────────────────
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, utoipa::ToSchema)]
 pub struct CalendarJson {
     pub account_id: String,
     pub href: String,
@@ -625,6 +625,26 @@ pub async fn toggle_calendar(
             (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response()
         }
     }
+}
+
+
+/// This module's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
+#[allow(unused_imports)]
+pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
+    use axum::routing::{delete, get, patch, post, put};
+    utoipa_axum::router::OpenApiRouter::new()
+        .route("/calendars", get(list_calendars))
+        .route("/calendar/toggle", post(toggle_calendar))
+        .route("/events", get(list_events))
+        .route("/calendar", get(list_calendar).post(create_calendar_handler))
+        .route("/import", post(import_ics).layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)))
+        .route("/import/preview", post(preview_ics_import).layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)))
+        .route("/event", post(save_event).delete(delete_event))
+        .route("/event/ics", get(get_event_ics))
+        .route("/email/message-events", get(get_message_events))
+        .route("/email/thread-events", get(get_thread_events))
+        .route("/calendar/event-emails", get(get_event_source_emails))
+        .route("/search", get(search_events))
 }
 
 #[cfg(test)]

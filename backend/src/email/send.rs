@@ -288,6 +288,16 @@ fn raw_address_emails(addresses: mail_parser::AddressList<'_>) -> Vec<String> {
         .collect()
 }
 
+
+/// This file's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
+#[allow(unused_imports)]
+pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
+    use axum::routing::{delete, get, patch, post, put};
+    utoipa_axum::router::OpenApiRouter::new()
+        .route("/email/autodiscover", get(autodiscover_handler))
+        .route("/email/send-raw", post(send_raw_email).layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

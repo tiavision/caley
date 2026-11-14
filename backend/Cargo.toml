@@ -58,3 +58,5 @@ zstd = "0.14"
 tokio-util = { version = "0.7", features = ["io", "io-util"] }
 webauthn-rs = { version = "0.6", features = ["danger-allow-state-serialisation"] }
 openssl = { version = "0.10", features = ["vendored"] }
+utoipa = { version = "6", features = ["axum_extras", "preserve_order"] }
+utoipa-axum = "0.3"
