@@ -16,7 +16,89 @@ use crate::caldav::{
 use crate::db;
 use crate::oidc::{AppState, CurrentUser};
 use crate::sync::SyncTrigger;
+use utoipa::{IntoParams, ToSchema};
 
+// The handlers parse their forms and queries by hand (fields repeat, missing ones have
+// defaults), so these structs only describe the requests.
+
+/// An event to create (no `uid`) or save. The alarm and attendee fields repeat, once
+/// per alarm / attendee, in the same order.
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub(crate) struct EventForm {
+    /// empty or missing: a new event
+    uid: Option<String>,
+    summary: String,
+    description: Option<String>,
+    location: Option<String>,
+    /// `YYYY-MM-DD`
+    date: String,
+    /// `HH:MM`
+    start_time: Option<String>,
+    /// `HH:MM`
+    end_time: Option<String>,
+    /// IANA timezone (default `UTC`)
+    tz: Option<String>,
+    /// `true` for an all-day event
+    is_all_day: Option<String>,
+    calendar_href: String,
+    account_id: String,
+    /// `series` (default) or `this_instance` (an override of one occurrence)
+    scope: Option<String>,
+    /// the occurrence's original start (`this_instance`)
+    original_dtstart: Option<String>,
+    /// the timezone the recurring master was authored in (default `tz`)
+    original_tz: Option<String>,
+    /// the calendar the event was in, when it moves
+    original_calendar_href: Option<String>,
+    /// the account the event was in, when it moves
+    original_account_id: Option<String>,
+    /// `RecurrenceInfo` as JSON; empty or `{}` for none
+    recurrence: Option<String>,
+    alarm_direction: Vec<String>,
+    alarm_value: Vec<String>,
+    alarm_unit: Vec<String>,
+    alarm_datetime: Vec<String>,
+    attendee_cn: Vec<String>,
+    attendee_email: Vec<String>,
+    attendee_partstat: Vec<String>,
+}
+
+#[allow(dead_code)]
+#[derive(IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct DeleteEventQuery {
+    uid: String,
+    account_id: String,
+    calendar_href: String,
+    /// `this_instance` (with `original_dtstart`) deletes one occurrence; else the event
+    scope: Option<String>,
+    /// the occurrence's original start (`this_instance`)
+    original_dtstart: Option<String>,
+    /// the occurrence's timezone (default `UTC`)
+    tz: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub(crate) struct CreateCalendarForm {
+    account_id: String,
+    name: String,
+    /// CSS color; empty for none
+    color: Option<String>,
+}
+
+#[utoipa::path(
+    post,
+    path = "/event",
+    request_body(content = EventForm, content_type = "application/x-www-form-urlencoded"),
+    responses(
+        (status = 200, description = "saved (empty body); the event arrives as an `event_updated` SSE event"),
+        (status = 400, description = "a required field is missing (plain text)"),
+        (status = 404, description = "no such CalDAV account or event (plain text)"),
+        (status = 500, description = "the CalDAV server refused it (plain text)")
+    )
+)]
 pub async fn save_event(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -379,6 +461,17 @@ pub async fn save_event(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/event",
+    params(DeleteEventQuery),
+    responses(
+        (status = 200, description = "deleted (empty body)"),
+        (status = 400, description = "a required parameter is missing (plain text)"),
+        (status = 404, description = "no such CalDAV account or event (plain text)"),
+        (status = 500, description = "the CalDAV server refused it (plain text)")
+    )
+)]
 pub async fn delete_event(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -551,7 +644,14 @@ pub(super) async fn optimistic_upsert(
             .into_iter()
             .next()
             .and_then(|ev| {
-                serde_json::to_string(&build_event_json(&ev, account_id, color, calendar_href, None)).ok()
+                serde_json::to_string(&build_event_json(
+                    &ev,
+                    account_id,
+                    color,
+                    calendar_href,
+                    None,
+                ))
+                .ok()
             })
     } else {
         None
@@ -567,6 +667,17 @@ pub(super) async fn optimistic_upsert(
     );
 }
 
+#[utoipa::path(
+    post,
+    path = "/calendar",
+    request_body(content = CreateCalendarForm, content_type = "application/x-www-form-urlencoded"),
+    responses(
+        (status = 200, body = CalendarJson),
+        (status = 400, description = "missing `name` or `account_id` (plain text)"),
+        (status = 404, description = "no such CalDAV account (plain text)"),
+        (status = 502, description = "the CalDAV server refused MKCALENDAR (plain text)")
+    )
+)]
 pub async fn create_calendar_handler(
     State(state): State<crate::oidc::AppState>,
     user: CurrentUser,

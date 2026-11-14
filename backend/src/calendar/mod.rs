@@ -7,6 +7,8 @@ use chrono::{Datelike, NaiveDate, NaiveDateTime, TimeZone as _, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
 use url::form_urlencoded;
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::caldav::{Alarm, CalDavClient, PartStat, RecurrenceInfo};
 use crate::db;
@@ -15,46 +17,49 @@ use crate::oidc::{AppState, CurrentUser};
 pub(crate) mod events;
 pub(crate) mod import;
 
-pub use events::{create_calendar_handler, delete_event, save_event};
-pub use import::{
-    get_event_ics, get_event_source_emails, get_message_events, get_thread_events, import_ics,
-    preview_ics_import, search_events,
-};
-
 pub(super) const NEUTRAL_DOT_COLOR: &str = "var(--tm-text-muted)";
 
 // ── JSON response types ────────────────────────────────────────────────────────
 
-#[derive(Serialize, Clone, utoipa::ToSchema)]
+#[derive(Serialize, Clone, ToSchema)]
 pub struct CalendarJson {
     pub account_id: String,
     pub href: String,
     pub name: String,
+    #[schema(required)]
     pub color: Option<String>,
     pub is_active: bool,
 }
 
-#[derive(Serialize, Clone)]
+/// An alarm as the event form edits it.
+#[derive(Serialize, Clone, ToSchema)]
 pub struct AlarmFields {
+    /// `before-start`, `after-start`, `before-end`, `after-end` or `absolute`
     pub direction: String,
+    /// the amount of `unit`s (relative alarms; empty for absolute ones)
     pub value: String,
+    /// minutes per unit: `1`, `60` or `1440` (empty for absolute alarms)
     pub unit: String,
+    /// UTC, `YYYYMMDDTHHMMSSZ` (absolute alarms; empty for relative ones)
     pub datetime: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, ToSchema)]
 pub struct AttendeeFields {
     pub cn: String,
     pub email: String,
     pub partstat: PartStat,
 }
 
-#[derive(Serialize, Clone)]
+/// An event (one occurrence of a recurring one), times in the viewer's timezone.
+#[derive(Serialize, Clone, ToSchema)]
 pub struct EventJson {
     pub account_id: String,
     pub uid: String,
+    /// `HH:MM-HH:MM`, `HH:MM` or `All day`
     pub time_range: String,
     pub summary: String,
+    /// the calendar's color, or a CSS variable for calendars without one
     pub color: String,
     pub dtstart: String,
     pub dtend: String,
@@ -63,6 +68,7 @@ pub struct EventJson {
     pub location: String,
     pub description: String,
     pub is_recurring: bool,
+    #[schema(required)]
     pub recurrence: Option<RecurrenceInfo>,
     pub calendar_href: String,
     pub master_dtstart: String,
@@ -70,24 +76,30 @@ pub struct EventJson {
     pub attendees: Vec<AttendeeFields>,
 }
 
-#[derive(Serialize)]
+/// A day of the week view with its events, all-day ones first.
+#[derive(Serialize, ToSchema)]
 pub struct DayEventsJson {
+    /// `YYYY-MM-DD`
     pub date_iso: String,
     pub day_name: String,
     pub is_today: bool,
     pub events: Vec<EventJson>,
 }
 
-#[derive(Serialize)]
+/// A cell of the month grid.
+#[derive(Serialize, ToSchema)]
 pub struct MonthDayJson {
     pub day_number: u32,
     pub date_str: String,
     pub is_current_month: bool,
+    /// the distinct colors of the day's events
     pub event_colors: Vec<String>,
 }
 
-#[derive(Serialize)]
+/// A month as whole weeks (Monday first).
+#[derive(Serialize, ToSchema)]
 pub struct MonthGridJson {
+    /// `YYYY-MM`
     pub month: String,
     pub month_name: String,
     pub month_number: u32,
@@ -310,7 +322,44 @@ pub(super) fn build_event_json(
     }
 }
 
+// ── Query and form descriptions ──────────────────────────────────────────────
+// The handlers parse these by hand (an unparsable value is ignored, not a 400; event
+// forms repeat fields), so the structs only describe the requests.
+
+#[allow(dead_code)]
+#[derive(IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct EventsQuery {
+    /// first day, `YYYY-MM-DD` (default: Monday of the current week)
+    start: Option<String>,
+    /// last day, `YYYY-MM-DD` (default: Sunday of the current week)
+    end: Option<String>,
+    /// the viewer's IANA timezone (default: the server's)
+    tz: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct MonthQuery {
+    /// `YYYY-MM` (default: the current month)
+    month: Option<String>,
+    /// the viewer's IANA timezone (default: the server's)
+    tz: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub(crate) struct ToggleCalendarForm {
+    account_id: String,
+    href: String,
+    /// `false` hides the calendar; anything else (or missing) shows it
+    active: Option<String>,
+}
+
 // ── Read handlers (serve from cache) ─────────────────────────────────────────
+
+#[utoipa::path(get, path = "/calendars", responses((status = 200, body = Vec<CalendarJson>)))]
 
 pub async fn list_calendars(State(state): State<AppState>, user: CurrentUser) -> Response {
     let calendars = match db::get_cached_calendars(&state.db, &user.user_id).await {
@@ -338,6 +387,12 @@ pub async fn list_calendars(State(state): State<AppState>, user: CurrentUser) ->
     Json(result).into_response()
 }
 
+#[utoipa::path(
+    get,
+    path = "/events",
+    params(EventsQuery),
+    responses((status = 200, description = "one entry per day from `start` to `end`", body = Vec<DayEventsJson>))
+)]
 pub async fn list_events(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -442,6 +497,7 @@ pub async fn list_events(
     Json(days).into_response()
 }
 
+#[utoipa::path(get, path = "/calendar", params(MonthQuery), responses((status = 200, body = MonthGridJson)))]
 pub async fn list_calendar(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -576,6 +632,16 @@ pub async fn list_calendar(
 
 // ── Write handlers (CalDAV + optimistic cache update) ─────────────────────────
 
+#[utoipa::path(
+    post,
+    path = "/calendar/toggle",
+    request_body(content = ToggleCalendarForm, content_type = "application/x-www-form-urlencoded"),
+    responses(
+        (status = 200, description = "saved (empty body)"),
+        (status = 400, description = "missing `href` or `account_id` (plain text)"),
+        (status = 404, description = "no such CalDAV account (plain text)")
+    )
+)]
 pub async fn toggle_calendar(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -627,31 +693,39 @@ pub async fn toggle_calendar(
     }
 }
 
-
-/// This module's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
-#[allow(unused_imports)]
-pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
-    use axum::routing::{delete, get, patch, post, put};
-    utoipa_axum::router::OpenApiRouter::new()
-        .route("/calendars", get(list_calendars))
-        .route("/calendar/toggle", post(toggle_calendar))
-        .route("/events", get(list_events))
-        .route("/calendar", get(list_calendar).post(create_calendar_handler))
-        .route("/import", post(import_ics).layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)))
-        .route("/import/preview", post(preview_ics_import).layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)))
-        .route("/event", post(save_event).delete(delete_event))
-        .route("/event/ics", get(get_event_ics))
-        .route("/email/message-events", get(get_message_events))
-        .route("/email/thread-events", get(get_thread_events))
-        .route("/calendar/event-emails", get(get_event_source_emails))
-        .route("/search", get(search_events))
+/// This module's routes that need a signed-in user, relative to `/api` (api.rs).
+pub fn routes() -> OpenApiRouter<AppState> {
+    use axum::extract::DefaultBodyLimit;
+    const ICS_LIMIT: usize = 10 * 1024 * 1024;
+    let (s, p, m) = routes!(import::import_ics);
+    let import = (s, p, m.layer(DefaultBodyLimit::max(ICS_LIMIT)));
+    let (s, p, m) = routes!(import::preview_ics_import);
+    let preview = (s, p, m.layer(DefaultBodyLimit::max(ICS_LIMIT)));
+    OpenApiRouter::new()
+        .routes(routes!(list_calendars))
+        .routes(routes!(toggle_calendar))
+        .routes(routes!(list_events))
+        .routes(routes!(list_calendar, events::create_calendar_handler))
+        .routes(import)
+        .routes(preview)
+        .routes(routes!(events::save_event, events::delete_event))
+        .routes(routes!(import::get_event_ics))
+        .routes(routes!(import::get_message_events))
+        .routes(routes!(import::get_thread_events))
+        .routes(routes!(import::get_event_source_emails))
+        .routes(routes!(import::search_events))
 }
 
 #[cfg(test)]
 mod viewer_local_tests {
     use super::*;
 
-    fn timed_event(date: &str, start_time: &str, start_ts: Option<i64>, end_ts: Option<i64>) -> crate::caldav::Event {
+    fn timed_event(
+        date: &str,
+        start_time: &str,
+        start_ts: Option<i64>,
+        end_ts: Option<i64>,
+    ) -> crate::caldav::Event {
         crate::caldav::Event {
             uid: "test".into(),
             summary: String::new(),

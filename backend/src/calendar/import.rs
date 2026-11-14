@@ -13,16 +13,21 @@ use crate::oidc::{AppState, CurrentUser};
 use crate::sync::SyncTrigger;
 use sqlx::{AssertSqlSafe, Row, SqlitePool};
 
+use utoipa::{IntoParams, ToSchema};
+
 use super::{EventJson, build_event_json, require_account_client};
 
-#[derive(serde::Serialize)]
-struct ImportResult {
+#[derive(serde::Serialize, ToSchema)]
+pub(crate) struct ImportResult {
+    /// events written to the calendar
     imported: usize,
+    /// events the CalDAV server refused
     errors: usize,
 }
 
-#[derive(serde::Serialize)]
-struct ImportPreviewEvent {
+/// An event of an ICS file, before the import.
+#[derive(serde::Serialize, ToSchema)]
+pub(crate) struct ImportPreviewEvent {
     uid: String,
     summary: String,
     dtstart: String,
@@ -51,6 +56,57 @@ async fn read_ics_multipart(mut multipart: Multipart) -> Result<String, Response
     ics_content.ok_or_else(|| (StatusCode::BAD_REQUEST, "Missing ICS file").into_response())
 }
 
+// The multipart forms and the search query are parsed by hand, so these structs only
+// describe the requests.
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub(crate) struct IcsFileForm {
+    /// the ICS file
+    #[schema(value_type = String, format = Binary)]
+    file: Vec<u8>,
+}
+
+/// An ICS file to import into a calendar; the `email_*` fields name the message it came
+/// from, so the message shows the events and the events their source message.
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub(crate) struct ImportForm {
+    account_id: String,
+    calendar_href: String,
+    /// the ICS file
+    #[schema(value_type = String, format = Binary)]
+    file: Vec<u8>,
+    email_account_id: Option<String>,
+    email_mailbox: Option<String>,
+    email_uid: Option<i64>,
+}
+
+#[allow(dead_code)]
+#[derive(IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct SearchQuery {
+    /// the search text (at most 200 characters are used)
+    q: String,
+    /// earliest start, `YYYY-MM-DD`
+    start: Option<String>,
+    /// latest start, `YYYY-MM-DD`
+    end: Option<String>,
+    /// `1`: only the active calendars (when no `cal` is given)
+    active: Option<String>,
+    /// calendars to search, each `account_id` and `href` joined by NUL or `|` (default: all)
+    cal: Option<Vec<String>>,
+}
+
+#[utoipa::path(
+    post,
+    path = "/import/preview",
+    request_body(content = IcsFileForm, content_type = "multipart/form-data"),
+    responses(
+        (status = 200, body = Vec<ImportPreviewEvent>),
+        (status = 400, description = "no file, or no importable events in it (plain text)")
+    )
+)]
 pub async fn preview_ics_import(
     State(_state): State<crate::oidc::AppState>,
     _user: CurrentUser,
@@ -94,6 +150,16 @@ pub async fn preview_ics_import(
     Json(previews).into_response()
 }
 
+#[utoipa::path(
+    post,
+    path = "/import",
+    request_body(content = ImportForm, content_type = "multipart/form-data"),
+    responses(
+        (status = 200, body = ImportResult),
+        (status = 400, description = "a required field is missing, or no events in the file (plain text)"),
+        (status = 404, description = "no such CalDAV account (plain text)")
+    )
+)]
 pub async fn import_ics(
     State(state): State<crate::oidc::AppState>,
     user: CurrentUser,
@@ -238,6 +304,15 @@ pub async fn import_ics(
 
 // ── Search ────────────────────────────────────────────────────────────────────
 
+#[utoipa::path(
+    get,
+    path = "/search",
+    params(SearchQuery),
+    responses(
+        (status = 200, description = "at most 100 events, latest first", body = Vec<EventJson>),
+        (status = 400, description = "no search text (plain text)")
+    )
+)]
 pub async fn search_events(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -375,14 +450,18 @@ pub async fn search_events(
 
 // GET /api/email/message-events
 
-#[derive(serde::Deserialize)]
+/// A mail message.
+#[derive(serde::Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct MessageEventsQuery {
+    /// the mail account
     pub account_id: String,
     pub mailbox: String,
     pub uid: i64,
 }
 
-#[derive(serde::Serialize)]
+/// A message of a thread and the events imported from it.
+#[derive(serde::Serialize, ToSchema)]
 pub struct MessageEventGroupJson {
     pub account_id: String,
     pub mailbox: String,
@@ -390,6 +469,15 @@ pub struct MessageEventGroupJson {
     pub events: Vec<EventJson>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/email/message-events",
+    params(MessageEventsQuery),
+    responses(
+        (status = 200, description = "the events imported from the message", body = Vec<EventJson>),
+        (status = 400, description = "a parameter is missing or invalid (plain text)")
+    )
+)]
 pub async fn get_message_events(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -464,6 +552,16 @@ pub async fn get_message_events(
 
 // GET /api/email/thread-events
 
+#[utoipa::path(
+    get,
+    path = "/email/thread-events",
+    params(MessageEventsQuery),
+    responses(
+        (status = 200, description = "the thread's messages with imported events, in thread order", body = Vec<MessageEventGroupJson>),
+        (status = 400, description = "a parameter is missing or invalid (plain text)"),
+        (status = 404, description = "no such mail account (empty body)")
+    )
+)]
 pub async fn get_thread_events(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -606,20 +704,27 @@ pub async fn get_thread_events(
 
 // GET /api/calendar/event-emails
 
-#[derive(serde::Deserialize)]
+/// An event.
+#[derive(serde::Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct EventEmailsQuery {
+    /// the CalDAV account
     pub cal_account_id: String,
     pub calendar_href: String,
     pub event_uid: String,
 }
 
-#[derive(serde::Serialize)]
+/// A mail message an event was imported from.
+#[derive(serde::Serialize, ToSchema)]
 pub struct SourceEmailJson {
     pub account_id: String,
     pub mailbox: String,
     pub uid: i64,
+    #[schema(required)]
     pub from: Option<String>,
+    #[schema(required)]
     pub subject: Option<String>,
+    #[schema(required)]
     pub sent_at: Option<i64>,
 }
 
@@ -712,6 +817,15 @@ async fn query_event_source_emails(
         .collect())
 }
 
+#[utoipa::path(
+    get,
+    path = "/calendar/event-emails",
+    params(EventEmailsQuery),
+    responses(
+        (status = 200, body = Vec<SourceEmailJson>),
+        (status = 400, description = "a parameter is missing (plain text)")
+    )
+)]
 pub async fn get_event_source_emails(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -727,13 +841,25 @@ pub async fn get_event_source_emails(
 }
 
 // GET /api/event/ics
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct EventIcsQuery {
+    /// the CalDAV account
     pub account_id: String,
     pub calendar_href: String,
     pub uid: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/event/ics",
+    params(EventIcsQuery),
+    responses(
+        (status = 200, description = "the event's iCalendar data as stored", body = String, content_type = "text/calendar"),
+        (status = 400, description = "a parameter is missing (plain text)"),
+        (status = 404, description = "no such account or event (empty body)")
+    )
+)]
 pub async fn get_event_ics(
     State(state): State<AppState>,
     user: CurrentUser,

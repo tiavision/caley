@@ -15,7 +15,7 @@ pub struct Alarm {
     pub datetime: Option<String>, // for absolute: UTC ISO 8601 (e.g. "20260514T090000Z")
 }
 
-#[derive(Serialize, Deserialize, Clone, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq, utoipa::ToSchema)]
 #[serde(rename_all = "SCREAMING-KEBAB-CASE")]
 pub enum PartStat {
     #[default]
@@ -78,7 +78,7 @@ pub struct Event {
     pub attendees: Vec<Attendee>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct RecurrenceInfo {
     pub freq: String,
     pub interval: u32,
