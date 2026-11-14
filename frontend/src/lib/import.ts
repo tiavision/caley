@@ -22,8 +22,11 @@ export interface ImportPreviewEvent {
   location: string;
 }
 
-/** POST /api/import, plus `calendar`: calendarValue() of the calendar the events went to. */
+/** POST /api/import (`account_id`, `calendar_href`: the calendar the events went to, a new one for
+ *  `new_calendar_name`), plus `calendar`: calendarValue() of it. */
 export interface ImportResult {
+  account_id: string;
+  calendar_href: string;
   imported: number;
   errors: number;
   calendar: string;

@@ -6,9 +6,13 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
+use axum_typed_multipart::{TryFromMultipart, TypedMultipart};
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
+
+use crate::api::JsonField;
 
 use crate::email_autodiscover;
 use crate::email_db;
@@ -18,22 +22,24 @@ use crate::oidc::{AppState, CurrentUser};
 
 // ── Raw send ─────────────────────────────────────────────────────────────────
 
-/// The multipart form of a raw send (only for the spec: the handler reads the fields one by one).
-#[derive(ToSchema)]
-#[allow(dead_code)]
+/// The multipart form of a raw send.
+#[derive(TryFromMultipart, ToSchema)]
 pub struct SendRawForm {
     /// the identity to send as: its account's SMTP server, its address the envelope sender
     /// (must be the message's only From)
     identity_id: String,
     /// JSON array of the envelope's To addresses
-    envelope_to: Option<String>,
+    #[schema(value_type = Option<String>)]
+    envelope_to: Option<JsonField<Vec<String>>>,
     /// JSON array of the envelope's Cc addresses
-    envelope_cc: Option<String>,
+    #[schema(value_type = Option<String>)]
+    envelope_cc: Option<JsonField<Vec<String>>>,
     /// JSON array of the envelope's Bcc addresses
-    envelope_bcc: Option<String>,
+    #[schema(value_type = Option<String>)]
+    envelope_bcc: Option<JsonField<Vec<String>>>,
     /// the message (`message/rfc822`): ASCII only, no Bcc header
     #[schema(value_type = String, format = Binary)]
-    raw_mime: Vec<u8>,
+    raw_mime: Bytes,
 }
 
 /// Sends a MIME message the client built (signed, encrypted) through the identity's SMTP server to
@@ -53,63 +59,20 @@ pub struct SendRawForm {
 pub async fn send_raw_email(
     State(state): State<AppState>,
     user: CurrentUser,
-    mut multipart: axum::extract::Multipart,
+    TypedMultipart(SendRawForm {
+        identity_id,
+        envelope_to,
+        envelope_cc,
+        envelope_bcc,
+        raw_mime,
+    }): TypedMultipart<SendRawForm>,
 ) -> impl IntoResponse {
-    let mut identity_id = String::new();
-    let mut envelope_to: Vec<String> = vec![];
-    let mut envelope_cc: Vec<String> = vec![];
-    let mut envelope_bcc: Vec<String> = vec![];
-    let mut raw_mime: Vec<u8> = vec![];
-
-    loop {
-        match multipart.next_field().await {
-            Ok(Some(field)) => {
-                let name = field.name().unwrap_or("").to_owned();
-                if name == "raw_mime" {
-                    match field.bytes().await {
-                        Ok(bytes) => raw_mime = bytes.to_vec(),
-                        Err(_) => {
-                            return (StatusCode::BAD_REQUEST, "invalid raw mime").into_response();
-                        }
-                    }
-                    continue;
-                }
-                let text = match field.text().await {
-                    Ok(text) => text,
-                    Err(_) => {
-                        return (StatusCode::BAD_REQUEST, "invalid multipart data").into_response();
-                    }
-                };
-                match name.as_str() {
-                    "identity_id" => identity_id = text,
-                    "envelope_to" => match serde_json::from_str(&text) {
-                        Ok(addresses) => envelope_to = addresses,
-                        Err(_) => {
-                            return (StatusCode::BAD_REQUEST, "invalid envelope recipients")
-                                .into_response();
-                        }
-                    },
-                    "envelope_cc" => match serde_json::from_str(&text) {
-                        Ok(addresses) => envelope_cc = addresses,
-                        Err(_) => {
-                            return (StatusCode::BAD_REQUEST, "invalid envelope recipients")
-                                .into_response();
-                        }
-                    },
-                    "envelope_bcc" => match serde_json::from_str(&text) {
-                        Ok(addresses) => envelope_bcc = addresses,
-                        Err(_) => {
-                            return (StatusCode::BAD_REQUEST, "invalid envelope recipients")
-                                .into_response();
-                        }
-                    },
-                    _ => {}
-                }
-            }
-            Ok(None) => break,
-            Err(_) => return (StatusCode::BAD_REQUEST, "invalid multipart data").into_response(),
-        }
-    }
+    let addresses = |field: Option<JsonField<Vec<String>>>| field.map(|f| f.0).unwrap_or_default();
+    let (envelope_to, envelope_cc, envelope_bcc) = (
+        addresses(envelope_to),
+        addresses(envelope_cc),
+        addresses(envelope_bcc),
+    );
 
     if identity_id.is_empty() || raw_mime.is_empty() {
         return (StatusCode::BAD_REQUEST, "missing identity_id or raw_mime").into_response();

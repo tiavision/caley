@@ -28,7 +28,10 @@ const accounts = [{
 }];
 
 async function show() {
-  const requests = mockRequests({ 'GET /api/caldav/accounts': { accounts }, 'POST /api/import': { imported: 3, errors: 0 } });
+  const requests = mockRequests({
+    'GET /api/caldav/accounts': { accounts },
+    'POST /api/import': { account_id: 'acc', calendar_href: '/cal/work/', imported: 3, errors: 0 },
+  });
   const actions = {
     ics,
     attachment: { open: (a: typeof accounts) => ics.draft(a as never, new File(['x'], 'invite.ics'), { account_id: 'mail', mailbox: 'INBOX', uid: 7 }) },

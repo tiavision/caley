@@ -1,12 +1,12 @@
 use axum::{
-    extract::{RawQuery, State},
+    extract::State,
     http::StatusCode,
     response::{IntoResponse, Json, Response},
 };
+use axum_extra::extract::{Form, Query};
 use chrono::{Datelike, NaiveDate, NaiveDateTime, TimeZone as _, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use url::form_urlencoded;
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -182,21 +182,6 @@ pub(super) fn parse_alarm_from_fields(
     }
 }
 
-// ── Form parsing helpers ──────────────────────────────────────────────────────
-
-pub(super) fn parse_form_field<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
-    pairs
-        .iter()
-        .find(|(k, _)| k == key)
-        .map(|(_, v)| v.as_str())
-}
-
-pub(super) fn parse_event_form(body: String) -> Vec<(String, String)> {
-    form_urlencoded::parse(body.as_bytes())
-        .map(|(k, v)| (k.into_owned(), v.into_owned()))
-        .collect()
-}
-
 pub(super) fn extract_vevent(ical: &str) -> String {
     let ical = ical.replace("\r\n", "\n");
     if let Some(start) = ical.find("BEGIN:VEVENT") {
@@ -322,39 +307,66 @@ pub(super) fn build_event_json(
     }
 }
 
-// ── Query and form descriptions ──────────────────────────────────────────────
-// The handlers parse these by hand (an unparsable value is ignored, not a 400; event
-// forms repeat fields), so the structs only describe the requests.
+// ── Queries and forms ────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
-#[derive(IntoParams)]
+/// A viewer's IANA timezone; one this server does not know is no timezone (the server's is used),
+/// as browsers may name zones the tz database here lacks.
+pub(super) fn viewer_tz<'de, D: serde::Deserializer<'de>>(
+    de: D,
+) -> Result<Option<chrono_tz::Tz>, D::Error> {
+    use serde::Deserialize as _;
+    Ok(Option::<String>::deserialize(de)?.and_then(|s| s.parse().ok()))
+}
+
+/// The first day of a `YYYY-MM` month.
+pub(crate) struct Month(NaiveDate);
+
+impl std::str::FromStr for Month {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        NaiveDate::parse_from_str(&format!("{s}-01"), "%Y-%m-%d")
+            .map(Month)
+            .map_err(|_| format!("invalid month `{s}` (YYYY-MM)"))
+    }
+}
+
+#[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub(crate) struct EventsQuery {
     /// first day, `YYYY-MM-DD` (default: Monday of the current week)
-    start: Option<String>,
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
+    #[param(value_type = Option<String>, format = Date)]
+    start: Option<NaiveDate>,
     /// last day, `YYYY-MM-DD` (default: Sunday of the current week)
-    end: Option<String>,
-    /// the viewer's IANA timezone (default: the server's)
-    tz: Option<String>,
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
+    #[param(value_type = Option<String>, format = Date)]
+    end: Option<NaiveDate>,
+    /// the viewer's IANA timezone (default, also for an unknown one: the server's)
+    #[serde(default, deserialize_with = "viewer_tz")]
+    #[param(value_type = Option<String>)]
+    tz: Option<chrono_tz::Tz>,
 }
 
-#[allow(dead_code)]
-#[derive(IntoParams)]
+#[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub(crate) struct MonthQuery {
     /// `YYYY-MM` (default: the current month)
-    month: Option<String>,
-    /// the viewer's IANA timezone (default: the server's)
-    tz: Option<String>,
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
+    #[param(value_type = Option<String>)]
+    month: Option<Month>,
+    /// the viewer's IANA timezone (default, also for an unknown one: the server's)
+    #[serde(default, deserialize_with = "viewer_tz")]
+    #[param(value_type = Option<String>)]
+    tz: Option<chrono_tz::Tz>,
 }
 
-#[allow(dead_code)]
-#[derive(ToSchema)]
+#[derive(Deserialize, ToSchema)]
 pub(crate) struct ToggleCalendarForm {
     account_id: String,
     href: String,
-    /// `false` hides the calendar; anything else (or missing) shows it
-    active: Option<String>,
+    /// `false` hides the calendar, `true` (or missing) shows it
+    #[serde(default, deserialize_with = "crate::api::empty_as_none")]
+    active: Option<bool>,
 }
 
 // ── Read handlers (serve from cache) ─────────────────────────────────────────
@@ -396,22 +408,12 @@ pub async fn list_calendars(State(state): State<AppState>, user: CurrentUser) ->
 pub async fn list_events(
     State(state): State<AppState>,
     user: CurrentUser,
-    RawQuery(raw_query): RawQuery,
+    Query(EventsQuery {
+        start,
+        end,
+        tz: viewer_tz,
+    }): Query<EventsQuery>,
 ) -> Response {
-    let mut start: Option<NaiveDate> = None;
-    let mut end: Option<NaiveDate> = None;
-    let mut viewer_tz: Option<chrono_tz::Tz> = None;
-    if let Some(query) = raw_query {
-        for (key, value) in form_urlencoded::parse(query.as_bytes()) {
-            match key.as_ref() {
-                "start" => start = NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok(),
-                "end" => end = NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok(),
-                "tz" => viewer_tz = value.parse::<chrono_tz::Tz>().ok(),
-                _ => {}
-            }
-        }
-    }
-
     let today = viewer_today(viewer_tz);
     let weekday = today.weekday().num_days_from_monday();
     let week_start = today - chrono::TimeDelta::days(weekday as i64);
@@ -501,26 +503,16 @@ pub async fn list_events(
 pub async fn list_calendar(
     State(state): State<AppState>,
     user: CurrentUser,
-    RawQuery(raw_query): RawQuery,
+    Query(MonthQuery {
+        month,
+        tz: viewer_tz,
+    }): Query<MonthQuery>,
 ) -> Response {
-    let mut month_param: Option<String> = None;
-    let mut viewer_tz: Option<chrono_tz::Tz> = None;
-    if let Some(query) = raw_query {
-        for (key, value) in form_urlencoded::parse(query.as_bytes()) {
-            match key.as_ref() {
-                "month" => month_param = Some(value.into_owned()),
-                "tz" => viewer_tz = value.parse::<chrono_tz::Tz>().ok(),
-                _ => {}
-            }
-        }
-    }
     let today = viewer_today(viewer_tz);
 
-    let first_day = if let Some(ref m) = month_param {
-        NaiveDate::parse_from_str(&format!("{}-01", m), "%Y-%m-%d")
-            .unwrap_or_else(|_| today.with_day(1).unwrap_or(today))
-    } else {
-        today.with_day(1).unwrap_or(today)
+    let first_day = match month {
+        Some(Month(first)) => first,
+        None => today.with_day(1).unwrap_or(today),
     };
 
     let next_first = if first_day.month() == 12 {
@@ -645,19 +637,13 @@ pub async fn list_calendar(
 pub async fn toggle_calendar(
     State(state): State<AppState>,
     user: CurrentUser,
-    body: String,
+    Form(ToggleCalendarForm {
+        account_id,
+        href,
+        active,
+    }): Form<ToggleCalendarForm>,
 ) -> Response {
-    let mut href = String::new();
-    let mut account_id = String::new();
-    let mut active = true;
-    for (key, value) in form_urlencoded::parse(body.as_bytes()) {
-        match key.as_ref() {
-            "account_id" => account_id = value.into_owned(),
-            "href" => href = value.into_owned(),
-            "active" => active = value != "false",
-            _ => {}
-        }
-    }
+    let active = active.unwrap_or(true);
     if href.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing href parameter").into_response();
     }
