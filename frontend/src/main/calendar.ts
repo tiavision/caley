@@ -2,5 +2,3 @@
 import '../styles/temper.ts';
 import '../styles/events.scss';
 import '../styles/calendar.scss';
-if (!redirectToPendingReturnUrl()) {
-  }

@@ -10,7 +10,7 @@ interface LayoutProps {
 declare module '*/auth-return.html' {
   const Base: typeof import('@tiaforge-ui/sinter/components').Component;
   /** the base of `src/components/auth-return.ts`: props, events, refs and state as `auth-return.html` declares them */
-  export class AuthReturnComponent extends Base<{}, {}, {  }, {}> {}
+  export class AuthReturnComponent extends Base<{ to?: string }, {}, {  }, {}> {}
 }
 declare module '*/close-after.html' {
   const Base: typeof import('@tiaforge-ui/sinter/components').Component;

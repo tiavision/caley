@@ -103,7 +103,9 @@ pub async fn handle_login(
         let _ = session.insert("user_id", demo_user_id).await;
         let _ = session.insert("display_name", "Demo User").await;
         state.sync_manager.ensure_task_for(demo_user_id);
-        return Json(json!({"status": "ok"})).into_response();
+        // where the login page goes next (landing.rs)
+        let redirect = crate::landing::take(&session).await;
+        return Json(json!({"status": "ok", "redirect": redirect})).into_response();
     }
 
     if login_rate_limited(&user_id) {
@@ -199,7 +201,9 @@ pub async fn handle_login(
         .sync_manager
         .trigger(&user_id, SyncTrigger::Incremental);
 
-    Json(json!({"status": "ok"})).into_response()
+    // where the login page goes next (landing.rs)
+    let redirect = crate::landing::take(&session).await;
+    Json(json!({"status": "ok", "redirect": redirect})).into_response()
 }
 
 pub async fn delete_account(

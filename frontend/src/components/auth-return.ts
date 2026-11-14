@@ -1,9 +1,9 @@
-// The script of <auth-return>: just signed in on the login page, ask `/` again; the server now redirects to
-// the page wanted or last used (backend/src/landing.rs).
+// The script of <auth-return>: the navigation after the sign-in on the login page. (Already signed in, the
+// server redirects `/` itself; on the Vite dev server, which cannot, this goes to the calendar.)
 import { AuthReturnComponent } from './auth-return.html';
 
 export class AuthReturn extends AuthReturnComponent {
   connected() {
-    location.replace('/');
+    location.replace(this.props.to || '/calendar/');
   }
 }

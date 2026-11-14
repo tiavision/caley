@@ -1,4 +1,5 @@
-<!-- Rendered once someone has signed in on the login page: asks `/` again, which the server redirects into the app (auth-return.ts). -->
-<template data-sn-component="">
+<!-- Rendered once someone has signed in on the login page: goes to `to`, the page the sign-in answered with (the
+     one wanted or last used, backend/src/landing.rs), else the calendar (auth-return.ts). -->
+<template data-sn-component="{ to?: string }">
   <span hidden></span>
 </template>
