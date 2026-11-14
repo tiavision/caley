@@ -6,6 +6,8 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::BroadcastStream;
+use utoipa::IntoParams;
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::db;
 use crate::oidc::{AppState, CurrentUser};
@@ -106,6 +108,30 @@ impl SseBroadcaster {
     }
 }
 
+/// The live updates of the signed-in user (server-sent events; a `heartbeat` comment every 30 s).
+/// Starts the user's CalDAV and email sync tasks.
+#[utoipa::path(
+    get,
+    path = "/events/stream",
+    responses((
+        status = 200,
+        body = String,
+        content_type = "text/event-stream",
+        description = "Server-sent events, each an `event:` name with a `data:` line. With data `1` \
+(re-fetch): `events_refetch` (/api/events), `calendars_changed` (/api/calendars), `contacts_refetch` \
+(/api/contacts), `accounts_changed` (the email accounts). With JSON data: \
+`event_updated` `{account_id, uid, calendar_href, event?: EventJson}`, \
+`event_removed` `{account_id, uid, calendar_href}`, \
+`contact_updated` `{account_id, uid, addressbook_href, contact?: ContactJson}`, \
+`contact_removed` `{account_id, uid, addressbook_href}`, \
+`emails_refetch` `{account_id, mailbox}`, \
+`email_updated` `{account_id, uid: number, mailbox, flags: string[]}`, \
+`email_removed` `{account_id, uid: number, mailbox}`, \
+`new_email` `{account_id, uid: number, mailbox, from: string|null, subject: string|null}`, \
+`mailboxes_changed` `{account_id}`, \
+`sync_started` and `sync_completed` `{account_id, mailbox}`."
+    ))
+)]
 pub async fn events_stream(
     axum::extract::State(state): axum::extract::State<AppState>,
     user: CurrentUser,
@@ -219,16 +245,32 @@ pub async fn events_stream(
     )
 }
 
+#[derive(serde::Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct PushWebhookQuery {
+    /// the push subscription's token (of a calendar or an address book)
+    token: Option<String>,
+}
+
 /// Webhook endpoint for WebDAV-Push notifications.
 /// Validates the per-calendar token, then triggers an incremental sync.
+#[utoipa::path(
+    post,
+    path = "/push/webhook",
+    params(PushWebhookQuery),
+    responses(
+        (status = 201, description = "accepted (also for an unknown token, so tokens cannot be probed)"),
+        (status = 400, description = "missing token (plain text)")
+    )
+)]
 pub async fn push_webhook(
     axum::extract::State(state): axum::extract::State<AppState>,
-    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    axum::extract::Query(params): axum::extract::Query<PushWebhookQuery>,
 ) -> impl IntoResponse {
     use crate::sync::SyncTrigger;
 
-    let token = match params.get("token") {
-        Some(t) => t.clone(),
+    let token = match params.token {
+        Some(t) => t,
         None => {
             eprintln!("[push] webhook called with no token");
             return (axum::http::StatusCode::BAD_REQUEST, "missing token").into_response();
@@ -280,18 +322,12 @@ pub async fn push_webhook(
     }
 }
 
-/// This module's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
-#[allow(unused_imports)]
-pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
-    use axum::routing::{delete, get, patch, post, put};
-    utoipa_axum::router::OpenApiRouter::new()
-        .route("/events/stream", get(events_stream))
+/// This module's routes that need a signed-in user, relative to `/api` (api.rs).
+pub fn routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(events_stream))
 }
 
-/// This module's public routes, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
-#[allow(unused_imports)]
-pub fn public_routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
-    use axum::routing::{delete, get, patch, post, put};
-    utoipa_axum::router::OpenApiRouter::new()
-        .route("/push/webhook", post(push_webhook))
+/// This module's public routes, relative to `/api` (api.rs).
+pub fn public_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(push_webhook))
 }

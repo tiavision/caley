@@ -6,8 +6,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::email_autodiscover;
 use crate::email_db;
@@ -17,6 +18,38 @@ use crate::oidc::{AppState, CurrentUser};
 
 // ── Raw send ─────────────────────────────────────────────────────────────────
 
+/// The multipart form of a raw send (only for the spec: the handler reads the fields one by one).
+#[derive(ToSchema)]
+#[allow(dead_code)]
+pub struct SendRawForm {
+    /// the identity to send as: its account's SMTP server, its address the envelope sender
+    /// (must be the message's only From)
+    identity_id: String,
+    /// JSON array of the envelope's To addresses
+    envelope_to: Option<String>,
+    /// JSON array of the envelope's Cc addresses
+    envelope_cc: Option<String>,
+    /// JSON array of the envelope's Bcc addresses
+    envelope_bcc: Option<String>,
+    /// the message (`message/rfc822`): ASCII only, no Bcc header
+    #[schema(value_type = String, format = Binary)]
+    raw_mime: Vec<u8>,
+}
+
+/// Sends a MIME message the client built (signed, encrypted) through the identity's SMTP server to
+/// the envelope's recipients (at most 100), then appends it to the Sent mailbox.
+#[utoipa::path(
+    post,
+    path = "/email/send-raw",
+    request_body(content = SendRawForm, content_type = "multipart/form-data"),
+    responses(
+        (status = 200, description = "sent (empty body)"),
+        (status = 400, description = "an invalid form, message or recipient (plain text)"),
+        (status = 404, description = "identity or account not found (plain text)"),
+        (status = 500, description = "database error"),
+        (status = 502, description = "the SMTP server refused it (plain text)")
+    )
+)]
 pub async fn send_raw_email(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -288,14 +321,16 @@ fn raw_address_emails(addresses: mail_parser::AddressList<'_>) -> Vec<String> {
         .collect()
 }
 
-
-/// This file's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
-#[allow(unused_imports)]
-pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
-    use axum::routing::{delete, get, patch, post, put};
-    utoipa_axum::router::OpenApiRouter::new()
-        .route("/email/autodiscover", get(autodiscover_handler))
-        .route("/email/send-raw", post(send_raw_email).layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)))
+/// This file's routes that need a signed-in user, relative to `/api` (api.rs).
+pub fn routes() -> OpenApiRouter<AppState> {
+    let (schemas, paths, send_raw) = routes!(send_raw_email);
+    OpenApiRouter::new()
+        .routes(routes!(autodiscover_handler))
+        .routes((
+            schemas,
+            paths,
+            send_raw.layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
+        ))
 }
 
 #[cfg(test)]
@@ -345,11 +380,73 @@ mod tests {
 
 // ── Autodiscover ──────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct AutodiscoverQuery {
+    /// the address to find the servers of
     pub email: String,
 }
 
+/// What autodiscovery found for an address: `{"found": false}`, or `found` with all the servers'
+/// fields (`provider_name` may be `null`).
+#[derive(Serialize, ToSchema)]
+pub struct Autodiscovery {
+    pub found: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_name: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = String, required = false)]
+    pub imap_host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = u16, required = false)]
+    pub imap_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = bool, required = false)]
+    pub imap_use_tls: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = String, required = false)]
+    pub imap_username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = String, required = false)]
+    pub smtp_host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = u16, required = false)]
+    pub smtp_port: Option<u16>,
+}
+
+impl Autodiscovery {
+    const NOT_FOUND: Autodiscovery = Autodiscovery {
+        found: false,
+        provider_name: None,
+        imap_host: None,
+        imap_port: None,
+        imap_use_tls: None,
+        imap_username: None,
+        smtp_host: None,
+        smtp_port: None,
+    };
+
+    fn found(r: email_autodiscover::AutodiscoverResult) -> Self {
+        Autodiscovery {
+            found: true,
+            provider_name: Some(r.provider_name),
+            imap_host: Some(r.imap_host),
+            imap_port: Some(r.imap_port),
+            imap_use_tls: Some(r.imap_use_tls),
+            imap_username: Some(r.imap_username),
+            smtp_host: Some(r.smtp_host),
+            smtp_port: Some(r.smtp_port),
+        }
+    }
+}
+
+/// The IMAP and SMTP servers of an address (Thunderbird's ISPDB, then the domain's autoconfig).
+#[utoipa::path(
+    get,
+    path = "/email/autodiscover",
+    params(AutodiscoverQuery),
+    responses((status = 200, body = Autodiscovery))
+)]
 pub async fn autodiscover_handler(
     State(state): State<AppState>,
     _user: CurrentUser,
@@ -357,16 +454,17 @@ pub async fn autodiscover_handler(
 ) -> impl IntoResponse {
     if state.demo_mode {
         let local = params.email.split('@').next().unwrap_or(&params.email);
-        return Json(json!({
-            "found": true,
-            "provider_name": "Demo Mail",
-            "imap_host": "imap.demo.example",
-            "imap_port": 993,
-            "imap_use_tls": true,
-            "imap_username": local,
-            "smtp_host": "smtp.demo.example",
-            "smtp_port": 587,
-        }))
+        return Json(Autodiscovery::found(
+            email_autodiscover::AutodiscoverResult {
+                provider_name: Some("Demo Mail".to_owned()),
+                imap_host: "imap.demo.example".to_owned(),
+                imap_port: 993,
+                imap_use_tls: true,
+                imap_username: local.to_owned(),
+                smtp_host: "smtp.demo.example".to_owned(),
+                smtp_port: 587,
+            },
+        ))
         .into_response();
     }
 
@@ -377,21 +475,11 @@ pub async fn autodiscover_handler(
         .build()
     {
         Ok(c) => c,
-        Err(_) => return Json(json!({ "found": false })).into_response(),
+        Err(_) => return Json(Autodiscovery::NOT_FOUND).into_response(),
     };
 
     match email_autodiscover::autodiscover(&params.email, &client).await {
-        Some(r) => Json(json!({
-            "found": true,
-            "provider_name": r.provider_name,
-            "imap_host": r.imap_host,
-            "imap_port": r.imap_port,
-            "imap_use_tls": r.imap_use_tls,
-            "imap_username": r.imap_username,
-            "smtp_host": r.smtp_host,
-            "smtp_port": r.smtp_port,
-        }))
-        .into_response(),
-        None => Json(json!({ "found": false })).into_response(),
+        Some(r) => Json(Autodiscovery::found(r)).into_response(),
+        None => Json(Autodiscovery::NOT_FOUND).into_response(),
     }
 }

@@ -7,7 +7,8 @@ use axum::{
     response::{IntoResponse, Json, Response},
 };
 use serde::Deserialize;
-use serde_json::json;
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::email_db;
 use crate::email_sync::eml_path;
@@ -47,9 +48,7 @@ fn find_bytes_by_cid(eml_bytes: &[u8], cid: &str) -> Option<Vec<u8>> {
     let msg = MessageParser::default().parse(eml_bytes)?;
     for part in msg.root().parts() {
         if let Some(part_cid) = part.content_id() {
-            let bare = part_cid
-                .trim_start_matches('<')
-                .trim_end_matches('>');
+            let bare = part_cid.trim_start_matches('<').trim_end_matches('>');
             if bare == cid || part_cid == cid {
                 return part_to_bytes(part);
             }
@@ -60,12 +59,17 @@ fn find_bytes_by_cid(eml_bytes: &[u8], cid: &str) -> Option<Vec<u8>> {
 
 // ── Image proxy ───────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+/// Either `url` (a remote image of a whitelisted origin) or `cid` with `account_id`, `mailbox`
+/// and `uid` (an inline image of a cached message).
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ProxyImageQuery {
+    /// the remote image's http(s) URL
     pub url: Option<String>,
     pub account_id: Option<String>,
     pub mailbox: Option<String>,
     pub uid: Option<u32>,
+    /// the inline part's Content-ID, with or without angle brackets
     pub cid: Option<String>,
 }
 
@@ -101,6 +105,18 @@ fn detect_allowed_image(data: &[u8]) -> Option<AllowedImage> {
     }
 }
 
+/// An image of a message: an inline part by Content-ID, or a remote image of a whitelisted origin.
+/// Only PNG, JPEG, GIF, WebP and AVIF (sniffed from the bytes) are served; anything else, an
+/// origin not whitelisted, an unsafe address or a failed fetch is a 1×1 transparent GIF.
+#[utoipa::path(
+    get,
+    path = "/email/proxy-image",
+    params(ProxyImageQuery),
+    responses(
+        (status = 200, description = "the image (PNG, JPEG, GIF, WebP or AVIF), or a 1×1 transparent GIF", body = Vec<u8>, content_type = "image/*"),
+        (status = 400, description = "`url` missing or not http(s) (plain text)", body = String, content_type = "text/plain")
+    )
+)]
 pub async fn proxy_image(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -126,24 +142,17 @@ pub async fn proxy_image(
 
         // Try the indexed path first (fast); fall back to scanning all MIME
         // parts by Content-ID for messages cached before the index was built.
-        let bytes = match email_db::get_attachment_by_cid(
-            &state.db,
-            account_id,
-            mailbox,
-            uid,
-            cid,
-        )
-        .await
-        {
-            Ok(Some(att)) => match extract_part_bytes(&eml, att.part_index as usize) {
-                Some(b) => b,
-                None => return transparent_pixel(),
-            },
-            _ => match find_bytes_by_cid(&eml, cid) {
-                Some(b) => b,
-                None => return transparent_pixel(),
-            },
-        };
+        let bytes =
+            match email_db::get_attachment_by_cid(&state.db, account_id, mailbox, uid, cid).await {
+                Ok(Some(att)) => match extract_part_bytes(&eml, att.part_index as usize) {
+                    Some(b) => b,
+                    None => return transparent_pixel(),
+                },
+                _ => match find_bytes_by_cid(&eml, cid) {
+                    Some(b) => b,
+                    None => return transparent_pixel(),
+                },
+            };
 
         // Sniff bytes before serving inline attachments. Declared MIME type is
         // untrusted and could otherwise make active content same-origin.
@@ -271,7 +280,8 @@ fn attachment_disposition(content_type: &str, filename: &str) -> String {
     format!("{kind}; filename=\"{filename}\"")
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct DownloadAttachmentQuery {
     pub account_id: String,
     pub mailbox: String,
@@ -279,6 +289,18 @@ pub struct DownloadAttachmentQuery {
     pub filename: String,
 }
 
+/// An attachment of a cached message, with its declared content type. Content-Disposition is
+/// `inline` for previewable types (PDF, plain text, raster images, audio, video), else `attachment`.
+#[utoipa::path(
+    get,
+    path = "/email/attachment",
+    params(DownloadAttachmentQuery),
+    responses(
+        (status = 200, description = "the attachment's bytes, as its declared content type (`application/octet-stream` without one)", body = Vec<u8>, content_type = "application/octet-stream"),
+        (status = 404, description = "no such account, attachment or part (plain text)", body = String, content_type = "text/plain"),
+        (status = 500, description = "database or file error (plain text)", body = String, content_type = "text/plain")
+    )
+)]
 pub async fn download_attachment(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -376,11 +398,24 @@ pub async fn download_attachment(
 
 // ── Export ────────────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ExportQuery {
     pub account_id: String,
 }
 
+/// Every cached message of an account as a gzipped tar archive (`<mailbox>/<uid>.eml`), named
+/// `<account display name>.tar.gz`; streamed.
+#[utoipa::path(
+    get,
+    path = "/email/export",
+    params(ExportQuery),
+    responses(
+        (status = 200, description = "a .tar.gz of the account's messages", body = Vec<u8>, content_type = "application/gzip"),
+        (status = 404, description = "no such account (plain text)", body = String, content_type = "text/plain"),
+        (status = 500, description = "database error (plain text)", body = String, content_type = "text/plain")
+    )
+)]
 pub async fn export_account(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -525,11 +560,23 @@ fn transparent_pixel() -> Response {
 
 // ── Navigate (link warning page) ─────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct NavigateQuery {
+    /// the external http(s) URL
     pub to: String,
 }
 
+/// A warning page before an external link of a message: the destination, Continue and Cancel.
+#[utoipa::path(
+    get,
+    path = "/email/navigate",
+    params(NavigateQuery),
+    responses(
+        (status = 200, description = "the warning page", body = String, content_type = "text/html"),
+        (status = 400, description = "`to` not an http(s) URL (plain text)", body = String, content_type = "text/plain")
+    )
+)]
 pub async fn navigate(Query(q): Query<NavigateQuery>) -> Response {
     let url = &q.to;
     match url::Url::parse(url) {
@@ -583,12 +630,27 @@ fn html_escape(s: &str) -> String {
 
 // ── Image origin whitelist API ────────────────────────────────────────────────
 
+/// A list of image origins (`scheme://host`): the allowed ones or the ignored ones.
+#[derive(serde::Serialize, ToSchema)]
+pub struct ImageOrigins {
+    pub origins: Vec<String>,
+}
+
+/// The origins whose remote images are loaded.
+#[utoipa::path(
+    get,
+    path = "/email/image-origins",
+    responses(
+        (status = 200, body = ImageOrigins),
+        (status = 500, description = "database error (plain text)", body = String, content_type = "text/plain")
+    )
+)]
 pub async fn list_image_origins(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> impl IntoResponse {
     match email_db::get_image_whitelist(&state.db, &user.user_id).await {
-        Ok(origins) => Json(json!({ "origins": origins })).into_response(),
+        Ok(origins) => Json(ImageOrigins { origins }).into_response(),
         Err(e) => {
             eprintln!("[email] list_image_origins error: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
@@ -596,11 +658,23 @@ pub async fn list_image_origins(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct ImageOriginBody {
+    /// an http(s) URL; stored as its `scheme://host`
     pub origin: String,
 }
 
+/// Allows the remote images of an origin.
+#[utoipa::path(
+    post,
+    path = "/email/image-origins",
+    request_body = ImageOriginBody,
+    responses(
+        (status = 204, description = "added"),
+        (status = 400, description = "not an http(s) origin (plain text)", body = String, content_type = "text/plain"),
+        (status = 500, description = "database error (plain text)", body = String, content_type = "text/plain")
+    )
+)]
 pub async fn add_image_origin(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -626,11 +700,21 @@ pub async fn add_image_origin(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ImageOriginQuery {
     pub origin: String,
 }
 
+#[utoipa::path(
+    delete,
+    path = "/email/image-origins",
+    params(ImageOriginQuery),
+    responses(
+        (status = 204, description = "removed (also when it was not listed)"),
+        (status = 500, description = "database error (plain text)", body = String, content_type = "text/plain")
+    )
+)]
 pub async fn remove_image_origin(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -647,12 +731,21 @@ pub async fn remove_image_origin(
 
 // ── Image origin blacklist API ─────────────────────────────────────────────
 
+/// The origins whose remote images are ignored (not offered for loading).
+#[utoipa::path(
+    get,
+    path = "/email/image-blacklist",
+    responses(
+        (status = 200, body = ImageOrigins),
+        (status = 500, description = "database error (plain text)", body = String, content_type = "text/plain")
+    )
+)]
 pub async fn list_image_blacklist(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> impl IntoResponse {
     match email_db::get_image_blacklist(&state.db, &user.user_id).await {
-        Ok(origins) => Json(json!({ "origins": origins })).into_response(),
+        Ok(origins) => Json(ImageOrigins { origins }).into_response(),
         Err(e) => {
             eprintln!("[email] list_image_blacklist error: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
@@ -660,6 +753,17 @@ pub async fn list_image_blacklist(
     }
 }
 
+/// Ignores the remote images of an origin.
+#[utoipa::path(
+    post,
+    path = "/email/image-blacklist",
+    request_body = ImageOriginBody,
+    responses(
+        (status = 204, description = "added"),
+        (status = 400, description = "not an http(s) origin (plain text)", body = String, content_type = "text/plain"),
+        (status = 500, description = "database error (plain text)", body = String, content_type = "text/plain")
+    )
+)]
 pub async fn add_image_blacklist_origin(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -683,6 +787,15 @@ pub async fn add_image_blacklist_origin(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/email/image-blacklist",
+    params(ImageOriginQuery),
+    responses(
+        (status = 204, description = "removed (also when it was not listed)"),
+        (status = 500, description = "database error (plain text)", body = String, content_type = "text/plain")
+    )
+)]
 pub async fn remove_image_blacklist_origin(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -697,25 +810,27 @@ pub async fn remove_image_blacklist_origin(
     }
 }
 
-
-/// This file's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
-#[allow(unused_imports)]
-pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
-    use axum::routing::{delete, get, patch, post, put};
-    utoipa_axum::router::OpenApiRouter::new()
-        .route("/email/proxy-image", get(proxy_image))
-        .route("/email/attachment", get(download_attachment))
-        .route("/email/export", get(export_account))
-        .route("/email/image-origins", get(list_image_origins).post(add_image_origin).delete(remove_image_origin))
-        .route("/email/image-blacklist", get(list_image_blacklist).post(add_image_blacklist_origin).delete(remove_image_blacklist_origin))
+/// This file's routes that need a signed-in user, relative to `/api` (api.rs).
+pub fn routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(proxy_image))
+        .routes(routes!(download_attachment))
+        .routes(routes!(export_account))
+        .routes(routes!(
+            list_image_origins,
+            add_image_origin,
+            remove_image_origin
+        ))
+        .routes(routes!(
+            list_image_blacklist,
+            add_image_blacklist_origin,
+            remove_image_blacklist_origin
+        ))
 }
 
-/// This file's public routes, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
-#[allow(unused_imports)]
-pub fn public_routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
-    use axum::routing::{delete, get, patch, post, put};
-    utoipa_axum::router::OpenApiRouter::new()
-        .route("/email/navigate", get(navigate))
+/// This file's public routes, relative to `/api` (api.rs).
+pub fn public_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(navigate))
 }
 
 #[cfg(test)]
@@ -729,7 +844,10 @@ mod tests {
     fn reads_an_attachment_by_its_root_part_index() {
         let raw = crate::imap_client::tests::FORWARDED_THEN_ATTACHMENT;
         assert_eq!(extract_part_bytes(raw, 3).as_deref(), Some(&b"hello"[..]));
-        assert_eq!(extract_part_bytes(raw, 1).as_deref(), Some(&b"See below"[..]));
+        assert_eq!(
+            extract_part_bytes(raw, 1).as_deref(),
+            Some(&b"See below"[..])
+        );
     }
 
     #[test]
