@@ -70,6 +70,24 @@ pub fn layer(static_dir: &str, api: Router) -> anyhow::Result<Option<EmbedLayer>
                     }
                 }
             });
+        // The message open in the mail page's URL (`?account_id=&mailbox=&uid=`, frontend src/lib/mail.ts
+        // urlRef()): its thread and the thread's events, which <mail-reader-data> loads for it.
+        for (resource, path) in [
+            ("thread", "/api/email/thread"),
+            ("threadEvents", "/api/email/thread-events"),
+        ] {
+            let api = api.clone();
+            embed = embed.resolve(format!("{dir}mail/index.html:{resource}"), move |req| {
+                let api = api.clone();
+                async move {
+                    let url = message_url(&req, path)?;
+                    match get(&api, &url, &req.headers).await? {
+                        (StatusCode::OK, body) => Some(body),
+                        _ => None,
+                    }
+                }
+            });
+        }
     }
     Ok(Some(embed.build()?))
 }
@@ -84,7 +102,12 @@ fn locales(static_dir: &str) -> Option<Vec<String>> {
 /// `/api/search?…` for the page URL's search, as `urlSearch()` builds it; None without words.
 fn search_url(req: &SlotRequest) -> Option<String> {
     // Every parameter of this page is one value (none is bound as a list): `param()` reads it.
-    let param = |name: &str| req.params.get(name).and_then(Param::as_str).filter(|v| !v.is_empty());
+    let param = |name: &str| {
+        req.params
+            .get(name)
+            .and_then(Param::as_str)
+            .filter(|v| !v.is_empty())
+    };
     let q = param("q").map(str::trim).unwrap_or("");
     if q.is_empty() {
         return None;
@@ -110,6 +133,25 @@ fn search_url(req: &SlotRequest) -> Option<String> {
         }
     }
     Some(format!("/api/search?{}", query.finish()))
+}
+
+/// `path?account_id=&mailbox=&uid=` for the message the page URL opens, as `urlRef()` reads it (a positive
+/// integer uid); None without one.
+fn message_url(req: &SlotRequest, path: &str) -> Option<String> {
+    let param = |name: &str| {
+        req.params
+            .get(name)
+            .and_then(Param::as_str)
+            .filter(|v| !v.is_empty())
+    };
+    let (account_id, mailbox) = (param("account_id")?, param("mailbox")?);
+    let uid: u32 = param("uid")?.parse().ok().filter(|&n| n > 0)?;
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("account_id", account_id)
+        .append_pair("mailbox", mailbox)
+        .append_pair("uid", &uid.to_string())
+        .finish();
+    Some(format!("{path}?{query}"))
 }
 
 /// GET `url` from the API router with the page request's cookie: the status and a JSON body.
@@ -151,6 +193,37 @@ mod tests {
             ),
             headers: Arc::new(HeaderMap::new()),
         }
+    }
+
+    #[test]
+    fn message_requests() {
+        assert_eq!(message_url(&slot(&[]), "/api/email/thread"), None);
+        assert_eq!(
+            message_url(
+                &slot(&[("account_id", "a"), ("mailbox", "INBOX")]),
+                "/api/email/thread"
+            ),
+            None
+        );
+        assert_eq!(
+            message_url(
+                &slot(&[("account_id", "a"), ("mailbox", "INBOX"), ("uid", "x")]),
+                "/api/email/thread"
+            ),
+            None
+        );
+        assert_eq!(
+            message_url(
+                &slot(&[
+                    ("account_id", "a b"),
+                    ("mailbox", "INBOX/Sub"),
+                    ("uid", "3")
+                ]),
+                "/api/email/thread"
+            )
+            .as_deref(),
+            Some("/api/email/thread?account_id=a+b&mailbox=INBOX%2FSub&uid=3")
+        );
     }
 
     #[test]
