@@ -237,10 +237,10 @@ test('keyboard: j/k open the neighbours, Ctrl/Shift+Space mark, Escape clears, S
   rows(root)[2].dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
   press(rows(root)[2], ' ', { code: 'Space', shiftKey: true });
   await settle();
-  expect(marked()).toEqual(['Second', 'First']);
+  expect(marked()).toEqual(['Third', 'Second', 'First']);         // the open one (Third) counts as marked
   press(rows(root)[2], 'j');                                      // no j/k while rows are marked
   await settle();
-  expect(marked()).toEqual(['Second', 'First']);
+  expect(marked()).toEqual(['Third', 'Second', 'First']);
   press(rows(root)[2], 'Escape');                                 // "Clear selection"
   await settle();
   expect(marked()).toEqual([]);

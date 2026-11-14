@@ -250,12 +250,16 @@ type Modifiers = Pick<MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>;
 /**
  * The selection after a click on the row `key` (or Ctrl/Cmd+Space, Shift+Space on it): Ctrl (Cmd) marks or
  * unmarks it, Shift marks the rows from the anchor; a plain click unmarks all and puts the cursor there (the page
- * opens the message, see opensRow()).
+ * opens the message, see opensRow()). With no rows marked, the message `open` in the reader (when it is in the
+ * list) counts as the first one marked: Ctrl adds the row to it, Shift marks the rows from it.
  */
-export function rowClick(e: Modifiers, sel: Selection, key: string, list: Message[]): Selection {
-  if (e.ctrlKey || e.metaKey) return { ...sel, keys: toggled(sel.keys, key), anchor: key, error: '', move: false };
-  if (e.shiftKey) return { ...sel, keys: markRange(list, sel.keys, sel.anchor, key), error: '', move: false };
-  return { ...sel, keys: [], anchor: null, error: '', cursor: key };
+export function rowClick(e: Modifiers, sel: Selection, key: string, list: Message[], open: MessageRef | null = null): Selection {
+  if (!e.ctrlKey && !e.metaKey && !e.shiftKey) return { ...sel, keys: [], anchor: null, error: '', cursor: key };
+  const opened = !sel.keys.length && open && list.some((msg) => isRef(msg, open)) ? messageKey(open) : null;
+  const keys = opened ? [opened] : sel.keys;
+  const anchor = opened ?? sel.anchor;
+  if (e.shiftKey && !e.ctrlKey && !e.metaKey) return { ...sel, keys: markRange(list, keys, anchor, key), anchor, error: '', move: false };
+  return { ...sel, keys: opened === key ? keys : toggled(keys, key), anchor: key, error: '', move: false };
 }
 
 /** Whether a click on a row opens its message (one without Ctrl, Cmd or Shift). */

@@ -30,6 +30,15 @@ describe('selection', () => {
     expect(sel).toMatchObject({ keys: [], anchor: null, cursor: keys[1] });
     expect([opensRow(click() as MouseEvent), opensRow(click({ shiftKey: true }) as MouseEvent)]).toEqual([true, false]);
   });
+  test('with nothing marked, the open message counts as the first one marked', () => {
+    const open = list[0]!;
+    expect(rowClick(click({ ctrlKey: true }), noSelection(), key(3), list, open)).toMatchObject({ keys: [key(1), key(3)], anchor: key(3) });
+    expect(rowClick(click({ shiftKey: true }), noSelection(), key(3), list, open)).toMatchObject({ keys: [key(1), key(2), key(3)], anchor: key(1) });
+    expect(rowClick(click({ ctrlKey: true }), noSelection(), key(1), list, open).keys).toEqual([key(1)]);
+    // Marks already there are kept as they are; an open message not in the list is not added.
+    expect(rowClick(click({ ctrlKey: true }), { ...noSelection(), keys: [key(2)] }, key(3), list, open).keys).toEqual([key(2), key(3)]);
+    expect(rowClick(click({ ctrlKey: true }), noSelection(), key(3), list, msg(9)).keys).toEqual([key(3)]);
+  });
   test('unmarked keeps the anchor and the menu; cleared drops them; openedAt puts the cursor on the open one', () => {
     const sel = { cursor: 'c', keys: ['k'], anchor: 'k', error: 'e', move: true, busy: true };
     expect(unmarked(sel)).toEqual({ ...sel, keys: [] });

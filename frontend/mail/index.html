@@ -390,9 +390,9 @@
                         tabindex: k === sel.cursor || (!sel.cursor && list[0] === msg) ? '0' : '-1',
                       }"
                       data-sn-on-focusin="sel.cursor = k"
-                      data-sn-on-click="sel = rowClick($event, sel, k, list); reader.shown = true; opensRow($event) && emit('mail-open', msg)"
-                      data-sn-on-keydown-mod-space="sel = rowClick($event, sel, k, list); reader.shown = true"
-                      data-sn-on-keydown-shift-space="sel = rowClick($event, sel, k, list); reader.shown = true"
+                      data-sn-on-click="sel = rowClick($event, sel, k, list, open); reader.shown = true; opensRow($event) && emit('mail-open', msg)"
+                      data-sn-on-keydown-mod-space="sel = rowClick($event, sel, k, list, open); reader.shown = true"
+                      data-sn-on-keydown-shift-space="sel = rowClick($event, sel, k, list, open); reader.shown = true"
                       data-sn-on-keydown-arrowdown="siblingRow($el, 1)?.focus(); !siblingRow($el, 1) && page(listName, 'next')"
                       data-sn-on-keydown-arrowup="siblingRow($el, -1)?.focus(); !siblingRow($el, -1) && page(listName, 'prev')"
                       data-sn-on-dragstart="drag.msg = msg"
