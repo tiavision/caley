@@ -14,9 +14,9 @@
               threadRef: /** @type {ThreadRef|null} */ (null),
               needContacts: false,
             }">
-  <sn-resource name="unread" src="/api/email/unread-counts" cache type="UnreadCounts"></sn-resource>
-  <sn-resource name="identities" src="/api/email/identities" cache items="identities" key="identity_id" type="Identity[]"></sn-resource>
-  <sn-resource name="contacts" src="/api/contacts" items="contacts" when="needContacts" type="ContactAddresses[]"></sn-resource>
+  <sn-resource name="unread" src="/email/unread-counts" cache></sn-resource>
+  <sn-resource name="identities" src="/email/identities" cache></sn-resource>
+  <sn-resource name="contacts" src="/contacts" items="contacts" key="account_id,uid,addressbook_href" when="needContacts"></sn-resource>
   <mail-reader-data data-sn-prop="{ open: reader.ref, threadRef, wiped }"></mail-reader-data>
 
   <!-- view: the list shown (persisted), always a valid one once the lists have arrived: the lists' `then` write back
@@ -27,11 +27,11 @@
         data-sn-state="{ view: noView(), collapsed: /** @type {string[]} */ ([]) }"
         data-sn-persist="mail"
         data-sn-let="{ open: reader.ref }">
-    <sn-resource name="accounts" src="/api/email/accounts" cache items="accounts" key="account_id" type="Account[]"
+    <sn-resource name="accounts" src="/email/accounts" cache
                  then="view = currentView(view, accounts, mailboxes, folders, { accounts: true, folders: !!$meta.folders.loadedAt })"></sn-resource>
-    <sn-resource name="mailboxes" each="a in accounts" src="/api/email/mailboxes?account_id={a.account_id}" items="mailboxes" key="account_id,name" type="Mailbox[]"
+    <sn-resource name="mailboxes" each="a in accounts" src="/email/mailboxes?account_id={a.account_id}"
                  then="view = currentView(view, accounts, mailboxes, folders, { accounts: !!$meta.accounts.loadedAt, folders: !!$meta.folders.loadedAt })"></sn-resource>
-    <sn-resource name="folders" src="/api/email/folders" cache items="folders" key="folder_id" order="sort_order" type="VirtualFolder[]"
+    <sn-resource name="folders" src="/email/folders" cache order="sort_order"
                  then="view = currentView(view, accounts, mailboxes, folders, { accounts: !!$meta.accounts.loadedAt, folders: true })"></sn-resource>
     <!-- defaultCal: the calendar the import dialog preselects and remembers (shared with the calendar pages' event form). -->
     <div class="mail-contents" data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
@@ -96,23 +96,21 @@
          data-sn-on-keydown-j="pageKey($event, bulk.messages.length) && emit('list-step', 1)"
          data-sn-on-keydown-k="pageKey($event, bulk.messages.length) && emit('list-step', -1)">
       <sn-resource name="messages"
-                   src="/api/email/messages?account_id={view.account_id}&mailbox={view.mailbox}&folder_id={view.folder_id}"
+                   src="/email/messages?account_id={view.account_id}&mailbox={view.mailbox}&folder_id={view.folder_id}"
                    when="(view.mailbox || view.folder_id) && !searching" cache
-                   items="messages" total="total" key="account_id,mailbox,uid" type="Message[]"
                    paginate="keyset" page-size="50" size-param="limit" offset-param="offset"
                    cursor="{cursor_sent_at: sent_at, cursor_rowid: rowid}" direction-param="direction"
                    direction-values="{first: 'forward', prev: 'backward', next: 'forward', last: 'last'}"></sn-resource>
       <sn-resource name="results"
-                   src="/api/email/search?q={search.q.trim()}&account_id={cur.account_id}&mailbox={cur.mailbox}&folder_id={cur.folder_id}&addrs={search.filter.addrs.length ? search.filter.addrs.join(',') : null}&date_from={search.filter.from || null}&date_to={search.filter.to || null}&unread_only={search.filter.unread ? 'true' : null}"
+                   src="/email/search?q={search.q.trim()}&account_id={cur.account_id}&mailbox={cur.mailbox}&folder_id={cur.folder_id}&addrs={search.filter.addrs.length ? search.filter.addrs.join(',') : null}&date_from={search.filter.from || null}&date_to={search.filter.to || null}&unread_only={search.filter.unread ? 'true' : null}"
                    when="searching"
-                   items="messages" key="account_id,mailbox,uid" type="Message[]"
                    paginate="keyset" page-size="50" size-param="limit"
                    cursor="{cursor_sent_at: sent_at, cursor_rowid: rowid}" direction-param="direction"
                    direction-values="{first: 'forward', prev: 'backward', next: 'forward'}"></sn-resource>
-      <sn-resource name="seenAddrs" src="/api/email/suggest-addrs?q={search.addrQ}" when="search.addrQ.trim()" items="addrs" type="string[]"></sn-resource>
+      <sn-resource name="seenAddrs" src="/email/suggest-addrs?q={search.addrQ}" when="search.addrQ.trim()"></sn-resource>
 
       <!-- The page's server events (shares the rail's connection). -->
-      <sn-sync src="/api/events/stream">
+      <sn-sync src="/events/stream">
         <sn-event name="emails_refetch" resource="messages" op="refetch" type="MailboxEvent"
                   when="!cur.folder_id && account_id === cur.account_id && mailbox === cur.mailbox"></sn-event>
         <sn-event name="emails_refetch" resource="unread" op="refetch"></sn-event>
@@ -169,7 +167,7 @@
                           data-sn-on-click="sidebarOpen = false; emit('folder-edit', folderDraft(f))"
                           data-sn-attr="{'aria-label': m.mail_editVirtualFolder()}"></button>
                   <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
-                          data-sn-delete="/api/email/folder?folder_id={f.folder_id}"
+                          data-sn-delete="/email/folder?folder_id={f.folder_id}"
                           data-sn-optimistic="remove(f)"
                           data-sn-then="sidebarOpen = false; view.folder_id === f.folder_id && (sel = unmarked(sel)); view = currentView(view, accounts, mailboxes, folders)"
                           data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
@@ -207,7 +205,7 @@
                      data-sn-on-dragover="canDrop && $event.preventDefault(); drag.over = canDrop ? item.key : drag.over"
                      data-sn-on-dragleave="drag.over === item.key && (drag.over = null)"
                      data-sn-on-drop="reader = isRef(open, drag.msg) ? noReader() : reader"
-                     data-sn-post="/api/email/message/move" data-sn-trigger="drop"
+                     data-sn-post="/email/message/move" data-sn-trigger="drop"
                      data-sn-body="moveBody(drag.msg, mb.name)"
                      data-sn-optimistic="remove(drag.msg)"
                      data-sn-then="refresh('messages', 'results', 'unread')">
@@ -215,7 +213,7 @@
                           data-sn-let="{ busy: syncing.includes(item.key), kind: folderKind(mb.name) }"
                           data-sn-class="{'drag-target': canDrop, 'drag-over': drag.over === item.key}"
                           data-sn-attr="{'aria-busy': busy ? 'true' : null, 'aria-current': cur.account_id === mb.account_id && cur.mailbox === mb.name ? 'true' : null}"
-                          data-sn-post="/api/email/sync?account_id={mb.account_id}&mailbox={mb.name}" data-sn-catch="sel.error = sel.error"
+                          data-sn-post="/email/sync?account_id={mb.account_id}&mailbox={mb.name}" data-sn-catch="sel.error = sel.error"
                           data-sn-on-click="view = mailboxView(mb.account_id, mb.name); sidebarOpen = false; emit('mail-view')">
                     <mail-folder-icon data-sn-prop="{ kind }"></mail-folder-icon>
                     <span data-truncate data-grow data-sn-text="folderName(mb.name)"></span>
@@ -239,7 +237,7 @@
               <button type="button" role="menuitem" data-icon="trash-2" data-tone="danger"
                       data-sn-let="{ acc: menuAcc }"
                       data-sn-on-click="ancestor($el, '[popover]')?.hidePopover()"
-                      data-sn-delete="/api/email/account?account_id={acc.account_id}"
+                      data-sn-delete="/email/account?account_id={acc.account_id}"
                       data-sn-confirm="m.mail_removeAccountConfirm({name: acc.display_name})"
                       data-sn-then="sidebarOpen = false; refresh('accounts'); collapsed = collapsed.filter(id => id !== acc.account_id); view.account_id === acc.account_id && emit('view-removed')"
                       data-sn-text="m.mail_removeAccount()"></button>
@@ -539,7 +537,7 @@
       <!-- ── Empty trash ───────────────────────────────────────────────────────── -->
       <dialog id="mail-empty-trash" closedby="any" data-sn-on-cancel="trash.busy && $event.preventDefault()"
               data-sn-let="{ days: emptyTrashDays(trash.choice, trash.custom) }">
-        <form data-sn-post="/api/email/trash/empty"
+        <form data-sn-post="/email/trash/empty"
               data-sn-body="{account_id: cur.account_id, mailbox: cur.mailbox, days}"
               data-sn-on-submit="trash.busy = true; trash.error = ''"
               data-sn-then="reader = inMailbox(open, cur) ? noReader() : reader; sel = unmarked(sel); refresh('messages', 'results', 'unread'); close()"

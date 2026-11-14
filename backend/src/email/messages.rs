@@ -57,22 +57,29 @@ pub struct Message {
     pub mailbox: String,
     /// the cache row; with `sent_at` the list's keyset cursor
     pub rowid: i64,
+    #[schema(required)]
     pub message_id: Option<String>,
+    #[schema(required)]
     pub thread_id: Option<String>,
     /// the From header
+    #[schema(required)]
     pub from: Option<String>,
     pub to: Vec<String>,
     pub cc: Vec<String>,
     pub reply_to: Vec<String>,
+    #[schema(required)]
     pub subject: Option<String>,
     /// Unix seconds
+    #[schema(required)]
     pub sent_at: Option<i64>,
     /// IMAP flags (`\Seen`, `\Flagged`, ...)
     pub flags: Vec<String>,
     pub has_attachments: bool,
     /// whether the body was cached (GET /email/message only; false in lists)
     pub body_cached: bool,
+    #[schema(required)]
     pub body_text: Option<String>,
+    #[schema(required)]
     pub body_html: Option<String>,
     pub autocrypt_headers: Vec<String>,
     pub is_read: bool,
@@ -86,11 +93,15 @@ pub struct Message {
 /// An attachment of a message (GET /email/attachment downloads it).
 #[derive(serde::Serialize, ToSchema)]
 pub struct Attachment {
+    #[schema(required)]
     pub filename: Option<String>,
+    #[schema(required)]
     pub content_type: Option<String>,
     /// bytes
+    #[schema(required)]
     pub size: Option<i64>,
     /// the Content-ID of an inline part (`cid:` images)
+    #[schema(required)]
     pub content_id: Option<String>,
 }
 
@@ -100,12 +111,17 @@ pub struct ThreadNode {
     pub uid: i64,
     pub account_id: String,
     pub mailbox: String,
+    #[schema(required)]
     pub message_id: Option<String>,
     /// the message this one replies to (its Message-ID)
+    #[schema(required)]
     pub parent_message_id: Option<String>,
+    #[schema(required)]
     pub from: Option<String>,
+    #[schema(required)]
     pub subject: Option<String>,
     /// Unix seconds
+    #[schema(required)]
     pub sent_at: Option<i64>,
     pub is_read: bool,
 }

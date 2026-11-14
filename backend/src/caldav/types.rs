@@ -82,7 +82,9 @@ pub struct Event {
 pub struct RecurrenceInfo {
     pub freq: String,
     pub interval: u32,
+    #[schema(required)]
     pub until: Option<String>,
+    #[schema(required)]
     pub count: Option<u32>,
     pub by_day: Vec<String>,
     pub by_month_day: Vec<u32>,

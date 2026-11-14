@@ -10,8 +10,8 @@
 <template data-sn-component="{ event: EventJson | null; threads?: boolean }"
           data-sn-emits="{ 'event-edit': { event: EventJson; scope: 'series' | 'this_instance' }; 'event-threads': { email: SourceEmailJson; event: EventJson } }">
   <dialog id="event-detail" closedby="any" data-sn-on-close="elementIn($el, '#event-edit-choice')?.hidePopover()">
-    <sn-resource name="eventEmails" type="SourceEmailJson[]" key="account_id,mailbox,uid" when="threads && event"
-                 src="/api/calendar/event-emails?cal_account_id={event.account_id}&calendar_href={event.calendar_href}&event_uid={event.uid}"></sn-resource>
+    <sn-resource name="eventEmails" when="threads && event"
+                 src="/calendar/event-emails?cal_account_id={event.account_id}&calendar_href={event.calendar_href}&event_uid={event.uid}"></sn-resource>
     <header data-layout="row" data-gap="xs" data-align="start">
       <h2 data-grow data-sn-text="event?.summary || ''"></h2>
       <div data-layout="row" data-gap="xs" data-wrap="none">

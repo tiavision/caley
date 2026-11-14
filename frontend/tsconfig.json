@@ -11,6 +11,6 @@
     "noEmit": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src/**/*.ts", "settings/**/*.html", "vite.config.ts"],
+  "include": ["src/**/*.ts", "settings/**/*.html", "vite.config.ts", "apis.ts"],
   "exclude": ["dist"]
 }

@@ -13,11 +13,11 @@
           threadRef: /** @type {ThreadRef|null} */ (null),
         }"
         data-sn-let="{ open: reader.ref }">
-    <sn-resource name="user" src="/api/user" type="User"></sn-resource>
-    <sn-resource name="mailboxes" src="/api/email/mailboxes?account_id={open.account_id}" when="open" items="mailboxes" key="account_id,name" type="Mailbox[]"></sn-resource>
-    <sn-resource name="identities" src="/api/email/identities" items="identities" key="identity_id" type="Identity[]"></sn-resource>
+    <sn-resource name="user" src="/user"></sn-resource>
+    <sn-resource name="mailboxes" src="/email/mailboxes?account_id={open.account_id}" when="open"></sn-resource>
+    <sn-resource name="identities" src="/email/identities"></sn-resource>
     <mail-reader-data data-sn-prop="{ open, threadRef, wiped }"></mail-reader-data>
-    <sn-sync src="/api/events/stream">
+    <sn-sync src="/events/stream">
       <sn-event name="emails_refetch" resource="message" op="refetch" type="MailboxEvent"
                 when="open && account_id === open.account_id && mailbox === open.mailbox"></sn-event>
       <sn-event name="emails_refetch" resource="body" op="refetch" type="MailboxEvent"

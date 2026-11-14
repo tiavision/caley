@@ -31,8 +31,10 @@ pub struct Account {
     pub username: String,
     pub use_tls: bool,
     /// SMTP server; `null`: the IMAP host
+    #[schema(required)]
     pub smtp_host: Option<String>,
     /// `null`: 587
+    #[schema(required)]
     pub smtp_port: Option<i64>,
     pub sort_order: i64,
 }
@@ -378,6 +380,7 @@ pub struct Mailbox {
     /// the full IMAP name
     pub name: String,
     /// the hierarchy delimiter (`/`, `.`), `null` for a flat namespace
+    #[schema(required)]
     pub delimiter: Option<String>,
     pub subscribed: bool,
 }
@@ -492,7 +495,9 @@ pub async fn trigger_mailbox_sync(
 /// Which mailboxes a virtual folder takes: `null` matches any account or mailbox.
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct VirtualFolderRule {
+    #[schema(required)]
     pub account_id: Option<String>,
+    #[schema(required)]
     pub mailbox_pattern: Option<String>,
 }
 

@@ -11,7 +11,7 @@ import '../test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 // a plain button with an empty draft.
 const page = `
 <body>
-  <sn-resource name="caldavAccounts" src="/api/caldav/accounts" items="accounts" key="account_id" type="CalDavAccountJson[]"></sn-resource>
+  <sn-resource name="caldavAccounts" src="/caldav/accounts"></sn-resource>
   <main data-sn-state="{ defaultCal: '' }">
     <import-dialog>
       <button type="button" id="attachment" data-sn-call="attachment.open(caldavAccounts)" data-sn-then="emit('ics-import', $result)">Attachment</button>

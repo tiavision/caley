@@ -13,10 +13,10 @@
               saving: false,
             }">
   <!-- One request for both (preloaded in the head); `cache`: a return visit in this tab shows the last list at once. -->
-  <sn-resource name="contacts" src="/api/contacts" items="contacts" key="account_id,uid,addressbook_href" order="fn_name" type="ContactJson[]" cache></sn-resource>
-  <sn-resource name="addressbooks" src="/api/contacts" items="addressbooks" key="account_id,href" type="AddressbookJson[]" cache></sn-resource>
+  <sn-resource name="contacts" src="/contacts" items="contacts" key="account_id,uid,addressbook_href" order="fn_name" cache></sn-resource>
+  <sn-resource name="addressbooks" src="/contacts" items="addressbooks" key="account_id,href" cache></sn-resource>
   <!-- The page's server events (shares the rail's connection). -->
-  <sn-sync src="/api/events/stream">
+  <sn-sync src="/events/stream">
     <sn-event name="contact_updated" resource="contacts" op="upsert" item="contact" fallback="refetch" type="ContactUpdatedEvent"></sn-event>
     <!-- Removed elsewhere while its detail dialog is open: close the dialog. -->
     <sn-event name="contact_removed" resource="contacts" op="remove" type="ContactRemovedEvent"
@@ -194,7 +194,7 @@
 
           <footer>
             <button type="button" data-variant="outline" data-tone="danger" data-icon="trash-2"
-                    data-sn-delete="/api/contact"
+                    data-sn-delete="/contact"
                     data-sn-body="{account_id: c.account_id, uid: c.uid, addressbook_href: c.addressbook_href}"
                     data-sn-confirm="m.contacts_deleteConfirm()"
                     data-sn-then="close('contact-detail'); remove(c)"
@@ -211,7 +211,7 @@
         </header>
 
         <form data-layout="stack" data-gap="md"
-              data-sn-post="/api/contact" data-sn-body="draftBody(draft)"
+              data-sn-post="/contact" data-sn-body="draftBody(draft)"
               data-sn-on-submit="saving = true; formError = ''"
               data-sn-then="saving = false; upsert('contacts', $result); close(); emit('contact-saved', $result)"
               data-sn-catch="saving = false; formError = m.contacts_error()">

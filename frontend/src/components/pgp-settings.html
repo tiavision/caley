@@ -30,7 +30,7 @@
          localPending: vault ? vault.pending.filter(d => d.local) : [],
        }">
     <sn-resource name="vault" call="pgpVault.status()" when="opened" type="VaultView"></sn-resource>
-    <sn-resource name="publicKeys" src="/api/pgp/keys" key="fingerprint" when="opened" type="StoredPublicKey[]"></sn-resource>
+    <sn-resource name="publicKeys" src="/pgp/keys" when="opened"></sn-resource>
     <template data-sn-if="vault">
       <template data-sn-if="vault.exists">
         <section data-layout="stack" data-gap="md">
@@ -266,7 +266,7 @@
                   </template>
                 </div>
                 <button type="button" data-variant="ghost" data-size="sm" data-tone="danger" data-icon="trash-2" data-tooltip
-                        data-sn-delete="/api/pgp/key" data-sn-body="{ fingerprint: key.fingerprint }"
+                        data-sn-delete="/pgp/key" data-sn-body="{ fingerprint: key.fingerprint }"
                         data-sn-confirm="m.pgp_confirmRemovePublicKey()"
                         data-sn-optimistic="remove(key)"
                         data-sn-catch="pubError = m.pgp_publicKeyRemoveError()"

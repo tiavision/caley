@@ -6,7 +6,7 @@
 <template data-sn-component="{ here: string }">
   <nav data-rail popover id="nav" data-sn-attr="{'aria-label': m.nav_label()}" data-sn-state="{ collapsed: false }">
     <sn-resource name="notifications" call="notify.status()"></sn-resource>
-    <sn-sync src="/api/events/stream"></sn-sync>
+    <sn-sync src="/events/stream"></sn-sync>
     <header>
       <a href="/" class="nav-brand" data-sn-attr="{'aria-label': m.app_brand()}">
         <img src="/icons/favicon-48x48.png" alt="">

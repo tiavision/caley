@@ -32,7 +32,7 @@
               </span>
               <template data-sn-if="!id.is_default">
                 <button type="button" data-variant="ghost" data-size="sm" data-icon="star" data-tooltip
-                        data-sn-post="/api/email/identity" data-sn-body="identityBody(id, true)" data-sn-then="refresh('identities')"
+                        data-sn-post="/email/identity" data-sn-body="identityBody(id, true)" data-sn-then="refresh('identities')"
                         data-sn-attr="{disabled: !!idForm, 'aria-label': m.mail_identitySetDefault()}"></button>
               </template>
               <button type="button" data-variant="ghost" data-size="sm" data-icon="pencil" data-tooltip
@@ -40,7 +40,7 @@
                       data-sn-attr="{disabled: !!idForm, 'aria-label': m.mail_update()}"></button>
               <template data-sn-if="!id.is_default">
                 <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
-                        data-sn-delete="/api/email/identity?identity_id={id.identity_id}"
+                        data-sn-delete="/email/identity?identity_id={id.identity_id}"
                         data-sn-confirm="m.mail_removeIdentityConfirm({name: id.name, email: id.email})"
                         data-sn-then="refresh('identities')"
                         data-sn-attr="{disabled: !!idForm, 'aria-label': m.mail_removeAttachment()}"></button>
@@ -58,7 +58,7 @@
       </template>
       <template data-sn-else>
         <form data-layout="stack" data-gap="md"
-              data-sn-post="/api/email/identity" data-sn-body="identityBody(idForm, false)"
+              data-sn-post="/email/identity" data-sn-body="identityBody(idForm, false)"
               data-sn-then="refresh('identities'); idForm = null"
               data-sn-catch="idError = $error.detail ?? m.mail_saveIdentityError()">
           <label>
@@ -89,7 +89,7 @@
       </header>
       <template data-sn-if="acctUi.step === 'basic'">
         <form data-layout="stack" data-gap="md"
-              data-sn-get="/api/email/autodiscover?email={acct.username}"
+              data-sn-get="/email/autodiscover?email={acct.username}"
               data-sn-on-submit="acctUi.busy = true"
               data-sn-then="acct = discovered(acct, $result); acctUi = accountUi('details', $result)"
               data-sn-catch="acct = discovered(acct, null); acctUi = accountUi('details')">
@@ -110,7 +110,7 @@
       </template>
       <template data-sn-else>
         <form data-layout="stack" data-gap="md"
-              data-sn-post="/api/email/account" data-sn-body="accountBody(acct)"
+              data-sn-post="/email/account" data-sn-body="accountBody(acct)"
               data-sn-on-submit="acctUi.busy = true; acctUi.error = ''"
               data-sn-then="close('mail-account'); refresh('accounts', 'identities', 'mailboxes')"
               data-sn-catch="acctUi.busy = false; acctUi.error = $error.detail ?? m.mail_saveAccountError()">

@@ -36,6 +36,7 @@ pub struct ContactJson {
     pub has_photo: bool,
     /// Version of the photo (a hash of it), sent as `v` with the photo URL so the browser may keep the photo
     /// until it changes. None when there is no photo GET /api/contact/photo would serve.
+    #[schema(required)]
     pub photo_rev: Option<String>,
 }
 

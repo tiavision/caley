@@ -1,4 +1,6 @@
 /// <reference types="vite/client" />
+import { apis } from '../apis.ts';
+import spec from '../openapi.json';
 // The app's components and the layout, for page tests: render(page, { ...app, … }).
 // Without `scripts` the components render without their scripts (jsdom measures no layout and has no
 // ResizeObserver); a test that needs one passes it: render(page, { ...app, scripts: { 'close-after': scripts['close-after'] } }).
@@ -12,4 +14,5 @@ export const components: Record<string, string> = Object.fromEntries(Object.entr
 export const scripts: Record<string, unknown> = Object.fromEntries(Object.entries(ts).map(([p, mod]) => [name(p), mod]));
 export const layoutFiles: Record<string, string> = Object.fromEntries(Object.entries(layouts).map(([p, t]) => [name(p), t]));
 
-export const app = { components, layouts: layoutFiles };
+// the build's APIs, with the spec (paths in the markup are relative to /api: mocks still name the full URL)
+export const app = { components, layouts: layoutFiles, apis: apis(spec) };

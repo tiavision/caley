@@ -29,10 +29,10 @@
                 <li data-layout="row" data-gap="sm" data-wrap="none" data-pad="xs">
                   <span data-truncate data-grow data-sn-text="origin"></span>
                   <button type="button" data-variant="outline" data-tone="accent" data-size="sm"
-                          data-sn-post="/api/email/image-origins" data-sn-body="{origin}" data-sn-then="refresh('allowedOrigins')"
+                          data-sn-post="/email/image-origins" data-sn-body="{origin}" data-sn-then="refresh('allowedOrigins')"
                           data-sn-text="m.mail_originsAllow()"></button>
                   <button type="button" data-variant="ghost" data-size="sm" data-icon="ban" data-tooltip
-                          data-sn-post="/api/email/image-blacklist" data-sn-body="{origin}" data-sn-then="refresh('ignoredOrigins')"
+                          data-sn-post="/email/image-blacklist" data-sn-body="{origin}" data-sn-then="refresh('ignoredOrigins')"
                           data-sn-attr="{'aria-label': m.mail_blockSilently()}"></button>
                 </li>
               </template>
@@ -51,7 +51,7 @@
               <li data-layout="row" data-gap="sm" data-wrap="none" data-pad="xs">
                 <span data-truncate data-grow data-sn-text="origin"></span>
                 <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
-                        data-sn-delete="/api/email/image-origins?origin={origin}" data-sn-then="refresh('allowedOrigins')"
+                        data-sn-delete="/email/image-origins?origin={origin}" data-sn-then="refresh('allowedOrigins')"
                         data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
               </li>
             </template>
@@ -73,7 +73,7 @@
                         data-sn-call="mail.promoteOrigin(origin)" data-sn-then="refresh('allowedOrigins', 'ignoredOrigins')"
                         data-sn-text="m.mail_originsAllow()"></button>
                 <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
-                        data-sn-delete="/api/email/image-blacklist?origin={origin}" data-sn-then="refresh('ignoredOrigins')"
+                        data-sn-delete="/email/image-blacklist?origin={origin}" data-sn-then="refresh('ignoredOrigins')"
                         data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
               </li>
             </template>

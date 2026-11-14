@@ -31,20 +31,20 @@
   <!-- The grids are built from dates (weekDates(), monthCells()), so the month's events need no /api/calendar
        response first: both requests go out together (the early file sends them). `cache`: a return visit in
        this tab shows the last data at once. -->
-  <sn-resource name="weekDays" when="view === 'week'" key="date_iso" type="DayEventsJson[]" cache
-               src="/api/events?start={weekStart}&end={addDays(weekStart, 6)}&tz={userTz()}"></sn-resource>
-  <sn-resource name="monthGrid" src="/api/calendar?month={gridMonth}&tz={userTz()}" type="MonthGridJson" cache></sn-resource>
-  <sn-resource name="monthDays" when="view === 'month'" key="date_iso" type="DayEventsJson[]" cache
-               src="/api/events?start={monthRange(gridMonth).start}&end={monthRange(gridMonth).end}&tz={userTz()}"></sn-resource>
+  <sn-resource name="weekDays" when="view === 'week'" cache
+               src="/events?start={weekStart}&end={addDays(weekStart, 6)}&tz={userTz()}"></sn-resource>
+  <sn-resource name="monthGrid" src="/calendar?month={gridMonth}&tz={userTz()}" cache></sn-resource>
+  <sn-resource name="monthDays" when="view === 'month'" cache
+               src="/events?start={monthRange(gridMonth).start}&end={monthRange(gridMonth).end}&tz={userTz()}"></sn-resource>
   <!-- the thread dialog's mails (src/components/thread-dialog.html), for an event imported from mail -->
-  <sn-resource name="threadNodes" when="threadRef" items="messages" key="account_id,mailbox,uid" type="ThreadNode[]"
-               src="/api/email/thread?account_id={threadRef.account_id}&mailbox={threadRef.mailbox}&uid={threadRef.uid}"></sn-resource>
-  <sn-resource name="threadEventGroups" when="threadRef" key="account_id,mailbox,uid" type="MessageEventGroupJson[]"
-               src="/api/email/thread-events?account_id={threadRef.account_id}&mailbox={threadRef.mailbox}&uid={threadRef.uid}"></sn-resource>
-  <sn-resource name="pickerGrid" when="view === 'month' && pickerAt" src="/api/calendar?month={pickerAt}&tz={userTz()}" type="MonthGridJson"></sn-resource>
+  <sn-resource name="threadNodes" when="threadRef"
+               src="/email/thread?account_id={threadRef.account_id}&mailbox={threadRef.mailbox}&uid={threadRef.uid}"></sn-resource>
+  <sn-resource name="threadEventGroups" when="threadRef"
+               src="/email/thread-events?account_id={threadRef.account_id}&mailbox={threadRef.mailbox}&uid={threadRef.uid}"></sn-resource>
+  <sn-resource name="pickerGrid" when="view === 'month' && pickerAt" src="/calendar?month={pickerAt}&tz={userTz()}"></sn-resource>
   <!-- The page's server events (shares the rail's connection). A changed event can move between
        days, so the day lists reload rather than patch one item. -->
-  <sn-sync src="/api/events/stream">
+  <sn-sync src="/events/stream">
     <sn-event name="events_refetch" resource="weekDays" op="refetch"></sn-event>
     <sn-event name="events_refetch" resource="monthDays" op="refetch"></sn-event>
     <sn-event name="events_refetch" resource="monthGrid" op="refetch"></sn-event>

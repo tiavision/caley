@@ -706,9 +706,10 @@ export interface AccountForm {
   username: string; password: string; use_tls: boolean; smtp_host: string; smtp_port: number | null;
 }
 
+/** GET /api/email/autodiscover: `{ found: false }` alone, or `found: true` with the servers. */
 export interface Autodiscovery {
-  found: boolean; provider_name?: string; imap_host: string; imap_port: number; imap_use_tls: boolean;
-  imap_username: string; smtp_host: string; smtp_port: number;
+  found: boolean; provider_name?: string | null; imap_host?: string; imap_port?: number; imap_use_tls?: boolean;
+  imap_username?: string; smtp_host?: string; smtp_port?: number;
 }
 
 export function newAccount(): AccountForm {
@@ -741,7 +742,12 @@ export function accountUi(step: 'basic' | 'details', discovery: Autodiscovery | 
 export function discovered(form: AccountForm, d: Autodiscovery | null): AccountForm {
   const next = { ...form };
   if (d?.found) {
-    Object.assign(next, { host: d.imap_host, port: d.imap_port, use_tls: d.imap_use_tls, username: d.imap_username, smtp_host: d.smtp_host, smtp_port: d.smtp_port });
+    next.host = d.imap_host ?? next.host;
+    next.port = d.imap_port ?? next.port;
+    next.use_tls = d.imap_use_tls ?? next.use_tls;
+    next.username = d.imap_username ?? next.username;
+    next.smtp_host = d.smtp_host ?? next.smtp_host;
+    next.smtp_port = d.smtp_port ?? next.smtp_port;
   }
   if (!next.display_name) next.display_name = (d?.found && d.provider_name) || form.username.split('@')[1] || '';
   return next;

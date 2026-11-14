@@ -43,7 +43,7 @@
                 <button type="button" class="star-btn" data-variant="ghost" data-icon="star" data-tooltip
                         data-sn-class="{flagged: msg.is_flagged}"
                         data-sn-attr="{'aria-label': msg.is_flagged ? m.mail_unflag() : m.mail_flag()}"
-                        data-sn-patch="/api/email/message/flags" data-sn-retry="flags" data-sn-body="flagBody(msg, '\\Flagged', !msg.is_flagged)"
+                        data-sn-patch="/email/message/flags" data-sn-retry="flags" data-sn-body="flagBody(msg, '\\Flagged', !msg.is_flagged)"
                         data-sn-optimistic="patch(message, star)"></button>
                 <button type="button" data-variant="ghost" data-icon="reply" data-tooltip data-shortcut="r"
                         data-sn-on-click="emit('compose', composeDraft('reply', msg, identities, b?.text ?? '', b?.html ?? null))"
@@ -65,7 +65,7 @@
                   <button type="button" role="menuitem" data-icon="mail"
                           data-sn-attr="{'data-shortcut': msg.is_read ? 'shift-u' : 'shift-i'}"
                           data-sn-on-click="ancestor($el, '[popover]')?.hidePopover()"
-                          data-sn-patch="/api/email/message/flags" data-sn-retry="flags" data-sn-body="flagBody(msg, '\\Seen', !msg.is_read)"
+                          data-sn-patch="/email/message/flags" data-sn-retry="flags" data-sn-body="flagBody(msg, '\\Seen', !msg.is_read)"
                           data-sn-optimistic="patch(message, read)"
                           data-sn-text="msg.is_read ? m.mail_markUnread() : m.mail_markRead()"></button>
                   <template data-sn-if="htmlAddsValue(html)">
@@ -87,7 +87,7 @@
                   <hr>
                   <template data-sn-if="archive">
                     <button type="button" role="menuitem" data-icon="archive" data-shortcut="e"
-                            data-sn-post="/api/email/message/move" data-sn-body="moveBody(msg, archive)"
+                            data-sn-post="/email/message/move" data-sn-body="moveBody(msg, archive)"
                             data-sn-then="emit('mail-removed', refOf(msg))"
                             data-sn-text="m.mail_archive()"></button>
                   </template>
@@ -100,7 +100,7 @@
                     <div class="move-submenu" role="group" data-layout="stack" data-gap="none" data-scroll="y" data-sn-attr="{'aria-label': m.mail_moveToFolder()}">
                       <template data-sn-for="mb in moveTargets(mailboxes, msg.account_id, [msg.mailbox])">
                         <button type="button" role="menuitem" data-sn-let="{ kind: folderKind(mb.name) }"
-                                data-sn-post="/api/email/message/move" data-sn-body="moveBody(msg, mb.name)"
+                                data-sn-post="/email/message/move" data-sn-body="moveBody(msg, mb.name)"
                                 data-sn-then="emit('mail-removed', refOf(msg))">
                           <mail-folder-icon data-sn-prop="{ kind }"></mail-folder-icon>
                           <span data-truncate data-sn-text="folderName(mb.name)"></span>
@@ -110,7 +110,7 @@
                   </template>
                   <hr>
                   <button type="button" role="menuitem" data-icon="trash-2" data-tone="danger" data-shortcut="#"
-                          data-sn-delete="/api/email/message?account_id={msg.account_id}&mailbox={msg.mailbox}&uid={msg.uid}"
+                          data-sn-delete="/email/message?account_id={msg.account_id}&mailbox={msg.mailbox}&uid={msg.uid}"
                           data-sn-confirm="inTrash(msg) ? m.mail_deleteMessageConfirm() : null"
                           data-sn-then="emit('mail-removed', refOf(msg))"
                           data-sn-text="m.mail_delete()"></button>
@@ -227,11 +227,11 @@
                     <template data-sn-for="origin in imgs.blocked" data-sn-key="origin">
                       <span data-layout="row" data-gap="none" data-wrap="none">
                         <button type="button" class="split-start" data-variant="outline" data-tone="accent" data-size="sm"
-                                data-sn-post="/api/email/image-origins" data-sn-body="{origin}"
+                                data-sn-post="/email/image-origins" data-sn-body="{origin}"
                                 data-sn-then="refresh('allowedOrigins'); frame = frame + 1"
                                 data-sn-text="m.mail_allowOrigin({origin})"></button>
                         <button type="button" class="split-end" data-variant="outline" data-tone="danger" data-size="sm" data-icon="ban" data-tooltip
-                                data-sn-post="/api/email/image-blacklist" data-sn-body="{origin}"
+                                data-sn-post="/email/image-blacklist" data-sn-body="{origin}"
                                 data-sn-then="refresh('ignoredOrigins')"
                                 data-sn-attr="{'aria-label': m.mail_blockSilently()}"></button>
                       </span>

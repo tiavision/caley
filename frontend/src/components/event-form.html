@@ -10,10 +10,10 @@
   <div data-sn-state="{ draft: /** @type {EventDraft|null} */ (null), eventError: '', summaryHints: false, attendeeRow: -1, attendeeQuery: '' }"
        data-sn-on-event-new="draft = $event.detail; showModal('event-form')"
        data-sn-on-event-edit="draft = editEventDraft($event.detail.event, $event.detail.scope); showModal('event-form')">
-    <sn-resource name="calendars" src="/api/calendars" key="account_id,href" type="CalendarJson[]"></sn-resource>
-    <sn-resource name="caldavAccounts" src="/api/caldav/accounts" items="accounts" key="account_id" type="CalDavAccountJson[]"></sn-resource>
+    <sn-resource name="calendars" src="/calendars"></sn-resource>
+    <sn-resource name="caldavAccounts" src="/caldav/accounts"></sn-resource>
     <!-- attendee suggestions: loaded when the form first opens -->
-    <sn-resource name="attendeeContacts" src="/api/contacts" items="contacts" key="account_id,uid,addressbook_href" type="ContactJson[]" when="draft"></sn-resource>
+    <sn-resource name="attendeeContacts" src="/contacts" items="contacts" key="account_id,uid,addressbook_href" when="draft"></sn-resource>
     <slot></slot>
     <dialog id="event-form" closedby="any"
             data-sn-on-toggle="$el.open && $el.querySelector('input')?.select()"
@@ -29,7 +29,7 @@
 
       <template data-sn-if="draft">
         <form data-layout="stack" data-gap="md"
-              data-sn-post="/api/event" data-sn-encoding="form" data-sn-body="eventFormBody(draft)"
+              data-sn-post="/event" data-sn-encoding="form" data-sn-body="eventFormBody(draft)"
               data-sn-then="draft.mode === 'create' && emit('calendar-chosen', draft.cal); close(); emit('event-saved', draft)"
               data-sn-catch="eventError = $error.detail ?? m.event_error()">
           <label>
@@ -260,7 +260,7 @@
           <footer data-layout="row" data-gap="sm">
             <template data-sn-if="draft.mode === 'edit'">
               <button type="button" data-variant="ghost" data-tone="danger" data-icon="trash-2"
-                      data-sn-delete="/api/event?account_id={draft.cal.split('\0')[0]}&uid={draft.uid}&calendar_href={draft.cal.split('\0')[1]}&scope={draft.scope === 'this_instance' && draft.original_dtstart ? 'this_instance' : null}&original_dtstart={draft.scope === 'this_instance' && draft.original_dtstart ? draft.original_dtstart : null}&tz={draft.scope === 'this_instance' && draft.original_dtstart ? draft.original_tz : null}"
+                      data-sn-delete="/event?account_id={draft.cal.split('\0')[0]}&uid={draft.uid}&calendar_href={draft.cal.split('\0')[1]}&scope={draft.scope === 'this_instance' && draft.original_dtstart ? 'this_instance' : null}&original_dtstart={draft.scope === 'this_instance' && draft.original_dtstart ? draft.original_dtstart : null}&tz={draft.scope === 'this_instance' && draft.original_dtstart ? draft.original_tz : null}"
                       data-sn-confirm="m.event_deleteConfirm()"
                       data-sn-then="close('event-form'); emit('event-deleted', draft)"
                       data-sn-catch="eventError = $error.detail ?? m.event_error()"
