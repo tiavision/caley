@@ -62,14 +62,12 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
       open: async (ref: { uid: number }) => { opened.push(ref); return current.find((m) => m.uid === ref.uid) ?? inbox[0]; },
       body: async (ref: { account_id: string; mailbox: string; uid: number }) => ({
         key: `${ref.account_id} ${ref.mailbox} ${ref.uid}`, html: '', text: `body ${ref.uid}`, mode: 'text', encrypted: false, signed: false,
-        locked: false, badges: [], subject: '', error: '', files: [], importable: [], origins: [],
+        locked: false, badges: [], subject: '', error: '', files: [], importable: {}, origins: [],
       }),
-      bulk: async () => [],
       composeKeys: async () => ({ keys: [], vault: [], unlocked: [] }),
       send: async () => null,
       forwardFiles: async () => ({ files: [], html: '', preview: '' }),
-      popout: () => {}, unlock: async () => true, importKey: async () => '', icsFile: async (_m: unknown, filename: string) => new File(['x'], filename),
-      promoteOrigin: async () => null, saveFolder: async () => null,
+      popout: () => {}, unlock: async () => true, icsFile: async (_m: unknown, filename: string) => new File(['x'], filename),
       pendingCompose: () => { pendingCalls++; const p = pending; pending = null; return p; },
     },
   };
@@ -128,9 +126,10 @@ test('searches the folder with filters, and pages by cursor', async () => {
   expect(requests.calls.at(-1)!.url).toContain('&unread_only=true');
 });
 
-test('marks rows with Ctrl and Shift, and runs a bulk action that reloads the list and the unread counts', async () => {
-  const { root, settle, requests } = await show();
-  const gets = (path: string) => requests.calls.filter((c) => c.method === 'GET' && c.path === path).length;
+const ref = (uid: number) => ({ account_id: 'work', mailbox: 'INBOX', uid });
+
+test('marks rows with Ctrl and Shift, and runs a bulk action in one request; the server events update the list', async () => {
+  const { root, settle, requests, stream } = await show({ 'PATCH /api/email/messages/flags': { failed: [] } });
   const r = rows(root);
   r[0].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
   r[2].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
@@ -138,11 +137,41 @@ test('marks rows with Ctrl and Shift, and runs a bulk action that reloads the li
   expect(rows(root).filter((x) => x.getAttribute('aria-pressed') === 'true')).toHaveLength(3);
   expect(root.querySelector('.message-detail h2')!.textContent).toBe('3 messages selected');
 
-  const [messages, unread] = [gets('/api/email/messages'), gets('/api/email/unread-counts')];
   root.querySelector<HTMLButtonElement>('.bulk-menu button[data-icon="mail"]')!.click();
   await settle();
+  expect(requests.calls.at(-1)).toMatchObject({ method: 'PATCH', path: '/api/email/messages/flags' });
+  expect(requests.calls.at(-1)!.body).toEqual({ messages: [ref(3), ref(2), ref(1)], flags: ['\\Seen'], set: false });
   expect(root.querySelectorAll('.message-row[aria-pressed="true"]')).toHaveLength(0);
-  expect([gets('/api/email/messages'), gets('/api/email/unread-counts')]).toEqual([messages + 1, unread + 1]);
+  stream.emit('email_updated', { account_id: 'work', mailbox: 'INBOX', uid: 2, flags: [] });
+  await settle();
+  expect(rows(root)[1].classList.contains('unread')).toBe(true);
+});
+
+test('a bulk archive moves each message to its account\'s archive; the failed ones stay marked, with the error', async () => {
+  const { root, settle, requests } = await show({ 'POST /api/email/messages/move': { failed: [ref(1)] } });
+  const r = rows(root);
+  r[0].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+  r[2].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+  await settle();
+  root.querySelector<HTMLButtonElement>('.bulk-menu button[data-icon="archive"]')!.click();
+  await settle();
+  expect(requests.calls.at(-1)).toMatchObject({ method: 'POST', path: '/api/email/messages/move' });
+  expect(requests.calls.at(-1)!.body).toEqual({ messages: [{ ...ref(3), dest_mailbox: 'Archive' }, { ...ref(1), dest_mailbox: 'Archive' }] });
+  expect(rows(root).filter((x) => x.getAttribute('aria-pressed') === 'true').map((x) => x.querySelector('.subject')!.textContent)).toEqual(['First']);
+  expect(root.querySelector('.message-detail [role=alert]')!.textContent).toBe(m.mail_bulkActionError());
+});
+
+test('a bulk delete that fails keeps every message marked, with the error', async () => {
+  const { root, settle, requests } = await show({ 'POST /api/email/messages/delete': { status: 500 } });
+  const r = rows(root);
+  r[0].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+  r[1].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+  await settle();
+  root.querySelector<HTMLButtonElement>('.bulk-menu button[data-icon="trash-2"]')!.click();
+  await settle();
+  expect(requests.calls.at(-1)!.body).toEqual({ messages: [ref(3), ref(2)] });
+  expect(rows(root).filter((x) => x.getAttribute('aria-pressed') === 'true')).toHaveLength(2);
+  expect(root.querySelector('.message-detail [role=alert]')!.textContent).toBe(m.mail_bulkActionError());
 });
 
 test('server events: flags patch the list, a removed open message closes the reader', async () => {
@@ -281,6 +310,46 @@ test('j past the last row loads the next page when there is one, and nothing at 
 
 const folderRow = { folder_id: 'f1', display_name: 'followup-Folder', sort_order: 0, query: '', mailboxes: [] };
 const folderItems = (root: HTMLElement) => [...root.querySelectorAll('.sidebar-item')].map((b) => b.textContent!.trim()).filter((t) => t.startsWith('followup-'));
+
+test('the folder dialog creates a folder and saves an edited one, each with one POST', async () => {
+  const folder = { folder_id: 'f1', display_name: 'followup-Folder', sort_order: 0, only_flagged: false, only_attachments: false,
+    rules: [{ account_id: null, mailbox_pattern: null }] };
+  const { root, settle, requests } = await show({ 'GET /api/email/folders': { folders: [folder] }, 'POST /api/email/folder': { folder_id: 'f2' } });
+  const save = async (name: string) => {
+    const input = root.querySelector<HTMLInputElement>('#mail-folder input:not([type])')!;
+    input.value = name;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    root.querySelector<HTMLFormElement>('#mail-folder form')!.requestSubmit();
+    await settle();
+    return requests.calls.filter((c) => c.method === 'POST' && c.path === '/api/email/folder').at(-1)!.body;
+  };
+  root.querySelector<HTMLButtonElement>('.sidebar-add button:last-child')!.click();
+  await settle();
+  expect(await save('followup-New')).toEqual({ folder_id: null, display_name: 'followup-New', rules: [{ account_id: null, mailbox_pattern: null }], only_flagged: false, only_attachments: false });
+  expect(root.querySelector<HTMLDialogElement>('#mail-folder')!.open).toBe(false);
+
+  root.querySelector<HTMLButtonElement>('button[data-icon="pencil"]')!.click();
+  await settle();
+  expect(await save('followup-Renamed')).toMatchObject({ folder_id: 'f1', display_name: 'followup-Renamed' });
+  expect(requests.calls.some((c) => c.method === 'PUT')).toBe(false);
+});
+
+test('allowing an ignored image origin is one POST to the allow list (the server takes it off the ignore list)', async () => {
+  const { root, settle, requests } = await show({
+    'GET /api/email/image-blacklist': { origins: ['https://ads.example'] },
+    'POST /api/email/image-origins': null,
+  });
+  root.querySelector<HTMLButtonElement>('.origins-trigger')!.click();
+  await settle();
+  const allow = [...root.querySelectorAll<HTMLButtonElement>('#mail-origins button')].find((b) => b.textContent === m.mail_originsAllow())!;
+  const loads = () => requests.calls.filter((c) => c.method === 'GET' && c.path.startsWith('/api/email/image-')).length;
+  const before = loads();
+  allow.click();
+  await settle();
+  const writes = requests.calls.filter((c) => c.method !== 'GET' && c.path.startsWith('/api/email/image-'));
+  expect(writes.map((c) => [c.method, c.path, c.body])).toEqual([['POST', '/api/email/image-origins', { origin: 'https://ads.example' }]]);
+  expect(loads()).toBe(before + 2);   // both lists reloaded
+});
 
 test('removing the open virtual folder drops it and goes back to the inbox', async () => {
   const { root, settle } = await show({ 'GET /api/email/folders': { folders: [folderRow] }, 'DELETE /api/email/folder': null, 'GET /api/email/search': { messages: [] } });

@@ -517,8 +517,9 @@ pub struct VirtualFoldersResponse {
     pub folders: Vec<VirtualFolder>,
 }
 
+/// The id of the folder created or updated.
 #[derive(Serialize, ToSchema)]
-pub struct VirtualFolderCreated {
+pub struct VirtualFolderSaved {
     pub folder_id: String,
 }
 
@@ -591,9 +592,11 @@ pub async fn get_unread_counts(
     Json(UnreadCounts { mailboxes, folders }).into_response()
 }
 
-/// A virtual folder to create or update.
+/// A virtual folder to create (no `folder_id`) or update.
 #[derive(Deserialize, ToSchema)]
 pub struct VirtualFolderBody {
+    /// the folder to update; absent or `null`: a new folder
+    pub folder_id: Option<String>,
     pub display_name: String,
     pub rules: Vec<VirtualFolderRule>,
     /// default false
@@ -602,90 +605,75 @@ pub struct VirtualFolderBody {
     pub only_attachments: Option<bool>,
 }
 
+/// Creates a virtual folder, or updates the one `folder_id` names.
 #[utoipa::path(
     post,
     path = "/email/folder",
     request_body = VirtualFolderBody,
-    responses((status = 200, body = VirtualFolderCreated), (status = 500, description = "database error"))
+    responses(
+        (status = 200, body = VirtualFolderSaved),
+        (status = 404, description = "no such folder (plain text)"),
+        (status = 500, description = "database error")
+    )
 )]
-pub async fn create_virtual_folder(
+pub async fn save_virtual_folder(
     State(state): State<AppState>,
     user: CurrentUser,
     Json(body): Json<VirtualFolderBody>,
 ) -> impl IntoResponse {
-    let folder_id = Uuid::new_v4().to_string();
     let rules: Vec<(Option<&str>, Option<&str>)> = body
         .rules
         .iter()
         .map(|r| (r.account_id.as_deref(), r.mailbox_pattern.as_deref()))
         .collect();
+    let only_flagged = body.only_flagged.unwrap_or(false);
+    let only_attachments = body.only_attachments.unwrap_or(false);
 
-    if let Err(e) = email_db::create_virtual_folder(
-        &state.db,
-        &folder_id,
-        &user.user_id,
-        &body.display_name,
-        &rules,
-        body.only_flagged.unwrap_or(false),
-        body.only_attachments.unwrap_or(false),
-    )
-    .await
-    {
-        eprintln!("[email] create_virtual_folder error: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+    let (folder_id, result) = match body.folder_id {
+        Some(folder_id) => {
+            let updated = email_db::update_virtual_folder(
+                &state.db,
+                &folder_id,
+                &user.user_id,
+                &body.display_name,
+                &rules,
+                only_flagged,
+                only_attachments,
+            )
+            .await;
+            (folder_id, updated)
+        }
+        None => {
+            let folder_id = Uuid::new_v4().to_string();
+            let created = email_db::create_virtual_folder(
+                &state.db,
+                &folder_id,
+                &user.user_id,
+                &body.display_name,
+                &rules,
+                only_flagged,
+                only_attachments,
+            )
+            .await;
+            (folder_id, created)
+        }
+    };
+    match result {
+        Ok(()) => Json(VirtualFolderSaved { folder_id }).into_response(),
+        Err(e) if e.to_string() == "not found" => {
+            (StatusCode::NOT_FOUND, "not found").into_response()
+        }
+        Err(e) => {
+            eprintln!("[email] save_virtual_folder error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
     }
-    Json(VirtualFolderCreated { folder_id }).into_response()
 }
 
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct FolderIdQuery {
     pub folder_id: String,
-}
-
-#[utoipa::path(
-    put,
-    path = "/email/folder",
-    params(FolderIdQuery),
-    request_body = VirtualFolderBody,
-    responses(
-        (status = 204, description = "updated"),
-        (status = 404, description = "not found (plain text)"),
-        (status = 500, description = "database error")
-    )
-)]
-pub async fn update_virtual_folder(
-    State(state): State<AppState>,
-    user: CurrentUser,
-    Query(q): Query<FolderIdQuery>,
-    Json(body): Json<VirtualFolderBody>,
-) -> impl IntoResponse {
-    let rules: Vec<(Option<&str>, Option<&str>)> = body
-        .rules
-        .iter()
-        .map(|r| (r.account_id.as_deref(), r.mailbox_pattern.as_deref()))
-        .collect();
-
-    match email_db::update_virtual_folder(
-        &state.db,
-        &q.folder_id,
-        &user.user_id,
-        &body.display_name,
-        &rules,
-        body.only_flagged.unwrap_or(false),
-        body.only_attachments.unwrap_or(false),
-    )
-    .await
-    {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) if e.to_string() == "not found" => {
-            (StatusCode::NOT_FOUND, "not found").into_response()
-        }
-        Err(e) => {
-            eprintln!("[email] update_virtual_folder error: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
-        }
-    }
 }
 
 #[utoipa::path(
@@ -715,11 +703,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(trigger_mailbox_sync))
         .routes(routes!(get_unread_counts))
         .routes(routes!(list_virtual_folders))
-        .routes(routes!(
-            create_virtual_folder,
-            update_virtual_folder,
-            delete_virtual_folder
-        ))
+        .routes(routes!(save_virtual_folder, delete_virtual_folder))
         .routes(routes!(list_identities))
         .routes(routes!(save_identity, delete_identity))
         .merge(messages::routes())

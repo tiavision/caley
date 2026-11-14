@@ -48,8 +48,9 @@ describe('selection', () => {
   });
   test('after a bulk action the failed ones stay marked, with the error', () => {
     expect(afterBulk({ ...noSelection(), busy: true, move: true }, [])).toEqual(noSelection());
-    expect(afterBulk(noSelection(), ['k1', 'k2'])).toMatchObject({ keys: ['k1', 'k2'], anchor: 'k1', busy: false });
-    expect(afterBulk(noSelection(), ['k1']).error).not.toBe('');
+    const ref = (uid: number) => ({ account_id: 'a', mailbox: 'INBOX', uid });
+    expect(afterBulk(noSelection(), [ref(1), ref(2)])).toMatchObject({ keys: [key(1), key(2)], anchor: key(1), busy: false });
+    expect(afterBulk(noSelection(), [ref(1)]).error).not.toBe('');
   });
 });
 

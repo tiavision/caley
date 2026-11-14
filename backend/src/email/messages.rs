@@ -456,6 +456,241 @@ fn dedupe_thread_messages(
     result
 }
 
+// ── Flags, moves, deletions ───────────────────────────────────────────────────
+//
+// One message (the reader, a dragged row) or many (the list's bulk menu): both run `apply`, which makes the
+// changes of one account's messages on its IMAP server over one connection, then in the cache, and reports each
+// with `email_updated` / `email_removed` (and `emails_refetch` for a move's destination). A server error is
+// logged, not reported: the cache changes either way and the next sync corrects it.
+
+/// A message: its account, mailbox and UID.
+#[derive(Clone, Deserialize, serde::Serialize, ToSchema)]
+pub struct MessageRef {
+    pub account_id: String,
+    pub mailbox: String,
+    pub uid: u32,
+}
+
+/// What happens to one message.
+enum Change {
+    Flags {
+        flags: Vec<String>,
+        set: bool,
+    },
+    Move {
+        dest: String,
+    },
+    /// to the account's trash; deleted outright in a trash mailbox or without one
+    Delete,
+}
+
+/// The messages' accounts, each looked up once, with the indices of its messages. The messages of an account that
+/// does not exist (or could not be read) go to `failed`.
+async fn accounts_of(
+    state: &AppState,
+    user_id: &str,
+    refs: &[&MessageRef],
+    failed: &mut Vec<MessageRef>,
+) -> Vec<(email_db::ImapAccountRow, Vec<usize>)> {
+    let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+    for (i, r) in refs.iter().enumerate() {
+        match groups.iter_mut().find(|(id, _)| *id == r.account_id) {
+            Some((_, idx)) => idx.push(i),
+            None => groups.push((r.account_id.clone(), vec![i])),
+        }
+    }
+    let mut out = Vec::new();
+    for (account_id, idx) in groups {
+        match email_db::get_account(&state.db, &account_id, user_id, &state.encryption_key).await {
+            Ok(Some(account)) => out.push((account, idx)),
+            other => {
+                if let Err(e) = other {
+                    eprintln!("[email] account lookup: {e}");
+                }
+                failed.extend(idx.iter().map(|&i| refs[i].clone()));
+            }
+        }
+    }
+    out
+}
+
+/// Makes the changes of one account's messages: on the server, in the cache, and in the server events.
+async fn apply(
+    state: &AppState,
+    user_id: &str,
+    account: &email_db::ImapAccountRow,
+    changes: Vec<(MessageRef, Change)>,
+) {
+    // A deletion outside the trash is a move to it.
+    let trash = if changes
+        .iter()
+        .any(|(m, c)| matches!(c, Change::Delete) && !is_trash_mailbox_name(&m.mailbox))
+    {
+        email_db::find_trash_mailbox(&state.db, &account.account_id)
+            .await
+            .unwrap_or(None)
+    } else {
+        None
+    };
+    let changes: Vec<(MessageRef, Change)> = changes
+        .into_iter()
+        .map(|(m, c)| match (c, &trash) {
+            (Change::Delete, Some(t)) if !is_trash_mailbox_name(&m.mailbox) => {
+                (m, Change::Move { dest: t.clone() })
+            }
+            (c, _) => (m, c),
+        })
+        .collect();
+
+    if !state.demo_mode {
+        match imap_client::connect(
+            &account.host,
+            account.port as u16,
+            &account.username,
+            &account.password,
+        )
+        .await
+        {
+            Ok(mut session) => {
+                let mut selected: Option<&str> = None;
+                for (m, change) in &changes {
+                    if selected != Some(m.mailbox.as_str()) {
+                        if let Err(e) = imap_client::select_mailbox(&mut session, &m.mailbox).await
+                        {
+                            eprintln!("[email] select {}: {e}", m.mailbox);
+                            selected = None;
+                            continue;
+                        }
+                        selected = Some(m.mailbox.as_str());
+                    }
+                    let result = match change {
+                        Change::Flags { flags, set } => {
+                            let flags: Vec<&str> = flags.iter().map(|s| s.as_str()).collect();
+                            imap_client::set_flags(&mut session, m.uid, &flags, *set).await
+                        }
+                        Change::Move { dest } => {
+                            imap_client::move_message_on_server(&mut session, m.uid, dest).await
+                        }
+                        Change::Delete => imap_client::delete_on_server(&mut session, m.uid).await,
+                    };
+                    if let Err(e) = result {
+                        eprintln!("[email] change of {} {}: {e}", m.mailbox, m.uid);
+                    }
+                }
+                let _ = session.logout().await;
+            }
+            Err(e) => eprintln!("[email] connect for a message change: {e}"),
+        }
+    }
+
+    let mut refetch: Vec<String> = Vec::new();
+    for (m, change) in changes {
+        match change {
+            Change::Flags { flags, set } => cache_flags(state, user_id, m, &flags, set).await,
+            Change::Move { dest } => {
+                cache_remove(state, user_id, m).await;
+                if !refetch.contains(&dest) {
+                    refetch.push(dest);
+                }
+            }
+            Change::Delete => cache_remove(state, user_id, m).await,
+        }
+    }
+    for mailbox in refetch {
+        state.sse_broadcaster.send(
+            user_id,
+            SseMessage::EmailsRefetch {
+                account_id: account.account_id.clone(),
+                mailbox,
+            },
+        );
+    }
+}
+
+/// Adds or removes flags of a cached message; `email_updated` reports the new flags.
+async fn cache_flags(state: &AppState, user_id: &str, m: MessageRef, flags: &[String], set: bool) {
+    let mut current: Vec<String> =
+        email_db::get_message(&state.db, &m.account_id, &m.mailbox, m.uid)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| row.flags)
+            .and_then(|f| serde_json::from_str(&f).ok())
+            .unwrap_or_default();
+    if set {
+        for f in flags {
+            if !current.contains(f) {
+                current.push(f.clone());
+            }
+        }
+    } else {
+        current.retain(|f| !flags.contains(f));
+    }
+    let flags_json = serde_json::to_string(&current).unwrap_or_default();
+    let _ =
+        email_db::update_message_flags(&state.db, &m.account_id, &m.mailbox, m.uid, &flags_json)
+            .await;
+    state.sse_broadcaster.send(
+        user_id,
+        SseMessage::EmailUpdated {
+            account_id: m.account_id,
+            uid: m.uid,
+            mailbox: m.mailbox,
+            flags: current,
+        },
+    );
+}
+
+/// Drops a message from the cache (its .eml, attachments and row); `email_removed` reports it.
+async fn cache_remove(state: &AppState, user_id: &str, m: MessageRef) {
+    let _ =
+        tokio::fs::remove_file(eml_path(&state.data_dir, &m.account_id, &m.mailbox, m.uid)).await;
+    let _ =
+        email_db::delete_attachments_for_message(&state.db, &m.account_id, &m.mailbox, m.uid).await;
+    let _ = email_db::delete_message(&state.db, &m.account_id, &m.mailbox, m.uid).await;
+    state.sse_broadcaster.send(
+        user_id,
+        SseMessage::EmailRemoved {
+            account_id: m.account_id,
+            uid: m.uid,
+            mailbox: m.mailbox,
+        },
+    );
+}
+
+/// The account of a single-message request: 404 when there is none.
+async fn account_or_error(
+    state: &AppState,
+    user_id: &str,
+    account_id: &str,
+) -> Result<email_db::ImapAccountRow, Response> {
+    match email_db::get_account(&state.db, account_id, user_id, &state.encryption_key).await {
+        Ok(Some(a)) => Ok(a),
+        Ok(None) => Err((StatusCode::NOT_FOUND, "account not found").into_response()),
+        Err(e) => {
+            eprintln!("[email] account lookup: {e}");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response())
+        }
+    }
+}
+
+/// Runs one change per message, grouped by account; the messages whose account is unknown failed.
+async fn apply_bulk(
+    state: &AppState,
+    user_id: &str,
+    items: Vec<(MessageRef, Change)>,
+) -> BulkResult {
+    let mut failed = Vec::new();
+    let refs: Vec<&MessageRef> = items.iter().map(|(m, _)| m).collect();
+    let groups = accounts_of(state, user_id, &refs, &mut failed).await;
+    let mut items: Vec<Option<(MessageRef, Change)>> = items.into_iter().map(Some).collect();
+    for (account, idx) in groups {
+        let changes = idx.iter().filter_map(|&i| items[i].take()).collect();
+        apply(state, user_id, &account, changes).await;
+    }
+    BulkResult { failed }
+}
+
 /// Sets or clears IMAP flags on a message.
 #[derive(Deserialize, ToSchema)]
 pub struct FlagsBody {
@@ -484,87 +719,20 @@ pub async fn update_flags(
     user: CurrentUser,
     Json(body): Json<FlagsBody>,
 ) -> impl IntoResponse {
-    let account = match email_db::get_account(
-        &state.db,
-        &body.account_id,
-        &user.user_id,
-        &state.encryption_key,
-    )
-    .await
-    {
-        Ok(Some(a)) => a,
-        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
-        Err(e) => {
-            eprintln!("[email] update_flags account lookup: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-        }
+    let account = match account_or_error(&state, &user.user_id, &body.account_id).await {
+        Ok(a) => a,
+        Err(r) => return r,
     };
-
-    // Apply on server (skipped in demo mode)
-    if !state.demo_mode {
-        match imap_client::connect(
-            &account.host,
-            account.port as u16,
-            &account.username,
-            &account.password,
-        )
-        .await
-        {
-            Ok(mut session) => {
-                if let Ok(_) = imap_client::select_mailbox(&mut session, &body.mailbox).await {
-                    let flag_strs: Vec<&str> = body.flags.iter().map(|s| s.as_str()).collect();
-                    if let Err(e) =
-                        imap_client::set_flags(&mut session, body.uid, &flag_strs, body.set).await
-                    {
-                        eprintln!("[email] set_flags error: {e}");
-                    }
-                }
-                let _ = session.logout().await;
-            }
-            Err(e) => eprintln!("[email] connect for flags error: {e}"),
-        }
-    }
-
-    // Update cached flags
-    let mut current_flags: Vec<String> =
-        email_db::get_message(&state.db, &body.account_id, &body.mailbox, body.uid)
-            .await
-            .ok()
-            .flatten()
-            .and_then(|m| m.flags)
-            .and_then(|f| serde_json::from_str(&f).ok())
-            .unwrap_or_default();
-
-    if body.set {
-        for f in &body.flags {
-            if !current_flags.contains(f) {
-                current_flags.push(f.clone());
-            }
-        }
-    } else {
-        current_flags.retain(|f| !body.flags.contains(f));
-    }
-
-    let flags_json = serde_json::to_string(&current_flags).unwrap_or_default();
-    let _ = email_db::update_message_flags(
-        &state.db,
-        &body.account_id,
-        &body.mailbox,
-        body.uid,
-        &flags_json,
-    )
-    .await;
-
-    state.sse_broadcaster.send(
-        &user.user_id,
-        SseMessage::EmailUpdated {
-            account_id: body.account_id.clone(),
-            uid: body.uid,
-            mailbox: body.mailbox.clone(),
-            flags: current_flags,
-        },
-    );
-
+    let m = MessageRef {
+        account_id: body.account_id,
+        mailbox: body.mailbox,
+        uid: body.uid,
+    };
+    let change = Change::Flags {
+        flags: body.flags,
+        set: body.set,
+    };
+    apply(&state, &user.user_id, &account, vec![(m, change)]).await;
     StatusCode::OK.into_response()
 }
 
@@ -592,77 +760,158 @@ pub async fn delete_message(
     user: CurrentUser,
     Query(q): Query<DeleteMessageQuery>,
 ) -> impl IntoResponse {
-    let account = match email_db::get_account(
-        &state.db,
-        &q.account_id,
-        &user.user_id,
-        &state.encryption_key,
-    )
-    .await
-    {
-        Ok(Some(a)) => a,
-        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
-        Err(e) => {
-            eprintln!("[email] delete_message account lookup: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-        }
+    let account = match account_or_error(&state, &user.user_id, &q.account_id).await {
+        Ok(a) => a,
+        Err(r) => return r,
     };
-
-    let is_trash = is_trash_mailbox_name(&q.mailbox);
-
-    let trash_mailbox = if is_trash {
-        None
-    } else {
-        email_db::find_trash_mailbox(&state.db, &q.account_id)
-            .await
-            .unwrap_or(None)
+    let m = MessageRef {
+        account_id: q.account_id,
+        mailbox: q.mailbox,
+        uid: q.uid,
     };
-
-    if !state.demo_mode {
-        match imap_client::connect(
-            &account.host,
-            account.port as u16,
-            &account.username,
-            &account.password,
-        )
-        .await
-        {
-            Ok(mut session) => {
-                if let Ok(_) = imap_client::select_mailbox(&mut session, &q.mailbox).await {
-                    if let Some(ref trash) = trash_mailbox {
-                        if let Err(e) =
-                            imap_client::move_message_on_server(&mut session, q.uid, trash).await
-                        {
-                            eprintln!("[email] move_to_trash error: {e}");
-                        }
-                    } else if let Err(e) = imap_client::delete_on_server(&mut session, q.uid).await
-                    {
-                        eprintln!("[email] delete_on_server error: {e}");
-                    }
-                }
-                let _ = session.logout().await;
-            }
-            Err(e) => eprintln!("[email] connect for delete error: {e}"),
-        }
-    }
-
-    // Delete .eml and DB rows
-    let _ =
-        tokio::fs::remove_file(eml_path(&state.data_dir, &q.account_id, &q.mailbox, q.uid)).await;
-    let _ =
-        email_db::delete_attachments_for_message(&state.db, &q.account_id, &q.mailbox, q.uid).await;
-    let _ = email_db::delete_message(&state.db, &q.account_id, &q.mailbox, q.uid).await;
-
-    state.sse_broadcaster.send(
-        &user.user_id,
-        SseMessage::EmailRemoved {
-            account_id: q.account_id,
-            uid: q.uid,
-            mailbox: q.mailbox,
-        },
-    );
-
+    apply(&state, &user.user_id, &account, vec![(m, Change::Delete)]).await;
     StatusCode::NO_CONTENT.into_response()
+}
+
+/// Moves a message to another mailbox of its account.
+#[derive(Deserialize, ToSchema)]
+pub struct MoveMessageBody {
+    pub account_id: String,
+    pub mailbox: String,
+    pub uid: u32,
+    pub dest_mailbox: String,
+}
+
+/// Moves a message; `email_removed` and `emails_refetch` (of the destination) report it.
+#[utoipa::path(
+    post,
+    path = "/email/message/move",
+    request_body = MoveMessageBody,
+    responses(
+        (status = 204, description = "moved"),
+        (status = 404, description = "no such account (plain text)"),
+        (status = 500, description = "database error (plain text)")
+    )
+)]
+pub async fn move_message(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<MoveMessageBody>,
+) -> impl IntoResponse {
+    let account = match account_or_error(&state, &user.user_id, &body.account_id).await {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    let (m, change) = move_change(body);
+    apply(&state, &user.user_id, &account, vec![(m, change)]).await;
+    StatusCode::NO_CONTENT.into_response()
+}
+
+fn move_change(body: MoveMessageBody) -> (MessageRef, Change) {
+    let m = MessageRef {
+        account_id: body.account_id,
+        mailbox: body.mailbox,
+        uid: body.uid,
+    };
+    (
+        m,
+        Change::Move {
+            dest: body.dest_mailbox,
+        },
+    )
+}
+
+// ── Bulk ──────────────────────────────────────────────────────────────────────
+
+/// What a bulk change could not do: the messages whose account does not exist (the others were changed).
+#[derive(serde::Serialize, ToSchema)]
+pub struct BulkResult {
+    pub failed: Vec<MessageRef>,
+}
+
+/// Sets or clears flags on several messages.
+#[derive(Deserialize, ToSchema)]
+pub struct BulkFlagsBody {
+    pub messages: Vec<MessageRef>,
+    /// e.g. `\Seen`, `\Flagged`
+    pub flags: Vec<String>,
+    /// true adds the flags, false removes them
+    pub set: bool,
+}
+
+/// Sets or clears flags of several messages (each as PATCH /email/message/flags); `email_updated` reports each.
+#[utoipa::path(
+    patch,
+    path = "/email/messages/flags",
+    request_body = BulkFlagsBody,
+    responses((status = 200, body = BulkResult))
+)]
+pub async fn bulk_flags(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<BulkFlagsBody>,
+) -> impl IntoResponse {
+    let items = body
+        .messages
+        .into_iter()
+        .map(|m| {
+            let change = Change::Flags {
+                flags: body.flags.clone(),
+                set: body.set,
+            };
+            (m, change)
+        })
+        .collect();
+    Json(apply_bulk(&state, &user.user_id, items).await)
+}
+
+/// Moves several messages, each to its `dest_mailbox`.
+#[derive(Deserialize, ToSchema)]
+pub struct BulkMoveBody {
+    pub messages: Vec<MoveMessageBody>,
+}
+
+/// Moves several messages (each as POST /email/message/move); `email_removed` and `emails_refetch` report them.
+#[utoipa::path(
+    post,
+    path = "/email/messages/move",
+    request_body = BulkMoveBody,
+    responses((status = 200, body = BulkResult))
+)]
+pub async fn bulk_move(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<BulkMoveBody>,
+) -> impl IntoResponse {
+    let items = body.messages.into_iter().map(move_change).collect();
+    Json(apply_bulk(&state, &user.user_id, items).await)
+}
+
+/// Several messages.
+#[derive(Deserialize, ToSchema)]
+pub struct BulkMessagesBody {
+    pub messages: Vec<MessageRef>,
+}
+
+/// Deletes several messages (each as DELETE /email/message: to the trash, outright in the trash); `email_removed`
+/// reports each.
+#[utoipa::path(
+    post,
+    path = "/email/messages/delete",
+    request_body = BulkMessagesBody,
+    responses((status = 200, body = BulkResult))
+)]
+pub async fn bulk_delete(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<BulkMessagesBody>,
+) -> impl IntoResponse {
+    let items = body
+        .messages
+        .into_iter()
+        .map(|m| (m, Change::Delete))
+        .collect();
+    Json(apply_bulk(&state, &user.user_id, items).await)
 }
 
 /// Deletes the messages of a trash mailbox put there more than `days` ago.
@@ -841,111 +1090,6 @@ async fn delete_cached_messages_and_files(
         email_db::delete_messages_by_uids(&state.db, account_id, mailbox, chunk).await?;
     }
     Ok(())
-}
-
-// ── Move ──────────────────────────────────────────────────────────────────────
-
-/// Moves a message to another mailbox of its account.
-#[derive(Deserialize, ToSchema)]
-pub struct MoveMessageBody {
-    pub account_id: String,
-    pub mailbox: String,
-    pub uid: u32,
-    pub dest_mailbox: String,
-}
-
-/// Moves a message; `email_removed` and `emails_refetch` (of the destination) report it.
-#[utoipa::path(
-    post,
-    path = "/email/message/move",
-    request_body = MoveMessageBody,
-    responses(
-        (status = 204, description = "moved"),
-        (status = 404, description = "no such account (plain text)"),
-        (status = 500, description = "database error (plain text)")
-    )
-)]
-pub async fn move_message(
-    State(state): State<AppState>,
-    user: CurrentUser,
-    Json(body): Json<MoveMessageBody>,
-) -> impl IntoResponse {
-    let account = match email_db::get_account(
-        &state.db,
-        &body.account_id,
-        &user.user_id,
-        &state.encryption_key,
-    )
-    .await
-    {
-        Ok(Some(a)) => a,
-        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
-        Err(e) => {
-            eprintln!("[email] move_message account lookup: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-        }
-    };
-
-    if !state.demo_mode {
-        match imap_client::connect(
-            &account.host,
-            account.port as u16,
-            &account.username,
-            &account.password,
-        )
-        .await
-        {
-            Ok(mut session) => {
-                if let Ok(_) = imap_client::select_mailbox(&mut session, &body.mailbox).await {
-                    if let Err(e) = imap_client::move_message_on_server(
-                        &mut session,
-                        body.uid,
-                        &body.dest_mailbox,
-                    )
-                    .await
-                    {
-                        eprintln!("[email] move_message_on_server error: {e}");
-                    }
-                }
-                let _ = session.logout().await;
-            }
-            Err(e) => eprintln!("[email] connect for move error: {e}"),
-        }
-    }
-
-    let _ = tokio::fs::remove_file(eml_path(
-        &state.data_dir,
-        &body.account_id,
-        &body.mailbox,
-        body.uid,
-    ))
-    .await;
-    let _ = email_db::delete_attachments_for_message(
-        &state.db,
-        &body.account_id,
-        &body.mailbox,
-        body.uid,
-    )
-    .await;
-    let _ = email_db::delete_message(&state.db, &body.account_id, &body.mailbox, body.uid).await;
-
-    state.sse_broadcaster.send(
-        &user.user_id,
-        SseMessage::EmailRemoved {
-            account_id: body.account_id.clone(),
-            uid: body.uid,
-            mailbox: body.mailbox.clone(),
-        },
-    );
-    state.sse_broadcaster.send(
-        &user.user_id,
-        SseMessage::EmailsRefetch {
-            account_id: body.account_id,
-            mailbox: body.dest_mailbox,
-        },
-    );
-
-    StatusCode::NO_CONTENT.into_response()
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────
@@ -1193,6 +1337,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(get_thread))
         .routes(routes!(update_flags))
         .routes(routes!(move_message))
+        .routes(routes!(bulk_flags))
+        .routes(routes!(bulk_move))
+        .routes(routes!(bulk_delete))
         .routes(routes!(empty_trash))
         .routes(routes!(search))
         .routes(routes!(suggest_addrs))

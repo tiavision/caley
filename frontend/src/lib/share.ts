@@ -1,28 +1,5 @@
 import type { EventJson, ContactJson } from '../types/calendar.ts';
-import { apiFetch } from './api.ts';
 import { pagePath } from './locale-path.ts';
-
-export async function fetchEventICS(event: EventJson): Promise<string> {
-  const params = new URLSearchParams({
-    account_id: event.account_id,
-    calendar_href: event.calendar_href,
-    uid: event.uid,
-  });
-  const res = await apiFetch(`/api/event/ics?${params}`);
-  if (!res.ok) throw new Error('fetch failed');
-  return res.text();
-}
-
-export async function fetchContactVCF(contact: ContactJson): Promise<string> {
-  const params = new URLSearchParams({
-    account_id: contact.account_id,
-    addressbook_href: contact.addressbook_href,
-    uid: contact.uid,
-  });
-  const res = await apiFetch(`/api/contact/vcf?${params}`);
-  if (!res.ok) throw new Error('fetch failed');
-  return res.text();
-}
 
 export function downloadFile(filename: string, content: string, mimeType: string): void {
   const blob = new Blob([content], { type: mimeType });

@@ -22,6 +22,7 @@
          ownPub: { fingerprint: '', armored: '' },
          keyError: '',
          pubArmored: '',
+         pubKey: /** @type {PublicKeyBody|null} */ (null),
          pubError: '',
          pubSuccess: '',
        }"
@@ -460,9 +461,13 @@
         <button type="button" commandfor="pgp-public-key-dialog" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
       </header>
       <template data-sn-if="pubError"><div data-callout data-tone="danger" role="alert" data-sn-text="pubError"></div></template>
+      <!-- Import: the key is read here (pgpKeys.publicKey, openpgp), then stored (#pub-key-save). -->
+      <span hidden id="pub-key-save" data-sn-post="/pgp/key" data-sn-body="pubKey"
+            data-sn-then="upsert('publicKeys', $result); pubArmored = ''; pubSuccess = m.pgp_publicKeyImported(); close('pgp-public-key-dialog')"
+            data-sn-catch="pubError = m.pgp_publicKeyImportError()"></span>
       <form data-layout="stack" data-gap="md"
-            data-sn-call="pgpKeys.importPublic(pubArmored)" data-sn-on-submit="pubError = ''; pubSuccess = ''"
-            data-sn-then="upsert('publicKeys', $result); pubArmored = ''; pubSuccess = m.pgp_publicKeyImported(); close()"
+            data-sn-call="pgpKeys.publicKey(pubArmored)" data-sn-on-submit="pubError = ''; pubSuccess = ''"
+            data-sn-then="pubKey = $result; run('pub-key-save')"
             data-sn-catch="pubError = loadErrorOr($error, m.pgp_publicKeyImportError())">
         <label>
           <span data-sn-text="m.pgp_keyFile()"></span>

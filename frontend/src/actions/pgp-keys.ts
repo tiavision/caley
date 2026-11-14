@@ -1,12 +1,12 @@
 // `pgpKeys` actions: trusted senders' public keys on the settings page (src/components/pgp-settings.html).
 // keyFile() reads a key file for the import dialogs' textareas. Parsing a key needs openpgp (a lazy package, loaded by
-// sinter on the first call); listing and deleting are plain requests in the markup.
+// sinter on the first call); listing, storing and deleting are plain requests in the markup.
 import { armorBinaryKey } from '../lib/pgp/keyring.ts';
-import { parsePublicKey, savePublicKey, type StoredPublicKey } from '../lib/pgp/public-keys.ts';
+import { parsePublicKey, publicKeyBody, type PublicKeyBody } from '../lib/pgp/public-keys.ts';
 
-/** Reads an armored public key and stores it as trusted; returns the stored record for `publicKeys`. */
-export async function importPublic(armored: string): Promise<StoredPublicKey> {
-  return savePublicKey(await parsePublicKey(armored), 'imported');
+/** Reads an armored public key: the body of POST /pgp/key that stores it as trusted. */
+export async function publicKey(armored: string): Promise<PublicKeyBody> {
+  return publicKeyBody(await parsePublicKey(armored), 'imported');
 }
 
 /**
