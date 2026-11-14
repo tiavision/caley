@@ -118,7 +118,7 @@ Calendar/search:
 - `GET|POST /api/calendar`
 - `GET /api/events`
 - `POST|DELETE /api/event`
-- `POST /api/import`
+- `POST /api/import` (into a calendar, or a new one by name)
 - `POST /api/import/preview`
 - `GET /api/search`
 - `GET /api/events/stream`
@@ -143,13 +143,14 @@ Email:
 - `POST /api/email/sync`
 - `GET /api/email/unread-counts`
 - `GET /api/email/folders`
-- `POST|PUT|DELETE /api/email/folder`
+- `POST|DELETE /api/email/folder` (POST creates or, with `folder_id`, updates)
 - `GET /api/email/messages`
 - `GET /api/email/message`
 - `GET /api/email/thread`
 - `PATCH /api/email/message/flags`
 - `POST /api/email/message/move`
 - `DELETE /api/email/message`
+- `PATCH /api/email/messages/flags`, `POST /api/email/messages/move`, `POST /api/email/messages/delete` (bulk: the marked messages in one request, answering the ones that failed)
 - `POST /api/email/send`
 - `POST /api/email/send-raw`
 - `GET /api/email/search`

@@ -328,11 +328,6 @@ async fn load_raw_eml(
     Some(raw)
 }
 
-/// A MIME message as bytes (only described: the handler sends the bytes themselves).
-#[derive(ToSchema)]
-#[allow(dead_code)]
-#[schema(value_type = String, format = Binary)]
-struct RawMessage(Vec<u8>);
 
 /// The message's MIME source (for PGP processing).
 #[utoipa::path(
@@ -340,7 +335,7 @@ struct RawMessage(Vec<u8>);
     path = "/email/message/raw",
     params(GetMessageQuery),
     responses(
-        (status = 200, body = inline(RawMessage), content_type = "message/rfc822", description = "the cached .eml"),
+        (status = 200, body = crate::api::Binary, content_type = "message/rfc822", description = "the cached .eml"),
         (status = 404, description = "no such account or no cached source (plain text)"),
         (status = 500, description = "database error (plain text)")
     )

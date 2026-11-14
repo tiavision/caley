@@ -791,42 +791,9 @@
       }
     },
     "/email/folder": {
-      "put": {
-        "operationId": "update_virtual_folder",
-        "parameters": [
-          {
-            "name": "folder_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VirtualFolderBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "updated"
-          },
-          "404": {
-            "description": "not found (plain text)"
-          },
-          "500": {
-            "description": "database error"
-          }
-        }
-      },
       "post": {
-        "operationId": "create_virtual_folder",
+        "summary": "Creates a virtual folder, or updates the one `folder_id` names.",
+        "operationId": "save_virtual_folder",
         "requestBody": {
           "content": {
             "application/json": {
@@ -842,10 +809,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/VirtualFolderCreated"
+                  "$ref": "#/components/schemas/VirtualFolderSaved"
                 }
               }
             }
+          },
+          "404": {
+            "description": "no such folder (plain text)"
           },
           "500": {
             "description": "database error"
@@ -1025,7 +995,7 @@
         }
       },
       "post": {
-        "summary": "Ignores the remote images of an origin.",
+        "summary": "Ignores the remote images of an origin (and takes it off the allow list).",
         "operationId": "add_image_blacklist_origin",
         "requestBody": {
           "content": {
@@ -1119,7 +1089,7 @@
         }
       },
       "post": {
-        "summary": "Allows the remote images of an origin.",
+        "summary": "Allows the remote images of an origin (and takes it off the ignore list).",
         "operationId": "add_image_origin",
         "requestBody": {
           "content": {
@@ -1456,9 +1426,7 @@
             "content": {
               "message/rfc822": {
                 "schema": {
-                  "type": "string",
-                  "format": "binary",
-                  "description": "A MIME message as bytes (only described: the handler sends the bytes themselves)."
+                  "$ref": "#/components/schemas/Binary"
                 }
               }
             }
@@ -1569,6 +1537,87 @@
           },
           "500": {
             "description": "database error (plain text)"
+          }
+        }
+      }
+    },
+    "/email/messages/delete": {
+      "post": {
+        "summary": "Deletes several messages (each as DELETE /email/message: to the trash, outright in the trash); `email_removed`\nreports each.",
+        "operationId": "bulk_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkMessagesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email/messages/flags": {
+      "patch": {
+        "summary": "Sets or clears flags of several messages (each as PATCH /email/message/flags); `email_updated` reports each.",
+        "operationId": "bulk_flags",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkFlagsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email/messages/move": {
+      "post": {
+        "summary": "Moves several messages (each as POST /email/message/move); `email_removed` and `emails_refetch` report them.",
+        "operationId": "bulk_move",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkMoveBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkResult"
+                }
+              }
+            }
           }
         }
       }
@@ -2457,7 +2506,7 @@
     },
     "/pgp/key": {
       "post": {
-        "summary": "Adds or replaces a public key (stored as trusted).",
+        "summary": "Adds or replaces a public key (stored as trusted); answers the stored key.",
         "operationId": "save_public_key",
         "requestBody": {
           "content": {
@@ -2470,8 +2519,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "saved"
+          "200": {
+            "description": "saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoredPublicKey"
+                }
+              }
+            }
           },
           "400": {
             "description": "plain text: invalid public key"
@@ -3409,6 +3465,79 @@
         "type": "string",
         "format": "binary",
         "description": "Raw bytes: a binary response (an image, a file), `type: string, format: binary`.\n(`Vec<u8>` would be described as an array of integers.)"
+      },
+      "BulkFlagsBody": {
+        "type": "object",
+        "description": "Sets or clears flags on several messages.",
+        "required": [
+          "messages",
+          "flags",
+          "set"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageRef"
+            }
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "e.g. `\\Seen`, `\\Flagged`"
+          },
+          "set": {
+            "type": "boolean",
+            "description": "true adds the flags, false removes them"
+          }
+        }
+      },
+      "BulkMessagesBody": {
+        "type": "object",
+        "description": "Several messages.",
+        "required": [
+          "messages"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageRef"
+            }
+          }
+        }
+      },
+      "BulkMoveBody": {
+        "type": "object",
+        "description": "Moves several messages, each to its `dest_mailbox`.",
+        "required": [
+          "messages"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MoveMessageBody"
+            }
+          }
+        }
+      },
+      "BulkResult": {
+        "type": "object",
+        "description": "What a bulk change could not do: the messages whose account does not exist (the others were changed).",
+        "required": [
+          "failed"
+        ],
+        "properties": {
+          "failed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageRef"
+            }
+          }
+        }
       },
       "CalDavAccountForm": {
         "type": "object",
@@ -4670,6 +4799,28 @@
           }
         }
       },
+      "MessageRef": {
+        "type": "object",
+        "description": "A message: its account, mailbox and UID.",
+        "required": [
+          "account_id",
+          "mailbox",
+          "uid"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "mailbox": {
+            "type": "string"
+          },
+          "uid": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "MessagesResponse": {
         "type": "object",
         "description": "A page of messages (list rows: no body, no attachments).",
@@ -5569,12 +5720,19 @@
       },
       "VirtualFolderBody": {
         "type": "object",
-        "description": "A virtual folder to create or update.",
+        "description": "A virtual folder to create (no `folder_id`) or update.",
         "required": [
           "display_name",
           "rules"
         ],
         "properties": {
+          "folder_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the folder to update; absent or `null`: a new folder"
+          },
           "display_name": {
             "type": "string"
           },
@@ -5600,17 +5758,6 @@
           }
         }
       },
-      "VirtualFolderCreated": {
-        "type": "object",
-        "required": [
-          "folder_id"
-        ],
-        "properties": {
-          "folder_id": {
-            "type": "string"
-          }
-        }
-      },
       "VirtualFolderRule": {
         "type": "object",
         "description": "Which mailboxes a virtual folder takes: `null` matches any account or mailbox.",
@@ -5630,6 +5777,18 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "VirtualFolderSaved": {
+        "type": "object",
+        "description": "The id of the folder created or updated.",
+        "required": [
+          "folder_id"
+        ],
+        "properties": {
+          "folder_id": {
+            "type": "string"
           }
         }
       },
