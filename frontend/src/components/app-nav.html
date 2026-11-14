@@ -20,10 +20,10 @@
     <a href="/contacts/" data-icon="users" data-sn-attr="{'aria-current': here === '/contacts/' ? 'page' : null, 'data-tooltip': m.nav_contacts()}"><span data-sn-text="m.nav_contacts()"></span></a>
     <a href="/search/" data-icon="search" data-sn-attr="{'aria-current': here === '/search/' ? 'page' : null, 'data-tooltip': m.nav_search()}"><span data-sn-text="m.nav_search()"></span></a>
     <footer>
-      <template data-sn-if="user.display_name">
+      <template data-sn-if="user?.display_name">
         <span data-caption data-rail-label data-truncate data-sn-text="user.display_name"></span>
       </template>
-      <template data-sn-if="notifications.supported">
+      <template data-sn-if="notifications?.supported">
         <button type="button" data-icon="bell"
                 data-sn-call="notify.toggle(notifications)" data-sn-then="upsert('notifications', $result)"
                 data-sn-attr="{
@@ -35,7 +35,7 @@
       <a href="/settings/" data-icon="settings" data-sn-attr="{'aria-current': here === '/settings/' ? 'page' : null, 'data-tooltip': m.nav_settings()}"><span data-sn-text="m.nav_settings()"></span></a>
       <a href="/logout" data-icon="log-out" data-sn-attr="{'data-tooltip': m.nav_logout()}"><span data-sn-text="m.nav_logout()"></span></a>
     </footer>
-    <template data-sn-if="notifications.enabled && here !== '/mail/'">
+    <template data-sn-if="notifications?.enabled && here !== '/mail/'">
       <mail-notifier></mail-notifier>
     </template>
   </nav>

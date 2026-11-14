@@ -120,7 +120,7 @@
           <hr />
           <button type="button" data-variant="outline" data-tone="danger" data-self="start" data-icon="trash-2"
                   data-sn-delete="/api/account" data-sn-confirm="m.settings_deleteAccountConfirm()"
-                  data-sn-then="emit('account-deleted', $result)"
+                  data-sn-then="navigate(pagePath($result.redirect || '/'))"
                   data-sn-text="m.settings_deleteAccount()"></button>
         </div>
 

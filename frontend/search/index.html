@@ -20,7 +20,7 @@
         <div data-layout="row" data-gap="sm" data-wrap="none">
           <nav-toggle></nav-toggle>
           <!-- Submitting puts the words into the URL, which loads the search; the same words again reload it.
-               The dates and calendars below write their URL parameters when changed: they apply at once. -->
+               The dates (models on $url) and calendars below write their URL parameters when changed: they apply at once. -->
           <form data-layout="row" data-gap="sm" data-wrap="none" data-grow
                 data-sn-on-submit="$event.preventDefault();
                                    q.trim() && q.trim() === urlSearch($url).q && refresh('results');
@@ -47,11 +47,11 @@
 
           <label data-layout="row" data-gap="xs">
             <small data-muted data-sn-text="m.search_from()"></small>
-            <input type="date" data-size="sm" data-sn-attr="{value: $url.start ?? ''}" data-sn-on-change="$url.start = $el.value || null">
+            <input type="date" data-size="sm" data-sn-model="$url.start">
           </label>
           <label data-layout="row" data-gap="xs">
             <small data-muted data-sn-text="m.search_to()"></small>
-            <input type="date" data-size="sm" data-sn-attr="{value: $url.end ?? ''}" data-sn-on-change="$url.end = $el.value || null">
+            <input type="date" data-size="sm" data-sn-model="$url.end">
           </label>
         </div>
 

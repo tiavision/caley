@@ -14,7 +14,7 @@ use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use bytes::Bytes;
 use http_body_util::BodyExt;
-use sinter_axum::{Embed, EmbedLayer, SlotRequest};
+use sinter_axum::{Embed, EmbedLayer, Param, SlotRequest};
 use std::path::Path;
 use tower::ServiceExt;
 
@@ -83,21 +83,22 @@ fn locales(static_dir: &str) -> Option<Vec<String>> {
 
 /// `/api/search?…` for the page URL's search, as `urlSearch()` builds it; None without words.
 fn search_url(req: &SlotRequest) -> Option<String> {
-    let p = &req.params;
-    let q = p.get("q").map(|s| s.trim()).unwrap_or("");
+    // Every parameter of this page is one value (none is bound as a list): `param()` reads it.
+    let param = |name: &str| req.params.get(name).and_then(Param::as_str).filter(|v| !v.is_empty());
+    let q = param("q").map(str::trim).unwrap_or("");
     if q.is_empty() {
         return None;
     }
     let mut query = url::form_urlencoded::Serializer::new(String::new());
     query.append_pair("q", q);
     for key in ["start", "end"] {
-        if let Some(v) = p.get(key).filter(|v| !v.is_empty()) {
+        if let Some(v) = param(key) {
             query.append_pair(key, v);
         }
     }
     // `cals`: absent = the calendars shown in the calendar (`active=1`), `all` = every calendar, else
     // the chosen calendars' keys, one per line.
-    match p.get("cals").filter(|v| !v.is_empty()).map(String::as_str) {
+    match param("cals") {
         None => {
             query.append_pair("active", "1");
         }
@@ -145,7 +146,7 @@ mod tests {
             params: Arc::new(
                 params
                     .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .map(|(k, v)| (k.to_string(), Param::One(v.to_string())))
                     .collect::<HashMap<_, _>>(),
             ),
             headers: Arc::new(HeaderMap::new()),

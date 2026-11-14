@@ -4,13 +4,10 @@ import { m } from '@tiaforge-ui/sinter/messages';
 import { messages } from './src/test-messages.ts';
 import page from './index.html?raw';
 import { app } from './src/test-components.ts';
-import { localeUrl } from './src/lib/locale-path.ts';
+import { localeUrl, pagePath } from './src/lib/locale-path.ts';
 import './src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
-// <auth-return>'s script navigates away: here it only counts that it ran.
-let returned = 0;
-const scripts = { 'auth-return': class { connected() { returned++; } } };
-const options = { ...app, scripts, helpers: { localeUrl } };
+const options = { ...app, helpers: { localeUrl, pagePath } };
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
 
@@ -20,7 +17,6 @@ async function show(routes: Record<string, RouteResponse> = {}, storage?: Storag
     'GET /api/auth/config': { oidc_enabled: false },
     ...routes,
   });
-  returned = 0;
   const r = await render(page, { ...options, requests, messages, storage });
   await r.settle();
   return { ...r, requests };
@@ -38,12 +34,12 @@ function fill(root: HTMLElement, url: string) {
 }
 
 test('signed out: the form, without single sign-on', async () => {
-  const { root } = await show();
+  const { root, navigations } = await show();
   expect(root.querySelector('h1')!.textContent).toBe('Caley');
   expect(root.querySelector('form')).not.toBeNull();
   expect(root.querySelector('[aria-busy]')).toBeNull();
   expect(root.querySelector('a[href="/auth/oidc"]')).toBeNull();
-  expect(returned).toBe(0);
+  expect(navigations).toEqual([]);
 });
 
 test('loading until both answers are in', async () => {
@@ -58,16 +54,14 @@ test('loading until both answers are in', async () => {
 });
 
 test('signed in already: straight to the app', async () => {
-  const { root } = await show({ 'GET /api/user': user });
-  expect(returned).toBe(1);
+  const { root, navigations } = await show({ 'GET /api/user': user });
+  expect(navigations).toEqual(['replace http://localhost/calendar/']);
   expect(root.querySelector('form')).toBeNull();
 });
 
-test('signs in with the form fields, then goes to the app', async () => {
-  let signedIn = false;
-  const { root, settle, requests } = await show({
-    'GET /api/user': () => (signedIn ? user : null),
-    'POST /auth/login': () => { signedIn = true; return { status: 'ok' }; },
+test('signs in with the form fields, then goes to the page the sign-in answered with', async () => {
+  const { root, settle, requests, navigations } = await show({
+    'POST /auth/login': { status: 'ok', redirect: '/en/mail/' },
   });
   fill(root, 'https://dav.example');
   root.querySelector('form')!.requestSubmit();
@@ -77,7 +71,7 @@ test('signs in with the form fields, then goes to the app', async () => {
   expect(Object.fromEntries(new URLSearchParams(String(post.body)))).toEqual({
     caldav_base_url: 'https://dav.example', caldav_username: 'ada', caldav_password: 'secret',
   });
-  expect(returned).toBe(1);
+  expect(navigations).toEqual(['replace http://localhost/en/mail/']);
 });
 
 test('a refused login shows the server reason and enables the button again', async () => {

@@ -6,6 +6,7 @@ if (!HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.close = function () { if (!this.open) return; this.open = false; this.dispatchEvent(new Event('toggle')); this.dispatchEvent(new Event('close')); };
 }
 if (!HTMLElement.prototype.hidePopover) HTMLElement.prototype.hidePopover = function () {};
+if (!Element.prototype.scrollTo) Element.prototype.scrollTo = function () {};   // jsdom lays nothing out
 
 // Command invokers: a click on a [commandfor] button runs its command after the click's handlers, as the
 // browser's default action does (show-modal on an open dialog and close on a closed one do nothing).

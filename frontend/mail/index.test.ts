@@ -7,6 +7,7 @@ import * as helpers from '../src/sinter.helpers.ts';
 import '../src/islands/common.ts';                 // data-shortcut keys
 import page from './index.html?raw';
 import { app } from '../src/test-components.ts';
+import { retryPolicies } from '../src/lib/retry-policies.ts';
 import type { Message } from '../src/lib/mail.ts';
 import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
@@ -20,8 +21,9 @@ const msg = (uid: number, subject: string, extra: Partial<Message> = {}): Messag
 const inbox = [msg(3, 'Third', { flags: [], is_read: false }), msg(2, 'Second'), msg(1, 'First')];
 
 
-beforeEach(() => { localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'] }); });
-afterEach(() => configure({ confirm: null as never, urlSchemes: [] }));
+// the app's retry policies: the flag toggles name one (data-sn-retry="flags")
+beforeEach(() => { localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'], retry: retryPolicies }); });
+afterEach(() => configure({ confirm: null as never, urlSchemes: [], retry: null }));
 
 async function show(routes: Record<string, RouteResponse> = {}, pending: { subject: string; files: File[] } | null = null, storage = memoryStorage()) {
   const opened: unknown[] = [];
@@ -193,7 +195,8 @@ test('the reader\'s star and read toggles stay on success; the list follows the 
 });
 
 test('a failed star toggle is rolled back', async () => {
-  const { root, settle } = await show({ 'PATCH /api/email/message/flags': { status: 500 } });
+  // a 4xx fails at once (a 5xx is sent again for a while: the flags retry policy)
+  const { root, settle } = await show({ 'PATCH /api/email/message/flags': { status: 400 } });
   rows(root)[1].click();
   await settle();
   root.querySelector<HTMLButtonElement>('.reader .star-btn')!.click();

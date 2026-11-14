@@ -3,14 +3,12 @@
   <head>
     <app-head></app-head>
   </head>
-  <body data-sn-state="{ baseUrl: '', error: '', saving: false, landing: '' }">
-    <!-- Signed out, /api/user answers 401, which src/sinter.config.ts turns into `null` on this page. -->
-    <sn-resource name="user" src="/api/user" type="User"></sn-resource>
+  <body data-sn-state="{ baseUrl: '', error: '', saving: false }">
+    <!-- Signed out, /api/user answers 401, which src/sinter.config.ts turns into `null` on this page. Signed in, the
+         server redirects `/` before this page is sent; on the Vite dev server, which cannot, `then` goes to the calendar. -->
+    <sn-resource name="user" src="/api/user" type="User"
+                 then="$result && navigate(pagePath('/calendar/'), { replace: true })"></sn-resource>
     <sn-resource name="authConfig" src="/api/auth/config" type="AuthConfig"></sn-resource>
-
-    <!-- Just signed in: on to the page the sign-in answered with. (Already signed in, the server redirects `/` before
-         this page is sent.) -->
-    <template data-sn-if="user"><auth-return data-sn-prop="{ to: landing }"></auth-return></template>
 
     <!-- The language picker in the page's corner; the column below is the logo, the name and the sign-in card. -->
     <header class="login-lang" data-layout="row" data-gap="sm" data-wrap="none" data-justify="end" data-pad="md">
@@ -37,7 +35,7 @@
             <form data-layout="stack" data-gap="md"
                   data-sn-post="/auth/login" data-sn-encoding="form"
                   data-sn-on-submit="saving = true; error = ''"
-                  data-sn-then="landing = $result.redirect; refresh('user')"
+                  data-sn-then="navigate(pagePath($result.redirect || '/calendar/'), { replace: true })"
                   data-sn-catch="saving = false; error = $error.detail ?? m.login_error()">
               <label>
                 <span data-sn-text="m.settings_baseUrl()"></span>

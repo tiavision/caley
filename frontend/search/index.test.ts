@@ -81,7 +81,7 @@ test('the calendar menu and dates narrow the search, at once when one is shown',
   await flush();
   const from = root.querySelectorAll<HTMLInputElement>('main input[type=date]')[0]!;
   from.value = '2026-11-10';
-  from.dispatchEvent(new Event('change', { bubbles: true }));
+  from.dispatchEvent(new Event('input', { bubbles: true }));
   await settle();
   expect(requests.calls.filter((c) => c.path === '/api/search')).toHaveLength(0); // no words yet: no search
   await search(root, settle, 'dinner');

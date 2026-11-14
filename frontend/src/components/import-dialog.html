@@ -70,7 +70,7 @@
                   data-sn-on-change="imp.target === '__new__' && (imp.accountId = caldavAccounts[0]?.account_id ?? '')">
             <template data-sn-for="account in caldavAccounts">
               <optgroup data-sn-attr="{label: account.display_name}">
-                <template data-sn-for="cal in account.calendars">
+                <template data-sn-for="cal in account.calendars" data-sn-key="cal.href">
                   <option data-sn-attr="{value: calendarValue(cal)}" data-sn-text="cal.name"></option>
                 </template>
               </optgroup>

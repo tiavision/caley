@@ -20,9 +20,8 @@ export function withoutLocale(pathname: string): string {
 }
 
 /**
- * This page's URL in language `locale` (`/de/settings/`). Built with `localePrefix`, the compiler writes its own
- * `localeUrl` into the page in place of this one; it is here only because `sinter check` (0.17) does not declare
- * that built-in (SN208 "Cannot find name 'localeUrl'"), and for test renders, which compile without a language.
+ * This page's URL in language `locale` (`/de/settings/`), for test renders only: they compile without a language,
+ * so the built-in `localeUrl()` the build writes into each page is not there (tests pass this in `helpers`).
  */
 export function localeUrl(locale: string): string {
   return `/${locale}${withoutLocale(location.pathname)}`;

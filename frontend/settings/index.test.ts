@@ -5,7 +5,7 @@ import { render, mockRequests, mockStream, memoryStorage, type RouteResponse } f
 import { calendarValue, importEventDate, importDraft, importSummary } from '../src/lib/import.ts';
 import { caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText } from '../src/lib/settings.ts';
 import { loadErrorOr } from '../src/lib/errors.ts';
-import { localeUrl } from '../src/lib/locale-path.ts';
+import { localeUrl, pagePath } from '../src/lib/locale-path.ts';
 import { SinterError } from '@tiaforge-ui/sinter';
 import { newCalendarDraft, newCalendarBody } from '../src/lib/events.ts';
 import { m } from '@tiaforge-ui/sinter/messages';
@@ -17,7 +17,7 @@ import type { VaultView } from '../src/actions/pgp-vault.ts';
 import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor, Blob.stream
 
 // The helpers the page and its components use (not the whole helpers module: other pages' helpers load more).
-const helpers = { calendarValue, importEventDate, importDraft, importSummary, newCalendarDraft, newCalendarBody, caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText, loadErrorOr, localeUrl };
+const helpers = { calendarValue, importEventDate, importDraft, importSummary, newCalendarDraft, newCalendarBody, caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText, loadErrorOr, localeUrl, pagePath };
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
 const cal = (href: string, name: string, extra: object = {}) => ({ account_id: 'acc', href, name, color: '#ff0000', is_active: true, ...extra });
@@ -358,13 +358,11 @@ test('reopening the import dialog shows the new draft: empty form, remembered ca
   expect(dialog.querySelector('ul[data-list]')).toBeNull();
 });
 
-test('deleting the whole account hands the redirect to the island', async () => {
-  const { root, settle } = await show({ 'DELETE /api/account': { redirect: '/' } });
-  const seen: unknown[] = [];
-  root.addEventListener('account-deleted', (e) => seen.push((e as CustomEvent).detail));
+test('deleting the whole account goes where the server says', async () => {
+  const { root, settle, navigations } = await show({ 'DELETE /api/account': { redirect: '/' } });
   button(root, m.settings_deleteAccount()).click();
   await settle();
-  expect(seen).toEqual([{ redirect: '/' }]);
+  expect(navigations).toEqual(['http://localhost/']);
 });
 
 test('server events refetch the accounts', async () => {
