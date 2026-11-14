@@ -21,28 +21,31 @@ fn decompress_eml(bytes: &[u8]) -> std::io::Result<Vec<u8>> {
 fn extract_part_bytes(eml_bytes: &[u8], part_index: usize) -> Option<Vec<u8>> {
     use mail_parser::MessageParser;
     let msg = MessageParser::default().parse(eml_bytes)?;
-    let part = msg.parts.get(part_index)?;
+    // The position among the root message's own parts, as `extract_attachments`
+    // in `imap_client` numbers them.
+    let part = msg.root().parts().nth(part_index)?;
     part_to_bytes(part)
 }
 
-fn part_to_bytes(part: &mail_parser::MessagePart<'_>) -> Option<Vec<u8>> {
-    let bytes = match &part.body {
-        mail_parser::PartType::Binary(b) => b.as_ref().to_vec(),
-        mail_parser::PartType::InlineBinary(b) => b.as_ref().to_vec(),
-        mail_parser::PartType::Text(t) => t.as_bytes().to_vec(),
-        mail_parser::PartType::Html(h) => h.as_bytes().to_vec(),
-        _ => return None,
-    };
-    Some(bytes)
+fn part_to_bytes(part: mail_parser::MessagePart<'_>) -> Option<Vec<u8>> {
+    match part.kind() {
+        mail_parser::PartKind::Binary | mail_parser::PartKind::InlineBinary => {
+            Some(part.decoded().into_owned())
+        }
+        mail_parser::PartKind::Text | mail_parser::PartKind::Html => {
+            part.text().map(|t| t.into_owned().into_bytes())
+        }
+        _ => None,
+    }
 }
 
 /// Scan all MIME parts in the EML for one whose Content-ID matches `cid`
 /// (with or without surrounding angle brackets).  Returns the decoded bytes
 /// when found.  Used as a fallback when the attachment DB row is missing.
 fn find_bytes_by_cid(eml_bytes: &[u8], cid: &str) -> Option<Vec<u8>> {
-    use mail_parser::{MimeHeaders, MessageParser};
+    use mail_parser::MessageParser;
     let msg = MessageParser::default().parse(eml_bytes)?;
-    for part in &msg.parts {
+    for part in msg.root().parts() {
         if let Some(part_cid) = part.content_id() {
             let bare = part_cid
                 .trim_start_matches('<')
@@ -698,7 +701,15 @@ pub async fn remove_image_blacklist_origin(
 mod tests {
     use super::{
         AllowedImage, attachment_disposition, can_preview_attachment, detect_allowed_image,
+        extract_part_bytes,
     };
+
+    #[test]
+    fn reads_an_attachment_by_its_root_part_index() {
+        let raw = crate::imap_client::tests::FORWARDED_THEN_ATTACHMENT;
+        assert_eq!(extract_part_bytes(raw, 3).as_deref(), Some(&b"hello"[..]));
+        assert_eq!(extract_part_bytes(raw, 1).as_deref(), Some(&b"See below"[..]));
+    }
 
     #[test]
     fn previewable_attachment_types_are_allowlisted_case_insensitively() {

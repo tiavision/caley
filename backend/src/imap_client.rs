@@ -522,7 +522,7 @@ fn parse_header_bytes(
 
     // Store the direct reply parent when available, otherwise the nearest
     // referenced ancestor for messages without In-Reply-To.
-    let thread_id = hv_first_text(msg.in_reply_to()).or_else(|| hv_last_text(msg.references()));
+    let thread_id = first_id(msg.in_reply_to()).or_else(|| last_id(msg.references()));
 
     let from_addr = msg.from().map(|a| {
         let addrs = address_to_strings(a);
@@ -560,56 +560,32 @@ pub fn parse_reply_to(bytes: &[u8]) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn hv_first_text(hv: &mail_parser::HeaderValue<'_>) -> Option<String> {
-    match hv {
-        mail_parser::HeaderValue::Text(t) => t.split_whitespace().next().map(str::to_owned),
-        mail_parser::HeaderValue::TextList(list) => list
-            .first()
-            .and_then(|t| t.split_whitespace().next().map(str::to_owned)),
-        _ => None,
-    }
+/// The first word of the first item of a message-ID list header.
+fn first_id(list: Option<mail_parser::TextList<'_>>) -> Option<String> {
+    list?.first()?.split_whitespace().next().map(str::to_owned)
 }
 
-fn hv_last_text(hv: &mail_parser::HeaderValue<'_>) -> Option<String> {
-    match hv {
-        mail_parser::HeaderValue::Text(t) => t.split_whitespace().last().map(str::to_owned),
-        mail_parser::HeaderValue::TextList(list) => list
-            .last()
-            .and_then(|t| t.split_whitespace().last().map(str::to_owned)),
-        _ => None,
-    }
+/// The last word of the last item of a message-ID list header.
+fn last_id(list: Option<mail_parser::TextList<'_>>) -> Option<String> {
+    list?.last()?.split_whitespace().last().map(str::to_owned)
 }
 
-fn address_to_strings(addr: &mail_parser::Address<'_>) -> Vec<String> {
-    match addr {
-        mail_parser::Address::List(addrs) => addrs.iter().map(format_addr).collect(),
-        mail_parser::Address::Group(groups) => groups
-            .iter()
-            .flat_map(|g| g.addresses.iter().map(format_addr))
-            .collect(),
-    }
+fn address_to_strings(addrs: mail_parser::AddressList<'_>) -> Vec<String> {
+    addrs.mailboxes().map(format_addr).collect()
 }
 
 /// Extracts the bare email addresses (lowercased, display name dropped) from an
 /// address header, for the normalized `message_addresses` lookup table.
-fn address_to_emails(addr: &mail_parser::Address<'_>) -> Vec<String> {
-    let emails = |a: &mail_parser::Addr<'_>| {
-        a.address
-            .as_ref()
-            .map(|e| e.trim().to_lowercase())
-            .filter(|e| !e.is_empty())
-    };
-    match addr {
-        mail_parser::Address::List(addrs) => addrs.iter().filter_map(emails).collect(),
-        mail_parser::Address::Group(groups) => groups
-            .iter()
-            .flat_map(|g| g.addresses.iter().filter_map(emails))
-            .collect(),
-    }
+fn address_to_emails(addrs: mail_parser::AddressList<'_>) -> Vec<String> {
+    addrs
+        .mailboxes()
+        .filter_map(|a| a.address().map(|e| e.trim().to_lowercase()))
+        .filter(|e| !e.is_empty())
+        .collect()
 }
 
-fn format_addr(a: &mail_parser::Addr<'_>) -> String {
-    match (&a.name, &a.address) {
+fn format_addr(a: mail_parser::Mailbox<'_>) -> String {
+    match (a.name(), a.address()) {
         (Some(name), Some(addr)) => format!("{name} <{addr}>"),
         (None, Some(addr)) => addr.to_string(),
         (Some(name), None) => name.to_string(),
@@ -690,12 +666,14 @@ fn extract_header_values(bytes: &[u8], name: &str) -> Vec<String> {
 }
 
 fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
-    use mail_parser::MimeHeaders;
     use std::collections::HashSet;
 
     let mut attachments = Vec::new();
     let mut used_filenames = HashSet::new();
-    for (idx, part) in msg.parts.iter().enumerate() {
+    // `part_index` is the position among the root message's own parts (nested
+    // messages' parts excluded), the numbering stored in `cached_attachments`
+    // and read back by `email::attachments`.
+    for (idx, part) in msg.root().parts().enumerate() {
         let is_attachment = part
             .content_disposition()
             .map_or(false, |cd| cd.ctype().to_ascii_lowercase() == "attachment");
@@ -745,11 +723,13 @@ fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
             .content_id()
             .map(|cid| cid.trim_start_matches('<').trim_end_matches('>').to_owned());
 
-        let size = match &part.body {
-            mail_parser::PartType::Binary(b) => b.len(),
-            mail_parser::PartType::InlineBinary(b) => b.len(),
-            mail_parser::PartType::Text(t) => t.len(),
-            mail_parser::PartType::Html(h) => h.len(),
+        let size = match part.kind() {
+            mail_parser::PartKind::Binary | mail_parser::PartKind::InlineBinary => {
+                part.decoded_len()
+            }
+            mail_parser::PartKind::Text | mail_parser::PartKind::Html => {
+                part.text().map_or(0, |t| t.len())
+            }
             _ => 0,
         } as i64;
 
@@ -943,7 +923,7 @@ pub async fn send_raw_email(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -1017,6 +997,22 @@ mod tests {
             .filter_map(|att| att.filename.as_deref())
             .collect();
         assert_eq!(filenames, vec!["noname.ics", "noname-2.ics"]);
+    }
+
+    /// Message with a forwarded message before an attachment: the parts of the
+    /// forwarded message are not counted, as with mail-parser 0.11, so the
+    /// `part_index` values already stored stay valid.
+    pub(crate) const FORWARDED_THEN_ATTACHMENT: &[u8] = b"Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nSee below\r\n--b\r\nContent-Type: message/rfc822\r\n\r\nSubject: Forwarded\r\nContent-Type: multipart/mixed; boundary=\"n\"\r\n\r\n--n\r\nContent-Type: text/plain\r\n\r\nInner\r\n--n\r\nContent-Type: application/pdf; name=\"inner.pdf\"\r\n\r\nINNER\r\n--n--\r\n--b\r\nContent-Type: application/octet-stream; name=\"outer.bin\"\r\nContent-Disposition: attachment; filename=\"outer.bin\"\r\nContent-Transfer-Encoding: base64\r\n\r\naGVsbG8=\r\n--b--\r\n";
+
+    #[test]
+    fn numbers_attachments_among_the_root_message_parts() {
+        let (_, _, attachments) = parse_body_bytes(FORWARDED_THEN_ATTACHMENT).unwrap();
+
+        let outer: Vec<_> = attachments
+            .iter()
+            .map(|att| (att.filename.as_deref(), att.part_index, att.size))
+            .collect();
+        assert_eq!(outer, vec![(Some("outer.bin"), 3, 5)]);
     }
 
     #[test]

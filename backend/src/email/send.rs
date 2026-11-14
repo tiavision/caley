@@ -280,20 +280,12 @@ fn normalize_envelope_address(value: &str) -> Result<Option<String>, NormalizeAd
     Ok(Some(normalized))
 }
 
-fn raw_address_emails(address: &mail_parser::Address<'_>) -> Vec<String> {
-    let email = |addr: &mail_parser::Addr<'_>| {
-        addr.address
-            .as_ref()
-            .map(|address| address.trim().to_owned())
-            .filter(|address| !address.is_empty())
-    };
-    match address {
-        mail_parser::Address::List(addresses) => addresses.iter().filter_map(email).collect(),
-        mail_parser::Address::Group(groups) => groups
-            .iter()
-            .flat_map(|group| group.addresses.iter().filter_map(email))
-            .collect(),
-    }
+fn raw_address_emails(addresses: mail_parser::AddressList<'_>) -> Vec<String> {
+    addresses
+        .mailboxes()
+        .filter_map(|mailbox| mailbox.address().map(|address| address.trim().to_owned()))
+        .filter(|address| !address.is_empty())
+        .collect()
 }
 
 #[cfg(test)]
