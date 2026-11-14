@@ -173,7 +173,7 @@ export function isRef(msg: MessageRef | null, ref: MessageRef | null): boolean {
 // The list shown, the message open, the page and the search live in the URL, so a reload, Back and Forward and a
 // shared link show the same: `?account_id=&mailbox=` (a mailbox) or `?folder=` (a virtual folder), `uid` (the
 // message open: in `account_id`'s `mailbox`, which in a virtual folder is the message's own), `page`, and the
-// search `q`, `sender` (addresses, comma-separated), `after`, `before`, `unread`. Pages read the parameters by name
+// search `q`, `sender` (addresses, repeated: a list sinter reads and writes), `after`, `before`, `unread`. Pages read the parameters by name
 // (`$url.uid`), never `$url` whole: a page that reads it whole cannot follow its own links in the page.
 
 /** The message `?account_id=&mailbox=&uid=` names (a notification, the popout, the open message), or null. */
@@ -209,11 +209,6 @@ export function urlLags(view: MailView, url: MailView | null): boolean {
   return !!(view.folder_id || (view.account_id && view.mailbox)) && !(url && sameView(view, url));
 }
 
-/** The `sender` parameter for a list of addresses: null for none. */
-export function senderParam(addrs: readonly string[]): string | null {
-  return addrs.length ? addrs.join(',') : null;
-}
-
 /** The sender filter box (what is typed, and what the suggestions are asked for); the rest of the search is in the URL. */
 export interface SearchBox { addrInput: string; addrQ: string }
 
@@ -221,14 +216,10 @@ export function noSearchBox(): SearchBox {
   return { addrInput: '', addrQ: '' };
 }
 
-/** The search: the URL's query and filters, with the sender box. */
-export function mailSearch(box: SearchBox, q: string | undefined, sender: string | undefined, after: string | undefined,
-                          before: string | undefined, unread: string | undefined): MailSearch {
-  return {
-    input: q ?? '', q: q ?? '',
-    filter: { addrs: sender ? sender.split(',').filter(Boolean) : [], from: after ?? '', to: before ?? '', unread: !!unread },
-    addrInput: box.addrInput, addrQ: box.addrQ,
-  };
+/** The search: the URL's query and filters (as sinter reads them), with the sender box. */
+export function mailSearch(box: SearchBox, q: string | undefined, sender: readonly string[], after: string | undefined,
+                          before: string | undefined, unread: boolean): MailSearch {
+  return { input: q ?? '', q: q ?? '', filter: { addrs: [...sender], from: after ?? '', to: before ?? '', unread }, ...box };
 }
 
 export interface SearchFilter { addrs: string[]; from: string; to: string; unread: boolean }

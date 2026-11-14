@@ -2,7 +2,7 @@ import '../test-messages.ts';
 // The small helpers the pages' handlers apply (`x = fn(…)`): calendar, search, contacts, create-calendar dialog.
 import { describe, expect, test } from 'vitest';
 import { farStep, hasDay, inWeek, monthCells, monthRange, swipeStep, weekDates } from './calendar.ts';
-import { calendarKey, calendarsLabel, calsParam, chosenCalendars, newCalendarBody, newCalendarDraft, sameEvent, urlCals, urlSearch } from './events.ts';
+import { calendarKey, calendarsLabel, newCalendarBody, newCalendarDraft, sameEvent } from './events.ts';
 import { addressbooksLabel, sameContact } from './contacts.ts';
 import { elementIn } from './dom.ts';
 
@@ -70,28 +70,11 @@ describe('events and search', () => {
     expect(sameEvent({ ...ev, uid: 'v' }, ev)).toBe(false);
     expect(sameEvent(null, ev)).toBe(false);
   });
-  test('the search in the URL: calendars default to the active ones, `all` for none checked', () => {
-    const cals = [
-      { account_id: 'a', href: '/w/', name: 'W', color: null, is_active: true },
-      { account_id: 'a', href: '/h/', name: 'H', color: null, is_active: true },
-      { account_id: 'a', href: '/o/', name: 'O', color: null, is_active: false },
-    ];
-    const [w, h, o] = cals.map(calendarKey) as [string, string, string];
-    expect([urlCals({}), urlCals({ cals: 'all' }), urlCals({ cals: `${w}\n${o}` })]).toEqual([null, [], [w, o]]);
-    expect(chosenCalendars(cals, null)).toEqual([w, h]);
-    expect(chosenCalendars(cals, [o])).toEqual([o]);
-    expect(calsParam([h, w], cals)).toBe(null); // the active ones, in any order: the default
-    expect(calsParam([], cals)).toBe('all');
-    expect(calsParam([w, o], cals)).toBe(`${w}\n${o}`);
-    expect(urlSearch({ q: ' lunch ' })).toEqual({ q: 'lunch', start: null, end: null, cals: [], active: '1' });
-    expect(urlSearch({ q: 'x', start: '2026-11-01', cals: 'all' })).toEqual({ q: 'x', start: '2026-11-01', end: null, cals: [], active: null });
-    expect(urlSearch({ q: 'x', cals: w }).cals).toEqual([w]);
-    expect(urlSearch({}).q).toBe('');
-  });
   test('calendarsLabel shows the count only while some calendars are left out', () => {
     expect(calendarsLabel(3, 3)).toBe('Calendars');
     expect(calendarsLabel(0, 0)).toBe('Calendars');
     expect(calendarsLabel(1, 3)).toBe('Calendars (1/3)');
+    expect(calendarsLabel(0, 3)).toBe('Calendars');   // none checked: every calendar
   });
   test('the create-calendar draft starts in the first account; its body sends a color only when chosen', () => {
     expect(newCalendarDraft([{ account_id: 'x' }, { account_id: 'y' }])).toEqual({ name: '', account_id: 'x', color: '#4a90d9', useColor: false });

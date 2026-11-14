@@ -14,7 +14,7 @@ use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use bytes::Bytes;
 use http_body_util::BodyExt;
-use sinter_axum::{Embed, EmbedLayer, Param, SlotRequest};
+use sinter_axum::{Embed, EmbedLayer};
 use std::path::Path;
 use tower::ServiceExt;
 
@@ -44,7 +44,6 @@ pub fn layer(static_dir: &str, api: Router) -> anyhow::Result<Option<EmbedLayer>
         .max_bytes(MAX_BYTES);
     for dir in &dirs {
         let user_api = api.clone();
-        let search_api = api.clone();
         embed = embed
             // The login page asks who is signed in: 401 is "nobody" (src/sinter.config.ts makes it `null` in
             // the browser too), not a failed page.
@@ -57,36 +56,11 @@ pub fn layer(static_dir: &str, api: Router) -> anyhow::Result<Option<EmbedLayer>
                         _ => None,
                     }
                 }
-            })
-            // The search in the URL: its `src` reads `urlSearch($url)` (frontend src/lib/events.ts), which
-            // the build cannot describe, so the same request is put together here.
-            .resolve(format!("{dir}search/index.html:results"), move |req| {
-                let api = search_api.clone();
-                async move {
-                    let url = search_url(&req)?;
-                    match get(&api, &url, &req.headers).await? {
-                        (StatusCode::OK, body) => Some(body),
-                        _ => None,
-                    }
-                }
             });
-        // The message open in the mail page's URL (`?account_id=&mailbox=&uid=`, frontend src/lib/mail.ts
-        // urlRef()): its thread and the thread's events, which <mail-reader-data> loads for it.
-        for (resource, path) in [
-            ("thread", "/api/email/thread"),
-            ("threadEvents", "/api/email/thread-events"),
-        ] {
-            let api = api.clone();
-            embed = embed.resolve(format!("{dir}mail/index.html:{resource}"), move |req| {
-                let api = api.clone();
-                async move {
-                    let url = message_url(&req, path)?;
-                    match get(&api, &url, &req.headers).await? {
-                        (StatusCode::OK, body) => Some(body),
-                        _ => None,
-                    }
-                }
-            });
+        // The message open in the mail page's URL: <mail-reader-data> loads its thread through a helper
+        // (urlRef()), which the build cannot describe, so those two are the browser's to load.
+        for resource in ["thread", "threadEvents"] {
+            embed = embed.skip(format!("{dir}mail/index.html:{resource}"));
         }
     }
     Ok(Some(embed.build()?))
@@ -97,61 +71,6 @@ fn locales(static_dir: &str) -> Option<Vec<String>> {
     let manifest = std::fs::read(Path::new(static_dir).join("sinter-embed.json")).ok()?;
     let manifest: serde_json::Value = serde_json::from_slice(&manifest).ok()?;
     serde_json::from_value(manifest.get("locales")?.get("list")?.clone()).ok()
-}
-
-/// `/api/search?…` for the page URL's search, as `urlSearch()` builds it; None without words.
-fn search_url(req: &SlotRequest) -> Option<String> {
-    // Every parameter of this page is one value (none is bound as a list): `param()` reads it.
-    let param = |name: &str| {
-        req.params
-            .get(name)
-            .and_then(Param::as_str)
-            .filter(|v| !v.is_empty())
-    };
-    let q = param("q").map(str::trim).unwrap_or("");
-    if q.is_empty() {
-        return None;
-    }
-    let mut query = url::form_urlencoded::Serializer::new(String::new());
-    query.append_pair("q", q);
-    for key in ["start", "end"] {
-        if let Some(v) = param(key) {
-            query.append_pair(key, v);
-        }
-    }
-    // `cals`: absent = the calendars shown in the calendar (`active=1`), `all` = every calendar, else
-    // the chosen calendars' keys, one per line.
-    match param("cals") {
-        None => {
-            query.append_pair("active", "1");
-        }
-        Some("all") => {}
-        Some(cals) => {
-            for cal in cals.split('\n') {
-                query.append_pair("cal", cal);
-            }
-        }
-    }
-    Some(format!("/api/search?{}", query.finish()))
-}
-
-/// `path?account_id=&mailbox=&uid=` for the message the page URL opens, as `urlRef()` reads it (a positive
-/// integer uid); None without one.
-fn message_url(req: &SlotRequest, path: &str) -> Option<String> {
-    let param = |name: &str| {
-        req.params
-            .get(name)
-            .and_then(Param::as_str)
-            .filter(|v| !v.is_empty())
-    };
-    let (account_id, mailbox) = (param("account_id")?, param("mailbox")?);
-    let uid: u32 = param("uid")?.parse().ok().filter(|&n| n > 0)?;
-    let query = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("account_id", account_id)
-        .append_pair("mailbox", mailbox)
-        .append_pair("uid", &uid.to_string())
-        .finish();
-    Some(format!("{path}?{query}"))
 }
 
 /// GET `url` from the API router with the page request's cookie: the status and a JSON body.
@@ -172,81 +91,4 @@ async fn get(api: &Router, url: &str, page: &HeaderMap) -> Option<(StatusCode, B
         .ok()?
         .to_bytes();
     Some((status, body))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashMap;
-    use std::sync::Arc;
-
-    fn slot(params: &[(&str, &str)]) -> SlotRequest {
-        SlotRequest {
-            page: "search/index.html".into(),
-            resource: "results".into(),
-            url: None,
-            params: Arc::new(
-                params
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), Param::One(v.to_string())))
-                    .collect::<HashMap<_, _>>(),
-            ),
-            headers: Arc::new(HeaderMap::new()),
-        }
-    }
-
-    #[test]
-    fn message_requests() {
-        assert_eq!(message_url(&slot(&[]), "/api/email/thread"), None);
-        assert_eq!(
-            message_url(
-                &slot(&[("account_id", "a"), ("mailbox", "INBOX")]),
-                "/api/email/thread"
-            ),
-            None
-        );
-        assert_eq!(
-            message_url(
-                &slot(&[("account_id", "a"), ("mailbox", "INBOX"), ("uid", "x")]),
-                "/api/email/thread"
-            ),
-            None
-        );
-        assert_eq!(
-            message_url(
-                &slot(&[
-                    ("account_id", "a b"),
-                    ("mailbox", "INBOX/Sub"),
-                    ("uid", "3")
-                ]),
-                "/api/email/thread"
-            )
-            .as_deref(),
-            Some("/api/email/thread?account_id=a+b&mailbox=INBOX%2FSub&uid=3")
-        );
-    }
-
-    #[test]
-    fn search_requests() {
-        assert_eq!(search_url(&slot(&[])), None);
-        assert_eq!(search_url(&slot(&[("q", "  ")])), None);
-        assert_eq!(
-            search_url(&slot(&[("q", " dentist ")])).as_deref(),
-            Some("/api/search?q=dentist&active=1")
-        );
-        assert_eq!(
-            search_url(&slot(&[
-                ("q", "a b"),
-                ("start", "2026-01-01"),
-                ("end", ""),
-                ("cals", "all")
-            ]))
-            .as_deref(),
-            Some("/api/search?q=a+b&start=2026-01-01")
-        );
-        assert_eq!(
-            search_url(&slot(&[("q", "x"), ("cals", "acc|/c1/\nacc|/c2/")])).as_deref(),
-            Some("/api/search?q=x&cal=acc%7C%2Fc1%2F&cal=acc%7C%2Fc2%2F")
-        );
-    }
 }

@@ -75,7 +75,7 @@
            hit: /** @type {Message|null} */ (null),
          }"
          data-sn-let="{
-           search: mailSearch(searchBox, $url.q, $url.sender, $url.after, $url.before, $url.unread),
+           search: mailSearch(searchBox, $url.q, $url.sender, $url.after, $url.before, !!$url.unread),
            searching: searchActive(search),
            list: searching ? results : messages,
            listName: searching ? 'results' : 'messages',
@@ -112,7 +112,7 @@
                    when="(cur.mailbox || cur.folder_id) && !searching" cache
                    paginate="offset" page-size="50" size-param="limit" offset-param="offset" page-model="$url.page"></sn-resource>
       <sn-resource name="results"
-                   src="/email/search?q={search.q.trim()}&account_id={cur.account_id}&mailbox={cur.mailbox}&folder_id={cur.folder_id}&addrs={search.filter.addrs.length ? search.filter.addrs.join(',') : null}&date_from={search.filter.from || null}&date_to={search.filter.to || null}&unread_only={search.filter.unread ? 'true' : null}"
+                   src="/email/search?q={search.q.trim()}&account_id={cur.account_id}&mailbox={cur.mailbox}&folder_id={cur.folder_id}&addrs={$url.sender.length ? $url.sender.join(',') : null}&date_from={search.filter.from || null}&date_to={search.filter.to || null}&unread_only={search.filter.unread ? 'true' : null}"
                    when="searching"
                    paginate="keyset" page-size="50" size-param="limit"
                    cursor="{cursor_sent_at: sent_at, cursor_rowid: rowid}" direction-param="direction"
@@ -300,17 +300,17 @@
                             <span data-truncate data-sn-text="senderLabel(addr, addressBook)"></span>
                             <button type="button" class="chip-remove" data-variant="ghost" data-icon="x"
                                     data-sn-attr="{'aria-label': m.mail_removeAttachment()}"
-                                    data-sn-on-click="$url.sender = senderParam(toggled(search.filter.addrs, addr)); sel = unmarked(sel); $url.uid = null"></button>
+                                    data-sn-on-click="$url.sender = toggled($url.sender, addr); sel = unmarked(sel); $url.uid = null"></button>
                           </span>
                         </template>
                       </div>
-                      <button type="button" data-icon="trash-2" data-sn-on-click="$url.sender = null; sel = unmarked(sel); $url.uid = null" data-sn-text="m.mail_filterClearAddrs()"></button>
+                      <button type="button" data-icon="trash-2" data-sn-on-click="$url.sender = []; sel = unmarked(sel); $url.uid = null" data-sn-text="m.mail_filterClearAddrs()"></button>
                       <hr>
                     </template>
                     <template data-sn-for="s in hits.contacts" data-sn-key="s.email">
                       <label class="filter-suggestion-row">
-                        <input type="checkbox" data-sn-attr="{checked: search.filter.addrs.includes(s.email)}"
-                               data-sn-on-change="$url.sender = senderParam(toggled(search.filter.addrs, s.email)); sel = unmarked(sel); $url.uid = null">
+                        <input type="checkbox" value="" data-sn-model="$url.sender" data-sn-attr="{value: s.email}"
+                               data-sn-on-change="sel = unmarked(sel); $url.uid = null">
                         <span data-layout="stack" data-gap="none" data-grow>
                           <template data-sn-if="s.name"><span data-truncate data-sn-text="s.name"></span></template>
                           <small data-muted class="suggestion-email" data-sn-text="s.email"></small>
@@ -319,8 +319,8 @@
                     </template>
                     <template data-sn-for="addr in hits.seen" data-sn-key="addr">
                       <label class="filter-suggestion-row">
-                        <input type="checkbox" data-sn-attr="{checked: search.filter.addrs.includes(addr)}"
-                               data-sn-on-change="$url.sender = senderParam(toggled(search.filter.addrs, addr)); sel = unmarked(sel); $url.uid = null">
+                        <input type="checkbox" value="" data-sn-model="$url.sender" data-sn-attr="{value: addr}"
+                               data-sn-on-change="sel = unmarked(sel); $url.uid = null">
                         <small class="suggestion-email" data-grow data-sn-text="addr"></small>
                       </label>
                     </template>
@@ -328,7 +328,7 @@
                       <button type="button" data-tone="accent" data-icon="plus"
                               data-sn-on-click="sel = addableSender(search) ? unmarked(sel) : sel;
                                                 addableSender(search) && ($url.uid = null);
-                                                $url.sender = senderParam(senderAdded(search).filter.addrs);
+                                                $url.sender = senderAdded(search).filter.addrs;
                                                 searchBox = noSearchBox()">
                         <span data-truncate data-sn-text="`${m.mail_filterAddAddr()}: ${search.addrInput}`"></span>
                       </button>

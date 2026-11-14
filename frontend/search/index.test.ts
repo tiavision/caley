@@ -62,12 +62,12 @@ async function search(root: HTMLElement, settle: () => Promise<void>, q: string)
 
 const titles = (root: HTMLElement) => [...root.querySelectorAll('.search-result strong')].map((s) => s.textContent);
 
-test('searches the active calendars in one request, newest first', async () => {
+test('searches every calendar in one request, newest first', async () => {
   const { root, settle, requests, url } = await show();
-  expect(root.querySelector('button[popovertarget=search-calendars]')!.textContent).toBe('Calendars (2/3)');
+  expect(root.querySelector('button[popovertarget=search-calendars]')!.textContent).toBe('Calendars');
   await search(root, settle, ' din ');
   const urls = requests.calls.filter((c) => c.path === '/api/search').map((c) => c.url);
-  expect(urls).toEqual(['/api/search?q=din&active=1']); // the server knows the active calendars
+  expect(urls).toEqual(['/api/search?q=din']); // no calendar checked: all of them
   expect(new URL(url()).search).toBe('?q=din');
   expect(titles(root)).toEqual(['Dinner', 'Standup']);
   expect(root.querySelector('.search-result small[data-caption]')!.textContent).toBe('Home');
@@ -76,9 +76,10 @@ test('searches the active calendars in one request, newest first', async () => {
 test('the calendar menu and dates narrow the search, at once when one is shown', async () => {
   const { root, settle, flush, requests, url } = await show();
   const boxes = root.querySelectorAll<HTMLInputElement>('#search-calendars input[type=checkbox]');
-  expect([...boxes].map((b) => b.checked)).toEqual([true, true, false]);
-  boxes[1]!.click();
+  expect([...boxes].map((b) => b.checked)).toEqual([false, false, false]);
+  boxes[0]!.click();
   await flush();
+  expect(root.querySelector('button[popovertarget=search-calendars]')!.textContent).toBe('Calendars (1/3)');
   const from = root.querySelectorAll<HTMLInputElement>('main input[type=date]')[0]!;
   from.value = '2026-11-10';
   from.dispatchEvent(new Event('input', { bubbles: true }));
@@ -87,19 +88,19 @@ test('the calendar menu and dates narrow the search, at once when one is shown',
   await search(root, settle, 'dinner');
   expect(requests.calls.at(-1)!.url).toBe('/api/search?q=dinner&start=2026-11-10&cal=acc%00%2Fcal%2Fwork%2F');
   expect(titles(root)).toEqual(['Standup']);
-  boxes[1]!.click(); // back to the active calendars: the search runs again
+  expect(new URL(url()).searchParams.getAll('cal')).toEqual(['acc\0/cal/work/']);
+  boxes[0]!.click(); // none checked again: every calendar, at once
   await settle();
-  expect(requests.calls.at(-1)!.url).toBe('/api/search?q=dinner&start=2026-11-10&active=1');
+  expect(requests.calls.at(-1)!.url).toBe('/api/search?q=dinner&start=2026-11-10');
   expect(Object.fromEntries(new URL(url()).searchParams)).toEqual({ q: 'dinner', start: '2026-11-10' });
 });
 
-test('a reload shows the search in the URL again', async () => {
-  const { root, requests } = await show({}, '/search/?q=din&end=2026-11-30&cals=all');
-  expect(requests.calls.filter((c) => c.path === '/api/search').map((c) => c.url)).toEqual(['/api/search?q=din&end=2026-11-30']);
+test('a reload shows the search in the URL again, its calendars checked', async () => {
+  const { root, requests } = await show({}, '/search/?q=din&end=2026-11-30&cal=' + encodeURIComponent('acc\0/cal/home/'));
+  expect(requests.calls.filter((c) => c.path === '/api/search').map((c) => c.url)).toEqual(['/api/search?q=din&end=2026-11-30&cal=acc%00%2Fcal%2Fhome%2F']);
   expect(root.querySelector<HTMLInputElement>('main input[type=search]')!.value).toBe('din');
   expect(root.querySelectorAll<HTMLInputElement>('main input[type=date]')[1]!.value).toBe('2026-11-30');
-  expect([...root.querySelectorAll<HTMLInputElement>('#search-calendars input[type=checkbox]')].map((b) => b.checked)).toEqual([false, false, false]);
-  expect(titles(root)).toEqual(['Dinner', 'Standup']);
+  expect([...root.querySelectorAll<HTMLInputElement>('#search-calendars input[type=checkbox]')].map((b) => b.checked)).toEqual([false, true, false]);
 });
 
 test('a new search keeps the last results, dimmed, with a bar, until its own arrive', async () => {
@@ -116,17 +117,6 @@ test('a new search keeps the last results, dimmed, with a bar, until its own arr
   expect(root.querySelector('.search-progress progress')).toBeNull();
 });
 
-test('with no calendar chosen, the search sends no cal and searches all', async () => {
-  const { root, settle, flush, requests } = await show();
-  const boxes = root.querySelectorAll<HTMLInputElement>('#search-calendars input[type=checkbox]');
-  boxes[0]!.click();
-  boxes[1]!.click();
-  await flush();
-  expect([...boxes].map((b) => b.checked)).toEqual([false, false, false]);
-  await search(root, settle, 'din');
-  expect(requests.calls.filter((c) => c.path === '/api/search').map((c) => c.url)).toEqual(['/api/search?q=din']);
-  expect(titles(root)).toEqual(['Dinner', 'Standup']);
-});
 
 test('a result opens the detail; edit this instance fills the form; saving posts the form and searches again', async () => {
   const { root, settle, flush, requests } = await show({ 'POST /api/event': '' });

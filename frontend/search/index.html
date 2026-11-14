@@ -1,29 +1,27 @@
 <!doctype html>
-<!-- q, start, end: the search form; flipped: calendarKey()s whose checkbox differs from the calendar's is_active;
-     search: the submitted SearchQuery (src/lib/events.ts) the results load for.
-     detail: the event <event-detail> shows. <event-form> wraps the page content that opens it. -->
+<!-- The search is the URL: ?q=&start=&end=&cal=… (`cal` repeated: the checked calendars, none for every calendar).
+     q: the search box (the URL's q once submitted); detail: the event <event-detail> shows.
+     <event-form> wraps the page content that opens it. -->
 <app-layout data-sn-prop="{ here: '/search/', title: 'Caley - Search' }"
             data-sn-state="{
               q: $url.q ?? '',
               detail: /** @type {EventJson|null} */ (null),
             }">
-  <!-- The search in the URL (urlSearch(), src/lib/events.ts): one request, `cal` repeated for each chosen calendar,
-       `active=1` for the default choice; it reads only $url, so the early file requests it on a reload. -->
-  <sn-resource name="results" when="urlSearch($url).q"
-               src="/search?q={urlSearch($url).q}&start={urlSearch($url).start}&end={urlSearch($url).end}&cal={urlSearch($url).cals}&active={urlSearch($url).active}"
- order="-dtstart"></sn-resource>
+  <!-- It reads only $url: the server embeds the results in the page, and the early file requests them on a reload. -->
+  <sn-resource name="results" when="$url.q"
+               src="/search?q={$url.q}&start={$url.start}&end={$url.end}&cal={$url.cal}" order="-dtstart"></sn-resource>
   <main data-gutter data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
         data-sn-on-calendar-chosen="defaultCal = $event.detail">
     <event-form data-density="compact"
                 data-sn-on-event-saved="refresh('results')" data-sn-on-event-deleted="refresh('results')">
-      <div data-layout="stack" data-gap="md" data-pad="sm" data-sn-let="{ chosen: chosenCalendars(calendars, urlCals($url)) }">
+      <div data-layout="stack" data-gap="md" data-pad="sm">
         <div data-layout="row" data-gap="sm" data-wrap="none">
           <nav-toggle></nav-toggle>
           <!-- Submitting puts the words into the URL, which loads the search; the same words again reload it.
                The dates (models on $url) and calendars below write their URL parameters when changed: they apply at once. -->
           <form data-layout="row" data-gap="sm" data-wrap="none" data-grow
                 data-sn-on-submit="$event.preventDefault();
-                                   q.trim() && q.trim() === urlSearch($url).q && refresh('results');
+                                   q.trim() && q.trim() === $url.q && refresh('results');
                                    q.trim() && ($url.q = q.trim())">
             <input type="search" data-grow autofocus data-sn-model="q"
                    data-sn-attr="{placeholder: m.search_placeholder(), 'aria-label': m.search_placeholder()}">
@@ -33,12 +31,11 @@
 
         <div data-layout="row" data-gap="sm">
           <button type="button" popovertarget="search-calendars" data-variant="outline" data-size="sm"
-                  data-sn-text="calendarsLabel(chosen.length, calendars.length)"></button>
+                  data-sn-text="calendarsLabel($url.cal.length, calendars.length)"></button>
           <div popover id="search-calendars" data-menu>
             <template data-sn-for="cal in calendars">
               <label>
-                <input type="checkbox" data-sn-attr="{checked: chosen.includes(calendarKey(cal))}"
-                       data-sn-on-change="$url.cals = calsParam(toggled(chosen, calendarKey(cal)), calendars)">
+                <input type="checkbox" value="" data-sn-model="$url.cal" data-sn-attr="{value: calendarKey(cal)}">
                 <span class="event-color-dot" data-sn-show="cal.color" data-sn-style="{'--tm-tone': cal.color}"></span>
                 <span data-sn-text="cal.name"></span>
               </label>
@@ -69,7 +66,7 @@
             <p data-tone="danger" aria-live="polite" data-sn-text="m.search_error()"></p>
           </template>
           <template data-sn-else>
-            <template data-sn-if="urlSearch($url).q && $meta.results.loadedAt && !$meta.results.loading && !results.length">
+            <template data-sn-if="$url.q && $meta.results.loadedAt && !$meta.results.loading && !results.length">
               <p data-muted aria-live="polite" data-sn-text="m.search_noResults()"></p>
             </template>
             <template data-sn-else>

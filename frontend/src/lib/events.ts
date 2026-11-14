@@ -394,41 +394,7 @@ export function attendeeSuggestions(contacts: readonly ContactJson[], query: str
 
 // ── Search page ─────────────────────────────────────────────────────────────
 
-/** A submitted search: the results resource loads for it. `cals` are calendarKey()s; none means all. */
-/** calendarKey()s of the calendars searched: the ones picked (`picked`, see urlCals()), by default the active ones. */
-export function chosenCalendars(calendars: readonly CalendarJson[], picked: readonly string[] | null): string[] {
-  return picked ?? calendars.filter((c) => c.is_active).map(calendarKey);
-}
-
-// ── The search in the URL ───────────────────────────────────────────────────
-// The search page keeps its search in the URL (?q=…&start=…&end=…&cals=…), so a reload, the back button or a
-// shared link shows it again, and the early file can request it before the page script runs. `cals` is left out
-// for the default choice (the active calendars, `active=1` to the server, which knows them); `all` when every
-// box is unchecked (search all, as before); else the chosen calendarKey()s, one per line.
-
-type UrlParams = Record<string, string | undefined>;
-
-/** The calendar choice in the URL: null for the default (active calendars), [] for all, else the keys. */
-export function urlCals(url: UrlParams): string[] | null {
-  if (!url.cals) return null;
-  return url.cals === 'all' ? [] : url.cals.split('\n');
-}
-
-/** The `cals` URL parameter for a choice: null when it is the default one. */
-export function calsParam(picked: readonly string[] | null, calendars: readonly CalendarJson[]): string | null {
-  if (picked === null) return null;
-  const active = calendars.filter((c) => c.is_active).map(calendarKey);
-  if (picked.length === active.length && picked.every((k) => active.includes(k))) return null;
-  return picked.length ? picked.join('\n') : 'all';
-}
-
-/** The request of the search in the URL; `q` is '' without one (no request). */
-export function urlSearch(url: UrlParams): { q: string; start: string | null; end: string | null; cals: string[]; active: '1' | null } {
-  const picked = urlCals(url);
-  return { q: (url.q ?? '').trim(), start: url.start || null, end: url.end || null, cals: picked ?? [], active: picked === null ? '1' : null };
-}
-
-/** The calendar menu's button: "Calendars", with "(chosen/all)" while some are left out. */
+/** The calendar menu's label: the count while some calendars are chosen and others not (none chosen: every one). */
 export function calendarsLabel(chosen: number, all: number): string {
-  return !all || chosen === all ? m.search_calendars() : `${m.search_calendars()} (${chosen}/${all})`;
+  return !all || !chosen || chosen === all ? m.search_calendars() : `${m.search_calendars()} (${chosen}/${all})`;
 }

@@ -62,10 +62,6 @@ export {
   summarySuggestions,
   applySummarySuggestion,
   attendeeSuggestions,
-  chosenCalendars,
-  urlCals,
-  urlSearch,
-  calsParam,
   sameEvent,
   calendarsLabel,
   newCalendarDraft,
@@ -98,7 +94,7 @@ export {
   noSearch, searchActive, addableSender, senderAdded, listStatus, noView, noDrag, canDrop, markedRead, sharedDraft,
   pageKey, readerScroller, scrollTopFor, siblingRow,
   // the page's URL (src/lib/mail.ts "The mail page's URL")
-  urlView, shownView, viewHref, urlLags, senderParam, noSearchBox, mailSearch,
+  urlView, shownView, viewHref, urlLags, noSearchBox, mailSearch,
 } from './lib/mail.ts';
 
 // Calendar page.

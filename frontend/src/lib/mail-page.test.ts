@@ -4,7 +4,7 @@ import { describe, expect, test } from 'vitest';
 import {
   accountUi, addableSender, afterBulk, bodyOf, canDrop, cleared, currentView, folderView, inMailbox, mailboxView, noView, listStatus, markedRead, noReader, noSearch,
   noSelection, openedAt, opensRow, pageKey, readerOn, rowClick, scrollTopFor, searchActive, senderAdded, sharedDraft,
-  siblingRow, unmarked, urlRef, urlView, shownView, viewHref, urlLags, senderParam, noSearchBox, mailSearch, type Account, type Mailbox, type Message, type VirtualFolder,
+  siblingRow, unmarked, urlRef, urlView, shownView, viewHref, urlLags, noSearchBox, mailSearch, type Account, type Mailbox, type Message, type VirtualFolder,
 } from './mail.ts';
 import { caldavBody, caldavDraft, enrollErrorText, keyImportError, withCalendarActive } from './settings.ts';
 import { loadErrorOr } from './errors.ts';
@@ -200,11 +200,9 @@ describe('the mail page URL', () => {
     expect(urlLags(noView(), null)).toBe(false);
   });
 
-  test('mailSearch reads the query and filters; senderParam joins addresses', () => {
-    const s = mailSearch({ addrInput: 'ad', addrQ: 'ad' }, 'invoice', 'ada@x,bob@y', '2026-01-01', undefined, '1');
+  test('mailSearch puts the URL query and filters together with the sender box', () => {
+    const s = mailSearch({ addrInput: 'ad', addrQ: 'ad' }, 'invoice', ['ada@x', 'bob@y'], '2026-01-01', undefined, true);
     expect(s).toEqual({ input: 'invoice', q: 'invoice', filter: { addrs: ['ada@x', 'bob@y'], from: '2026-01-01', to: '', unread: true }, addrInput: 'ad', addrQ: 'ad' });
-    expect(searchActive(mailSearch(noSearchBox(), undefined, undefined, undefined, undefined, undefined))).toBe(false);
-    expect(senderParam(['ada@x', 'bob@y'])).toBe('ada@x,bob@y');
-    expect(senderParam([])).toBeNull();
+    expect(searchActive(mailSearch(noSearchBox(), undefined, [], undefined, undefined, false))).toBe(false);
   });
 });
