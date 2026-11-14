@@ -56,8 +56,6 @@
     <div class="mail-page" data-layout="stack" data-gap="none" data-density="compact" data-grow
          data-sn-state="{
            syncing: /** @type {string[]} */ ([]),
-           sidebarW: 220,
-           listW: 320,
            sidebarOpen: false,
            search: noSearch(),
            sel: noSelection(),
@@ -143,7 +141,9 @@
       <template data-sn-if="$meta.unread.loadedAt"><mail-notifier></mail-notifier></template>
       <mail-hidden-watch data-sn-on-page-hidden="wiped = body && body.encrypted ? body.key : wiped"></mail-hidden-watch>
 
-      <div class="mail-layout" data-grow data-sn-style="{'--sidebar-w': sidebarW + 'px', '--list-w': listW + 'px'}">
+      <!-- sidebarW, listW: the widths of the folder and message columns, set with the two <mail-split>s (persisted). -->
+      <div class="mail-layout" data-grow data-sn-state="{ sidebarW: 220, listW: 320 }" data-sn-persist="mail-widths"
+           data-sn-style="{'--sidebar-w': sidebarW + 'px', '--list-w': listW + 'px'}">
         <!-- ── Folders ───────────────────────────────────────────────────────── -->
         <button type="button" class="sidebar-backdrop" data-sn-show="sidebarOpen" data-sn-on-click="sidebarOpen = false"
                 data-sn-attr="{'aria-label': m.mail_aria_folders()}"></button>

@@ -398,3 +398,18 @@ test('a remembered folder that is gone gives way to the inbox', async () => {
   expect(listUrls(requests).at(-1)).toBe('/api/email/messages?account_id=work&mailbox=INBOX&limit=50&direction=forward');
   expect(remembered(storage)).toEqual({ account_id: 'work', mailbox: 'INBOX', folder_id: null });
 });
+
+test('the column widths set with the dividers are remembered for the next visit', async () => {
+  const storage = memoryStorage();
+  storage.setItem('sn:mail-widths', JSON.stringify({ sidebarW: 260, listW: 400 }));
+  const { root, flush } = await show({}, null, storage);
+  const layout = root.querySelector<HTMLElement>('.mail-layout')!;
+  expect(layout.style.getPropertyValue('--sidebar-w')).toBe('260px');
+  expect(layout.style.getPropertyValue('--list-w')).toBe('400px');
+  const split = root.querySelector('.detail-resize-handle')!;
+  split.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  await flush();
+  const saved = JSON.parse(storage.getItem('sn:mail-widths')!);
+  expect(saved.sidebarW).toBe(260);
+  expect(saved.listW).toBeGreaterThan(400);
+});
