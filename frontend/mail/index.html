@@ -1,14 +1,16 @@
 <!doctype html>
 <!-- Mail: folders (accounts, mailboxes, virtual folders), the message list and the reader (<mail-reader>).
-     Page state: reader (Reader): the message in the reader (from ?account_id=&mailbox=&uid= on load; `open` names
-     its ref) and whether its overlay is shown below 1024px; wiped: the key of the encrypted message whose decrypted
-     content was dropped while the page was hidden (it is not loaded again until asked); detail, threadRef: what
-     <event-detail> and <thread-dialog> show; needContacts: load the contacts (the search's sender filter).
+     The URL holds what is shown (src/lib/mail.ts "The mail page's URL"): the view (?account_id=&mailbox= or
+     ?folder=), the message open (uid; below 1024px it is the reader's overlay, so Back closes it), the list's page
+     and the search. The page reads its parameters by name ($url.uid), never $url whole, so its own links and
+     navigate() stay in the page.
+     Page state: wiped: the key of the encrypted message whose decrypted content was dropped while the page was
+     hidden (it is not loaded again until asked); detail, threadRef: what <event-detail> and <thread-dialog> show;
+     needContacts: load the contacts (the search's sender filter).
      The dialogs with drafts (compose, image sources, import, account, folder) are components around the page's
      content: their openers emit the draft. -->
 <app-layout data-sn-prop="{ here: '/mail/', title: mailTitle(unread) }"
             data-sn-state="{
-              reader: readerOn(urlRef($url)),
               wiped: '',
               detail: /** @type {EventJson|null} */ (null),
               threadRef: /** @type {ThreadRef|null} */ (null),
@@ -17,22 +19,29 @@
   <sn-resource name="unread" src="/email/unread-counts" cache></sn-resource>
   <sn-resource name="identities" src="/email/identities" cache></sn-resource>
   <sn-resource name="contacts" src="/contacts" items="contacts" key="account_id,uid,addressbook_href" when="needContacts"></sn-resource>
-  <mail-reader-data data-sn-prop="{ open: reader.ref, threadRef, wiped }"></mail-reader-data>
+  <mail-reader-data data-sn-prop="{ open: urlRef($url.account_id, $url.mailbox, $url.uid), threadRef, wiped }"></mail-reader-data>
 
-  <!-- view: the list shown (persisted), always a valid one once the lists have arrived: the lists' `then` write back
-       currentView() (the remembered view while it exists, else the first inbox), so the message list's URL reads
-       only `view` and the early file can request it before the page script; collapsed: account ids.
-       The lists are declared here, in view's scope, for those `then`s; their names are page-wide. -->
+  <!-- cur: the list shown, the URL's view, else `view`, the one remembered from the last visit (persisted). The
+       lists' `then` check it once they have arrived (currentView(): it while it exists, else the first inbox) and
+       put a view the URL does not name into it, in place (replace: no history entry). The message list's URL reads
+       only the URL and `view`, so the early file requests it before the page script. collapsed: account ids.
+       The lists are declared here, in cur's scope, for those `then`s; their names are page-wide. -->
   <main data-layout="stack" data-gap="none"
         data-sn-state="{ view: noView(), collapsed: /** @type {string[]} */ ([]) }"
         data-sn-persist="mail"
-        data-sn-let="{ open: reader.ref }">
+        data-sn-let="{
+          cur: shownView(urlView($url.folder, $url.account_id, $url.mailbox), view),
+          open: urlRef($url.account_id, $url.mailbox, $url.uid),
+        }">
     <sn-resource name="accounts" src="/email/accounts" cache
-                 then="view = currentView(view, accounts, mailboxes, folders, { accounts: true, folders: !!$meta.folders.loadedAt })"></sn-resource>
+                 then="view = currentView(cur, accounts, mailboxes, folders, { accounts: true, folders: !!$meta.folders.loadedAt });
+                       urlLags(view, urlView($url.folder, $url.account_id, $url.mailbox)) && navigate(viewHref(view), { replace: true })"></sn-resource>
     <sn-resource name="mailboxes" each="a in accounts" src="/email/mailboxes?account_id={a.account_id}"
-                 then="view = currentView(view, accounts, mailboxes, folders, { accounts: !!$meta.accounts.loadedAt, folders: !!$meta.folders.loadedAt })"></sn-resource>
+                 then="view = currentView(cur, accounts, mailboxes, folders, { accounts: !!$meta.accounts.loadedAt, folders: !!$meta.folders.loadedAt });
+                       urlLags(view, urlView($url.folder, $url.account_id, $url.mailbox)) && navigate(viewHref(view), { replace: true })"></sn-resource>
     <sn-resource name="folders" src="/email/folders" cache order="sort_order"
-                 then="view = currentView(view, accounts, mailboxes, folders, { accounts: !!$meta.accounts.loadedAt, folders: true })"></sn-resource>
+                 then="view = currentView(cur, accounts, mailboxes, folders, { accounts: !!$meta.accounts.loadedAt, folders: true });
+                       urlLags(view, urlView($url.folder, $url.account_id, $url.mailbox)) && navigate(viewHref(view), { replace: true })"></sn-resource>
     <!-- defaultCal: the calendar the import dialog preselects and remembers (shared with the calendar pages' event form). -->
     <div class="mail-contents" data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
          data-sn-on-ics-imported="$event.detail.errors === 0 && (defaultCal = $event.detail.calendar)">
@@ -41,11 +50,12 @@
   <import-dialog>
   <mail-account>
   <mail-folder>
-    <!-- List state: sel (Selection: the cursor, the rows marked for a bulk action, the bulk menu), search
-         (MailSearch: the search box and filters), drag (the message dragged to a mailbox, the mailbox under it).
+    <!-- List state: sel (Selection: the cursor, the rows marked for a bulk action, the bulk menu), searchBox (the
+         sender filter's box; search, MailSearch, is the URL's query and filters with it), drag (the message dragged
+         to a mailbox, the mailbox under it).
          Events of the list (emitted inside it, handled here):
-           mail-open {detail: Message}: show it in the reader, with the cursor on it, read in the lists;
-           mail-view: the list shows another view: no marks, search or open message;
+           mail-open {detail: Message}: show it in the reader (its ref into the URL), with the cursor on it;
+           mail-view: the list shows another view (viewHref() has no message, page or search): no marks;
            list-step {detail: 1 | -1}: j/k, open the next/previous message (or load that page at the end of one);
            reader-back (Escape, the reader's back button): the overlay closes, the cursor goes to its message;
            view-removed: the virtual folder or account shown was removed: no view, no marks;
@@ -57,7 +67,7 @@
          data-sn-state="{
            syncing: /** @type {string[]} */ ([]),
            sidebarOpen: false,
-           search: noSearch(),
+           searchBox: noSearchBox(),
            sel: noSelection(),
            drag: noDrag(),
            pageValue: /** @type {number|null} */ (1),
@@ -65,7 +75,7 @@
            hit: /** @type {Message|null} */ (null),
          }"
          data-sn-let="{
-           cur: view,
+           search: mailSearch(searchBox, $url.q, $url.sender, $url.after, $url.before, $url.unread),
            searching: searchActive(search),
            list: searching ? results : messages,
            listName: searching ? 'results' : 'messages',
@@ -82,25 +92,25 @@
            eventThreads: true,
          }"
          
-                    data-sn-on-mail-removed="reader = noReader(); sel = unmarked(sel)"
-         data-sn-on-mail-open="reader = readerOn($event.detail); sel = openedAt(sel, messageKey($event.detail))"
+         data-sn-on-mail-removed="$url.uid = null; sel = unmarked(sel)"
+         data-sn-on-mail-open="$url.account_id = $event.detail.account_id; $url.mailbox = $event.detail.mailbox; $url.uid = $event.detail.uid;
+                               sel = openedAt(sel, messageKey($event.detail))"
          data-sn-on-thread-open="threadRef = $event.detail; showModal('thread-dialog')"
          data-sn-on-decrypt="wiped = ''"
-         data-sn-on-view-removed="view = currentView(noView(), accounts, mailboxes, folders); sel = unmarked(sel)"
-         data-sn-on-mail-view="sel = cleared(sel, null); search = noSearch(); reader = noReader()"
+         data-sn-on-view-removed="view = currentView(noView(), accounts, mailboxes, folders); sel = unmarked(sel);
+                                  navigate(viewHref(view), { replace: true })"
+         data-sn-on-mail-view="sel = cleared(sel, null); searchBox = noSearchBox()"
          data-sn-on-list-step="hit = neighbor(list, open ? messageKey(open) : sel.cursor, $event.detail);
                                hit && emit('mail-open', hit);
                                hit && elementIn($el, '.message-detail')?.focus();
                                !hit && page(listName, $event.detail > 0 ? 'next' : 'prev')"
-         data-sn-on-reader-back="reader.shown = false; sel.cursor = open ? messageKey(open) : sel.cursor"
+         data-sn-on-reader-back="sel.cursor = open ? messageKey(open) : sel.cursor; $url.uid = null"
          data-sn-on-keydown-j="pageKey($event, bulk.messages.length) && emit('list-step', 1)"
          data-sn-on-keydown-k="pageKey($event, bulk.messages.length) && emit('list-step', -1)">
       <sn-resource name="messages"
-                   src="/email/messages?account_id={view.account_id}&mailbox={view.mailbox}&folder_id={view.folder_id}"
-                   when="(view.mailbox || view.folder_id) && !searching" cache
-                   paginate="keyset" page-size="50" size-param="limit" offset-param="offset"
-                   cursor="{cursor_sent_at: sent_at, cursor_rowid: rowid}" direction-param="direction"
-                   direction-values="{first: 'forward', prev: 'backward', next: 'forward', last: 'last'}"></sn-resource>
+                   src="/email/messages?account_id={cur.account_id}&mailbox={cur.mailbox}&folder_id={cur.folder_id}"
+                   when="(cur.mailbox || cur.folder_id) && !searching" cache
+                   paginate="offset" page-size="50" size-param="limit" offset-param="offset" page-model="$url.page"></sn-resource>
       <sn-resource name="results"
                    src="/email/search?q={search.q.trim()}&account_id={cur.account_id}&mailbox={cur.mailbox}&folder_id={cur.folder_id}&addrs={search.filter.addrs.length ? search.filter.addrs.join(',') : null}&date_from={search.filter.from || null}&date_to={search.filter.to || null}&unread_only={search.filter.unread ? 'true' : null}"
                    when="searching"
@@ -125,7 +135,7 @@
         <sn-event name="email_removed" resource="messages" op="remove" type="EmailRemovedEvent"></sn-event>
         <sn-event name="email_removed" resource="results" op="remove" type="EmailRemovedEvent"></sn-event>
         <sn-event name="email_removed" resource="message" op="remove" type="EmailRemovedEvent" when="isRef(open, {account_id, mailbox, uid})"
-                  then="reader = noReader()"></sn-event>
+                  then="$url.uid = null"></sn-event>
         <sn-event name="email_removed" resource="unread" op="refetch"></sn-event>
         <sn-event name="accounts_changed" resource="accounts" op="refetch"></sn-event>
         <sn-event name="accounts_changed" resource="mailboxes" op="refetch"></sn-event>
@@ -158,7 +168,7 @@
                 <div data-layout="row" data-gap="none" data-wrap="none" data-sn-let="{ n: unread?.folders?.[f.folder_id] ?? 0 }">
                   <button type="button" class="sidebar-item" data-variant="item" data-size="sm" data-layout="row" data-gap="sm" data-wrap="none" data-grow
                           data-sn-attr="{'aria-current': cur.folder_id === f.folder_id ? 'true' : null}"
-                          data-sn-on-click="view = folderView(f.folder_id); sidebarOpen = false; emit('mail-view')">
+                          data-sn-on-click="navigate(viewHref(folderView(f.folder_id))); sidebarOpen = false; emit('mail-view')">
                     <span data-icon="layers" aria-hidden="true"></span>
                     <span data-truncate data-grow data-sn-text="f.display_name"></span>
                     <template data-sn-if="n > 0"><span data-badge data-tone="accent" data-sn-text="badgeCount(n)"></span></template>
@@ -169,7 +179,8 @@
                   <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
                           data-sn-delete="/email/folder?folder_id={f.folder_id}"
                           data-sn-optimistic="remove(f)"
-                          data-sn-then="sidebarOpen = false; view.folder_id === f.folder_id && (sel = unmarked(sel)); view = currentView(view, accounts, mailboxes, folders)"
+                          data-sn-then="sidebarOpen = false; cur.folder_id === f.folder_id && (sel = unmarked(sel)); view = currentView(cur, accounts, mailboxes, folders);
+                                        urlLags(view, urlView($url.folder, $url.account_id, $url.mailbox)) && navigate(viewHref(view), { replace: true })"
                           data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
                 </div>
               </template>
@@ -204,7 +215,7 @@
                      data-sn-let="{ mb: item.mailbox, canDrop: canDrop(drag.msg, item.mailbox) }"
                      data-sn-on-dragover="canDrop && $event.preventDefault(); drag.over = canDrop ? item.key : drag.over"
                      data-sn-on-dragleave="drag.over === item.key && (drag.over = null)"
-                     data-sn-on-drop="reader = isRef(open, drag.msg) ? noReader() : reader"
+                     data-sn-on-drop="isRef(open, drag.msg) && ($url.uid = null)"
                      data-sn-post="/email/message/move" data-sn-trigger="drop"
                      data-sn-body="moveBody(drag.msg, mb.name)"
                      data-sn-optimistic="remove(drag.msg)"
@@ -214,7 +225,7 @@
                           data-sn-class="{'drag-target': canDrop, 'drag-over': drag.over === item.key}"
                           data-sn-attr="{'aria-busy': busy ? 'true' : null, 'aria-current': cur.account_id === mb.account_id && cur.mailbox === mb.name ? 'true' : null}"
                           data-sn-post="/email/sync?account_id={mb.account_id}&mailbox={mb.name}" data-sn-catch="sel.error = sel.error"
-                          data-sn-on-click="view = mailboxView(mb.account_id, mb.name); sidebarOpen = false; emit('mail-view')">
+                          data-sn-on-click="navigate(viewHref(mailboxView(mb.account_id, mb.name))); sidebarOpen = false; emit('mail-view')">
                     <mail-folder-icon data-sn-prop="{ kind }"></mail-folder-icon>
                     <span data-truncate data-grow data-sn-text="folderName(mb.name)"></span>
                     <template data-sn-if="!busy && item.unread > 0"><span data-badge data-tone="accent" data-sn-text="badgeCount(item.unread)"></span></template>
@@ -239,7 +250,7 @@
                       data-sn-on-click="ancestor($el, '[popover]')?.hidePopover()"
                       data-sn-delete="/email/account?account_id={acc.account_id}"
                       data-sn-confirm="m.mail_removeAccountConfirm({name: acc.display_name})"
-                      data-sn-then="sidebarOpen = false; refresh('accounts'); collapsed = collapsed.filter(id => id !== acc.account_id); view.account_id === acc.account_id && emit('view-removed')"
+                      data-sn-then="sidebarOpen = false; refresh('accounts'); collapsed = collapsed.filter(id => id !== acc.account_id); cur.account_id === acc.account_id && emit('view-removed')"
                       data-sn-text="m.mail_removeAccount()"></button>
             </template>
           </div>
@@ -280,7 +291,7 @@
                   <div popover id="mail-filter-addr" class="filter-popover" data-menu role="dialog"
                        data-sn-attr="{'aria-label': m.mail_filterBySender()}"
                        data-sn-let="{ hits: senderHits(search.addrInput, addressBook, seenAddrs ?? [], search.filter.addrs) }">
-                    <input type="search" data-sn-model="search.addrInput" data-sn-on-input="search.addrQ = search.addrInput" data-sn-debounce-input="300"
+                    <input type="search" data-sn-model="searchBox.addrInput" data-sn-on-input="searchBox.addrQ = searchBox.addrInput" data-sn-debounce-input="300"
                            data-sn-attr="{placeholder: m.mail_filterAddrPlaceholder(), 'aria-label': m.mail_filterAddrPlaceholder()}">
                     <template data-sn-if="search.filter.addrs.length > 0">
                       <div data-layout="row" data-gap="xs" data-pad="xs">
@@ -289,17 +300,17 @@
                             <span data-truncate data-sn-text="senderLabel(addr, addressBook)"></span>
                             <button type="button" class="chip-remove" data-variant="ghost" data-icon="x"
                                     data-sn-attr="{'aria-label': m.mail_removeAttachment()}"
-                                    data-sn-on-click="search.filter.addrs = toggled(search.filter.addrs, addr); sel = unmarked(sel); reader.ref = null"></button>
+                                    data-sn-on-click="$url.sender = senderParam(toggled(search.filter.addrs, addr)); sel = unmarked(sel); $url.uid = null"></button>
                           </span>
                         </template>
                       </div>
-                      <button type="button" data-icon="trash-2" data-sn-on-click="search.filter.addrs = []; sel = unmarked(sel); reader.ref = null" data-sn-text="m.mail_filterClearAddrs()"></button>
+                      <button type="button" data-icon="trash-2" data-sn-on-click="$url.sender = null; sel = unmarked(sel); $url.uid = null" data-sn-text="m.mail_filterClearAddrs()"></button>
                       <hr>
                     </template>
                     <template data-sn-for="s in hits.contacts" data-sn-key="s.email">
                       <label class="filter-suggestion-row">
                         <input type="checkbox" data-sn-attr="{checked: search.filter.addrs.includes(s.email)}"
-                               data-sn-on-change="search.filter.addrs = toggled(search.filter.addrs, s.email); sel = unmarked(sel); reader.ref = null">
+                               data-sn-on-change="$url.sender = senderParam(toggled(search.filter.addrs, s.email)); sel = unmarked(sel); $url.uid = null">
                         <span data-layout="stack" data-gap="none" data-grow>
                           <template data-sn-if="s.name"><span data-truncate data-sn-text="s.name"></span></template>
                           <small data-muted class="suggestion-email" data-sn-text="s.email"></small>
@@ -309,15 +320,16 @@
                     <template data-sn-for="addr in hits.seen" data-sn-key="addr">
                       <label class="filter-suggestion-row">
                         <input type="checkbox" data-sn-attr="{checked: search.filter.addrs.includes(addr)}"
-                               data-sn-on-change="search.filter.addrs = toggled(search.filter.addrs, addr); sel = unmarked(sel); reader.ref = null">
+                               data-sn-on-change="$url.sender = senderParam(toggled(search.filter.addrs, addr)); sel = unmarked(sel); $url.uid = null">
                         <small class="suggestion-email" data-grow data-sn-text="addr"></small>
                       </label>
                     </template>
                     <template data-sn-if="hits.canAdd">
                       <button type="button" data-tone="accent" data-icon="plus"
                               data-sn-on-click="sel = addableSender(search) ? unmarked(sel) : sel;
-                                                reader.ref = addableSender(search) ? null : reader.ref;
-                                                search = senderAdded(search)">
+                                                addableSender(search) && ($url.uid = null);
+                                                $url.sender = senderParam(senderAdded(search).filter.addrs);
+                                                searchBox = noSearchBox()">
                         <span data-truncate data-sn-text="`${m.mail_filterAddAddr()}: ${search.addrInput}`"></span>
                       </button>
                     </template>
@@ -329,27 +341,28 @@
                     <div data-layout="stack" data-gap="sm" data-pad="xs">
                       <label>
                         <span data-sn-text="m.mail_filterDateFrom()"></span>
-                        <input type="date" data-sn-model="search.filter.from" data-sn-on-change="sel = unmarked(sel); reader.ref = null">
+                        <input type="date" data-sn-model="$url.after" data-sn-on-change="sel = unmarked(sel); $url.uid = null">
                       </label>
                       <label>
                         <span data-sn-text="m.mail_filterDateTo()"></span>
-                        <input type="date" data-sn-model="search.filter.to" data-sn-on-change="sel = unmarked(sel); reader.ref = null">
+                        <input type="date" data-sn-model="$url.before" data-sn-on-change="sel = unmarked(sel); $url.uid = null">
                       </label>
                       <template data-sn-if="search.filter.from || search.filter.to">
                         <button type="button" data-variant="secondary" data-size="sm" data-self="start"
-                                data-sn-on-click="search.filter.from = ''; search.filter.to = ''; sel = unmarked(sel); reader.ref = null" data-sn-text="m.mail_filterClearDate()"></button>
+                                data-sn-on-click="$url.after = null; $url.before = null; sel = unmarked(sel); $url.uid = null" data-sn-text="m.mail_filterClearDate()"></button>
                       </template>
                     </div>
                   </div>
                   <button type="button" data-variant="ghost" data-icon="circle-check" data-tooltip
-                          data-sn-on-click="search.filter.unread = !search.filter.unread; sel = unmarked(sel); reader = noReader()"
+                          data-sn-on-click="$url.unread = !search.filter.unread; sel = unmarked(sel); $url.uid = null"
                           data-sn-attr="{'aria-label': m.mail_filterUnread(), 'aria-pressed': search.filter.unread ? 'true' : 'false'}"></button>
                 </div>
               </template>
             </div>
             <template data-sn-if="cur.folder_id || cur.mailbox">
-              <input type="search" data-sn-model="search.input"
-                     data-sn-on-input="search.q = search.input; sel = unmarked(sel); reader = noReader()" data-sn-debounce-input="250"
+              <!-- a model on $url.q: written at each typing pause, the first of a run a history entry -->
+              <input type="search" data-sn-model="$url.q"
+                     data-sn-on-input="sel = unmarked(sel); $url.uid = null"
                      data-sn-attr="{placeholder: m.mail_searchPlaceholder(), 'aria-label': m.mail_searchPlaceholder()}">
             </template>
             <template data-sn-if="searching && !$meta.results.loading">
@@ -388,9 +401,9 @@
                         tabindex: k === sel.cursor || (!sel.cursor && list[0] === msg) ? '0' : '-1',
                       }"
                       data-sn-on-focusin="sel.cursor = k"
-                      data-sn-on-click="sel = rowClick($event, sel, k, list, open); reader.shown = true; opensRow($event) && emit('mail-open', msg)"
-                      data-sn-on-keydown-mod-space="sel = rowClick($event, sel, k, list, open); reader.shown = true"
-                      data-sn-on-keydown-shift-space="sel = rowClick($event, sel, k, list, open); reader.shown = true"
+                      data-sn-on-click="sel = rowClick($event, sel, k, list, open); opensRow($event) && emit('mail-open', msg)"
+                      data-sn-on-keydown-mod-space="sel = rowClick($event, sel, k, list, open)"
+                      data-sn-on-keydown-shift-space="sel = rowClick($event, sel, k, list, open)"
                       data-sn-on-keydown-arrowdown="siblingRow($el, 1)?.focus(); !siblingRow($el, 1) && page(listName, 'next')"
                       data-sn-on-keydown-arrowup="siblingRow($el, -1)?.focus(); !siblingRow($el, -1) && page(listName, 'prev')"
                       data-sn-on-dragstart="drag.msg = msg"
@@ -458,7 +471,7 @@
                  data-sn-on-keydown-home="!bulk.messages.length && emit('reader-scroll', $event)"
                  data-sn-on-keydown-end="!bulk.messages.length && emit('reader-scroll', $event)"
                  data-sn-on-reader-scroll="readerScroller($el)?.scrollTo({top: scrollTopFor($event.detail.key, readerScroller($el))})"
-                 data-sn-class="{'is-open': reader.shown && (bulk.messages.length > 0 || !!open)}"
+                 data-sn-class="{'is-open': bulk.messages.length > 0 || !!open}"
                  data-sn-attr="{'aria-label': m.nav_mail()}">
           <template data-sn-if="bulk.messages.length > 0">
             <div class="detail-header" data-layout="row" data-gap="sm" data-wrap="none" data-pad="sm">
@@ -540,7 +553,7 @@
         <form data-sn-post="/email/trash/empty"
               data-sn-body="{account_id: cur.account_id, mailbox: cur.mailbox, days}"
               data-sn-on-submit="trash.busy = true; trash.error = ''"
-              data-sn-then="reader = inMailbox(open, cur) ? noReader() : reader; sel = unmarked(sel); refresh('messages', 'results', 'unread'); close()"
+              data-sn-then="inMailbox(open, cur) && ($url.uid = null); sel = unmarked(sel); refresh('messages', 'results', 'unread'); close()"
               data-sn-catch="trash.busy = false; trash.error = $error.body?.error === 'savedate_unsupported' ? m.mail_emptyTrashUnsupported() : m.mail_emptyTrashError()">
           <header>
             <h2 data-sn-text="m.mail_emptyTrash()"></h2>
@@ -573,7 +586,8 @@
       </dialog>
 
       <thread-dialog data-sn-prop="{ nodes: threadNodes, eventGroups: threadEventGroups, loading: threadLoading, current: threadRef, links: threadLinks }"
-                     data-sn-on-thread-message="reader = readerOn($event.detail); sel = unmarked(sel)"
+                     data-sn-on-thread-message="$url.account_id = $event.detail.account_id; $url.mailbox = $event.detail.mailbox; $url.uid = $event.detail.uid;
+                                                sel = unmarked(sel)"
                      data-sn-on-event-open="detail = $event.detail; showModal('event-detail')"></thread-dialog>
       <event-detail data-sn-prop="{ event: detail, threads: eventThreads }"
                     data-sn-on-event-threads="threadRef = threadOfEmail($event.detail.email, $event.detail.event); showModal('thread-dialog')"></event-detail>

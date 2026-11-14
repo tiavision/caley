@@ -25,7 +25,8 @@ const inbox = [msg(3, 'Third', { flags: [], is_read: false }), msg(2, 'Second'),
 beforeEach(() => { localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'], retry: retryPolicies }); });
 afterEach(() => configure({ confirm: null as never, urlSchemes: [], retry: null }));
 
-async function show(routes: Record<string, RouteResponse> = {}, pending: { subject: string; files: File[] } | null = null, storage = memoryStorage()) {
+async function show(routes: Record<string, RouteResponse> = {}, pending: { subject: string; files: File[] } | null = null, storage = memoryStorage(),
+                    url = 'http://localhost/mail/') {
   const opened: unknown[] = [];
   let pendingCalls = 0;
   const listed = routes['GET /api/email/messages'];
@@ -72,7 +73,7 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
       pendingCompose: () => { pendingCalls++; const p = pending; pending = null; return p; },
     },
   };
-  const r = await render(page, { ...app, messages, requests, actions, helpers, storage, streams: { '/api/events/stream': stream } });
+  const r = await render(page, { ...app, messages, requests, actions, helpers, storage, url, streams: { '/api/events/stream': stream } });
   await r.settle();
   return { ...r, requests, stream, storage, opened, pendingCalls: () => pendingCalls };
 }
@@ -250,10 +251,12 @@ test('keyboard: j/k open the neighbours, Ctrl/Shift+Space mark, Escape clears, S
 });
 
 test('j past the last row loads the next page when there is one, and nothing at the end', async () => {
-  // keyset paging: a full page (50) means there may be more, a shorter one is the end
+  // offset paging: the total says whether there is a next page (three messages: none; 51: one more)
   const full = Array.from({ length: 50 }, (_, i) => msg(100 - i, `M${100 - i}`));
-  const pages = (first: Message[]) => (call: { url: string }) =>
-    new URL(call.url, 'http://x').searchParams.get('cursor_rowid') ? { messages: [msg(1, 'Next page')] } : { messages: first };
+  const pages = (first: Message[]) => (call: { url: string }) => {
+    const total = first.length === 50 ? 51 : first.length;
+    return Number(new URL(call.url, 'http://x').searchParams.get('offset')) > 0 ? { messages: [msg(1, 'Next page')], total } : { messages: first, total };
+  };
   const press = (target: Element, key: string) =>
     target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
   const listed = (r: { requests: { calls: { method: string; path: string; url: string }[] } }) =>
@@ -272,8 +275,7 @@ test('j past the last row loads the next page when there is one, and nothing at 
   const more = await show({ 'GET /api/email/messages': pages(full), 'PATCH /api/email/message/flags': null });   // a full page: load the next one
   await jAtLast(more);
   expect(listed(more)).toHaveLength(2);
-  expect(listed(more)[1]).toContain('direction=forward');
-  expect(listed(more)[1]).toContain('cursor_rowid=');
+  expect(listed(more)[1]).toContain('offset=50');
   expect(subjects(more.root)).toEqual(['Next page']);
 });
 
@@ -374,22 +376,23 @@ test('the thread button opens the conversation; a message in it opens in the rea
   expect(root.querySelector('.reader .detail-subject')!.textContent).toBe('Second');
 });
 
-// The message list's URL reads only the remembered view (so sinter's early file can request it): the view the
-// lists settle on is written back, a remembered one is requested at once, a gone one is replaced.
+// Without a view in the URL, the message list shows the remembered one (its URL reads only the URL and the
+// remembered view, so sinter's early file can request it): the view the lists settle on is remembered and put
+// into the URL, a remembered one is requested at once, a gone one is replaced.
 const listUrls = (requests: { calls: { path: string; url: string }[] }) => requests.calls.filter((c) => c.path === '/api/email/messages').map((c) => c.url);
 const remembered = (storage: Storage) => JSON.parse(storage.getItem('sn:mail') ?? '{}').view;
 
 test('the inbox the page settles on is remembered for the next visit', async () => {
   const { storage, requests } = await show();
   expect(remembered(storage)).toEqual({ account_id: 'work', mailbox: 'INBOX', folder_id: null });
-  expect(listUrls(requests)).toEqual(['/api/email/messages?account_id=work&mailbox=INBOX&limit=50&direction=forward']);
+  expect(listUrls(requests)).toEqual(['/api/email/messages?account_id=work&mailbox=INBOX&offset=0&limit=50']);
 });
 
 test('a remembered mailbox is the first list requested', async () => {
   const storage = memoryStorage();
   storage.setItem('sn:mail', JSON.stringify({ view: { account_id: 'work', mailbox: 'Archive', folder_id: null }, collapsed: [] }));
   const { root, requests } = await show({}, null, storage);
-  expect(listUrls(requests)[0]).toBe('/api/email/messages?account_id=work&mailbox=Archive&limit=50&direction=forward');
+  expect(listUrls(requests)[0]).toBe('/api/email/messages?account_id=work&mailbox=Archive&offset=0&limit=50');
   expect(root.querySelector('.message-list-header h2')!.textContent).toBe('Archive');
 });
 
@@ -398,8 +401,64 @@ test('a remembered folder that is gone gives way to the inbox', async () => {
   storage.setItem('sn:mail', JSON.stringify({ view: { account_id: null, mailbox: null, folder_id: 'gone' }, collapsed: [] }));
   const { root, requests } = await show({ 'GET /api/email/search': { messages: [] } }, null, storage);
   expect(root.querySelector('.message-list-header h2')!.textContent).toBe('Inbox');
-  expect(listUrls(requests).at(-1)).toBe('/api/email/messages?account_id=work&mailbox=INBOX&limit=50&direction=forward');
+  expect(listUrls(requests).at(-1)).toBe('/api/email/messages?account_id=work&mailbox=INBOX&offset=0&limit=50');
   expect(remembered(storage)).toEqual({ account_id: 'work', mailbox: 'INBOX', folder_id: null });
+});
+
+// The URL holds what is shown: the view, the message open, the page and the search (src/lib/mail.ts).
+const query = (url: string) => Object.fromEntries(new URL(url).searchParams);
+
+test('a link names the view, the message open and the page', async () => {
+  const { root, requests, opened } = await show({}, null, memoryStorage(), 'http://localhost/mail/?account_id=work&mailbox=Archive&uid=2&page=2');
+  expect(listUrls(requests)[0]).toBe('/api/email/messages?account_id=work&mailbox=Archive&offset=50&limit=50');
+  expect(root.querySelector('.message-list-header h2')!.textContent).toBe('Archive');
+  expect(opened).toContainEqual({ account_id: 'work', mailbox: 'Archive', uid: 2 });
+  expect(root.querySelector('.message-detail')!.classList.contains('is-open')).toBe(true);
+});
+
+test('without a view in the URL, the one shown is put into it, in place', async () => {
+  const { url, history } = await show();
+  expect(query(url())).toEqual({ account_id: 'work', mailbox: 'INBOX' });
+  expect(history()).toHaveLength(1);
+});
+
+test('a message and a mailbox are history entries: Back returns to the message, then closes it', async () => {
+  const { root, settle, url, back } = await show();
+  rows(root)[1].click();
+  await settle();
+  expect(query(url())).toEqual({ account_id: 'work', mailbox: 'INBOX', uid: '2' });
+  expect(root.querySelector('.message-detail')!.classList.contains('is-open')).toBe(true);
+  [...root.querySelectorAll<HTMLButtonElement>('.sidebar-item')].find((b) => b.textContent!.includes('Archive'))!.click();
+  await settle();
+  expect(query(url())).toEqual({ account_id: 'work', mailbox: 'Archive' });
+  expect(root.querySelector('.message-list-header h2')!.textContent).toBe('Archive');
+
+  back();
+  await settle();
+  expect(query(url())).toEqual({ account_id: 'work', mailbox: 'INBOX', uid: '2' });
+  expect(root.querySelector('.reader .detail-subject')!.textContent).toBe('Second');
+  back();
+  await settle();
+  expect(query(url())).toEqual({ account_id: 'work', mailbox: 'INBOX' });
+  expect(root.querySelector('.message-detail')!.classList.contains('is-open')).toBe(false);
+});
+
+test('the search and its filters are in the URL; another mailbox drops them', async () => {
+  const { root, settle, advance, url, requests } = await show({ 'GET /api/email/search': { messages: [msg(2, 'Second')] } });
+  const search = root.querySelector<HTMLInputElement>('.message-list-header > input[type=search]')!;
+  search.value = 'sec';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  await advance(300);
+  await settle();
+  root.querySelector<HTMLButtonElement>(`button[aria-label="${m.mail_filterUnread()}"]`)!.click();
+  await settle();
+  expect(query(url())).toEqual({ account_id: 'work', mailbox: 'INBOX', q: 'sec', unread: '1' });
+  expect(requests.calls.at(-1)!.url).toContain('/api/email/search?q=sec&account_id=work&mailbox=INBOX&unread_only=true');
+
+  [...root.querySelectorAll<HTMLButtonElement>('.sidebar-item')].find((b) => b.textContent!.includes('Archive'))!.click();
+  await settle();
+  expect(query(url())).toEqual({ account_id: 'work', mailbox: 'Archive' });
+  expect(search.value).toBe('');
 });
 
 test('the column widths set with the dividers are remembered for the next visit', async () => {

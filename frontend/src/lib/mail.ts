@@ -169,12 +169,66 @@ export function isRef(msg: MessageRef | null, ref: MessageRef | null): boolean {
   return !!msg && !!ref && msg.account_id === ref.account_id && msg.mailbox === ref.mailbox && msg.uid === ref.uid;
 }
 
-/** The ?account_id=&mailbox=&uid= of a link (notification, popout), or null. */
-export function urlRef(url: Record<string, string | undefined>): MessageRef | null {
-  const uid = Number(url.uid);
-  return url.account_id && url.mailbox && Number.isInteger(uid) && uid > 0
-    ? { account_id: url.account_id, mailbox: url.mailbox, uid }
-    : null;
+// ── The mail page's URL ────────────────────────────────────────────────────────
+// The list shown, the message open, the page and the search live in the URL, so a reload, Back and Forward and a
+// shared link show the same: `?account_id=&mailbox=` (a mailbox) or `?folder=` (a virtual folder), `uid` (the
+// message open: in `account_id`'s `mailbox`, which in a virtual folder is the message's own), `page`, and the
+// search `q`, `sender` (addresses, comma-separated), `after`, `before`, `unread`. Pages read the parameters by name
+// (`$url.uid`), never `$url` whole: a page that reads it whole cannot follow its own links in the page.
+
+/** The message `?account_id=&mailbox=&uid=` names (a notification, the popout, the open message), or null. */
+export function urlRef(account_id: string | undefined, mailbox: string | undefined, uid: string | undefined): MessageRef | null {
+  const n = Number(uid);
+  return account_id && mailbox && Number.isInteger(n) && n > 0 ? { account_id, mailbox, uid: n } : null;
+}
+
+/** The view the URL names (`folder`, else `account_id` + `mailbox`), or null. */
+export function urlView(folder: string | undefined, account_id: string | undefined, mailbox: string | undefined): MailView | null {
+  if (folder) return folderView(folder);
+  return account_id && mailbox ? mailboxView(account_id, mailbox) : null;
+}
+
+/** The view shown: the URL's, else the one remembered from the last visit (`last`). */
+export function shownView(url: MailView | null, last: MailView): MailView {
+  return url ?? last;
+}
+
+/** This page's URL showing `view`: its own parameters only, so no message, page or search. */
+export function viewHref(view: MailView): string {
+  const p = new URLSearchParams();
+  if (view.folder_id) p.set('folder', view.folder_id);
+  else if (view.account_id && view.mailbox) {
+    p.set('account_id', view.account_id);
+    p.set('mailbox', view.mailbox);
+  }
+  return '?' + p.toString();
+}
+
+/** Whether the URL must change to show `view` (a real view the URL does not name: none, or another one). */
+export function urlLags(view: MailView, url: MailView | null): boolean {
+  return !!(view.folder_id || (view.account_id && view.mailbox)) && !(url && sameView(view, url));
+}
+
+/** The `sender` parameter for a list of addresses: null for none. */
+export function senderParam(addrs: readonly string[]): string | null {
+  return addrs.length ? addrs.join(',') : null;
+}
+
+/** The sender filter box (what is typed, and what the suggestions are asked for); the rest of the search is in the URL. */
+export interface SearchBox { addrInput: string; addrQ: string }
+
+export function noSearchBox(): SearchBox {
+  return { addrInput: '', addrQ: '' };
+}
+
+/** The search: the URL's query and filters, with the sender box. */
+export function mailSearch(box: SearchBox, q: string | undefined, sender: string | undefined, after: string | undefined,
+                          before: string | undefined, unread: string | undefined): MailSearch {
+  return {
+    input: q ?? '', q: q ?? '',
+    filter: { addrs: sender ? sender.split(',').filter(Boolean) : [], from: after ?? '', to: before ?? '', unread: !!unread },
+    addrInput: box.addrInput, addrQ: box.addrQ,
+  };
 }
 
 export interface SearchFilter { addrs: string[]; from: string; to: string; unread: boolean }

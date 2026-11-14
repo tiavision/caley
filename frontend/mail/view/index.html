@@ -7,7 +7,7 @@
        notifications): the reader of /mail/ (<mail-reader>) without the list. -->
   <body data-shell="fixed"
         data-sn-state="{
-          reader: { ref: urlRef($url), shown: false },
+          reader: { ref: urlRef($url.account_id, $url.mailbox, $url.uid), shown: false },
           wiped: '',
           detail: /** @type {EventJson|null} */ (null),
           threadRef: /** @type {ThreadRef|null} */ (null),

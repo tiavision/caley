@@ -4,7 +4,7 @@ import { describe, expect, test } from 'vitest';
 import {
   accountUi, addableSender, afterBulk, bodyOf, canDrop, cleared, currentView, folderView, inMailbox, mailboxView, noView, listStatus, markedRead, noReader, noSearch,
   noSelection, openedAt, opensRow, pageKey, readerOn, rowClick, scrollTopFor, searchActive, senderAdded, sharedDraft,
-  siblingRow, unmarked, type Account, type Mailbox, type Message, type VirtualFolder,
+  siblingRow, unmarked, urlRef, urlView, shownView, viewHref, urlLags, senderParam, noSearchBox, mailSearch, type Account, type Mailbox, type Message, type VirtualFolder,
 } from './mail.ts';
 import { caldavBody, caldavDraft, enrollErrorText, keyImportError, withCalendarActive } from './settings.ts';
 import { loadErrorOr } from './errors.ts';
@@ -174,5 +174,36 @@ describe('dialogs', () => {
     expect(loadErrorOr({ stale: true }, 'Unlock failed')).toBe(m.pgp_loadError());
     expect(loadErrorOr({ stale: false }, 'Unlock failed')).toBe('Unlock failed');
     expect(loadErrorOr({}, 'Unlock failed')).toBe('Unlock failed');
+  });
+});
+
+describe('the mail page URL', () => {
+  test('urlRef and urlView read the parameters; shownView falls back to the remembered view', () => {
+    expect(urlRef('a', 'INBOX', '3')).toEqual({ account_id: 'a', mailbox: 'INBOX', uid: 3 });
+    expect(urlRef('a', 'INBOX', 'x')).toBeNull();
+    expect(urlRef(undefined, 'INBOX', '3')).toBeNull();
+    expect(urlView('f1', 'a', 'INBOX')).toEqual(folderView('f1'));   // a folder wins: account_id/mailbox are the message's
+    expect(urlView(undefined, 'a', 'INBOX')).toEqual(mailboxView('a', 'INBOX'));
+    expect(urlView(undefined, 'a', undefined)).toBeNull();
+    expect(shownView(null, mailboxView('a', 'Archive'))).toEqual(mailboxView('a', 'Archive'));
+    expect(shownView(folderView('f1'), mailboxView('a', 'Archive'))).toEqual(folderView('f1'));
+  });
+
+  test('viewHref names only the view; urlLags says when the URL must follow', () => {
+    expect(viewHref(mailboxView('a b', 'INBOX/Sub'))).toBe('?account_id=a+b&mailbox=INBOX%2FSub');
+    expect(viewHref(folderView('f1'))).toBe('?folder=f1');
+    expect(viewHref(noView())).toBe('?');
+    expect(urlLags(mailboxView('a', 'INBOX'), null)).toBe(true);
+    expect(urlLags(mailboxView('a', 'INBOX'), mailboxView('a', 'INBOX'))).toBe(false);
+    expect(urlLags(mailboxView('a', 'INBOX'), folderView('gone'))).toBe(true);
+    expect(urlLags(noView(), null)).toBe(false);
+  });
+
+  test('mailSearch reads the query and filters; senderParam joins addresses', () => {
+    const s = mailSearch({ addrInput: 'ad', addrQ: 'ad' }, 'invoice', 'ada@x,bob@y', '2026-01-01', undefined, '1');
+    expect(s).toEqual({ input: 'invoice', q: 'invoice', filter: { addrs: ['ada@x', 'bob@y'], from: '2026-01-01', to: '', unread: true }, addrInput: 'ad', addrQ: 'ad' });
+    expect(searchActive(mailSearch(noSearchBox(), undefined, undefined, undefined, undefined, undefined))).toBe(false);
+    expect(senderParam(['ada@x', 'bob@y'])).toBe('ada@x,bob@y');
+    expect(senderParam([])).toBeNull();
   });
 });
