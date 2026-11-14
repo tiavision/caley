@@ -523,8 +523,10 @@
               </template>
             </div>
           </template>
+          <!-- Not in the early script (data-sn-early="off"): what the reader shows needs message and body, `call`
+               resources that only the page bundle loads, so before it nothing of it would render. -->
           <template data-sn-else>
-            <mail-reader data-sn-prop="{ open, defaultCal }">
+            <mail-reader data-sn-prop="{ open, defaultCal }" data-sn-early="off">
               <button slot="back" type="button" class="detail-close-btn overlay-only" data-variant="ghost" data-icon="arrow-left"
                       data-sn-on-click="emit('reader-back')" data-sn-attr="{'aria-label': m.mail_back()}"></button>
               <button slot="popout" type="button" data-variant="ghost" data-icon="external-link" data-tooltip data-sn-call="mail.popout(open)"
