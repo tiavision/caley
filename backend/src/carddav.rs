@@ -13,13 +13,13 @@ pub struct Addressbook {
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, utoipa::ToSchema)]
 pub struct TypedEntry {
     pub value: String,
     pub type_label: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, utoipa::ToSchema)]
 pub struct AddressEntry {
     pub street: String,
     pub city: String,

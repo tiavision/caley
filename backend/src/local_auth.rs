@@ -10,6 +10,10 @@ use axum::{
 use serde_json::json;
 use tower_sessions::Session;
 use url::Url;
+use utoipa::ToSchema;
+use utoipa_axum::{router::OpenApiRouter, routes};
+
+use crate::api::ApiError;
 
 use crate::db::UserSettings;
 use crate::oidc::{AppState, CurrentUser};
@@ -206,6 +210,19 @@ pub async fn handle_login(
     Json(json!({"status": "ok", "redirect": redirect})).into_response()
 }
 
+/// The account was deleted and the session ended.
+#[derive(serde::Serialize, ToSchema)]
+pub struct AccountDeleted {
+    /// where to go next: always `/`, the login page
+    pub redirect: &'static str,
+}
+
+/// Deletes the user with all their data (accounts, caches, mail files) and ends the session.
+#[utoipa::path(
+    delete,
+    path = "/account",
+    responses((status = 200, body = AccountDeleted), (status = 500, body = ApiError))
+)]
 pub async fn delete_account(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -217,7 +234,7 @@ pub async fn delete_account(
         eprintln!("Error deleting user {}: {e}", user.user_id);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to delete account"})),
+            Json(ApiError::new("Failed to delete account")),
         )
             .into_response();
     }
@@ -228,13 +245,10 @@ pub async fn delete_account(
 
     session.flush().await.ok();
 
-    Json(json!({"redirect": "/"})).into_response()
+    Json(AccountDeleted { redirect: "/" }).into_response()
 }
 
-/// This module's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
-#[allow(unused_imports)]
-pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
-    use axum::routing::{delete, get, patch, post, put};
-    utoipa_axum::router::OpenApiRouter::new()
-        .route("/account", delete(delete_account))
+/// This module's routes that need a signed-in user, relative to `/api` (api.rs).
+pub fn routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(delete_account))
 }

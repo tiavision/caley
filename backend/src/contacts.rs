@@ -5,6 +5,8 @@ use axum::{
 };
 use base64::prelude::*;
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::carddav::{self, AddressEntry, TypedEntry, build_vcard_preserving, contact_href};
@@ -12,14 +14,16 @@ use crate::db;
 use crate::oidc::{AppState, CurrentUser};
 use crate::sse::SseMessage;
 
-#[derive(Serialize, Clone, utoipa::ToSchema)]
+/// A cached CardDAV address book.
+#[derive(Serialize, Clone, ToSchema)]
 pub struct AddressbookJson {
     pub account_id: String,
     pub href: String,
     pub name: String,
 }
 
-#[derive(Serialize, Clone)]
+/// A cached contact.
+#[derive(Serialize, Clone, ToSchema)]
 pub struct ContactJson {
     pub account_id: String,
     pub uid: String,
@@ -55,7 +59,8 @@ fn photo_rev(photo: Option<&str>) -> Option<String> {
     Some(digest.iter().take(8).map(|b| format!("{b:02x}")).collect())
 }
 
-#[derive(Serialize)]
+/// All address books and contacts of the user.
+#[derive(Serialize, ToSchema)]
 pub struct ContactsResponse {
     pub addressbooks: Vec<AddressbookJson>,
     pub contacts: Vec<ContactJson>,
@@ -127,7 +132,15 @@ async fn require_account_client(
     }
 }
 
-// GET /api/contacts
+/// All address books and their contacts (from the cache).
+#[utoipa::path(
+    get,
+    path = "/contacts",
+    responses(
+        (status = 200, body = ContactsResponse),
+        (status = 500, description = "database error (plain text)")
+    )
+)]
 pub async fn list_contacts(State(state): State<AppState>, user: CurrentUser) -> impl IntoResponse {
     let addressbooks = match db::get_cached_addressbooks(&state.db, &user.user_id).await {
         Ok(a) => a,
@@ -158,9 +171,10 @@ pub async fn list_contacts(State(state): State<AppState>, user: CurrentUser) -> 
     Json(resp).into_response()
 }
 
-// POST /api/contact
-#[derive(Deserialize)]
+/// A contact to create (no `uid`) or update.
+#[derive(Deserialize, ToSchema)]
 pub struct SaveContactRequest {
+    /// the contact to update; none creates one
     pub uid: Option<String>,
     pub account_id: String,
     pub addressbook_href: String,
@@ -171,6 +185,19 @@ pub struct SaveContactRequest {
     pub org: String,
 }
 
+/// Creates (no `uid`) or updates a contact on the CardDAV server, keeping the vCard's other
+/// properties, and in the cache; sends `contact_updated`.
+#[utoipa::path(
+    post,
+    path = "/contact",
+    request_body = SaveContactRequest,
+    responses(
+        (status = 200, body = ContactJson, description = "the saved contact"),
+        (status = 404, description = "no such CalDAV account or contact (plain text)"),
+        (status = 500, description = "database or configuration error (plain text)"),
+        (status = 502, description = "the CardDAV server did not save it (plain text)")
+    )
+)]
 pub async fn save_contact(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -286,14 +313,26 @@ pub async fn save_contact(
     Json(contact_json).into_response()
 }
 
-// DELETE /api/contact
-#[derive(Deserialize)]
+/// The contact to delete.
+#[derive(Deserialize, ToSchema)]
 pub struct DeleteContactRequest {
     pub account_id: String,
     pub uid: String,
     pub addressbook_href: String,
 }
 
+/// Deletes a contact on the CardDAV server and from the cache; sends `contact_removed`.
+#[utoipa::path(
+    delete,
+    path = "/contact",
+    request_body = DeleteContactRequest,
+    responses(
+        (status = 204, description = "deleted"),
+        (status = 404, description = "no such CalDAV account or contact (plain text)"),
+        (status = 500, description = "database or configuration error (plain text)"),
+        (status = 502, description = "the CardDAV server did not delete it (plain text)")
+    )
+)]
 pub async fn delete_contact(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -346,16 +385,30 @@ pub async fn delete_contact(
     StatusCode::NO_CONTENT.into_response()
 }
 
-// GET /api/contact/photo
-#[derive(Deserialize)]
+/// A contact, for its photo or vCard.
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct PhotoQuery {
     pub account_id: String,
     pub uid: String,
     pub addressbook_href: String,
-    /// The photo's version (ContactJson.photo_rev): with it the response may be kept for good.
+    /// The photo's version (ContactJson.photo_rev): with it the response may be kept for good
+    /// (photo only; ignored by the vCard).
     pub v: Option<String>,
 }
 
+/// The contact's embedded photo (raster images only, never SVG or a remote URL). With `v` the
+/// current version it is cached for good, else revalidated by `ETag` (`If-None-Match` → 304).
+#[utoipa::path(
+    get,
+    path = "/contact/photo",
+    params(PhotoQuery),
+    responses(
+        (status = 200, body = Vec<u8>, content_type = "image/*", description = "the photo, in its own image type"),
+        (status = 304, description = "unchanged (`If-None-Match`)"),
+        (status = 404, description = "no such contact, or no photo served")
+    )
+)]
 pub async fn get_contact_photo(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -424,12 +477,7 @@ pub async fn get_contact_photo(
                 if fresh {
                     return (StatusCode::NOT_MODIFIED, common).into_response();
                 }
-                return (
-                    common,
-                    [(header::CONTENT_TYPE, mime.to_string())],
-                    bytes,
-                )
-                    .into_response();
+                return (common, [(header::CONTENT_TYPE, mime.to_string())], bytes).into_response();
             }
         }
     }
@@ -437,7 +485,16 @@ pub async fn get_contact_photo(
     StatusCode::NOT_FOUND.into_response()
 }
 
-// GET /api/contact/vcf
+/// The contact's vCard as stored on the server.
+#[utoipa::path(
+    get,
+    path = "/contact/vcf",
+    params(PhotoQuery),
+    responses(
+        (status = 200, body = String, content_type = "text/vcard", description = "the vCard"),
+        (status = 404, description = "no such contact")
+    )
+)]
 pub async fn get_contact_vcf(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -463,16 +520,13 @@ pub async fn get_contact_vcf(
         .into_response()
 }
 
-
-/// This module's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
-#[allow(unused_imports)]
-pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
-    use axum::routing::{delete, get, patch, post, put};
-    utoipa_axum::router::OpenApiRouter::new()
-        .route("/contacts", get(list_contacts))
-        .route("/contact", post(save_contact).delete(delete_contact))
-        .route("/contact/photo", get(get_contact_photo))
-        .route("/contact/vcf", get(get_contact_vcf))
+/// This module's routes that need a signed-in user, relative to `/api` (api.rs).
+pub fn routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(list_contacts))
+        .routes(routes!(save_contact, delete_contact))
+        .routes(routes!(get_contact_photo))
+        .routes(routes!(get_contact_vcf))
 }
 
 #[cfg(test)]

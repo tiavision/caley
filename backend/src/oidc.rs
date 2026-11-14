@@ -27,6 +27,8 @@ use std::{
 };
 use tower::{Layer, Service};
 use tower_sessions::Session;
+use utoipa::ToSchema;
+use utoipa_axum::{router::OpenApiRouter, routes};
 use webauthn_rs::Webauthn;
 
 /// The concrete CoreClient type produced by `from_provider_metadata` after discovery.
@@ -146,6 +148,33 @@ pub fn extract_user_id(
     }
 }
 
+/// The signed-in user (an OIDC or a CalDAV-login session alike).
+#[derive(serde::Serialize, ToSchema)]
+pub struct User {
+    /// the name to show; the user ID when there is none
+    pub display_name: String,
+    /// whether a CalDAV account is set up
+    pub has_settings: bool,
+    /// the same as `has_settings`
+    pub has_caldav: bool,
+    pub oidc_enabled: bool,
+    /// the map URL template for locations, `{q}` the query (`MAP_URL`)
+    pub map_url: String,
+}
+
+/// What the login page offers.
+#[derive(serde::Serialize, ToSchema)]
+pub struct AuthConfig {
+    /// whether OIDC sign-in is configured
+    pub oidc_enabled: bool,
+}
+
+/// The signed-in user; starts the user's sync task.
+#[utoipa::path(
+    get,
+    path = "/user",
+    responses((status = 200, body = User), (status = 401, body = crate::api::ApiError))
+)]
 pub async fn user_info(State(state): State<AppState>, user: CurrentUser) -> impl IntoResponse {
     let display_name = user.display_name.unwrap_or_else(|| user.user_id.clone());
 
@@ -157,20 +186,21 @@ pub async fn user_info(State(state): State<AppState>, user: CurrentUser) -> impl
 
     let _ = state.sync_manager.ensure_task_for(&user.user_id);
 
-    Json(json!({
-        "display_name": display_name,
-        "has_settings": has_settings,
-        "has_caldav": has_settings,
-        "oidc_enabled": state.oidc_enabled,
-        "map_url": state.map_url,
-    }))
+    Json(User {
+        display_name,
+        has_settings,
+        has_caldav: has_settings,
+        oidc_enabled: state.oidc_enabled,
+        map_url: state.map_url,
+    })
 }
 
 /// Public endpoint so the login page can decide whether to offer OIDC.
+#[utoipa::path(get, path = "/auth/config", responses((status = 200, body = AuthConfig)))]
 pub async fn auth_config(State(state): State<AppState>) -> impl IntoResponse {
-    Json(json!({
-        "oidc_enabled": state.oidc_enabled,
-    }))
+    Json(AuthConfig {
+        oidc_enabled: state.oidc_enabled,
+    })
 }
 
 /// Unified logout. For OIDC sessions, performs RP-initiated logout using the
@@ -504,18 +534,12 @@ fn is_public_static_asset(path: &str) -> bool {
         )
 }
 
-/// This module's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
-#[allow(unused_imports)]
-pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
-    use axum::routing::{delete, get, patch, post, put};
-    utoipa_axum::router::OpenApiRouter::new()
-        .route("/user", get(user_info))
+/// This module's routes that need a signed-in user, relative to `/api` (api.rs).
+pub fn routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(user_info))
 }
 
-/// This module's public routes, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
-#[allow(unused_imports)]
-pub fn public_routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
-    use axum::routing::{delete, get, patch, post, put};
-    utoipa_axum::router::OpenApiRouter::new()
-        .route("/auth/config", get(auth_config))
+/// This module's public routes, relative to `/api` (api.rs).
+pub fn public_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(auth_config))
 }
