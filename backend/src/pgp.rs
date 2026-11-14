@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
 use tower_sessions::Session;
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 use webauthn_rs::prelude::*;
 
@@ -63,8 +65,26 @@ fn inject_prf_authentication(challenge: &mut serde_json::Value, prf_salt_b64: &s
     }
 }
 
+/// The WebAuthn credential a registration or an authentication ended with.
+#[derive(Serialize, ToSchema)]
+pub struct WebAuthnCredentialId {
+    /// the credential ID, base64url without padding
+    pub cred_id: String,
+}
+
 // ── Register start ────────────────────────────────────────────────────────────
 
+/// Starts a passkey registration for the signed-in user (excluding the credentials already
+/// enrolled): the challenge to pass to `navigator.credentials.create()`. The registration state is
+/// kept in the session for `/webauthn/register/finish`.
+#[utoipa::path(
+    post,
+    path = "/webauthn/register/start",
+    responses(
+        (status = 200, body = Object, description = "WebAuthn `CreationChallengeResponse` (`{ publicKey: PublicKeyCredentialCreationOptions }`), with a required resident key and the `prf` extension requested"),
+        (status = 500, description = "plain text: WebAuthn or session error")
+    )
+)]
 pub async fn register_start(
     State(state): State<AppState>,
     session: Session,
@@ -123,13 +143,27 @@ pub async fn register_start(
 
 // ── Register finish ───────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct RegisterFinishBody {
+    /// WebAuthn `RegisterPublicKeyCredential`: the result of `navigator.credentials.create()`
+    #[schema(value_type = Object)]
     pub credential: serde_json::Value,
     pub device_label: Option<String>,
+    /// whether the authenticator reported the `prf` extension as enabled (default false)
     pub has_prf: Option<bool>,
 }
 
+/// Finishes the passkey registration started in the session and stores the credential.
+#[utoipa::path(
+    post,
+    path = "/webauthn/register/finish",
+    request_body = RegisterFinishBody,
+    responses(
+        (status = 200, body = WebAuthnCredentialId),
+        (status = 400, description = "plain text: no registration in progress, invalid credential or registration failed"),
+        (status = 500, description = "plain text: database error")
+    )
+)]
 pub async fn register_finish(
     State(state): State<AppState>,
     session: Session,
@@ -185,7 +219,7 @@ pub async fn register_finish(
                 eprintln!("[pgp] store_webauthn_credential: {e}");
                 return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
             }
-            Json(json!({ "cred_id": cred_id })).into_response()
+            Json(WebAuthnCredentialId { cred_id }).into_response()
         }
         Err(e) => {
             eprintln!("[pgp] finish_passkey_registration: {e:?}");
@@ -196,12 +230,27 @@ pub async fn register_finish(
 
 // ── Authenticate start ────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct AuthStartBody {
+    /// the salt for the `prf` extension's `eval.first`, base64url
     pub prf_salt: String,
+    /// only this credential (base64url ID) is allowed; all the user's credentials without it
     pub credential_id: Option<String>,
 }
 
+/// Starts a passkey authentication with the user's credentials: the challenge to pass to
+/// `navigator.credentials.get()`, evaluating the `prf` extension with `prf_salt`. The state is kept
+/// in the session for `/webauthn/authenticate/finish`.
+#[utoipa::path(
+    post,
+    path = "/webauthn/authenticate/start",
+    request_body = AuthStartBody,
+    responses(
+        (status = 200, body = Object, description = "WebAuthn `RequestChallengeResponse` (`{ publicKey: PublicKeyCredentialRequestOptions }`), its `extensions` set to `{ prf: { eval: { first: prf_salt } } }`"),
+        (status = 404, description = "plain text: no credentials enrolled"),
+        (status = 500, description = "plain text: database, WebAuthn or session error")
+    )
+)]
 pub async fn authenticate_start(
     State(state): State<AppState>,
     session: Session,
@@ -262,6 +311,19 @@ pub async fn authenticate_start(
 
 // ── Authenticate finish ───────────────────────────────────────────────────────
 
+/// Finishes the passkey authentication started in the session and updates the credential's
+/// counter: the credential that was used.
+#[utoipa::path(
+    post,
+    path = "/webauthn/authenticate/finish",
+    request_body(content = Object, description = "WebAuthn `PublicKeyCredential`: the result of `navigator.credentials.get()`"),
+    responses(
+        (status = 200, body = WebAuthnCredentialId),
+        (status = 400, description = "plain text: no authentication in progress or invalid credential"),
+        (status = 401, description = "plain text: authentication failed"),
+        (status = 500, description = "plain text: database error")
+    )
+)]
 pub async fn authenticate_finish(
     State(state): State<AppState>,
     session: Session,
@@ -324,7 +386,10 @@ pub async fn authenticate_finish(
                 }
                 break;
             }
-            Json(json!({ "cred_id": matched_id })).into_response()
+            Json(WebAuthnCredentialId {
+                cred_id: matched_id,
+            })
+            .into_response()
         }
         Err(e) => {
             eprintln!("[pgp] finish_passkey_authentication: {e:?}");
@@ -335,20 +400,39 @@ pub async fn authenticate_finish(
 
 // ── List credentials ─────────────────────────────────────────────────────────
 
+/// An enrolled WebAuthn credential (passkey).
+#[derive(Serialize, ToSchema)]
+pub struct CredentialInfo {
+    /// the credential ID, base64url without padding
+    pub cred_id: String,
+    /// null when none was given
+    #[schema(required = true)]
+    pub device_label: Option<String>,
+    /// whether the credential supports the `prf` extension (needed to unlock the vault)
+    pub has_prf: bool,
+}
+
+/// The signed-in user's WebAuthn credentials.
+#[utoipa::path(
+    get,
+    path = "/webauthn/credentials",
+    responses(
+        (status = 200, body = Vec<CredentialInfo>),
+        (status = 500, description = "plain text: database error")
+    )
+)]
 pub async fn list_credentials(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> impl IntoResponse {
     match db::get_webauthn_credentials(&state.db, &user.user_id).await {
         Ok(rows) => {
-            let list: Vec<serde_json::Value> = rows
-                .iter()
-                .map(|r| {
-                    json!({
-                        "cred_id": r.cred_id,
-                        "device_label": r.device_label,
-                        "has_prf": r.has_prf,
-                    })
+            let list: Vec<CredentialInfo> = rows
+                .into_iter()
+                .map(|r| CredentialInfo {
+                    cred_id: r.cred_id,
+                    device_label: r.device_label,
+                    has_prf: r.has_prf,
                 })
                 .collect();
             Json(list).into_response()
@@ -362,11 +446,21 @@ pub async fn list_credentials(
 
 // ── Delete credential ─────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct DeleteCredentialBody {
     pub cred_id: String,
 }
 
+/// Deletes one of the user's WebAuthn credentials (with its vault device and wrap).
+#[utoipa::path(
+    delete,
+    path = "/webauthn/credential",
+    request_body = DeleteCredentialBody,
+    responses(
+        (status = 204, description = "deleted (also when there was no such credential)"),
+        (status = 500, description = "plain text: database error")
+    )
+)]
 pub async fn delete_credential(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -382,7 +476,21 @@ pub async fn delete_credential(
 }
 
 // ── Synced encrypted private-key vault ───────────────────────────────────────
+//
+// The server stores the vault as opaque records: AES-GCM ciphertexts the browser encrypts and
+// decrypts with keys derived from the passkeys' PRF output, and the devices' public key material.
+// Private-key material is never decrypted here.
 
+/// Deletes the whole vault: its manifest, the encrypted private keys, and the user's WebAuthn
+/// credentials with their devices and wraps.
+#[utoipa::path(
+    delete,
+    path = "/pgp/vault",
+    responses(
+        (status = 204, description = "deleted"),
+        (status = 500, description = "plain text: database error")
+    )
+)]
 pub async fn reset_vault(State(state): State<AppState>, user: CurrentUser) -> impl IntoResponse {
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -414,23 +522,38 @@ pub async fn reset_vault(State(state): State<AppState>, user: CurrentUser) -> im
     }
 }
 
-#[derive(Deserialize, Serialize)]
+/// An opaque AES-GCM ciphertext encrypted in the browser (the vault manifest); the server cannot
+/// decrypt it.
+#[derive(Deserialize, Serialize, ToSchema)]
 pub struct EncryptedBlob {
+    /// the AES-GCM nonce, base64url
     pub iv: String,
+    /// base64url
     pub ciphertext: String,
 }
 
-#[derive(Deserialize, Serialize)]
+/// An OpenPGP private key of the vault, encrypted in the browser with the vault key (opaque to
+/// the server). The frontend's `VaultKeyRecord`.
+#[derive(Deserialize, Serialize, ToSchema)]
 pub struct PrivateKeyBlob {
+    /// the key's fingerprint (hex)
     pub fingerprint: String,
+    /// the AES-GCM nonce, base64url
     pub iv: String,
+    /// the encrypted armored private key, base64url
     pub ciphertext: String,
 }
 
-#[derive(Deserialize, Serialize)]
+/// A device's public key material and its own private key encrypted with its passkey's PRF output
+/// (opaque to the server).
+#[derive(Deserialize, Serialize, ToSchema)]
 pub struct DeviceBundle {
+    /// the device's WebAuthn credential ID
     pub cred_id: String,
+    /// the device's public ECDH key, a JWK
+    #[schema(value_type = Object)]
     pub public_jwk: serde_json::Value,
+    /// the device's private JWK, encrypted with its PRF-derived key
     pub encrypted_private_jwk: String,
     pub private_iv: String,
     pub prf_salt: String,
@@ -438,16 +561,21 @@ pub struct DeviceBundle {
     pub pairing_nonce: String,
 }
 
-#[derive(Deserialize, Serialize)]
+/// The vault key wrapped for one device (ECDH with an ephemeral key, then AES-GCM); opaque to the
+/// server.
+#[derive(Deserialize, Serialize, ToSchema)]
 pub struct VaultWrap {
+    /// the device's WebAuthn credential ID
     pub cred_id: String,
+    /// the ephemeral public ECDH key, a JWK (null if the stored one could not be read)
+    #[schema(value_type = Object)]
     pub ephemeral_public_jwk: serde_json::Value,
     pub hkdf_salt: String,
     pub iv: String,
     pub ciphertext: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct InitializeVaultBody {
     pub manifest: EncryptedBlob,
     pub key: PrivateKeyBlob,
@@ -455,28 +583,75 @@ pub struct InitializeVaultBody {
     pub wrap: VaultWrap,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct PendingDeviceBody {
     pub device: DeviceBundle,
 }
 
-#[derive(Deserialize)]
+/// A pending device made active, with the vault key wrapped for it.
+#[derive(Deserialize, ToSchema)]
 pub struct ApproveDeviceBody {
     pub cred_id: String,
     pub wrap: VaultWrap,
 }
 
-#[derive(Deserialize)]
+/// A change of the vault, applied only if the vault is still at `expected_revision`. The
+/// frontend's `VaultUpdate`.
+#[derive(Deserialize, ToSchema)]
 pub struct UpdateVaultBody {
     pub expected_revision: i64,
+    /// the new encrypted manifest
     pub manifest: EncryptedBlob,
+    /// keys added or replaced
     #[serde(default)]
     pub upsert_keys: Vec<PrivateKeyBlob>,
+    /// fingerprints of keys to delete
     #[serde(default)]
     pub delete_keys: Vec<String>,
     pub approve_device: Option<ApproveDeviceBody>,
+    /// a credential ID whose credential, device and wrap are deleted
     pub remove_device: Option<String>,
+    /// when given, replaces all wraps
     pub replace_wraps: Option<Vec<VaultWrap>>,
+}
+
+/// A device of the vault, as stored: its bundle, status and wrap.
+#[derive(Serialize, ToSchema)]
+pub struct DeviceRecord {
+    pub cred_id: String,
+    #[schema(required = true)]
+    pub device_label: Option<String>,
+    /// `pending` (waiting for approval by an active device) or `active`
+    pub status: String,
+    /// the device's public ECDH key, a JWK (null if the stored one could not be read)
+    #[schema(value_type = Object)]
+    pub public_jwk: serde_json::Value,
+    pub encrypted_private_jwk: String,
+    pub private_iv: String,
+    pub prf_salt: String,
+    pub hkdf_salt: String,
+    pub pairing_nonce: String,
+    /// the vault key wrapped for this device; null for a pending one
+    #[schema(required = true)]
+    pub wrap: Option<VaultWrap>,
+}
+
+/// The synced vault: opaque encrypted records and the devices' public material.
+#[derive(Serialize, ToSchema)]
+pub struct VaultData {
+    /// incremented by each update
+    pub revision: i64,
+    pub manifest: EncryptedBlob,
+    /// ordered by fingerprint
+    pub keys: Vec<PrivateKeyBlob>,
+    /// in the order they were added
+    pub devices: Vec<DeviceRecord>,
+}
+
+/// The vault's revision after an update.
+#[derive(Serialize, ToSchema)]
+pub struct VaultRevision {
+    pub revision: i64,
 }
 
 async fn owns_credential(state: &AppState, user_id: &str, cred_id: &str) -> bool {
@@ -491,6 +666,16 @@ async fn owns_credential(state: &AppState, user_id: &str, cred_id: &str) -> bool
         > 0
 }
 
+/// The user's vault, or 204 when none is initialized.
+#[utoipa::path(
+    get,
+    path = "/pgp/vault",
+    responses(
+        (status = 200, body = VaultData),
+        (status = 204, description = "no vault initialized"),
+        (status = 500, description = "plain text: database error")
+    )
+)]
 pub async fn get_vault(State(state): State<AppState>, user: CurrentUser) -> impl IntoResponse {
     let vault = match sqlx::query(
         "SELECT revision, manifest_iv, encrypted_manifest FROM pgp_vaults WHERE user_id = ?",
@@ -516,7 +701,11 @@ pub async fn get_vault(State(state): State<AppState>, user: CurrentUser) -> impl
     {
         Ok(rows) => rows
             .into_iter()
-            .map(|r| json!({ "fingerprint": r.get::<String, _>(0), "iv": r.get::<String, _>(1), "ciphertext": r.get::<String, _>(2) }))
+            .map(|r| PrivateKeyBlob {
+                fingerprint: r.get::<String, _>(0),
+                iv: r.get::<String, _>(1),
+                ciphertext: r.get::<String, _>(2),
+            })
             .collect::<Vec<_>>(),
         Err(e) => {
             eprintln!("[pgp] get vault keys: {e}");
@@ -539,25 +728,27 @@ pub async fn get_vault(State(state): State<AppState>, user: CurrentUser) -> impl
         Ok(rows) => rows
             .into_iter()
             .map(|r| {
-                let envelope = r.get::<Option<String>, _>(9).map(|jwk| json!({
-                    "cred_id": r.get::<String, _>(0),
-                    "ephemeral_public_jwk": serde_json::from_str::<serde_json::Value>(&jwk).unwrap_or(json!(null)),
-                    "hkdf_salt": r.get::<Option<String>, _>(10).unwrap_or_default(),
-                    "iv": r.get::<Option<String>, _>(11).unwrap_or_default(),
-                    "ciphertext": r.get::<Option<String>, _>(12).unwrap_or_default(),
-                }));
-                json!({
-                    "cred_id": r.get::<String, _>(0),
-                    "device_label": r.get::<Option<String>, _>(1),
-                    "status": r.get::<String, _>(2),
-                    "public_jwk": serde_json::from_str::<serde_json::Value>(&r.get::<String, _>(3)).unwrap_or(json!(null)),
-                    "encrypted_private_jwk": r.get::<String, _>(4),
-                    "private_iv": r.get::<String, _>(5),
-                    "prf_salt": r.get::<String, _>(6),
-                    "hkdf_salt": r.get::<String, _>(7),
-                    "pairing_nonce": r.get::<String, _>(8),
-                    "wrap": envelope,
-                })
+                let envelope = r.get::<Option<String>, _>(9).map(|jwk| VaultWrap {
+                    cred_id: r.get::<String, _>(0),
+                    ephemeral_public_jwk: serde_json::from_str::<serde_json::Value>(&jwk)
+                        .unwrap_or(serde_json::Value::Null),
+                    hkdf_salt: r.get::<Option<String>, _>(10).unwrap_or_default(),
+                    iv: r.get::<Option<String>, _>(11).unwrap_or_default(),
+                    ciphertext: r.get::<Option<String>, _>(12).unwrap_or_default(),
+                });
+                DeviceRecord {
+                    cred_id: r.get::<String, _>(0),
+                    device_label: r.get::<Option<String>, _>(1),
+                    status: r.get::<String, _>(2),
+                    public_jwk: serde_json::from_str::<serde_json::Value>(&r.get::<String, _>(3))
+                        .unwrap_or(serde_json::Value::Null),
+                    encrypted_private_jwk: r.get::<String, _>(4),
+                    private_iv: r.get::<String, _>(5),
+                    prf_salt: r.get::<String, _>(6),
+                    hkdf_salt: r.get::<String, _>(7),
+                    pairing_nonce: r.get::<String, _>(8),
+                    wrap: envelope,
+                }
             })
             .collect::<Vec<_>>(),
         Err(e) => {
@@ -566,15 +757,31 @@ pub async fn get_vault(State(state): State<AppState>, user: CurrentUser) -> impl
         }
     };
 
-    Json(json!({
-        "revision": vault.get::<i64, _>(0),
-        "manifest": { "iv": vault.get::<String, _>(1), "ciphertext": vault.get::<String, _>(2) },
-        "keys": keys,
-        "devices": devices,
-    }))
+    Json(VaultData {
+        revision: vault.get::<i64, _>(0),
+        manifest: EncryptedBlob {
+            iv: vault.get::<String, _>(1),
+            ciphertext: vault.get::<String, _>(2),
+        },
+        keys,
+        devices,
+    })
     .into_response()
 }
 
+/// Creates the vault (revision 1) with its first key and first device (active, with its wrap);
+/// the device's credential must be the user's.
+#[utoipa::path(
+    post,
+    path = "/pgp/vault/initialize",
+    request_body = InitializeVaultBody,
+    responses(
+        (status = 201, description = "created"),
+        (status = 400, description = "plain text: invalid device credential"),
+        (status = 409, description = "plain text: vault already exists"),
+        (status = 500, description = "plain text: database error")
+    )
+)]
 pub async fn initialize_vault(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -642,6 +849,17 @@ async fn insert_wrap(
     Ok(())
 }
 
+/// Adds a device waiting for approval by an active device (`approve_device` of `PUT /pgp/vault`).
+#[utoipa::path(
+    post,
+    path = "/pgp/devices/pending",
+    request_body = PendingDeviceBody,
+    responses(
+        (status = 201, description = "added"),
+        (status = 400, description = "plain text: invalid device credential"),
+        (status = 409, description = "plain text: vault not initialized or device already registered")
+    )
+)]
 pub async fn create_pending_device(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -687,6 +905,18 @@ pub async fn create_pending_device(
     }
 }
 
+/// Applies a change to the vault in one transaction if it is still at `expected_revision`.
+#[utoipa::path(
+    put,
+    path = "/pgp/vault",
+    request_body = UpdateVaultBody,
+    responses(
+        (status = 200, body = VaultRevision),
+        (status = 400, description = "plain text: invalid vault update (e.g. no such pending device)"),
+        (status = 409, description = "plain text: vault revision conflict"),
+        (status = 500, description = "plain text: database error")
+    )
+)]
 pub async fn update_vault(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -754,7 +984,10 @@ pub async fn update_vault(
     }
     .await;
     match result {
-        Ok(_) => Json(json!({ "revision": body.expected_revision + 1 })).into_response(),
+        Ok(_) => Json(VaultRevision {
+            revision: body.expected_revision + 1,
+        })
+        .into_response(),
         Err(e) => {
             eprintln!("[pgp] apply vault update: {e}");
             (StatusCode::BAD_REQUEST, "invalid vault update").into_response()
@@ -764,11 +997,39 @@ pub async fn update_vault(
 
 // ── Trusted PGP public keys ───────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct PublicKeysQuery {
+    /// only the keys of this address
     pub email: Option<String>,
 }
 
+/// A stored OpenPGP public key: the user's own or a trusted sender's.
+#[derive(Serialize, ToSchema)]
+pub struct StoredPublicKey {
+    /// the key's fingerprint (hex)
+    pub fingerprint: String,
+    pub email: String,
+    /// the ASCII-armored public key
+    pub armored: String,
+    /// whether it is the public half of one of the user's own keys
+    pub is_own: bool,
+    /// where it came from, e.g. `imported` or `autocrypt`
+    pub source: String,
+    /// e.g. `trusted`
+    pub trust: String,
+}
+
+/// The stored public keys, optionally of one address.
+#[utoipa::path(
+    get,
+    path = "/pgp/keys",
+    params(PublicKeysQuery),
+    responses(
+        (status = 200, body = Vec<StoredPublicKey>),
+        (status = 500, description = "plain text: database error")
+    )
+)]
 pub async fn list_public_keys(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -776,17 +1037,15 @@ pub async fn list_public_keys(
 ) -> impl IntoResponse {
     match db::get_pgp_public_keys(&state.db, &user.user_id, q.email.as_deref()).await {
         Ok(rows) => {
-            let list: Vec<serde_json::Value> = rows
+            let list: Vec<StoredPublicKey> = rows
                 .into_iter()
-                .map(|row| {
-                    json!({
-                        "fingerprint": row.fingerprint,
-                        "email": row.email,
-                        "armored": row.armored,
-                        "is_own": row.is_own,
-                        "source": row.source,
-                        "trust": row.trust,
-                    })
+                .map(|row| StoredPublicKey {
+                    fingerprint: row.fingerprint,
+                    email: row.email,
+                    armored: row.armored,
+                    is_own: row.is_own,
+                    source: row.source,
+                    trust: row.trust,
                 })
                 .collect();
             Json(list).into_response()
@@ -798,15 +1057,29 @@ pub async fn list_public_keys(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct SavePublicKeyBody {
     pub fingerprint: String,
     pub email: String,
+    /// an ASCII-armored public key block
     pub armored: String,
+    /// default false
     pub is_own: Option<bool>,
+    /// default `imported`
     pub source: Option<String>,
 }
 
+/// Adds or replaces a public key (stored as trusted).
+#[utoipa::path(
+    post,
+    path = "/pgp/key",
+    request_body = SavePublicKeyBody,
+    responses(
+        (status = 204, description = "saved"),
+        (status = 400, description = "plain text: invalid public key"),
+        (status = 500, description = "plain text: database error")
+    )
+)]
 pub async fn save_public_key(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -840,11 +1113,21 @@ pub async fn save_public_key(
     StatusCode::NO_CONTENT.into_response()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct DeletePublicKeyBody {
     pub fingerprint: String,
 }
 
+/// Deletes a stored public key.
+#[utoipa::path(
+    delete,
+    path = "/pgp/key",
+    request_body = DeletePublicKeyBody,
+    responses(
+        (status = 204, description = "deleted (also when there was no such key)"),
+        (status = 500, description = "plain text: database error")
+    )
+)]
 pub async fn delete_public_key(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -861,13 +1144,25 @@ pub async fn delete_public_key(
 
 // ── Raw email ─────────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct RawEmailQuery {
     pub account_id: String,
     pub mailbox: String,
     pub uid: u32,
 }
 
+/// A cached message as it came from the server (for PGP/MIME decryption and signature checks).
+#[utoipa::path(
+    get,
+    path = "/email/raw",
+    params(RawEmailQuery),
+    responses(
+        (status = 200, content_type = "message/rfc822", body = String, description = "the raw message (RFC 5322)"),
+        (status = 404, description = "plain text: account not found or message not cached"),
+        (status = 500, description = "plain text: database, read or decompress error")
+    )
+)]
 pub async fn raw_email(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -916,21 +1211,19 @@ pub async fn raw_email(
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-/// This module's routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
-#[allow(unused_imports)]
-pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
-    use axum::routing::{delete, get, patch, post, put};
-    utoipa_axum::router::OpenApiRouter::new()
-        .route("/webauthn/register/start", post(register_start))
-        .route("/webauthn/register/finish", post(register_finish))
-        .route("/webauthn/authenticate/start", post(authenticate_start))
-        .route("/webauthn/authenticate/finish", post(authenticate_finish))
-        .route("/webauthn/credentials", get(list_credentials))
-        .route("/webauthn/credential", delete(delete_credential))
-        .route("/pgp/vault", get(get_vault).delete(reset_vault).put(update_vault))
-        .route("/pgp/vault/initialize", post(initialize_vault))
-        .route("/pgp/devices/pending", post(create_pending_device))
-        .route("/pgp/keys", get(list_public_keys))
-        .route("/pgp/key", post(save_public_key).delete(delete_public_key))
-        .route("/email/raw", get(raw_email))
+/// This module's routes that need a signed-in user, relative to `/api` (api.rs).
+pub fn routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(register_start))
+        .routes(routes!(register_finish))
+        .routes(routes!(authenticate_start))
+        .routes(routes!(authenticate_finish))
+        .routes(routes!(list_credentials))
+        .routes(routes!(delete_credential))
+        .routes(routes!(get_vault, update_vault, reset_vault))
+        .routes(routes!(initialize_vault))
+        .routes(routes!(create_pending_device))
+        .routes(routes!(list_public_keys))
+        .routes(routes!(save_public_key, delete_public_key))
+        .routes(routes!(raw_email))
 }
