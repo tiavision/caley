@@ -309,7 +309,7 @@ pub async fn oidc_handler(
         let _ = state.sync_manager.ensure_task_for(&user_id);
 
         // the page wanted before the sign-in, else the last one used (landing.rs)
-        return Redirect::to(&crate::landing::take(&session).await).into_response();
+        return Redirect::to(&crate::landing::take(&session, "").await).into_response();
     }
 
     // Initiate leg: generate PKCE + state and redirect to IdP.
@@ -386,7 +386,7 @@ where
 
         let path = request.uri().path().to_string();
         // Always-public paths: auth endpoints and static assets referenced before authentication,
-        // such as the web app manifest and icons. (`/`, the login page, is public too: below.)
+        // such as the web app manifest and icons. (The login page, `/` or `/de/`, is public too: below.)
         let is_static = is_public_static_asset(&path);
         if path.starts_with("/auth/")
             || path == "/logout"
@@ -404,14 +404,14 @@ where
             };
             // The login page: signed in, a redirect to the page wanted or last used (landing.rs), so
             // the login page is never painted on the way; signed out, the page, keeping `?next=`.
-            if path == "/" {
+            if landing::is_login_page(&path) {
                 if let (Some(s), true) = (&session, request.method() == Method::GET) {
                     let next = landing::next_param(request.uri().query());
                     if authenticated {
                         if let Some(next) = next {
                             landing::remember_next(s, &next).await;
                         }
-                        let to = landing::take(s).await;
+                        let to = landing::take(s, landing::locale_prefix(&path)).await;
                         return Ok(Redirect::to(&to).into_response());
                     }
                     if let Some(next) = next {
@@ -448,12 +448,15 @@ where
                 }
                 return Ok(Redirect::temporary("/auth/oidc?auto=1").into_response());
             }
+            // the login page in the language of the page asked for (`/de/mail/` → `/de/`)
+            let login = format!("{}/", landing::locale_prefix(&path));
             if !landing::valid_next(&wanted) {
-                return Ok(Redirect::temporary("/").into_response());
+                return Ok(Redirect::temporary(&login).into_response());
             }
-            let to: String = url::form_urlencoded::Serializer::for_suffix(String::from("/?"), 2)
-                .append_pair("next", &wanted)
-                .finish();
+            let to: String =
+                url::form_urlencoded::Serializer::for_suffix(format!("{login}?"), login.len() + 1)
+                    .append_pair("next", &wanted)
+                    .finish();
             Ok(Redirect::temporary(&to).into_response())
         })
     }

@@ -5,6 +5,7 @@ import { render, mockRequests, mockStream, memoryStorage, type RouteResponse } f
 import { calendarValue, importEventDate, importDraft, importSummary } from '../src/lib/import.ts';
 import { caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText } from '../src/lib/settings.ts';
 import { loadErrorOr } from '../src/lib/errors.ts';
+import { localeUrl } from '../src/lib/locale-path.ts';
 import { SinterError } from '@tiaforge-ui/sinter';
 import { newCalendarDraft, newCalendarBody } from '../src/lib/events.ts';
 import { m } from '@tiaforge-ui/sinter/messages';
@@ -16,7 +17,7 @@ import type { VaultView } from '../src/actions/pgp-vault.ts';
 import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
 // The helpers the page and its components use (not the whole helpers module: other pages' helpers load more).
-const helpers = { calendarValue, importEventDate, importDraft, importSummary, newCalendarDraft, newCalendarBody, caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText, loadErrorOr };
+const helpers = { calendarValue, importEventDate, importDraft, importSummary, newCalendarDraft, newCalendarBody, caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText, loadErrorOr, localeUrl };
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
 const cal = (href: string, name: string, extra: object = {}) => ({ account_id: 'acc', href, name, color: '#ff0000', is_active: true, ...extra });

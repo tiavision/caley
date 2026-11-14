@@ -104,7 +104,7 @@ pub async fn handle_login(
         let _ = session.insert("display_name", "Demo User").await;
         state.sync_manager.ensure_task_for(demo_user_id);
         // where the login page goes next (landing.rs)
-        let redirect = crate::landing::take(&session).await;
+        let redirect = crate::landing::take(&session, "").await;
         return Json(json!({"status": "ok", "redirect": redirect})).into_response();
     }
 
@@ -202,7 +202,7 @@ pub async fn handle_login(
         .trigger(&user_id, SyncTrigger::Incremental);
 
     // where the login page goes next (landing.rs)
-    let redirect = crate::landing::take(&session).await;
+    let redirect = crate::landing::take(&session, "").await;
     Json(json!({"status": "ok", "redirect": redirect})).into_response()
 }
 

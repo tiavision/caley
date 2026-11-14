@@ -2,7 +2,6 @@
 <!-- tab: the open tab; encOpened: the Encryption tab has been opened (its data loads then and stays); draft: the CalDAV account dialog's fields (account_id '' for a new account). -->
 <app-layout data-sn-prop="{ here: '/settings/', title: 'Caley - Settings' }"
             data-sn-state="{
-              lang: ($locale ?? 'en').slice(0, 2),
               tab: 'settings',
               encOpened: false,
               draft: /** @type {AccountDraft|null} */ (null),
@@ -39,9 +38,10 @@
         <label data-layout="row" data-gap="sm" data-wrap="none">
           <span data-icon="globe" data-muted></span>
           <span data-grow data-sn-text="m.settings_language()"></span>
-          <select data-size="sm" data-sn-model="lang" data-sn-on-change="$locale = lang">
-            <option value="en">English</option>
-            <option value="de">Deutsch</option>
+          <!-- each language is its own page: choosing one goes there (src/islands/common.ts) -->
+          <select data-size="sm" data-locale-switch>
+            <option data-sn-attr="{ value: localeUrl('en'), selected: $locale === 'en' }">English</option>
+            <option data-sn-attr="{ value: localeUrl('de'), selected: $locale === 'de' }">Deutsch</option>
           </select>
         </label>
         <hr />

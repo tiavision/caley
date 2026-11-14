@@ -1,4 +1,4 @@
-// Browser work every page shares (imported by src/sinter.config.ts): keyboard shortcuts and the drawer on page swap.
+// Browser work every page shares (imported by src/sinter.config.ts): keyboard shortcuts, the drawer on page swap and the language pickers.
 // Components with a script (src/components/*.ts) hold the per-element work: <mail-notifier>, <close-after>, …
 import { shortcutMatches, typingTarget } from '../lib/shortcuts.ts';
 
@@ -44,4 +44,15 @@ window.addEventListener('pageswap', () => {
   if (!rail?.matches(':popover-open')) return;
   rail.style.transition = 'none';
   rail.hidePopover();
+});
+
+/**
+ * The language pickers (login page, settings): each language is its own page (`localePrefix`, `/de/…`), so a
+ * picker is a `<select data-locale-switch>` whose options' values are `localeUrl(…)`; choosing one goes there,
+ * with this page's query and fragment (sinter expressions cannot navigate). That page records the choice.
+ */
+document.addEventListener('change', (e) => {
+  const select = e.target;
+  if (!(select instanceof HTMLSelectElement) || !select.matches('[data-locale-switch]')) return;
+  location.assign(select.value + location.search + location.hash);
 });

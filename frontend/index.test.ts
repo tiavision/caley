@@ -4,12 +4,13 @@ import { m } from '@tiaforge-ui/sinter/messages';
 import { messages } from './src/test-messages.ts';
 import page from './index.html?raw';
 import { app } from './src/test-components.ts';
+import { localeUrl } from './src/lib/locale-path.ts';
 import './src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
 // <auth-return>'s script navigates away: here it only counts that it ran.
 let returned = 0;
 const scripts = { 'auth-return': class { connected() { returned++; } } };
-const options = { ...app, scripts };
+const options = { ...app, scripts, helpers: { localeUrl } };
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
 

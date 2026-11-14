@@ -1,4 +1,5 @@
 import { m } from '@tiaforge-ui/sinter/messages';
+import { pagePath } from './locale-path.ts';
 
 export interface NewMailNotification {
   account_id: string;
@@ -30,7 +31,7 @@ export function showNewMailNotification(mail: NewMailNotification): void {
   });
   notification.onclick = () => {
     window.focus();
-    window.location.assign(`/mail/view/?account_id=${encodeURIComponent(mail.account_id)}&mailbox=${encodeURIComponent(mail.mailbox)}&uid=${mail.uid}`);
+    window.location.assign(pagePath(`/mail/view/?account_id=${encodeURIComponent(mail.account_id)}&mailbox=${encodeURIComponent(mail.mailbox)}&uid=${mail.uid}`));
     notification.close();
   };
 }

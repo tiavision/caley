@@ -1,5 +1,6 @@
 import type { EventJson, ContactJson } from '../types/calendar.ts';
 import { apiFetch } from './api.ts';
+import { pagePath } from './locale-path.ts';
 
 export async function fetchEventICS(event: EventJson): Promise<string> {
   const params = new URLSearchParams({
@@ -37,7 +38,7 @@ export function downloadFile(filename: string, content: string, mimeType: string
 
 export function composeEmailWithAttachment(subject: string, filename: string, mimeType: string, content: string): void {
   sessionStorage.setItem('caley_compose', JSON.stringify({ subject, filename, mimeType, content }));
-  window.location.href = '/mail/';
+  window.location.href = pagePath('/mail/');
 }
 
 export function safeFilename(name: string, ext: string): string {

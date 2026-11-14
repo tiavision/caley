@@ -21,6 +21,7 @@ import { buildProtectedMime, parseEnvelopeAddresses } from '../lib/pgp/compose.t
 import type * as openpgp from 'openpgp';
 import { SinterError } from '@tiaforge-ui/sinter';
 import { m } from '@tiaforge-ui/sinter/messages';
+import { pagePath } from '../lib/locale-path.ts';
 
 // ── Reading ───────────────────────────────────────────────────────────────────
 
@@ -248,7 +249,7 @@ export async function icsFile(msg: MessageRef, filename: string, contentType: st
 /** Opens the message in its own window (/mail/view/). */
 export function popout(msg: MessageRef): void {
   const params = new URLSearchParams({ account_id: msg.account_id, mailbox: msg.mailbox, uid: String(msg.uid) });
-  window.open(`/mail/view/?${params}`, '_blank', 'popup=yes,width=980,height=760,noopener,noreferrer');
+  window.open(pagePath(`/mail/view/?${params}`), '_blank', 'popup=yes,width=980,height=760,noopener,noreferrer');
 }
 
 // ── Bulk actions ──────────────────────────────────────────────────────────────

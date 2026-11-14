@@ -30,40 +30,55 @@ pub fn layer(static_dir: &str, api: Router) -> anyhow::Result<Option<EmbedLayer>
         );
         return Ok(None);
     }
-    let user_api = api.clone();
-    let search_api = api.clone();
-    let embed = Embed::from_dir(static_dir)
-        .api(api)
+    // Each page is built once per language (`localePrefix`: `de/index.html`), so the resolvers are
+    // registered for each language's file; a build without languages has the files at the root.
+    let dirs: Vec<String> = match locales(static_dir) {
+        Some(list) => list.into_iter().map(|l| format!("{l}/")).collect(),
+        None => vec![String::new()],
+    };
+    let mut embed = Embed::from_dir(static_dir)
+        .api(api.clone())
         // Cookie for the session; Accept-Language as the browser would send it (no Authorization: Caley
         // has no token auth).
         .forward([header::COOKIE, header::ACCEPT_LANGUAGE])
-        .max_bytes(MAX_BYTES)
-        // The login page asks who is signed in: 401 is "nobody" (src/sinter.config.ts makes it `null` in
-        // the browser too), not a failed page.
-        .resolve("index.html:user", move |req| {
-            let api = user_api.clone();
-            async move {
-                match get(&api, "/api/user", &req.headers).await? {
-                    (StatusCode::OK, body) => Some(body),
-                    (StatusCode::UNAUTHORIZED, _) => Some(Bytes::from_static(b"null")),
-                    _ => None,
+        .max_bytes(MAX_BYTES);
+    for dir in &dirs {
+        let user_api = api.clone();
+        let search_api = api.clone();
+        embed = embed
+            // The login page asks who is signed in: 401 is "nobody" (src/sinter.config.ts makes it `null` in
+            // the browser too), not a failed page.
+            .resolve(format!("{dir}index.html:user"), move |req| {
+                let api = user_api.clone();
+                async move {
+                    match get(&api, "/api/user", &req.headers).await? {
+                        (StatusCode::OK, body) => Some(body),
+                        (StatusCode::UNAUTHORIZED, _) => Some(Bytes::from_static(b"null")),
+                        _ => None,
+                    }
                 }
-            }
-        })
-        // The search in the URL: its `src` reads `urlSearch($url)` (frontend src/lib/events.ts), which
-        // the build cannot describe, so the same request is put together here.
-        .resolve("search/index.html:results", move |req| {
-            let api = search_api.clone();
-            async move {
-                let url = search_url(&req)?;
-                match get(&api, &url, &req.headers).await? {
-                    (StatusCode::OK, body) => Some(body),
-                    _ => None,
+            })
+            // The search in the URL: its `src` reads `urlSearch($url)` (frontend src/lib/events.ts), which
+            // the build cannot describe, so the same request is put together here.
+            .resolve(format!("{dir}search/index.html:results"), move |req| {
+                let api = search_api.clone();
+                async move {
+                    let url = search_url(&req)?;
+                    match get(&api, &url, &req.headers).await? {
+                        (StatusCode::OK, body) => Some(body),
+                        _ => None,
+                    }
                 }
-            }
-        })
-        .build()?;
-    Ok(Some(embed))
+            });
+    }
+    Ok(Some(embed.build()?))
+}
+
+/// The languages of a `localePrefix` build (`sinter-embed.json`'s `locales.list`), `None` without.
+fn locales(static_dir: &str) -> Option<Vec<String>> {
+    let manifest = std::fs::read(Path::new(static_dir).join("sinter-embed.json")).ok()?;
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest).ok()?;
+    serde_json::from_value(manifest.get("locales")?.get("list")?.clone()).ok()
 }
 
 /// `/api/search?…` for the page URL's search, as `urlSearch()` builds it; None without words.

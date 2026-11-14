@@ -2,6 +2,7 @@
 import { configure, onUnauthorized } from '@tiaforge-ui/sinter';
 import { retry } from '@tiaforge-ui/sinter/retry';
 import { loginUrl } from './lib/return-url.ts';
+import { withoutLocale } from './lib/locale-path.ts';
 import './islands/common.ts';
 
 configure({
@@ -9,7 +10,7 @@ configure({
     // The same 401 handling as apiFetch (src/lib/api.ts): to the login page, which takes us back here after the sign-in.
     // On the login page itself a 401 from /api/user only means "not signed in": the user resource is null.
     onUnauthorized(async (req, res) => {
-      if (location.pathname === '/') {
+      if (withoutLocale(location.pathname) === '/') {
         return new URL(req.url).pathname === '/api/user' ? Response.json(null) : res;
       }
       location.href = loginUrl();

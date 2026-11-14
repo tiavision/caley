@@ -4,6 +4,9 @@
 // number() and bytes() need no export here; they format with $locale, the language sinter picked.
 // Add a page's formatting helpers here (or re-export them from a module next to the page); keep them pure.
 
+// localeUrl: see src/lib/locale-path.ts (here only for `sinter check` and test renders)
+export { localeUrl } from './lib/locale-path.ts';
+
 export {
   partstatKey,
   localDateIso,

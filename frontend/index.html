@@ -3,7 +3,7 @@
   <head>
     <app-head></app-head>
   </head>
-  <body data-sn-state="{ lang: $locale, baseUrl: '', error: '', saving: false, landing: '' }">
+  <body data-sn-state="{ baseUrl: '', error: '', saving: false, landing: '' }">
     <!-- Signed out, /api/user answers 401, which src/sinter.config.ts turns into `null` on this page. -->
     <sn-resource name="user" src="/api/user" type="User"></sn-resource>
     <sn-resource name="authConfig" src="/api/auth/config" type="AuthConfig"></sn-resource>
@@ -15,10 +15,10 @@
     <!-- The language picker in the page's corner; the column below is the logo, the name and the sign-in card. -->
     <header class="login-lang" data-layout="row" data-gap="sm" data-wrap="none" data-justify="end" data-pad="md">
       <span data-icon="globe" data-muted></span>
-      <select data-size="sm" data-sn-attr="{'aria-label': m.settings_language()}"
-              data-sn-model="lang" data-sn-on-change="$locale = lang">
-        <option value="en">English</option>
-        <option value="de">Deutsch</option>
+      <!-- each language is its own page: choosing one goes there (src/islands/common.ts) -->
+      <select data-size="sm" data-sn-attr="{'aria-label': m.settings_language()}" data-locale-switch>
+        <option data-sn-attr="{ value: localeUrl('en'), selected: $locale === 'en' }">English</option>
+        <option data-sn-attr="{ value: localeUrl('de'), selected: $locale === 'de' }">Deutsch</option>
       </select>
     </header>
 
