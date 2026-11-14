@@ -3,8 +3,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::email_db;
@@ -25,30 +27,60 @@ pub use messages::{
     delete_message, empty_trash, get_message, get_raw_message, get_thread, list_messages,
     move_message, search, suggest_addrs, update_flags,
 };
-pub use send::{autodiscover_handler, send_raw_email};
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
 
+/// An IMAP account (its password is never sent).
+#[derive(Serialize, ToSchema)]
+pub struct Account {
+    pub account_id: String,
+    pub display_name: String,
+    /// IMAP server
+    pub host: String,
+    pub port: i64,
+    pub username: String,
+    pub use_tls: bool,
+    /// SMTP server; `null`: the IMAP host
+    pub smtp_host: Option<String>,
+    /// `null`: 587
+    pub smtp_port: Option<i64>,
+    pub sort_order: i64,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct AccountsResponse {
+    pub accounts: Vec<Account>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct AccountSaved {
+    pub account_id: String,
+}
+
+/// The IMAP accounts.
+#[utoipa::path(
+    get,
+    path = "/email/accounts",
+    responses((status = 200, body = AccountsResponse), (status = 500, description = "database error"))
+)]
 pub async fn list_accounts(State(state): State<AppState>, user: CurrentUser) -> impl IntoResponse {
     match email_db::list_accounts(&state.db, &user.user_id, &state.encryption_key).await {
         Ok(accounts) => {
-            let list: Vec<_> = accounts
-                .iter()
-                .map(|a| {
-                    json!({
-                        "account_id": a.account_id,
-                        "display_name": a.display_name,
-                        "host": a.host,
-                        "port": a.port,
-                        "username": a.username,
-                        "use_tls": a.use_tls,
-                        "smtp_host": a.smtp_host,
-                        "smtp_port": a.smtp_port,
-                        "sort_order": a.sort_order,
-                    })
+            let accounts = accounts
+                .into_iter()
+                .map(|a| Account {
+                    account_id: a.account_id,
+                    display_name: a.display_name,
+                    host: a.host,
+                    port: a.port,
+                    username: a.username,
+                    use_tls: a.use_tls,
+                    smtp_host: a.smtp_host,
+                    smtp_port: a.smtp_port,
+                    sort_order: a.sort_order,
                 })
                 .collect();
-            Json(json!({ "accounts": list })).into_response()
+            Json(AccountsResponse { accounts }).into_response()
         }
         Err(e) => {
             eprintln!("[email] list_accounts error: {e}");
@@ -57,20 +89,35 @@ pub async fn list_accounts(State(state): State<AppState>, user: CurrentUser) -> 
     }
 }
 
-#[derive(Deserialize)]
+/// An IMAP account to add (no `account_id`) or update.
+#[derive(Deserialize, ToSchema)]
 pub struct AccountBody {
     pub account_id: Option<String>,
     pub display_name: String,
     pub host: String,
     pub port: u16,
     pub username: String,
+    /// empty or missing: keep the stored one (required for a new account)
     pub password: Option<String>,
+    /// default true
     pub use_tls: Option<bool>,
     pub smtp_host: Option<String>,
     pub smtp_port: Option<u16>,
+    /// a new account's default identity gets this name (none without it)
     pub sender_name: Option<String>,
 }
 
+/// Adds (no `account_id`) or updates an IMAP account; PUT is the same.
+#[utoipa::path(
+    method(post, put),
+    path = "/email/account",
+    request_body = AccountBody,
+    responses(
+        (status = 200, body = AccountSaved),
+        (status = 400, description = "password required for new account (plain text)"),
+        (status = 500, description = "database error")
+    )
+)]
 pub async fn save_account(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -147,14 +194,22 @@ pub async fn save_account(
     state
         .sse_broadcaster
         .send(&user.user_id, SseMessage::AccountsChanged);
-    Json(json!({ "account_id": account_id })).into_response()
+    Json(AccountSaved { account_id }).into_response()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct AccountIdQuery {
     pub account_id: String,
 }
 
+/// Deletes an IMAP account with its cached mail.
+#[utoipa::path(
+    delete,
+    path = "/email/account",
+    params(AccountIdQuery),
+    responses((status = 204, description = "deleted"), (status = 500, description = "database error"))
+)]
 pub async fn delete_account(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -180,26 +235,51 @@ pub async fn delete_account(
 
 // ── Identities ───────────────────────────────────────────────────────────────
 
+/// A sender identity (name and address) of an account.
+#[derive(Serialize, ToSchema)]
+pub struct Identity {
+    pub identity_id: String,
+    pub account_id: String,
+    pub name: String,
+    pub email: String,
+    pub is_default: bool,
+    pub sort_order: i64,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct IdentitiesResponse {
+    pub identities: Vec<Identity>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct IdentitySaved {
+    pub identity_id: String,
+}
+
+/// The sender identities of all accounts.
+#[utoipa::path(
+    get,
+    path = "/email/identities",
+    responses((status = 200, body = IdentitiesResponse), (status = 500, description = "database error"))
+)]
 pub async fn list_identities(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> impl IntoResponse {
     match email_db::list_identities(&state.db, &user.user_id).await {
         Ok(rows) => {
-            let list: Vec<_> = rows
-                .iter()
-                .map(|i| {
-                    json!({
-                        "identity_id": i.identity_id,
-                        "account_id":  i.account_id,
-                        "name":        i.name,
-                        "email":       i.email,
-                        "is_default":  i.is_default,
-                        "sort_order":  i.sort_order,
-                    })
+            let identities = rows
+                .into_iter()
+                .map(|i| Identity {
+                    identity_id: i.identity_id,
+                    account_id: i.account_id,
+                    name: i.name,
+                    email: i.email,
+                    is_default: i.is_default,
+                    sort_order: i.sort_order,
                 })
                 .collect();
-            Json(json!({ "identities": list })).into_response()
+            Json(IdentitiesResponse { identities }).into_response()
         }
         Err(e) => {
             eprintln!("[email] list_identities error: {e}");
@@ -208,15 +288,28 @@ pub async fn list_identities(
     }
 }
 
-#[derive(Deserialize)]
+/// A sender identity to add (no `identity_id`) or update.
+#[derive(Deserialize, ToSchema)]
 pub struct IdentityBody {
     pub identity_id: Option<String>,
     pub account_id: String,
     pub name: String,
     pub email: String,
+    /// default false
     pub is_default: Option<bool>,
 }
 
+/// Adds (no `identity_id`) or updates a sender identity; PUT is the same.
+#[utoipa::path(
+    method(post, put),
+    path = "/email/identity",
+    request_body = IdentityBody,
+    responses(
+        (status = 200, body = IdentitySaved),
+        (status = 404, description = "account not found (plain text)"),
+        (status = 500, description = "database error")
+    )
+)]
 pub async fn save_identity(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -259,14 +352,21 @@ pub async fn save_identity(
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
 
-    Json(json!({ "identity_id": identity_id })).into_response()
+    Json(IdentitySaved { identity_id }).into_response()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct IdentityIdQuery {
     pub identity_id: String,
 }
 
+#[utoipa::path(
+    delete,
+    path = "/email/identity",
+    params(IdentityIdQuery),
+    responses((status = 204, description = "deleted"), (status = 500, description = "database error"))
+)]
 pub async fn delete_identity(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -281,6 +381,33 @@ pub async fn delete_identity(
 
 // ── Mailboxes ─────────────────────────────────────────────────────────────────
 
+/// An IMAP mailbox of an account.
+#[derive(Serialize, ToSchema)]
+pub struct Mailbox {
+    pub account_id: String,
+    /// the full IMAP name
+    pub name: String,
+    /// the hierarchy delimiter (`/`, `.`), `null` for a flat namespace
+    pub delimiter: Option<String>,
+    pub subscribed: bool,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct MailboxesResponse {
+    pub mailboxes: Vec<Mailbox>,
+}
+
+/// The cached mailboxes of an account.
+#[utoipa::path(
+    get,
+    path = "/email/mailboxes",
+    params(AccountIdQuery),
+    responses(
+        (status = 200, body = MailboxesResponse),
+        (status = 404, description = "account not found (plain text)"),
+        (status = 500, description = "database error")
+    )
+)]
 pub async fn list_mailboxes(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -305,18 +432,16 @@ pub async fn list_mailboxes(
 
     match email_db::list_mailboxes(&state.db, &q.account_id).await {
         Ok(mbs) => {
-            let list: Vec<_> = mbs
-                .iter()
-                .map(|m| {
-                    json!({
-                        "account_id": m.account_id,
-                        "name": m.name,
-                        "delimiter": m.delimiter,
-                        "subscribed": m.subscribed,
-                    })
+            let mailboxes = mbs
+                .into_iter()
+                .map(|m| Mailbox {
+                    account_id: m.account_id,
+                    name: m.name,
+                    delimiter: m.delimiter,
+                    subscribed: m.subscribed,
                 })
                 .collect();
-            Json(json!({ "mailboxes": list })).into_response()
+            Json(MailboxesResponse { mailboxes }).into_response()
         }
         Err(e) => {
             eprintln!("[email] list_mailboxes error: {e}");
@@ -327,12 +452,24 @@ pub async fn list_mailboxes(
 
 // ── Sync trigger ─────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct MailboxSyncQuery {
     pub account_id: String,
     pub mailbox: String,
 }
 
+/// Starts a sync of one mailbox; its progress arrives on the event stream.
+#[utoipa::path(
+    post,
+    path = "/email/sync",
+    params(MailboxSyncQuery),
+    responses(
+        (status = 200, description = "sync started (empty body)"),
+        (status = 404, description = "account not found (plain text)"),
+        (status = 500, description = "database error")
+    )
+)]
 pub async fn trigger_mailbox_sync(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -362,29 +499,73 @@ pub async fn trigger_mailbox_sync(
 
 // ── Virtual Folders ───────────────────────────────────────────────────────────
 
+/// Which mailboxes a virtual folder takes: `null` matches any account or mailbox.
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct VirtualFolderRule {
+    pub account_id: Option<String>,
+    pub mailbox_pattern: Option<String>,
+}
+
+/// A virtual folder: the messages of the mailboxes its rules match.
+#[derive(Serialize, ToSchema)]
+pub struct VirtualFolder {
+    pub folder_id: String,
+    pub display_name: String,
+    pub sort_order: i64,
+    pub only_flagged: bool,
+    pub only_attachments: bool,
+    pub rules: Vec<VirtualFolderRule>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct VirtualFoldersResponse {
+    pub folders: Vec<VirtualFolder>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct VirtualFolderCreated {
+    pub folder_id: String,
+}
+
+/// The unread messages per account and mailbox, and per virtual folder.
+#[derive(Serialize, ToSchema)]
+pub struct UnreadCounts {
+    /// account id → mailbox name → unread count
+    pub mailboxes: BTreeMap<String, BTreeMap<String, i64>>,
+    /// folder id → unread count
+    pub folders: BTreeMap<String, i64>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/email/folders",
+    responses((status = 200, body = VirtualFoldersResponse), (status = 500, description = "database error"))
+)]
 pub async fn list_virtual_folders(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> impl IntoResponse {
     match email_db::list_virtual_folders(&state.db, &user.user_id).await {
         Ok(folders) => {
-            let list: Vec<_> = folders
-                .iter()
-                .map(|f| {
-                    json!({
-                        "folder_id": f.folder_id,
-                        "display_name": f.display_name,
-                        "sort_order": f.sort_order,
-                        "only_flagged": f.only_flagged,
-                        "only_attachments": f.only_attachments,
-                        "rules": f.rules.iter().map(|r| json!({
-                            "account_id": r.account_id,
-                            "mailbox_pattern": r.mailbox_pattern,
-                        })).collect::<Vec<_>>(),
-                    })
+            let folders = folders
+                .into_iter()
+                .map(|f| VirtualFolder {
+                    folder_id: f.folder_id,
+                    display_name: f.display_name,
+                    sort_order: f.sort_order,
+                    only_flagged: f.only_flagged,
+                    only_attachments: f.only_attachments,
+                    rules: f
+                        .rules
+                        .into_iter()
+                        .map(|r| VirtualFolderRule {
+                            account_id: r.account_id,
+                            mailbox_pattern: r.mailbox_pattern,
+                        })
+                        .collect(),
                 })
                 .collect();
-            Json(json!({ "folders": list })).into_response()
+            Json(VirtualFoldersResponse { folders }).into_response()
         }
         Err(e) => {
             eprintln!("[email] list_virtual_folders error: {e}");
@@ -393,6 +574,8 @@ pub async fn list_virtual_folders(
     }
 }
 
+/// Unread counts; a database error gives empty maps.
+#[utoipa::path(get, path = "/email/unread-counts", responses((status = 200, body = UnreadCounts)))]
 pub async fn get_unread_counts(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -404,37 +587,32 @@ pub async fn get_unread_counts(
         .await
         .unwrap_or_default();
 
-    let mut mailboxes_map: serde_json::Map<String, serde_json::Value> = Default::default();
+    let mut mailboxes: BTreeMap<String, BTreeMap<String, i64>> = BTreeMap::new();
     for (acc, mbox, cnt) in mb {
-        mailboxes_map
-            .entry(acc)
-            .or_insert_with(|| json!({}))
-            .as_object_mut()
-            .unwrap()
-            .insert(mbox, json!(cnt));
+        mailboxes.entry(acc).or_default().insert(mbox, cnt);
     }
-    let folders_map: serde_json::Map<String, serde_json::Value> = folders
-        .into_iter()
-        .map(|(id, cnt)| (id, json!(cnt)))
-        .collect();
+    let folders = folders.into_iter().collect();
 
-    Json(json!({ "mailboxes": mailboxes_map, "folders": folders_map })).into_response()
+    Json(UnreadCounts { mailboxes, folders }).into_response()
 }
 
-#[derive(Deserialize)]
-pub struct VirtualFolderRuleBody {
-    pub account_id: Option<String>,
-    pub mailbox_pattern: Option<String>,
-}
-
-#[derive(Deserialize)]
+/// A virtual folder to create or update.
+#[derive(Deserialize, ToSchema)]
 pub struct VirtualFolderBody {
     pub display_name: String,
-    pub rules: Vec<VirtualFolderRuleBody>,
+    pub rules: Vec<VirtualFolderRule>,
+    /// default false
     pub only_flagged: Option<bool>,
+    /// default false
     pub only_attachments: Option<bool>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/email/folder",
+    request_body = VirtualFolderBody,
+    responses((status = 200, body = VirtualFolderCreated), (status = 500, description = "database error"))
+)]
 pub async fn create_virtual_folder(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -461,14 +639,26 @@ pub async fn create_virtual_folder(
         eprintln!("[email] create_virtual_folder error: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
-    Json(json!({ "folder_id": folder_id })).into_response()
+    Json(VirtualFolderCreated { folder_id }).into_response()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct FolderIdQuery {
     pub folder_id: String,
 }
 
+#[utoipa::path(
+    put,
+    path = "/email/folder",
+    params(FolderIdQuery),
+    request_body = VirtualFolderBody,
+    responses(
+        (status = 204, description = "updated"),
+        (status = 404, description = "not found (plain text)"),
+        (status = 500, description = "database error")
+    )
+)]
 pub async fn update_virtual_folder(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -503,6 +693,12 @@ pub async fn update_virtual_folder(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/email/folder",
+    params(FolderIdQuery),
+    responses((status = 204, description = "deleted"), (status = 500, description = "database error"))
+)]
 pub async fn delete_virtual_folder(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -515,26 +711,28 @@ pub async fn delete_virtual_folder(
     StatusCode::NO_CONTENT.into_response()
 }
 
-/// The mail routes that need a signed-in user, relative to `/api` (api.rs). Not yet described by OpenAPI: plain routes.
-#[allow(unused_imports)]
-pub fn routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
-    use axum::routing::{delete, get, patch, post, put};
-    utoipa_axum::router::OpenApiRouter::new()
-        .route("/email/accounts", get(list_accounts))
-        .route("/email/account", post(save_account).put(save_account).delete(delete_account))
-        .route("/email/mailboxes", get(list_mailboxes))
-        .route("/email/sync", post(trigger_mailbox_sync))
-        .route("/email/unread-counts", get(get_unread_counts))
-        .route("/email/folders", get(list_virtual_folders))
-        .route("/email/folder", post(create_virtual_folder).put(update_virtual_folder).delete(delete_virtual_folder))
-        .route("/email/identities", get(list_identities))
-        .route("/email/identity", post(save_identity).put(save_identity).delete(delete_identity))
+/// The mail routes that need a signed-in user, relative to `/api` (api.rs).
+pub fn routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(list_accounts))
+        .routes(routes!(save_account, delete_account))
+        .routes(routes!(list_mailboxes))
+        .routes(routes!(trigger_mailbox_sync))
+        .routes(routes!(get_unread_counts))
+        .routes(routes!(list_virtual_folders))
+        .routes(routes!(
+            create_virtual_folder,
+            update_virtual_folder,
+            delete_virtual_folder
+        ))
+        .routes(routes!(list_identities))
+        .routes(routes!(save_identity, delete_identity))
         .merge(messages::routes())
         .merge(attachments::routes())
         .merge(send::routes())
 }
 
 /// The public mail routes, relative to `/api` (api.rs).
-pub fn public_routes() -> utoipa_axum::router::OpenApiRouter<crate::oidc::AppState> {
+pub fn public_routes() -> OpenApiRouter<AppState> {
     attachments::public_routes()
 }
