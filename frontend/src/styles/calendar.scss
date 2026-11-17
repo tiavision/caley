@@ -165,16 +165,21 @@
   }
 }
 .month-grid {
-  // The chips' type: small and tight, a month is for an overview (the day's list and the detail have the full text).
-  // The day number's position on the first line is computed from these (.day-num below).
+  // The chips' type: small and tight, a month is for an overview (the day's list and the detail have the full text);
+  // a step larger on desktop (below), where the cells have the room. The day number's position on the first line is
+  // computed from these (.day-num below); --day-font is the day number's size.
   --chip-font: 0.6875rem;
   --chip-lh: 1.25;
   --chip-pad: 2px;
+  --day-font: var(--tm-text-xs);
   grid-template-rows: repeat(var(--row-count), minmax(0, 1fr));
   flex: 1;
   min-block-size: 0;
   border-inline-start: 1px solid var(--tm-border);
   border-block-end: 1px solid var(--tm-border);
+}
+@media (width >= 60rem) {
+  .month-grid { --chip-font: 0.8125rem; --day-font: var(--tm-text-sm); }
 }
 // --cell-bg: the cell's opaque background, which the day number's notch (.flow below) is painted in.
 .month-cell {
@@ -199,7 +204,7 @@
 .day-num {
   display: flex;
   justify-content: end;
-  font-size: var(--tm-text-xs);
+  font-size: var(--day-font);
   font-weight: 500;
   line-height: 1.5;
   color: var(--tm-text);
@@ -303,12 +308,12 @@
         visibility: hidden;
         block-size: calc(var(--chip-font) * var(--chip-lh));
         padding-inline: var(--tm-space-xs) 2px;
-        font-size: var(--tm-text-xs);
+        font-size: var(--day-font);
         font-weight: 500;
         line-height: var(--chip-lh);
       }
       .chip-text[data-today]::before {
-        min-inline-size: calc(1.5 * var(--tm-text-xs) + 6px);
+        min-inline-size: calc(1.5 * var(--day-font) + 6px);
         font-weight: 700;
       }
     }
