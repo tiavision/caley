@@ -383,7 +383,7 @@
   .month-cell.other-month { --cell-bg: var(--tm-bg); }
   // Edge to edge: no outer side rules, and narrow chips keep their width for the text.
   .month-grid { border-inline-start: 0; }
-  .month-cell:nth-child(7n) { border-inline-end: 0; }
+  .month-cell:nth-child(7n of .month-cell) { border-inline-end: 0; }
   .month-cell { padding-inline: 0; }
   // A tap on a narrow cell opens its day (#day-events), chips included: the chips take no clicks there.
   .month-grid { --chip-font: 0.625rem; --chip-pad: 1px; }
