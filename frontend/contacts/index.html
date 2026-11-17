@@ -11,6 +11,7 @@
               draft: newDraft([]),
               formError: '',
               saving: false,
+              edited: false,
             }">
   <!-- One request for both (preloaded in the head); `cache`: a return visit in this tab shows the last list at once. -->
   <sn-resource name="contacts" src="/contacts" items="contacts" key="account_id,uid,addressbook_href" order="fn_name" cache></sn-resource>
@@ -204,7 +205,10 @@
         </template>
       </dialog>
 
-      <dialog id="contact-form" closedby="any" style="--tm-dialog-width: 36rem">
+      <!-- Leaving the page while the open form has been edited (Back or Forward) is refused, with a note. -->
+      <dialog id="contact-form" closedby="any" style="--tm-dialog-width: 36rem"
+              data-sn-on-input="edited = true" data-sn-on-change="edited = true" data-sn-on-close="edited = false"
+              data-sn-on-navigate="edited && $event.preventDefault(); edited && (formError = m.draft_leave())">
         <header>
           <h2 data-sn-text="draft.uid ? m.contacts_edit() : m.contacts_new()"></h2>
           <button type="button" commandfor="contact-form" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>

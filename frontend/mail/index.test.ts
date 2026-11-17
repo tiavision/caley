@@ -92,6 +92,7 @@ test('shows the first inbox with its unread count, then opens a message in the r
   expect(opened).toEqual([{ account_id: 'work', mailbox: 'INBOX', uid: 3 }]);
   expect(root.querySelector('.reader .detail-subject')!.textContent).toBe('Third');
   expect(root.querySelector('.reader .body-text')!.textContent).toBe('body 3');
+  expect(root.querySelector('.reader .body-text span')).toBeNull();
   // the list shows it read once the server says so (the reader patched only its own message)
   stream.emit('email_updated', { account_id: 'work', mailbox: 'INBOX', uid: 3, flags: ['\\Seen'] });
   await settle();
@@ -99,7 +100,7 @@ test('shows the first inbox with its unread count, then opens a message in the r
   expect(rows(root)[0].getAttribute('aria-current')).toBe('true');
   expect(marks()).toEqual([{ account_id: 'work', mailbox: 'INBOX', uid: 3, flags: ['\\Seen'], set: true }]);
 
-  expect(root.querySelector('#mail-actions-menu button[data-icon="mail"]')!.textContent).toBe(m.mail_markUnread());   // the reader shows it read
+  expect(root.querySelector('[id^="mail-actions-"] button[data-icon="mail"]')!.textContent).toBe(m.mail_markUnread());   // the reader shows it read
   rows(root)[1].click();                                          // a read message is not marked
   await settle();
   expect(marks()).toHaveLength(1);
@@ -215,10 +216,10 @@ test('the reader\'s star and read toggles stay on success; the list follows the 
   await settle();
   expect(rows(root)[1].querySelector('.flag-star')).not.toBeNull();
 
-  root.querySelector<HTMLButtonElement>('#mail-actions-menu button[data-icon="mail"]')!.click();
+  root.querySelector<HTMLButtonElement>('[id^="mail-actions-"] button[data-icon="mail"]')!.click();
   await settle();
   expect(patched()).toEqual({ account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Seen'], set: false });
-  expect(root.querySelector('#mail-actions-menu button[data-icon="mail"]')!.textContent).toBe(m.mail_markRead());
+  expect(root.querySelector('[id^="mail-actions-"] button[data-icon="mail"]')!.textContent).toBe(m.mail_markRead());
   stream.emit('email_updated', { account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Flagged'] });
   await settle();
   expect(rows(root)[1].classList.contains('unread')).toBe(true);
@@ -382,6 +383,46 @@ test('reply opens the compose dialog with the quoted message, and sends it', asy
   root.querySelector<HTMLFormElement>('.compose-form')!.requestSubmit();
   await settle();
   expect(root.querySelector<HTMLDialogElement>('#mail-compose')!.open).toBe(false);
+});
+
+test('leaving the page is refused while the open draft has been edited, with a note; untouched or discarded, it goes', async () => {
+  const { root, settle, advance } = await show();
+  rows(root)[2].click();
+  await settle();
+  rows(root)[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));
+  await settle();
+  const dialog = root.querySelector<HTMLDialogElement>('#mail-compose')!;
+  const leave = async () => {
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    root.querySelector('nav[data-rail] a[href$="/calendar/"]')!.dispatchEvent(click);
+    await settle();
+    return click.defaultPrevented;
+  };
+  expect(dialog.open).toBe(true);
+  expect(await leave()).toBe(false);                                   // a reply nobody typed in yet
+
+  const subject = root.querySelector<HTMLInputElement>('#compose-subject')!;
+  subject.value = 'Re: First, edited';
+  subject.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+  expect(await leave()).toBe(true);
+  expect(dialog.querySelector('[role=alert]')!.textContent).toBe(m.mail_leaveDraft());
+
+  root.querySelector<HTMLButtonElement>(`#mail-compose footer button[commandfor="mail-compose"]`)!.click();   // Discard
+  await settle();
+  expect(dialog.open).toBe(false);
+  expect(await leave()).toBe(false);
+
+  // a field with its own (debounced) input handler counts too
+  rows(root)[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));
+  await settle();
+  expect(await leave()).toBe(false);
+  const to = root.querySelector<HTMLInputElement>('#compose-to')!;
+  to.value += ', b';                                            // a token too short to ask for suggestions
+  to.dispatchEvent(new Event('input', { bubbles: true }));
+  await advance(200);
+  await settle();
+  expect(await leave()).toBe(true);
 });
 
 test('a draft shared from another page opens compose once, from the default identity, with its attachment', async () => {

@@ -1,6 +1,9 @@
 <!-- Compose dialog #mail-compose (/mail/ and /mail/view/). It wraps the part of the page that opens it; an opener
      emits `compose` with the draft: emit('compose', composeDraft(mode, msg, identities, text, html, files)).
      With `pending`, it also opens a draft another page left (share menu → send by email).
+     Leaving the page while the open draft has been edited (Back or Forward: the modal dialog keeps the page's links
+     out of reach) is refused, with a note in the dialog: send it or discard it first. An event runs only the
+     nearest handler, so a field with its own input or change handler sets `edited` there too.
      Sending builds the MIME message here (signed/encrypted with OpenPGP when chosen) and posts it raw.
      Resources: identities. -->
 <template data-sn-component="{ pending?: boolean }" data-sn-emits="{ compose: ComposeDraft }">
@@ -8,9 +11,11 @@
          compose: /** @type {ComposeDraft|null} */ (null),
          composeError: '',
          sending: false,
+         edited: false,
          rcpt: { field: '', token: '' },
        }"
-       data-sn-on-compose="compose = $event.detail; showModal('mail-compose')">
+       data-sn-on-compose="compose = $event.detail; edited = false; showModal('mail-compose')"
+       data-sn-on-navigate="edited && $event.preventDefault(); edited && (composeError = m.mail_leaveDraft())">
     <sn-resource name="composeKeys" call="mail.composeKeys()" when="!!compose"></sn-resource>
     <sn-resource name="recipientAddrs" src="/email/suggest-addrs?q={rcpt.token}" when="rcpt.token.length >= 2"></sn-resource>
     <!-- address suggestions: the contacts, loaded when compose first opens -->
@@ -21,9 +26,10 @@
                  then="$result && (compose = sharedDraft($result, identities)); $result && showModal('mail-compose')"></sn-resource>
     <slot></slot>
     <dialog id="mail-compose" class="compose-dialog" data-layout="stack" data-gap="none" data-pad="none"
-            data-sn-on-close="composeError = ''; sending = false">
+            data-sn-on-close="composeError = ''; sending = false; edited = false">
       <template data-sn-if="compose">
         <div class="compose-inner" data-layout="stack" data-gap="none" data-grow
+             data-sn-on-input="edited = true" data-sn-on-change="edited = true"
              data-sn-let="{
                canEnc: canEncrypt(compose, identities, composeKeys),
                signing: signs(compose, identities, composeKeys),
@@ -52,7 +58,7 @@
               <label class="compose-label" for="compose-to" data-sn-text="m.mail_composeTo()"></label>
               <div class="compose-input-wrap" data-combo data-grow>
                 <input id="compose-to" class="compose-input" autocomplete="off" data-sn-model="compose.to" data-sn-listbox="compose-to-list"
-                       data-sn-on-input="rcpt = {field: 'to', token: recipientToken(compose.to)}" data-sn-debounce-input="200"
+                       data-sn-on-input="edited = true; rcpt = {field: 'to', token: recipientToken(compose.to)}" data-sn-debounce-input="200"
                        data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-dismiss="rcpt = {field: '', token: ''}"
                        data-sn-attr="{placeholder: m.mail_composeToPlaceholder()}">
                 <div data-menu role="listbox" id="compose-to-list" data-sn-show="rcpt.field === 'to' && hits.length > 0">
@@ -76,7 +82,7 @@
                 <label class="compose-label" for="compose-cc" data-sn-text="m.mail_composeCc()"></label>
                 <div class="compose-input-wrap" data-combo data-grow>
                   <input id="compose-cc" class="compose-input" autocomplete="off" data-sn-model="compose.cc" data-sn-listbox="compose-cc-list"
-                         data-sn-on-input="rcpt = {field: 'cc', token: recipientToken(compose.cc)}" data-sn-debounce-input="200"
+                         data-sn-on-input="edited = true; rcpt = {field: 'cc', token: recipientToken(compose.cc)}" data-sn-debounce-input="200"
                          data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-dismiss="rcpt = {field: '', token: ''}"
                          data-sn-attr="{placeholder: m.mail_composeCcPlaceholder()}">
                   <div data-menu role="listbox" id="compose-cc-list" data-sn-show="rcpt.field === 'cc' && hits.length > 0">
@@ -90,7 +96,7 @@
                 <label class="compose-label" for="compose-bcc" data-sn-text="m.mail_composeBcc()"></label>
                 <div class="compose-input-wrap" data-combo data-grow>
                   <input id="compose-bcc" class="compose-input" autocomplete="off" data-sn-model="compose.bcc" data-sn-listbox="compose-bcc-list"
-                         data-sn-on-input="rcpt = {field: 'bcc', token: recipientToken(compose.bcc)}" data-sn-debounce-input="200"
+                         data-sn-on-input="edited = true; rcpt = {field: 'bcc', token: recipientToken(compose.bcc)}" data-sn-debounce-input="200"
                          data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-dismiss="rcpt = {field: '', token: ''}"
                          data-sn-attr="{placeholder: m.mail_composeBccPlaceholder()}">
                   <div data-menu role="listbox" id="compose-bcc-list" data-sn-show="rcpt.field === 'bcc' && hits.length > 0">
@@ -140,7 +146,7 @@
           <!-- The file picker: its own form, so reset() clears it after the files went into the draft. -->
           <form class="compose-files" hidden>
             <input type="file" multiple data-sn-attr="{'aria-label': m.mail_attachFiles()}"
-                   data-sn-on-change="compose.files = [...compose.files, ...$el.files]; reset()">
+                   data-sn-on-change="edited = true; compose.files = [...compose.files, ...$el.files]; reset()">
           </form>
         </div>
       </template>

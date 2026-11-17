@@ -362,6 +362,8 @@
   "mail_attachFiles": "Dateien anhängen",
   "mail_attach": "Anhängen",
   "mail_discard": "Verwerfen",
+  "mail_leaveDraft": "Sende oder verwirf diesen Entwurf, bevor du die Seite verlässt.",
+  "draft_leave": "Speichere oder verwirf deine Änderungen, bevor du die Seite verlässt.",
   "mail_sending": "Wird gesendet…",
   "mail_send": "Senden",
   "mail_sendError": "Konnte nicht gesendet werden.",

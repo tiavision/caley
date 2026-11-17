@@ -362,6 +362,8 @@
   "mail_attachFiles": "Attach files",
   "mail_attach": "Attach",
   "mail_discard": "Discard",
+  "mail_leaveDraft": "Send or discard this draft before you leave the page.",
+  "draft_leave": "Save or discard your changes before you leave the page.",
   "mail_sending": "Sending…",
   "mail_send": "Send",
   "mail_sendError": "Failed to send.",

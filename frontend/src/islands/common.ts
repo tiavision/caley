@@ -35,15 +35,27 @@ document.addEventListener('keydown', clickShortcut);
 
 /**
  * Page transitions (src/styles/app.scss): on narrow screens the nav rail is a popover drawer, and a tap on one of
- * its links navigates while it is open. The old page is captured for the cross-document view transition right
- * after `pageswap`, so the open drawer would be in the snapshot and fade out over the new page, where it is
- * closed. Hide it here first, without its slide-out transition, so the new page starts with the drawer closed.
+ * its links navigates while it is open. The old page is captured for the view transition, so the open drawer
+ * would be in the snapshot and fade out over the new page. Hide it first, without its slide-out transition, so
+ * the new page starts with the drawer closed. Pages swap (`sinter({ swap: true })`) and the rail is kept
+ * (`data-sn-permanent`), so it would stay open: close it when a navigation starts (the Navigation API's
+ * `navigate`, before sinter fetches the next page). `pageswap` covers page loads (no Navigation API, or a page
+ * that does not swap). Its transition comes back once the next page is in (`sn-page`).
  */
-window.addEventListener('pageswap', () => {
+function closeDrawer(): void {
   const rail = document.querySelector<HTMLElement>('body[data-shell] > nav[data-rail][popover]');
   if (!rail?.matches(':popover-open')) return;
   rail.style.transition = 'none';
   rail.hidePopover();
+  void getComputedStyle(rail).display;   // hidden now, before the transition is allowed again
+}
+window.addEventListener('pageswap', closeDrawer);
+(window as { navigation?: EventTarget }).navigation?.addEventListener('navigate', (e) => {
+  const to = (e as Event & { destination?: { url: string } }).destination?.url;
+  if (to && new URL(to).pathname !== location.pathname) closeDrawer();
+});
+document.addEventListener('sn-page', () => {
+  document.querySelector<HTMLElement>('body[data-shell] > nav[data-rail]')?.style.removeProperty('transition');
 });
 
 /**

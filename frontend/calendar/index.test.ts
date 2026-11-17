@@ -1,3 +1,4 @@
+import { m } from '@tiaforge-ui/sinter/messages';
 import { messages } from '../src/test-messages.ts';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { configure } from '@tiaforge-ui/sinter';
@@ -152,6 +153,29 @@ test('a new event goes to the day of its + button; saving reloads the week', asy
   expect([body.get('summary'), body.get('date'), body.get('is_all_day'), body.get('calendar_href')]).toEqual(['Dentist', '2026-11-12', 'true', '/cal/work/']);
   expect(form.open).toBe(false);
   expect(requests.calls.slice(before).some((c) => c.path === '/api/events')).toBe(true);
+});
+
+test('leaving the page is refused while the open event form has been edited, with a note; closed, it goes', async () => {
+  const { root, settle, flush } = await show();
+  const leave = async () => {
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    root.querySelector('nav[data-rail] a[href$="/mail/"]')!.dispatchEvent(click);
+    await settle();
+    return click.defaultPrevented;
+  };
+  root.querySelector<HTMLButtonElement>('.day[data-date="2026-11-12"] .day-add')!.click();
+  await flush();
+  const form = root.querySelector<HTMLDialogElement>('#event-form')!;
+  expect(await leave()).toBe(false);                                   // nothing typed yet
+  const summary = form.querySelector<HTMLInputElement>('input[type=text]')!;
+  summary.value = 'Dentist';
+  summary.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+  expect(await leave()).toBe(true);
+  expect(form.querySelector('[role=alert]')!.textContent).toBe(m.draft_leave());
+  form.close();
+  await settle();
+  expect(await leave()).toBe(false);
 });
 
 test('a removed event closes its detail; server changes reload the week', async () => {

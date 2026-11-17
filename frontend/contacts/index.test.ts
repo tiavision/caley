@@ -145,6 +145,27 @@ test('creates a contact: empty rows are left out, then the new contact is shown'
   expect(r.root.querySelector('#contact-detail h2')!.textContent).toBe('contacts-Zed');
 });
 
+test('leaving the page is refused while the open contact form has been edited, with a note; closed, it goes', async () => {
+  const r = await show();
+  const root = r.root, settle = r.settle;
+  const leave = async () => {
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    root.querySelector('nav[data-rail] a[href$="/mail/"]')!.dispatchEvent(click);
+    await settle();
+    return click.defaultPrevented;
+  };
+  r.root.querySelector<HTMLButtonElement>('button[data-fab]')!.click();
+  const form = await opened(r.root.querySelector<HTMLDialogElement>('#contact-form')!, r.flush);
+  expect(await leave()).toBe(false);
+  type(form.querySelector<HTMLInputElement>('input[required]')!, 'contacts-Zed');
+  await settle();
+  expect(await leave()).toBe(true);
+  expect(form.querySelector('[role=alert]')!.textContent).toBe(m.draft_leave());
+  form.close();
+  await settle();
+  expect(await leave()).toBe(false);
+});
+
 test('edits from the detail dialog: rows can be added and removed, an error is shown', async () => {
   let fail = true;
   const r = await show({ 'POST /api/contact': (call) => (fail ? { status: 502 } : { ...ada, ...(call.body as object) }) });

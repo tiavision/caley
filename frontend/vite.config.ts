@@ -16,7 +16,7 @@ export default defineConfig({
     // fonts.preload: the UI font (Figtree, @fontsource-variable/figtree) is preloaded, so a first visit does not paint the fallback font first.
     // apis: the backend's JSON API (apis.ts, described by openapi.json).
     sinter({
-      typecheck: true, strict: true, embed: true, localePrefix: true, lazy: ['openpgp'], fonts: { preload: ['Figtree Variable'] },
+      typecheck: true, strict: true, embed: true, localePrefix: true, swap: true, lazy: ['openpgp'], fonts: { preload: ['Figtree Variable'] },
       apis: apis('openapi.json'),
     }),
     // temper check on all markup and CSS (errors fail the build); serves the Lucide icons the markup names.

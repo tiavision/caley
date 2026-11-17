@@ -4,7 +4,7 @@
      New-mail notifications: <mail-notifier> (src/components/mail-notifier.ts) shows the `new_email` events of the
      rail's own <sn-sync>; a page's <sn-sync> for the same URL shares its connection. /mail/ shows its own notifications. -->
 <template data-sn-component="{ here: string }">
-  <nav data-rail popover id="nav" data-sn-attr="{'aria-label': m.nav_label()}" data-sn-state="{ collapsed: false }">
+  <nav data-rail popover id="nav" data-sn-permanent="rail" data-sn-attr="{'aria-label': m.nav_label()}" data-sn-state="{ collapsed: false }">
     <sn-resource name="notifications" call="notify.status()"></sn-resource>
     <sn-sync src="/events/stream"></sn-sync>
     <header>

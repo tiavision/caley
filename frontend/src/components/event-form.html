@@ -7,7 +7,7 @@
      (a calendar key) when a calendar is picked or a new event saved: the page remembers it as its default calendar. -->
 <template data-sn-component=""
           data-sn-emits="{ 'event-new': EventDraft; 'event-saved': EventDraft; 'event-deleted': EventDraft; 'calendar-chosen': string }">
-  <div data-sn-state="{ draft: /** @type {EventDraft|null} */ (null), eventError: '', summaryHints: false, attendeeRow: -1, attendeeQuery: '' }"
+  <div data-sn-state="{ draft: /** @type {EventDraft|null} */ (null), eventError: '', summaryHints: false, attendeeRow: -1, attendeeQuery: '', edited: false }"
        data-sn-on-event-new="draft = $event.detail; showModal('event-form')"
        data-sn-on-event-edit="draft = editEventDraft($event.detail.event, $event.detail.scope); showModal('event-form')">
     <sn-resource name="calendars" src="/calendars"></sn-resource>
@@ -15,9 +15,14 @@
     <!-- attendee suggestions: loaded when the form first opens -->
     <sn-resource name="attendeeContacts" src="/contacts" items="contacts" key="account_id,uid,addressbook_href" when="draft"></sn-resource>
     <slot></slot>
+    <!-- Leaving the page while the open form has been edited (Back or Forward: the modal keeps the page's links out
+         of reach) is refused, with a note: save or discard first. An event runs only the nearest handler, so a
+         field with its own input or change handler sets `edited` there too. -->
     <dialog id="event-form" closedby="any"
             data-sn-on-toggle="$el.open && $el.querySelector('input')?.select()"
-            data-sn-on-close="eventError = ''; summaryHints = false; attendeeRow = -1">
+            data-sn-on-input="edited = true" data-sn-on-change="edited = true"
+            data-sn-on-navigate="edited && $event.preventDefault(); edited && (eventError = m.draft_leave())"
+            data-sn-on-close="eventError = ''; summaryHints = false; attendeeRow = -1; edited = false">
       <header>
         <h2 data-sn-text="draft?.mode === 'edit' ? m.event_edit() : m.event_create()"></h2>
         <button type="button" commandfor="event-form" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
@@ -37,7 +42,7 @@
             <div data-combo data-sn-let="{ hints: summaryHints ? summarySuggestions(draft.summary, $locale, $now) : [] }">
               <input type="text" required autofocus data-sn-model="draft.summary" data-sn-listbox="event-summary-suggestions"
                      data-sn-attr="{'aria-expanded': hints.length > 0 ? 'true' : 'false'}"
-                     data-sn-on-input="summaryHints = true"
+                     data-sn-on-input="edited = true; summaryHints = true"
                      data-sn-on-dismiss="summaryHints = false"
                      data-sn-on-blur="summaryHints = false">
               <div data-menu role="listbox" id="event-summary-suggestions" data-sn-show="hints.length > 0">
@@ -64,7 +69,7 @@
               <label>
                 <span data-sn-text="m.event_startTime()"></span>
                 <input type="time" data-sn-model="draft.start_time"
-                       data-sn-on-change="!draft.end_time && $el.value && (draft.end_time = halfHourAfter($el.value))">
+                       data-sn-on-change="edited = true; !draft.end_time && $el.value && (draft.end_time = halfHourAfter($el.value))">
               </label>
               <label>
                 <span data-sn-text="m.event_endTime()"></span>
@@ -121,7 +126,7 @@
                 <div data-combo data-grow>
                   <input type="text" data-sn-listbox data-sn-model="draft.attendees[i].cn"
                          data-sn-attr="{placeholder: m.event_attendeeName(), 'aria-label': m.event_attendeeName(), 'aria-expanded': hits.length > 0 ? 'true' : 'false'}"
-                         data-sn-on-input="attendeeRow = i; attendeeQuery = $el.value"
+                         data-sn-on-input="edited = true; attendeeRow = i; attendeeQuery = $el.value"
                          data-sn-on-dismiss="attendeeRow = -1" data-sn-on-blur="attendeeRow = -1">
                   <div data-menu role="listbox" data-sn-show="hits.length > 0">
                     <template data-sn-for="(s, j) in hits" data-sn-key="j">
@@ -133,7 +138,7 @@
                 <div data-combo data-grow class="event-attendee-email">
                   <input type="email" data-sn-listbox data-sn-model="draft.attendees[i].email"
                          data-sn-attr="{placeholder: m.event_attendeeEmail(), 'aria-label': m.event_attendeeEmail(), 'aria-expanded': hits.length > 0 ? 'true' : 'false'}"
-                         data-sn-on-input="attendeeRow = i; attendeeQuery = $el.value"
+                         data-sn-on-input="edited = true; attendeeRow = i; attendeeQuery = $el.value"
                          data-sn-on-dismiss="attendeeRow = -1" data-sn-on-blur="attendeeRow = -1">
                   <div data-menu role="listbox" data-sn-show="hits.length > 0">
                     <template data-sn-for="(s, j) in hits" data-sn-key="j">
@@ -246,7 +251,7 @@
           <label>
             <span data-sn-text="m.event_calendar()"></span>
             <select data-sn-model="draft.cal" data-sn-attr="{disabled: draft.scope === 'this_instance'}"
-                    data-sn-on-change="emit('calendar-chosen', $el.value)">
+                    data-sn-on-change="edited = true; emit('calendar-chosen', $el.value)">
               <template data-sn-for="g in calendarGroups(calendars, caldavAccounts)" data-sn-key="g.account_id">
                 <optgroup data-sn-attr="{label: g.label}">
                   <template data-sn-for="cal in g.calendars">
