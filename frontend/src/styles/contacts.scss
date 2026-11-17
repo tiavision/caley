@@ -11,7 +11,8 @@
   border-radius: 0;
 }
 
-// A contact card before the list has loaded: avatar and two lines (.placeholder-bar, app.scss).
+// A contact card before the list has loaded: avatar and two lines (.placeholder-bar, app.scss; both pulse and wait
+// as app.scss's placeholders do).
 .contact-placeholder { padding-block: var(--tm-space-xs); }
 .placeholder-avatar {
   display: block;
@@ -19,9 +20,4 @@
   block-size: var(--tm-avatar-size, 2.5rem);
   border-radius: var(--tm-radius-full);
   background: var(--tm-fill);
-  animation: placeholder-pulse 1.4s ease-in-out infinite;
-
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-  }
 }

@@ -57,7 +57,8 @@ a.mail-attachment-chip:hover {
 }
 
 // Page transitions: cross-document view transitions between the app pages (same-origin navigations).
-// The rail keeps its place and cross-fades (only aria-current changes); <main> fades with a short lift.
+// The rail keeps its place and cross-fades (only aria-current changes); <main> cross-fades with a short lift. The two
+// fades run together: one after the other, both were near zero in the middle, and the page flashed empty.
 // temper turns the transitions on (`@view-transition`, not with reduced motion); these rules only shape them.
 body[data-shell] > nav[data-rail] {
   view-transition-name: nav-rail;
@@ -73,11 +74,11 @@ body[data-shell] > main {
 }
 
 ::view-transition-old(page) {
-  animation: 120ms ease-in both page-out;
+  animation: 150ms linear both page-out;
 }
 
 ::view-transition-new(page) {
-  animation: 200ms ease-out 60ms both page-in;
+  animation: 150ms ease-out both page-in;
 }
 
 @keyframes page-out {
@@ -165,18 +166,33 @@ body[data-shell] > main {
   background: var(--tm-tone);
 }
 
-// Placeholders while nothing is there to show yet (mail sidebar and list, calendar days): a pulsing bar,
-// --w wide; .placeholder-chip (calendar.scss) is an event chip's size.
+// Loading indicators wait as temper's aria-busy ones do: shown after --tm-busy-delay (200ms), faded in with its
+// tm-busy-in, so a load that is quicker (embedded, cached, a fast server) never flashes them. The bars of a reload
+// (indeterminate <progress>: the calendar's, the mail list's, contacts', search's) and the placeholders below.
+progress:not([value]) {
+  animation: tm-busy-in var(--tm-duration) var(--tm-ease) var(--tm-busy-delay) backwards;
+}
+
+// Placeholders while nothing is there to show yet (mail sidebar and list, calendar days, contacts): a pulsing bar,
+// --w wide; .placeholder-chip (calendar.scss) is an event chip's size, .placeholder-avatar (contacts.scss) an avatar's.
+// The pulse starts once they show; with reduced motion they only wait.
+.placeholder-bar,
+.placeholder-chip,
+.placeholder-avatar {
+  animation:
+    placeholder-pulse 1.4s ease-in-out var(--tm-busy-delay) infinite,
+    tm-busy-in var(--tm-duration) var(--tm-ease) var(--tm-busy-delay) backwards;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: tm-busy-in 0s var(--tm-busy-delay) backwards;
+  }
+}
+
 .placeholder-bar,
 .placeholder-chip {
   display: block;
   border-radius: var(--tm-radius-sm);
   background: var(--tm-fill);
-  animation: placeholder-pulse 1.4s ease-in-out infinite;
-
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-  }
 }
 
 .placeholder-bar {
