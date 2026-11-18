@@ -105,6 +105,8 @@
                                hit && elementIn($el, '.message-detail')?.focus();
                                !hit && page(listName, $event.detail > 0 ? 'next' : 'prev')"
          data-sn-on-reader-back="sel.cursor = open ? messageKey(open) : sel.cursor; $url.uid = null"
+         data-sn-on-navigate="sel.selecting && $event.kind === 'traverse' && $event.preventDefault();
+                              sel = sel.selecting && $event.kind === 'traverse' ? cleared(sel) : sel"
          data-sn-on-keydown-j="pageKey($event, bulk.messages.length) && emit('list-step', 1)"
          data-sn-on-keydown-k="pageKey($event, bulk.messages.length) && emit('list-step', -1)">
       <sn-resource name="messages"
@@ -280,6 +282,10 @@
               <h2 data-truncate data-grow data-sn-text="viewTitle(cur, folders)"></h2>
               <template data-sn-if="cur.folder_id || cur.mailbox">
                 <div data-layout="row" data-gap="xs" data-wrap="none">
+                  <template data-sn-if="!sel.selecting && list.length > 0">
+                    <button type="button" class="overlay-only" data-variant="ghost" data-icon="list-checks" data-sn-on-click="sel = selecting(sel)"
+                            data-sn-attr="{'aria-label': m.mail_select()}"></button>
+                  </template>
                   <template data-sn-if="cur.account_id && cur.mailbox && !cur.folder_id && folderKind(cur.mailbox) === 'trash'">
                     <button type="button" data-variant="ghost" data-tone="danger" data-icon="trash-2" data-tooltip commandfor="mail-empty-trash" command="show-modal"
                             data-sn-on-click="trash = {choice: '30', custom: 30, error: '', busy: false}"
@@ -359,6 +365,17 @@
                 </div>
               </template>
             </div>
+            <!-- Selection mode (the Select button): what is marked, Select all, Cancel. -->
+            <template data-sn-if="sel.selecting">
+              <div class="selection-row" data-layout="row" data-gap="xs" data-wrap="none">
+                <button type="button" data-variant="ghost" data-icon="x" data-shortcut="escape" data-sn-on-click="sel = cleared(sel)"
+                        data-sn-attr="{disabled: sel.busy, 'aria-label': m.mail_cancel()}"></button>
+                <strong data-grow data-truncate role="status"
+                        data-sn-text="bulk.messages.length ? m.mail_selectedCount({n: bulk.messages.length}) : m.mail_selectPrompt()"></strong>
+                <button type="button" data-variant="ghost" data-size="sm" data-icon="check-check" data-sn-on-click="sel = allMarked(sel, list)"
+                        data-sn-attr="{disabled: sel.busy || bulk.messages.length === list.length}" data-sn-text="m.mail_selectAll()"></button>
+              </div>
+            </template>
             <template data-sn-if="cur.folder_id || cur.mailbox">
               <!-- a model on $url.q: written at each typing pause, the first of a run a history entry -->
               <input type="search" data-sn-model="$url.q"
@@ -401,7 +418,7 @@
                         tabindex: k === sel.cursor || (!sel.cursor && list[0] === msg) ? '0' : '-1',
                       }"
                       data-sn-on-focusin="sel.cursor = k"
-                      data-sn-on-click="sel = rowClick($event, sel, k, list, open); opensRow($event) && emit('mail-open', msg)"
+                      data-sn-on-click="sel = rowClick($event, sel, k, list, open); opensRow($event, sel) && emit('mail-open', msg)"
                       data-sn-on-keydown-mod-space="sel = rowClick($event, sel, k, list, open)"
                       data-sn-on-keydown-shift-space="sel = rowClick($event, sel, k, list, open)"
                       data-sn-on-keydown-arrowdown="siblingRow($el, 1)?.focus(); !siblingRow($el, 1) && page(listName, 'next')"
@@ -409,6 +426,10 @@
                       data-sn-on-dragstart="drag.msg = msg"
                       data-sn-on-dragend="drag = noDrag()">
                 <span data-layout="row" data-gap="sm" data-wrap="none">
+                  <template data-sn-if="sel.selecting">
+                    <template data-sn-if="sel.keys.includes(k)"><span class="row-check" data-icon="square-check" aria-hidden="true"></span></template>
+                    <template data-sn-else><span class="row-check" data-icon="square" data-muted aria-hidden="true"></span></template>
+                  </template>
                   <span class="from" data-truncate data-grow><template data-sn-if="!msg.is_read"><span class="unread-dot" aria-label="Unread"></span></template><span data-sn-text="senderName(msg.from) || m.mail_unknownSender()"></span></span>
                   <small class="date" data-muted data-sn-text="formatDate(msg.sent_at)"></small>
                 </span>
@@ -421,7 +442,34 @@
             </template>
           </div>
 
-          <template data-sn-if="searching ? results.length > 0 : $meta.messages.total > 0">
+          <!-- Selection mode: the actions for the marked rows (More: the whole bulk menu, in the overlay). -->
+          <template data-sn-if="sel.selecting">
+            <div class="selection-bar" data-layout="stack" data-gap="xs" data-pad="xs" data-sn-attr="{'aria-busy': sel.busy ? 'true' : 'false'}">
+              <template data-sn-if="sel.error && !sel.more"><p data-callout data-tone="danger" role="alert" data-sn-text="sel.error"></p></template>
+              <div data-layout="row" data-gap="xs" data-justify="between" data-wrap="none" role="toolbar"
+                   data-sn-attr="{'aria-label': m.mail_selectedCount({n: bulk.messages.length})}">
+                <button type="button" data-variant="ghost" data-icon="archive" data-sn-on-click="sel.busy = true"
+                        data-sn-attr="{disabled: sel.busy || !bulk.canArchive, 'aria-label': m.mail_archive()}"
+                        data-sn-post="/email/messages/move" data-sn-body="bulkMoveBody(bulk.messages, null, mailboxes)"
+                        data-sn-then="sel = afterBulk(sel, $result.failed)"
+                        data-sn-catch="sel = afterBulk(sel, bulk.messages)"></button>
+                <button type="button" data-variant="ghost" data-icon="trash-2" data-tone="danger" data-sn-on-click="sel.busy = true"
+                        data-sn-attr="{disabled: sel.busy || !bulk.messages.length, 'aria-label': m.mail_delete()}"
+                        data-sn-confirm="bulk.inTrash ? m.mail_bulkDeleteConfirm() : null"
+                        data-sn-post="/email/messages/delete" data-sn-body="bulkBody(bulk.messages)"
+                        data-sn-then="sel = afterBulk(sel, $result.failed)"
+                        data-sn-catch="sel = afterBulk(sel, bulk.messages)"></button>
+                <button type="button" data-variant="ghost" data-icon="mail-open" data-sn-on-click="sel.busy = true"
+                        data-sn-attr="{disabled: sel.busy || !bulk.messages.length, 'aria-label': m.mail_markRead()}"
+                        data-sn-patch="/email/messages/flags" data-sn-body="bulkFlagsBody(bulk.messages, '\\Seen', true)"
+                        data-sn-then="sel = afterBulk(sel, $result.failed)"
+                        data-sn-catch="sel = afterBulk(sel, bulk.messages)"></button>
+                <button type="button" data-variant="ghost" data-icon="ellipsis" data-sn-on-click="sel.more = true"
+                        data-sn-attr="{disabled: sel.busy || !bulk.messages.length, 'aria-label': m.mail_more()}"></button>
+              </div>
+            </div>
+          </template>
+          <template data-sn-if="!sel.selecting && (searching ? results.length > 0 : $meta.messages.total > 0)">
             <nav class="pagination-bar" data-layout="row" data-gap="xs" data-justify="center" data-wrap="none" data-pad="xs">
               <template data-sn-if="searching">
                 <button type="button" data-variant="ghost" data-size="sm" data-icon="chevrons-left" data-tooltip data-sn-on-click="page('results', 'first'); sel = unmarked(sel)"
@@ -465,17 +513,17 @@
         <!-- ── Reader, or the bulk menu for marked rows ─────────────────────────── -->
         <!-- Escape: clears the marks (the bulk menu shows here) or closes the overlay. -->
         <section class="message-detail" data-layout="stack" data-gap="none" tabindex="-1"
-                 data-sn-on-keydown-escape="bulk.messages.length > 0 && (sel = cleared(sel)); bulk.messages.length === 0 && emit('reader-back')"
+                 data-sn-on-keydown-escape="bulk.messages.length > 0 && (sel = bulkBack(sel)); bulk.messages.length === 0 && emit('reader-back')"
                  data-sn-on-keydown-pageup="!bulk.messages.length && emit('reader-scroll', $event)"
                  data-sn-on-keydown-pagedown="!bulk.messages.length && emit('reader-scroll', $event)"
                  data-sn-on-keydown-home="!bulk.messages.length && emit('reader-scroll', $event)"
                  data-sn-on-keydown-end="!bulk.messages.length && emit('reader-scroll', $event)"
                  data-sn-on-reader-scroll="readerScroller($el)?.scrollTo({top: scrollTopFor($event.detail.key, readerScroller($el))})"
-                 data-sn-class="{'is-open': bulk.messages.length > 0 || !!open}"
+                 data-sn-class="{'is-open': bulk.messages.length > 0 && (!sel.selecting || sel.more) || !!open}"
                  data-sn-attr="{'aria-label': m.nav_mail()}">
           <template data-sn-if="bulk.messages.length > 0">
             <div class="detail-header" data-layout="row" data-gap="sm" data-wrap="none" data-pad="sm">
-              <button type="button" class="overlay-only" data-variant="ghost" data-icon="arrow-left" data-sn-on-click="sel = cleared(sel)"
+              <button type="button" class="overlay-only" data-variant="ghost" data-icon="arrow-left" data-sn-on-click="sel = bulkBack(sel)"
                       data-sn-attr="{'aria-label': m.mail_back()}"></button>
               <h2 class="detail-subject" data-grow data-sn-text="m.mail_selectedCount({n: bulk.messages.length})"></h2>
               <button type="button" data-variant="outline" data-size="sm" data-shortcut="escape" data-sn-on-click="sel = cleared(sel)"
@@ -599,14 +647,16 @@
       <event-detail data-sn-prop="{ event: detail, threads: eventThreads }"
                     data-sn-on-event-threads="threadRef = threadOfEmail($event.detail.email, $event.detail.event); showModal('thread-dialog')"></event-detail>
 
-      <!-- Next to the FAB: the image sources dialog for every message. -->
-      <button type="button" class="origins-trigger" data-variant="secondary" data-icon="image" data-tooltip
-              data-sn-on-click="emit('origins-open', null)"
-              data-sn-attr="{'aria-label': m.mail_manageImageSources()}"
-              data-sn-text="(allowedOrigins?.origins.length ?? 0) + (ignoredOrigins?.origins.length ?? 0) || ''"></button>
-      <button type="button" data-fab data-icon="plus"
-              data-sn-on-click="emit('compose', composeDraft('new', null, identities))"
-              data-sn-attr="{'aria-label': m.mail_newMessage()}"></button>
+      <!-- Next to the FAB: the image sources dialog for every message. Not in selection mode: its bar is where they float. -->
+      <template data-sn-if="!sel.selecting">
+        <button type="button" class="origins-trigger" data-variant="secondary" data-icon="image" data-tooltip
+                data-sn-on-click="emit('origins-open', null)"
+                data-sn-attr="{'aria-label': m.mail_manageImageSources()}"
+                data-sn-text="(allowedOrigins?.origins.length ?? 0) + (ignoredOrigins?.origins.length ?? 0) || ''"></button>
+        <button type="button" data-fab data-icon="plus"
+                data-sn-on-click="emit('compose', composeDraft('new', null, identities))"
+                data-sn-attr="{'aria-label': m.mail_newMessage()}"></button>
+      </template>
     </div>
   </email-folder>
   </email-account>

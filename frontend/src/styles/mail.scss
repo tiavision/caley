@@ -351,6 +351,23 @@ $phone: 639px;
   inline-size: min(16rem, 100%);
 }
 
+// Selection mode (narrow screens' Select button): the row under the title, the actions under the list.
+.selection-row {
+  min-block-size: 2.5rem;
+}
+
+.selection-bar {
+  flex-shrink: 0;
+  border-block-start: 1px solid var(--tm-border);
+  background: var(--tm-surface-raised);
+  padding-block-end: max(var(--tm-space-xs), env(safe-area-inset-bottom));
+}
+
+.row-check {
+  flex-shrink: 0;
+  color: var(--tm-accent);
+}
+
 .caret {
   transition: rotate var(--tm-duration) var(--tm-ease);
 }

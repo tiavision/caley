@@ -239,6 +239,72 @@ test('a failed star toggle is rolled back', async () => {
   expect(rows(root)[1].querySelector('.flag-star')).toBeNull();
 });
 
+test('selection mode (the Select button): taps mark rows without opening them, the bar acts on them and ends the mode', async () => {
+  const { root, settle, requests, opened } = await show({ 'PATCH /api/email/messages/flags': { failed: [] } });
+  const marked = () => rows(root).filter((x) => x.getAttribute('aria-pressed') === 'true').map((x) => x.querySelector('.subject')!.textContent);
+  const detailOpen = () => root.querySelector('.message-detail')!.classList.contains('is-open');
+  expect(root.querySelector('.selection-bar')).toBeNull();
+  root.querySelector<HTMLButtonElement>('.message-list-header button[data-icon="list-checks"]')!.click();
+  await settle();
+  expect(root.querySelector('.selection-row [role=status]')!.textContent).toBe(m.mail_selectPrompt());
+  expect(root.querySelector('.pagination-bar')).toBeNull();
+  expect(root.querySelector<HTMLButtonElement>('.selection-bar button[data-icon="mail-open"]')!.disabled).toBe(true);
+
+  rows(root)[0].click();
+  rows(root)[2].click();
+  await settle();
+  expect(marked()).toEqual(['Third', 'First']);
+  expect(opened).toEqual([]);
+  expect(detailOpen()).toBe(false);                                // the list stays in view while marking
+  expect(root.querySelectorAll('.message-row [data-icon="square-check"]')).toHaveLength(2);
+  expect(root.querySelector('.selection-row [role=status]')!.textContent).toBe('2 messages selected');
+  rows(root)[2].click();                                           // a second tap unmarks
+  await settle();
+  expect(marked()).toEqual(['Third']);
+  root.querySelector<HTMLButtonElement>('.selection-row button[data-icon="check-check"]')!.click();
+  await settle();
+  expect(marked()).toEqual(['Third', 'Second', 'First']);
+
+  root.querySelector<HTMLButtonElement>('.selection-bar button[data-icon="mail-open"]')!.click();
+  await settle();
+  expect(requests.calls.at(-1)).toMatchObject({ method: 'PATCH', path: '/api/email/messages/flags' });
+  expect(requests.calls.at(-1)!.body).toEqual({ messages: [ref(3), ref(2), ref(1)], flags: ['\\Seen'], set: true });
+  expect(marked()).toEqual([]);
+  expect(root.querySelector('.selection-bar')).toBeNull();
+  expect(root.querySelector('.pagination-bar')).not.toBeNull();
+  rows(root)[1].click();                                           // out of the mode a tap opens again
+  await settle();
+  expect(opened).toEqual([ref(2)]);
+});
+
+test('selection mode: More shows the whole bulk menu, its back arrow returns to the marks; a failed action keeps the mode', async () => {
+  const { root, settle } = await show({ 'POST /api/email/messages/delete': { failed: [ref(2)] } });
+  const marked = () => rows(root).filter((x) => x.getAttribute('aria-pressed') === 'true').map((x) => x.querySelector('.subject')!.textContent);
+  const detailOpen = () => root.querySelector('.message-detail')!.classList.contains('is-open');
+  root.querySelector<HTMLButtonElement>('.message-list-header button[data-icon="list-checks"]')!.click();
+  await settle();
+  rows(root)[0].click();
+  rows(root)[1].click();
+  await settle();
+  root.querySelector<HTMLButtonElement>('.selection-bar button[data-icon="ellipsis"]')!.click();
+  await settle();
+  expect(detailOpen()).toBe(true);
+  expect(root.querySelector('.message-detail h2')!.textContent).toBe('2 messages selected');
+  root.querySelector<HTMLButtonElement>('.message-detail .detail-header button[data-icon="arrow-left"]')!.click();
+  await settle();
+  expect(detailOpen()).toBe(false);
+  expect(marked()).toEqual(['Third', 'Second']);
+
+  root.querySelector<HTMLButtonElement>('.selection-bar button[data-icon="trash-2"]')!.click();
+  await settle();
+  expect(marked()).toEqual(['Second']);
+  expect(root.querySelector('.selection-bar [role=alert]')!.textContent).toBe(m.mail_bulkActionError());
+  root.querySelector<HTMLButtonElement>('.selection-row button[data-icon="x"]')!.click();   // Cancel
+  await settle();
+  expect(marked()).toEqual([]);
+  expect(root.querySelector('.selection-row')).toBeNull();
+});
+
 test('keyboard: j/k open the neighbours, Ctrl/Shift+Space mark, Escape clears, Shift+U marks unread', async () => {
   const { root, settle, requests } = await show({ 'PATCH /api/email/message/flags': null });
   const press = (target: Element, key: string, init: KeyboardEventInit = {}) =>

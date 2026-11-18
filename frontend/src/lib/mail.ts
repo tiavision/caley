@@ -270,20 +270,42 @@ export function inMailbox(ref: MessageRef | null, view: MailView): boolean {
  * (`anchor` the last one marked with Ctrl or a plain click); the bulk menu's `error`, `move` (its folder list is
  * open) and `busy` (an action runs).
  */
-export interface Selection { cursor: string | null; keys: string[]; anchor: string | null; error: string; move: boolean; busy: boolean }
+/**
+ * The list's selection. `selecting`: selection mode (narrow screens' Select button), where a tap marks a row instead
+ * of opening it and the actions are a bar under the list; `more`: in it, the whole bulk menu is shown (the overlay).
+ */
+export interface Selection {
+  cursor: string | null; keys: string[]; anchor: string | null; error: string; move: boolean; busy: boolean;
+  selecting: boolean; more: boolean;
+}
 
 export function noSelection(): Selection {
-  return { cursor: null, keys: [], anchor: null, error: '', move: false, busy: false };
+  return { cursor: null, keys: [], anchor: null, error: '', move: false, busy: false, selecting: false, more: false };
 }
 
-/** No rows marked any more (the list changed under them). */
+/** No rows marked any more (the list changed under them), and no selection mode. */
 export function unmarked(sel: Selection): Selection {
-  return { ...sel, keys: [] };
+  return { ...sel, keys: [], selecting: false, more: false };
 }
 
-/** The marks and the bulk menu cleared (Escape, "Clear selection"); with `cursor`, the focus ring moves too. */
+/** The marks, the bulk menu and selection mode cleared (Escape, "Clear selection"); with `cursor`, the focus ring moves too. */
 export function cleared(sel: Selection, cursor: string | null = sel.cursor): Selection {
-  return { ...sel, cursor, keys: [], anchor: null, error: '', move: false };
+  return { ...sel, cursor, keys: [], anchor: null, error: '', move: false, selecting: false, more: false };
+}
+
+/** Selection mode on (the Select button), nothing marked yet. */
+export function selecting(sel: Selection): Selection {
+  return { ...cleared(sel), selecting: true };
+}
+
+/** Every row of the list (this page) marked. */
+export function allMarked(sel: Selection, list: Message[]): Selection {
+  return { ...sel, keys: list.map(messageKey), error: '', move: false };
+}
+
+/** Back from the bulk menu: in selection mode to the list with the marks kept, else the marks cleared. */
+export function bulkBack(sel: Selection): Selection {
+  return sel.selecting ? { ...sel, more: false, move: false } : cleared(sel);
 }
 
 /** The cursor on `key` with no rows marked: the message there is open in the reader. */
@@ -300,6 +322,7 @@ type Modifiers = Pick<MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>;
  * list) counts as the first one marked: Ctrl adds the row to it, Shift marks the rows from it.
  */
 export function rowClick(e: Modifiers, sel: Selection, key: string, list: Message[], open: MessageRef | null = null): Selection {
+  if (sel.selecting) return { ...sel, keys: toggled(sel.keys, key), anchor: key, cursor: key, error: '', move: false };
   if (!e.ctrlKey && !e.metaKey && !e.shiftKey) return { ...sel, keys: [], anchor: null, error: '', cursor: key };
   const opened = !sel.keys.length && open && list.some((msg) => isRef(msg, open)) ? messageKey(open) : null;
   const keys = opened ? [opened] : sel.keys;
@@ -308,15 +331,17 @@ export function rowClick(e: Modifiers, sel: Selection, key: string, list: Messag
   return { ...sel, keys: opened === key ? keys : toggled(keys, key), anchor: key, error: '', move: false };
 }
 
-/** Whether a click on a row opens its message (one without Ctrl, Cmd or Shift). */
-export function opensRow(e: MouseEvent): boolean {
-  return !e.ctrlKey && !e.metaKey && !e.shiftKey;
+/** Whether a click on a row opens its message (one without Ctrl, Cmd or Shift, outside selection mode). */
+export function opensRow(e: MouseEvent, sel: Selection): boolean {
+  return !sel.selecting && !e.ctrlKey && !e.metaKey && !e.shiftKey;
 }
 
-/** After a bulk action: the messages it failed for stay marked, with the error. */
+/** After a bulk action: the messages it failed for stay marked, with the error; none failed, selection mode ends. */
 export function afterBulk(sel: Selection, failed: MessageRef[]): Selection {
   const keys = failed.map(messageKey);
-  return { ...sel, busy: false, keys, anchor: keys[0] ?? null, error: keys.length ? m.mail_bulkActionError() : '', move: false };
+  const left = keys.length > 0;
+  return { ...sel, busy: false, keys, anchor: keys[0] ?? null, error: left ? m.mail_bulkActionError() : '', move: false,
+           selecting: sel.selecting && left, more: sel.more && left };
 }
 
 /** The search box and filters: `input` while typing, `q` the search (debounced), `addrInput`/`addrQ` the sender box. */

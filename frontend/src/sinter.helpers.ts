@@ -96,7 +96,7 @@ export {
   identityBody, folderDraft, folderBody, subscribed, canPreviewAttachment, folderKind, htmlAddsValue,
   isIcsAttachment, formatDate, humanSize, textSegments, messageKey, senderName,
   // page state (src/lib/mail.ts "Page state") and the keys without a control of their own
-  bodyOf, readerOn, noReader, inMailbox, noSelection, unmarked, cleared, openedAt, rowClick, opensRow, afterBulk,
+  bodyOf, readerOn, noReader, inMailbox, noSelection, unmarked, cleared, selecting, allMarked, bulkBack, openedAt, rowClick, opensRow, afterBulk,
   noSearch, searchActive, addableSender, senderAdded, listStatus, noView, noDrag, canDrop, markedRead, sharedDraft,
   pageKey, readerScroller, scrollTopFor, siblingRow,
   // the page's URL (src/lib/mail.ts "The mail page's URL")

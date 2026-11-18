@@ -28,7 +28,25 @@ describe('selection', () => {
     expect(sel.keys).toEqual([keys[0], keys[2]]);
     sel = rowClick(click(), sel, keys[1]!, list);
     expect(sel).toMatchObject({ keys: [], anchor: null, cursor: keys[1] });
-    expect([opensRow(click() as MouseEvent), opensRow(click({ shiftKey: true }) as MouseEvent)]).toEqual([true, false]);
+    expect([opensRow(click() as MouseEvent, sel), opensRow(click({ shiftKey: true }) as MouseEvent, sel)]).toEqual([true, false]);
+  });
+
+  test('selection mode: a plain tap marks and unmarks, opens nothing; an action that fails for none ends it', async () => {
+    const { messageKey, selecting, allMarked, bulkBack, afterBulk, cleared } = await import('./mail.ts');
+    const keys = list.map(messageKey);
+    let sel = selecting(noSelection());
+    sel = rowClick(click(), sel, keys[1]!, list);
+    sel = rowClick(click(), sel, keys[2]!, list);
+    expect([sel.selecting, sel.keys]).toEqual([true, [keys[1], keys[2]]]);
+    expect(opensRow(click() as MouseEvent, sel)).toBe(false);
+    sel = rowClick(click(), sel, keys[1]!, list);
+    expect(sel.keys).toEqual([keys[2]]);
+    expect(allMarked(sel, list).keys).toEqual(keys);
+    expect(bulkBack({ ...sel, more: true })).toMatchObject({ selecting: true, more: false, keys: [keys[2]] });
+    expect(bulkBack({ ...sel, selecting: false })).toMatchObject({ keys: [] });
+    expect(afterBulk({ ...sel, more: true }, [list[2]!])).toMatchObject({ selecting: true, more: true, keys: [keys[2]] });
+    expect(afterBulk({ ...sel, more: true }, [])).toMatchObject({ selecting: false, more: false, keys: [] });
+    expect([unmarked(sel).selecting, cleared(sel).selecting]).toEqual([false, false]);
   });
   test('with nothing marked, the open message counts as the first one marked', () => {
     const open = list[0]!;
@@ -39,10 +57,10 @@ describe('selection', () => {
     expect(rowClick(click({ ctrlKey: true }), { ...noSelection(), keys: [key(2)] }, key(3), list, open).keys).toEqual([key(2), key(3)]);
     expect(rowClick(click({ ctrlKey: true }), noSelection(), key(3), list, msg(9)).keys).toEqual([key(3)]);
   });
-  test('unmarked keeps the anchor and the menu; cleared drops them; openedAt puts the cursor on the open one', () => {
-    const sel = { cursor: 'c', keys: ['k'], anchor: 'k', error: 'e', move: true, busy: true };
-    expect(unmarked(sel)).toEqual({ ...sel, keys: [] });
-    expect(cleared(sel)).toEqual({ cursor: 'c', keys: [], anchor: null, error: '', move: false, busy: true });
+  test('unmarked keeps the anchor and the menu; cleared drops them; both end selection mode; openedAt puts the cursor on the open one', () => {
+    const sel = { cursor: 'c', keys: ['k'], anchor: 'k', error: 'e', move: true, busy: true, selecting: true, more: true };
+    expect(unmarked(sel)).toEqual({ ...sel, keys: [], selecting: false, more: false });
+    expect(cleared(sel)).toEqual({ cursor: 'c', keys: [], anchor: null, error: '', move: false, busy: true, selecting: false, more: false });
     expect(cleared(sel, null).cursor).toBeNull();
     expect(openedAt(sel, 'x')).toMatchObject({ cursor: 'x', keys: [] });
   });
