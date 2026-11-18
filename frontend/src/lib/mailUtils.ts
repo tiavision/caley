@@ -76,16 +76,6 @@ export function attachmentDataUrl(attachment: DecryptedAttachment): string {
   return `data:${attachment.contentType};base64,${btoa(binary)}`;
 }
 
-export function insertDecryptedInlineImages(html: string, attachments: DecryptedAttachment[]): string {
-  let result = html;
-  for (const attachment of attachments) {
-    if (!attachment.contentId || !/^image\/(png|jpeg|gif|webp|avif)$/i.test(attachment.contentType)) continue;
-    const escapedCid = attachment.contentId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    result = result.replace(new RegExp(`cid:${escapedCid}`, 'gi'), attachmentDataUrl(attachment));
-  }
-  return result;
-}
-
 // ── Message key helpers ───────────────────────────────────────────────────────
 
 export function messageKey(msg: Message): string {

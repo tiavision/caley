@@ -11,6 +11,7 @@ import {
 } from './mailUtils.ts';
 import type { Account, Attachment, Identity, Mailbox, Message, ThreadNode, VirtualFolder } from './MailTypes.ts';
 import { parseEnvelopeAddresses } from './addresses.ts';
+import type { Body, Node, ParseOptions } from '@tiavision/sinter-mail';
 
 export type { Account, Attachment, Identity, Mailbox, Message, ThreadNode, VirtualFolder };
 export {
@@ -548,6 +549,31 @@ export function bodyOrigins(all: string[], allowed: string[], ignored: string[])
   };
 }
 
+/**
+ * How email.parse treats a body's images (sinter-mail's ParseOptions): remote ones through the image proxy, which
+ * fetches only the origins the user allowed (a transparent pixel otherwise; `version` changes the URLs after an origin
+ * is allowed, so the browser does not keep the pixel), inline ones (`cid:`) from the message's parts, or from `cids`
+ * (a decrypted message's parts, as data: URLs).
+ */
+export function bodyImages(msg: MessageRef, cids: Record<string, string> | null, version: number): ParseOptions {
+  const ref = `account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
+  return {
+    images: 'proxy',
+    proxy: `/api/email/proxy-image?v=${version}&url={url}`,
+    cid: cids ?? `/api/email/proxy-image?${ref}&cid={cid}`,
+  };
+}
+
+/**
+ * Does a mail body (email.parse) set colours of its own, text or background? Those were picked against a white page:
+ * such a mail gets a light canvas in dark mode (.mail-light), one without takes the app's colours.
+ */
+export function setsColors(body: Body): boolean {
+  const colored = (n: Body | Node): boolean =>
+    n.type !== 'text' && (!!n.style.color || !!n.style['background-color'] || n.children.some(colored));
+  return colored(body);
+}
+
 export function matching(origins: string[], q: string): string[] {
   return q ? origins.filter((o) => o.includes(q)) : origins;
 }
@@ -578,8 +604,6 @@ export interface ComposeDraft {
   forwardHtml: string | null;
   forwardText: string | null;
   forwardRef: MessageRef | null;
-  /** the forwarded HTML as the dialog previews it (mail.forwardFiles) */
-  forwardPreview: string;
   files: File[];
   encrypt: boolean;
   sign: boolean;
@@ -644,11 +668,11 @@ export function sharedDraft(shared: { subject: string; files: File[] }, identiti
   return composeDraft('new', null, identities, '', null, shared.files, shared.subject);
 }
 
-export function composeDraft(mode: ComposeMode, msg: Message | null, identities: Identity[], text = '', html: string | null = null, files: File[] = [], subject = '', preview = ''): ComposeDraft {
+export function composeDraft(mode: ComposeMode, msg: Message | null, identities: Identity[], text = '', html: string | null = null, files: File[] = [], subject = ''): ComposeDraft {
   const draft: ComposeDraft = {
     mode: 'new', identity_id: (identities.find((i) => i.is_default) ?? identities[0])?.identity_id ?? '',
     to: '', cc: '', bcc: '', subject, body: '', ccOpen: false, in_reply_to: null, references: null,
-    forwardHtml: null, forwardText: null, forwardRef: null, forwardPreview: preview, files, encrypt: false, sign: false, signOptOut: false,
+    forwardHtml: null, forwardText: null, forwardRef: null, files, encrypt: false, sign: false, signOptOut: false,
   };
   if (!msg || mode === 'new') return draft;
   draft.mode = mode;

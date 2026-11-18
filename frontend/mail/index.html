@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Mail: folders (accounts, mailboxes, virtual folders), the message list and the reader (<mail-reader>).
+<!-- Mail: folders (accounts, mailboxes, virtual folders), the message list and the reader (<email-reader>).
      The URL holds what is shown (src/lib/mail.ts "The mail page's URL"): the view (?account_id=&mailbox= or
      ?folder=), the message open (uid; below 1024px it is the reader's overlay, so Back closes it), the list's page
      and the search. The page reads its parameters by name ($url.uid), never $url whole, so its own links and
@@ -19,7 +19,7 @@
   <sn-resource name="unread" src="/email/unread-counts" cache></sn-resource>
   <sn-resource name="identities" src="/email/identities" cache></sn-resource>
   <sn-resource name="contacts" src="/contacts" items="contacts" key="account_id,uid,addressbook_href" when="needContacts"></sn-resource>
-  <mail-reader-data data-sn-prop="{ open: urlRef($url.account_id, $url.mailbox, $url.uid), threadRef, wiped }"></mail-reader-data>
+  <email-reader-data data-sn-prop="{ open: urlRef($url.account_id, $url.mailbox, $url.uid), threadRef, wiped }"></email-reader-data>
 
   <!-- cur: the list shown, the URL's view, else `view`, the one remembered from the last visit (persisted). The
        lists' `then` check it once they have arrived (currentView(): it while it exists, else the first inbox) and
@@ -45,11 +45,11 @@
     <!-- defaultCal: the calendar the import dialog preselects and remembers (shared with the calendar pages' event form). -->
     <div class="mail-contents" data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
          data-sn-on-ics-imported="$event.detail.errors === 0 && (defaultCal = $event.detail.calendar)">
-  <mail-compose data-sn-prop="{ pending: true }">
-  <mail-origins>
+  <email-compose data-sn-prop="{ pending: true }">
+  <email-origins>
   <import-dialog>
-  <mail-account>
-  <mail-folder>
+  <email-account>
+  <email-folder>
     <!-- List state: sel (Selection: the cursor, the rows marked for a bulk action, the bulk menu), searchBox (the
          sender filter's box; search, MailSearch, is the URL's query and filters with it), drag (the message dragged
          to a mailbox, the mailbox under it).
@@ -59,7 +59,7 @@
            list-step {detail: 1 | -1}: j/k, open the next/previous message (or load that page at the end of one);
            reader-back (Escape, the reader's back button): the overlay closes, the cursor goes to its message;
            view-removed: the virtual folder or account shown was removed: no view, no marks;
-                        mail-removed (the reader moved or deleted its message), thread-open, decrypt: see src/components/mail-reader.html.
+                        mail-removed (the reader moved or deleted its message), thread-open, decrypt: see src/components/email-reader.html.
          Changes to messages (flags, moves, deletions) reach the lists through the server's events. -->
     <!-- Keys without a control of their own: j/k here, Escape and the scroll keys on the reader, the marking and
          arrow keys on the rows (key filters; the others are data-shortcut on their buttons). -->
@@ -146,10 +146,10 @@
                   then="syncing = syncing.filter(k => k !== mailboxKey(account_id, mailbox))"></sn-event>
       </sn-sync>
       <!-- New-mail notifications: the rail shows none on this page, the page shows them itself. -->
-      <template data-sn-if="$meta.unread.loadedAt"><mail-notifier></mail-notifier></template>
-      <mail-hidden-watch data-sn-on-page-hidden="wiped = body && body.encrypted ? body.key : wiped"></mail-hidden-watch>
+      <template data-sn-if="$meta.unread.loadedAt"><email-notifier></email-notifier></template>
+      <email-hidden-watch data-sn-on-page-hidden="wiped = body && body.encrypted ? body.key : wiped"></email-hidden-watch>
 
-      <!-- sidebarW, listW: the widths of the folder and message columns, set with the two <mail-split>s (persisted). -->
+      <!-- sidebarW, listW: the widths of the folder and message columns, set with the two <email-split>s (persisted). -->
       <div class="mail-layout" data-grow data-sn-state="{ sidebarW: 220, listW: 320 }" data-sn-persist="mail-widths"
            data-sn-style="{'--sidebar-w': sidebarW + 'px', '--list-w': listW + 'px'}">
         <!-- ── Folders ───────────────────────────────────────────────────────── -->
@@ -226,7 +226,7 @@
                           data-sn-attr="{'aria-busy': busy ? 'true' : null, 'aria-current': cur.account_id === mb.account_id && cur.mailbox === mb.name ? 'true' : null}"
                           data-sn-post="/email/sync?account_id={mb.account_id}&mailbox={mb.name}" data-sn-catch="sel.error = sel.error"
                           data-sn-on-click="navigate(viewHref(mailboxView(mb.account_id, mb.name))); sidebarOpen = false; emit('mail-view')">
-                    <mail-folder-icon data-sn-prop="{ kind }"></mail-folder-icon>
+                    <email-folder-icon data-sn-prop="{ kind }"></email-folder-icon>
                     <span data-truncate data-grow data-sn-text="folderName(mb.name)"></span>
                     <template data-sn-if="!busy && item.unread > 0"><span data-badge data-tone="accent" data-sn-text="badgeCount(item.unread)"></span></template>
                   </button>
@@ -264,11 +264,11 @@
                     data-sn-text="m.mail_addVirtualFolder()"></button>
           </div>
         </aside>
-        <mail-split class="resize-handle" role="separator" tabindex="0" aria-orientation="vertical" aria-valuemin="140" aria-valuemax="400"
+        <email-split class="resize-handle" role="separator" tabindex="0" aria-orientation="vertical" aria-valuemin="140" aria-valuemax="400"
                     data-sn-prop="{ width: sidebarW }"
                     data-sn-attr="{'aria-label': m.mail_resizeFolders(), 'aria-valuenow': sidebarW}"
                     data-sn-on-split-resize="sidebarW = clampWidth('sidebar', $event.detail)"
-                    data-sn-on-keydown="sidebarW = keyWidth('sidebar', $event, sidebarW); ($event.key === 'ArrowLeft' || $event.key === 'ArrowRight') && $event.preventDefault()"></mail-split>
+                    data-sn-on-keydown="sidebarW = keyWidth('sidebar', $event, sidebarW); ($event.key === 'ArrowLeft' || $event.key === 'ArrowRight') && $event.preventDefault()"></email-split>
 
         <!-- ── Message list ───────────────────────────────────────────────────── -->
         <section class="message-list" data-layout="stack" data-gap="none" data-sn-attr="{'aria-label': m.nav_mail()}">
@@ -456,11 +456,11 @@
             </nav>
           </template>
         </section>
-        <mail-split class="resize-handle detail-resize-handle" role="separator" tabindex="0" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="600"
+        <email-split class="resize-handle detail-resize-handle" role="separator" tabindex="0" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="600"
                     data-sn-prop="{ width: listW }"
                     data-sn-attr="{'aria-label': m.mail_resizeMessages(), 'aria-valuenow': listW}"
                     data-sn-on-split-resize="listW = clampWidth('list', $event.detail)"
-                    data-sn-on-keydown="listW = keyWidth('list', $event, listW); ($event.key === 'ArrowLeft' || $event.key === 'ArrowRight') && $event.preventDefault()"></mail-split>
+                    data-sn-on-keydown="listW = keyWidth('list', $event, listW); ($event.key === 'ArrowLeft' || $event.key === 'ArrowRight') && $event.preventDefault()"></email-split>
 
         <!-- ── Reader, or the bulk menu for marked rows ─────────────────────────── -->
         <!-- Escape: clears the marks (the bulk menu shows here) or closes the overlay. -->
@@ -533,7 +533,7 @@
                             data-sn-post="/email/messages/move" data-sn-body="bulkMoveBody(bulk.messages, mb.name, mailboxes)"
                             data-sn-then="sel = afterBulk(sel, $result.failed)"
                             data-sn-catch="sel = afterBulk(sel, bulk.messages)">
-                      <mail-folder-icon data-sn-prop="{ kind }"></mail-folder-icon>
+                      <email-folder-icon data-sn-prop="{ kind }"></email-folder-icon>
                       <span data-truncate data-sn-text="folderName(mb.name)"></span>
                     </button>
                   </template>
@@ -544,12 +544,12 @@
           <!-- Not in the early script (data-sn-early="off"): what the reader shows needs message and body, `call`
                resources that only the page bundle loads, so before it nothing of it would render. -->
           <template data-sn-else>
-            <mail-reader data-sn-prop="{ open, defaultCal }" data-sn-early="off">
+            <email-reader data-sn-prop="{ open, defaultCal }" data-sn-early="off">
               <button slot="back" type="button" class="detail-close-btn overlay-only" data-variant="ghost" data-icon="arrow-left"
                       data-sn-on-click="emit('reader-back')" data-sn-attr="{'aria-label': m.mail_back()}"></button>
               <button slot="popout" type="button" data-variant="ghost" data-icon="external-link" data-tooltip data-sn-call="mail.popout(open)"
                       data-sn-attr="{'aria-label': m.mail_popout()}"></button>
-            </mail-reader>
+            </email-reader>
           </template>
         </section>
       </div>
@@ -601,18 +601,18 @@
 
       <!-- Next to the FAB: the image sources dialog for every message. -->
       <button type="button" class="origins-trigger" data-variant="secondary" data-icon="image" data-tooltip
-              data-sn-on-click="emit('origins-open', false)"
+              data-sn-on-click="emit('origins-open', null)"
               data-sn-attr="{'aria-label': m.mail_manageImageSources()}"
               data-sn-text="(allowedOrigins?.origins.length ?? 0) + (ignoredOrigins?.origins.length ?? 0) || ''"></button>
       <button type="button" data-fab data-icon="plus"
               data-sn-on-click="emit('compose', composeDraft('new', null, identities))"
               data-sn-attr="{'aria-label': m.mail_newMessage()}"></button>
     </div>
-  </mail-folder>
-  </mail-account>
+  </email-folder>
+  </email-account>
   </import-dialog>
-  </mail-origins>
-  </mail-compose>
+  </email-origins>
+  </email-compose>
   </div>
   </main>
   <script type="module" src="/src/main/mail.ts"></script>

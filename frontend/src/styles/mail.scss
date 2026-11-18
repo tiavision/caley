@@ -381,7 +381,7 @@ $phone: 639px;
   }
 }
 
-// The From/To line: the address, then the date at the end when there is room for both (src/components/mail-reader.html).
+// The From/To line: the address, then the date at the end when there is room for both (src/components/email-reader.html).
 // The line wraps, and only its first row shows: a date that does not fit beside the address drops to the hidden row.
 .meta-line {
   display: flex;
@@ -452,19 +452,62 @@ $phone: 639px;
   border-inline-start-width: 0;
 }
 
-.mail-frame {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-block-size: 0;
+// A mail body (sinter-mail's <mail-body>: its root is .mail, the mail's elements are part of the page). The mail's own
+// styles are inline and win; what it leaves unset takes temper's styles, except where mails count on the browser's
+// defaults (compared on real mails: newsletters, legacy HTML, Outlook, Gmail replies, unstyled HTML):
+// - layout: tables and images as the browser draws them (temper's tables have padding, rules and full width, its
+//   images are blocks: layout tables would get lines, inline images their own line), and content-box sizing, which
+//   mails' widths with padding are written for. Images no wider than the reader.
+// - spacing: temper's reset takes every margin away; paragraphs, headings, lists and quotes get theirs back.
+// Text, links, code and pre keep temper's look.
+.mail,
+.mail :where(*) {
+  box-sizing: content-box;
+}
 
-  iframe {
-    display: block;
-    inline-size: 100%;
-    border: 0;
-    flex: 1;
-    min-block-size: 0;
+.mail :where(table, caption, colgroup, col, thead, tbody, tfoot, tr, td, th, img) {
+  all: revert;
+}
+
+.mail :where(img) {
+  max-inline-size: 100%;
+}
+
+.mail :where(p, ul, ol, h1, h2, h3, h4, h5, h6) {
+  // temper-ignore: the mail's spacing, which its own margins (inline) must be able to replace; a gap would add to them
+  margin-block: 1em;
+}
+
+.mail :where(blockquote) {
+  // temper-ignore: the browser's quote indent, which a mail's own margin (Gmail's quotes) replaces
+  margin: 1em 40px;
+}
+
+// A mail that sets colours of its own (setsColors in src/lib/mail.ts) picked them against a white page, often a dark
+// text colour without a background: it keeps a light canvas in dark mode, the light scheme's canvas and text (system
+// colours follow color-scheme; temper's tokens are resolved for the page's). A mail without colours takes the app's.
+.mail-light {
+  color-scheme: light;
+  background: Canvas;
+  color: CanvasText;
+  // temper's colour tokens are resolved for the page's scheme (dark in dark mode): the ones the mail's elements use
+  // (code and pre: fill, hr: border, kbd: strong border) are mixed from the canvas's colours here instead.
+  --tm-fill: color-mix(in oklab, CanvasText 6%, Canvas);
+  --tm-border: color-mix(in oklab, CanvasText 15%, Canvas);
+  --tm-border-strong: color-mix(in oklab, CanvasText 30%, Canvas);
+
+  // the canvas's link colour; a mail's own link colours win (inline)
+  :where(a) {
+    color: LinkText;
   }
+}
+
+// The reader's HTML body: a mail wider than the reader (a 600px newsletter on a phone) scrolls sideways in its box,
+// the reader vertically.
+.mail-html {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: var(--tm-space-sm) var(--tm-space-md);
 }
 
 .detail-status {
@@ -574,6 +617,8 @@ $phone: 639px;
 
 .compose-forward-preview {
   flex-shrink: 0;
+  max-block-size: 240px;
+  overflow: auto;
   border-block-start: 1px solid var(--tm-border);
   padding-inline: var(--tm-space-md);
 }
@@ -631,8 +676,7 @@ $phone: 639px;
     }
   }
 
-  // The whole reader scrolls. Its body fills at least the rest of the screen, so the mail's frame has its full
-  // height before the mail has loaded (no jump), and the frame grows past that with the mail (src/components/mail-frame.ts).
+  // The whole reader scrolls, its body with it.
   .reader {
     flex: 1 0 auto;
   }
@@ -642,20 +686,6 @@ $phone: 639px;
     overflow-y: visible;
   }
 
-  .detail-body .mail-frame,
-  .detail-body .mail-frame iframe {
-    flex: 1 0 auto;
-  }
-
-  // The frame takes a wide mail's width (src/components/mail-frame.ts): the mail scrolls sideways here, the reader vertically.
-  .detail-body .mail-frame {
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-
-    iframe {
-      max-inline-size: none;
-    }
-  }
 }
 
 @media (max-width: $phone) {

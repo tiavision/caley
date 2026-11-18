@@ -1,5 +1,5 @@
 // Browser work every page shares (imported by src/sinter.config.ts): keyboard shortcuts, the drawer on page swap and the language pickers.
-// Components with a script (src/components/*.ts) hold the per-element work: <mail-notifier>, <close-after>, …
+// Components with a script (src/components/*.ts) hold the per-element work: <email-notifier>, <close-after>, …
 import { shortcutMatches, typingTarget } from '../lib/shortcuts.ts';
 
 /**

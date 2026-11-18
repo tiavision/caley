@@ -1,7 +1,7 @@
-// The script of <mail-hidden-watch>: the page's visibility, as an event.
-import { MailHiddenWatchComponent } from './mail-hidden-watch.html';
+// The script of <email-hidden-watch>: the page's visibility, as an event.
+import { EmailHiddenWatchComponent } from './email-hidden-watch.html';
 
-export class MailHiddenWatch extends MailHiddenWatchComponent {
+export class EmailHiddenWatch extends EmailHiddenWatchComponent {
   #fire = () => { if (document.hidden) this.emit('page-hidden'); };
   #leave = () => this.emit('page-hidden');
 

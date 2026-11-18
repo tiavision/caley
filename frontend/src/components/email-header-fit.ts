@@ -1,7 +1,7 @@
-// The script of <mail-header-fit>: measures whether the subject and the controls fit on one line.
-import { MailHeaderFitComponent } from './mail-header-fit.html';
+// The script of <email-header-fit>: measures whether the subject and the controls fit on one line.
+import { EmailHeaderFitComponent } from './email-header-fit.html';
 
-export class MailHeaderFit extends MailHeaderFitComponent {
+export class EmailHeaderFit extends EmailHeaderFitComponent {
   #observer = new ResizeObserver(() => this.#measure());
   #mutations = new MutationObserver(() => this.#measure());
 

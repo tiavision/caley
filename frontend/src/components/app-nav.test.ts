@@ -12,9 +12,9 @@ const page = (here: string) => `
   <main><nav-toggle></nav-toggle></main>
 </app-layout>`;
 
-// <mail-notifier>'s script listens to server events: here it only keeps the live instances.
+// <email-notifier>'s script listens to server events: here it only keeps the live instances.
 const live = new Set<object>();
-const scripts = { 'mail-notifier': class { connected() { live.add(this); } disconnected() { live.delete(this); } } };
+const scripts = { 'email-notifier': class { connected() { live.add(this); } disconnected() { live.delete(this); } } };
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
 

@@ -1,4 +1,4 @@
-<!-- Mail account and identity dialogs #mail-account, #mail-identities (/mail/). They wrap the part of the page that
+<!-- Mail account and identity dialogs #email-account, #mail-identities (/mail/). They wrap the part of the page that
      opens them; an opener emits
        - `account-edit` {acct: AccountForm, ui: AccountUi}: emit('account-edit', {acct: newAccount(), ui: accountUi('basic')});
        - `identities-open` (an account id): the identities of that account.
@@ -13,7 +13,7 @@
          idForm: /** @type {IdentityForm|null} */ (null),
          idError: '',
        }"
-       data-sn-on-account-edit="acct = $event.detail.acct; acctUi = $event.detail.ui; showModal('mail-account')"
+       data-sn-on-account-edit="acct = $event.detail.acct; acctUi = $event.detail.ui; showModal('email-account')"
        data-sn-on-identities-open="idAccount = $event.detail; idForm = null; idError = ''; showModal('mail-identities')">
     <slot></slot>
     <dialog id="mail-identities" closedby="any">
@@ -78,14 +78,14 @@
       </template>
     </dialog>
 
-    <dialog id="mail-account" closedby="any">
+    <dialog id="email-account" closedby="any">
       <header>
         <h2 data-sn-text="acct.account_id ? m.mail_editAccountHeading() : m.mail_addAccountHeading()"></h2>
         <template data-sn-if="acct.account_id">
           <a download role="button" data-variant="ghost" data-icon="download" data-tooltip
              data-sn-attr="{href: `/api/email/export?account_id=${acct.account_id}`, 'aria-label': m.mail_exportAccount()}"></a>
         </template>
-        <button type="button" commandfor="mail-account" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
+        <button type="button" commandfor="email-account" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
       </header>
       <template data-sn-if="acctUi.step === 'basic'">
         <form data-layout="stack" data-gap="md"
@@ -103,7 +103,7 @@
           </label>
           <template data-sn-if="acctUi.busy"><p data-muted aria-busy="true" data-sn-text="m.mail_detectingSettings()"></p></template>
           <footer>
-            <button type="button" data-variant="ghost" commandfor="mail-account" command="close" data-sn-text="m.mail_cancel()"></button>
+            <button type="button" data-variant="ghost" commandfor="email-account" command="close" data-sn-text="m.mail_cancel()"></button>
             <button type="submit" data-sn-attr="{disabled: acctUi.busy}" data-sn-text="m.mail_continue()"></button>
           </footer>
         </form>
@@ -112,7 +112,7 @@
         <form data-layout="stack" data-gap="md"
               data-sn-post="/email/account" data-sn-body="accountBody(acct)"
               data-sn-on-submit="acctUi.busy = true; acctUi.error = ''"
-              data-sn-then="close('mail-account'); refresh('accounts', 'identities', 'mailboxes')"
+              data-sn-then="close('email-account'); refresh('accounts', 'identities', 'mailboxes')"
               data-sn-catch="acctUi.busy = false; acctUi.error = $error.detail ?? m.mail_saveAccountError()">
           <template data-sn-if="acctUi.discovery?.provider_name">
             <p data-muted data-sn-text="m.mail_settingsDetected({provider: acctUi.discovery.provider_name})"></p>
@@ -165,7 +165,7 @@
               <button type="button" data-variant="secondary" data-sn-on-click="acctUi.step = 'basic'; acctUi.error = ''" data-sn-text="m.mail_back()"></button>
             </template>
             <template data-sn-else>
-              <button type="button" data-variant="ghost" commandfor="mail-account" command="close" data-sn-text="m.mail_cancel()"></button>
+              <button type="button" data-variant="ghost" commandfor="email-account" command="close" data-sn-text="m.mail_cancel()"></button>
             </template>
             <button type="submit" data-sn-attr="{disabled: acctUi.busy}" data-sn-text="acctUi.busy ? m.mail_testingConnection() : m.mail_save()"></button>
           </footer>

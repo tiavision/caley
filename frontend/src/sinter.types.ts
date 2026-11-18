@@ -46,6 +46,8 @@ export type {
   Reader, Selection, MailSearch, Drag,
 } from './lib/mail.ts';
 export type { ReaderBody } from './actions/mail.ts';
+// sinter-mail's tree (email.parse) and its options.
+export type { Body, Element, ParseOptions } from '@tiavision/sinter-mail';
 export type { ThreadNode as MailThreadNode } from './lib/mail.ts';
 
 // Calendar page and thread dialog.

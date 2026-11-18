@@ -1,20 +1,20 @@
-<!-- Image sources dialog #mail-origins (/mail/ and /mail/view/): the allowed and ignored image origins, or with
+<!-- Image sources dialog #email-origins (/mail/ and /mail/view/): the allowed and ignored image origins, or with
      `only` those of the open message (blocked ones too). It wraps the part of the page that opens it; an opener emits
-     `origins-open` with whether to show only the open message's: emit('origins-open', true).
-     Resources: body, allowedOrigins, ignoredOrigins. -->
-<template data-sn-component="" data-sn-emits="{ 'origins-open': boolean }">
-  <div data-sn-state="{ only: false, q: '' }"
-       data-sn-on-origins-open="only = $event.detail; q = ''; showModal('mail-origins')">
+     `origins-open` with the open message's image origins to show only those (emit('origins-open', tree.images.origins)),
+     or null for all of them. Resources: allowedOrigins, ignoredOrigins. -->
+<template data-sn-component="" data-sn-emits="{ 'origins-open': string[] | null }">
+  <div data-sn-state="{ only: false, mailOrigins: /** @type {string[]} */ ([]), q: '' }"
+       data-sn-on-origins-open="only = !!$event.detail; mailOrigins = $event.detail ?? []; q = ''; showModal('email-origins')">
     <slot></slot>
-    <dialog id="mail-origins" closedby="any"
+    <dialog id="email-origins" closedby="any"
             data-sn-let="{
               allowed: allowedOrigins?.origins ?? [],
               ignored: ignoredOrigins?.origins ?? [],
-              inMail: bodyOrigins(body?.origins ?? [], allowed, ignored),
+              inMail: bodyOrigins(mailOrigins, allowed, ignored),
             }">
       <header>
         <h2 data-sn-text="only ? m.mail_imageSourcesThisEmail() : m.mail_imageSources()"></h2>
-        <button type="button" commandfor="mail-origins" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
+        <button type="button" commandfor="email-origins" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
       </header>
       <input type="search" data-sn-model="q" data-sn-attr="{placeholder: m.mail_originsFilter(), 'aria-label': m.mail_originsFilter()}">
       <template data-sn-if="only">

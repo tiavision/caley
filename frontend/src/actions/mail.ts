@@ -5,10 +5,10 @@
 import type { CallContext } from '@tiaforge-ui/sinter';
 import { apiFetch } from '../lib/api.ts';
 import {
-  attachmentUrl, canEncrypt, composeDraft, messageKey, type ComposeDraft, type ComposeKeys, type Identity, type Message, type MessageRef,
+  attachmentUrl, canEncrypt, messageKey, type ComposeDraft, type ComposeKeys, type Identity, type Message, type MessageRef,
 } from '../lib/mail.ts';
-import { cidReferencesFromHtml, htmlToPlainText, imageOriginsFromHtml, prepareEmailHtml, restoreForwardedImageSources } from '../lib/mail-html.ts';
-import { canPreviewContentType, htmlAddsValue, insertDecryptedInlineImages, isPgpPublicKeyAttachment, bareMailbox, keyHasEmail } from '../lib/mailUtils.ts';
+import { cidReferencesFromHtml, htmlToPlainText, withInlineImages } from '../lib/mail-html.ts';
+import { attachmentDataUrl, canPreviewContentType, htmlAddsValue, isPgpPublicKeyAttachment, bareMailbox, keyHasEmail } from '../lib/mailUtils.ts';
 // openpgp is a lazy package (sinter({ lazy }) in vite.config.ts): these modules import it as usual, sinter loads it
 // on the first call, and a failed load is a SinterError (stale when a deploy removed it).
 import { detectPgpMessage, parseMimeMessage } from '../lib/pgp/mime.ts';
@@ -43,7 +43,7 @@ function fetchMessage(ref: MessageRef, ctx: CallContext, fresh: boolean): Promis
   return lastFetch.message;
 }
 
-/** The full message, fetched again (body() shares the fetch). The reader marks it read (src/components/mail-reader-data.html). */
+/** The full message, fetched again (body() shares the fetch). The reader marks it read (src/components/email-reader-data.html). */
 export function open(ref: MessageRef, ctx: CallContext): Promise<Message> {
   return fetchMessage(ref, ctx, true);
 }
@@ -53,6 +53,7 @@ export interface DecryptedFile { filename: string; content_type: string; size: n
 /** What the reader shows for a message body (plain, signed or encrypted). */
 export interface ReaderBody {
   key: string;
+  /** the HTML body as the message has it: the reader renders it with email.parse and <mail-body> (sinter-mail) */
   html: string;
   text: string;
   mode: 'html' | 'text';
@@ -68,8 +69,8 @@ export interface ReaderBody {
   files: DecryptedFile[];
   /** the public keys not stored yet, by the name of the attachment that holds them: the bodies of POST /pgp/key */
   importable: Record<string, PublicKeyBody>;
-  /** remote image origins of the HTML body */
-  origins: string[];
+  /** a decrypted message's inline images (`cid:` parts) as data: URLs, by content id; null for other messages */
+  cids: Record<string, string> | null;
 }
 
 // Bytes of the open message's decrypted attachments (for key import and calendar import), by file name.
@@ -126,8 +127,12 @@ async function decrypt(msg: Message, raw: Uint8Array, body: ReaderBody): Promise
     return { filename: a.filename, content_type: a.contentType, size: a.data.byteLength, content_id: null, url };
   });
   const next: ReaderBody = { ...body, badges: result.badges, subject: result.subject ?? '', files };
+  next.cids = {};
+  for (const a of result.attachments) {
+    if (a.contentId && /^image\/(png|jpeg|gif|webp|avif)$/i.test(a.contentType)) next.cids[a.contentId] = attachmentDataUrl(a);
+  }
   if (result.html) {
-    next.html = prepareEmailHtml(insertDecryptedInlineImages(result.html, result.attachments));
+    next.html = result.html;
     next.text = result.text ?? htmlToPlainText(result.html);
     next.mode = htmlAddsValue(result.html) ? 'html' : 'text';
   } else if (result.text) {
@@ -147,13 +152,12 @@ export async function body(ref: MessageRef, ctx: CallContext): Promise<ReaderBod
   const msg = await fetchMessage(ref, ctx, false);
   ctx.signal.throwIfAborted();
   forget();
-  const context = { accountId: msg.account_id, mailbox: msg.mailbox, uid: msg.uid };
   let out: ReaderBody = {
     key: messageKey(msg), html: '', text: '', mode: 'text', encrypted: msg.is_encrypted, signed: msg.is_signed,
-    locked: false, badges: [], subject: '', error: '', files: [], importable: {}, origins: [],
+    locked: false, badges: [], subject: '', error: '', files: [], importable: {}, cids: null,
   };
   if (msg.body_cached && !msg.is_encrypted) {
-    out.html = msg.body_html ? prepareEmailHtml(msg.body_html, context) : '';
+    out.html = msg.body_html ?? '';
     out.text = msg.body_text ?? '';
     out.mode = htmlAddsValue(msg.body_html) ? 'html' : 'text';
   }
@@ -168,7 +172,7 @@ export async function body(ref: MessageRef, ctx: CallContext): Promise<ReaderBod
       out.signed ||= detected.isSigned;
       if (!out.encrypted && !msg.body_cached) {
         const parsed = parseMimeMessage(raw);
-        out.html = parsed.html ? prepareEmailHtml(parsed.html, context) : '';
+        out.html = parsed.html ?? '';
         out.text = parsed.text ?? '';
         out.mode = htmlAddsValue(parsed.html) ? 'html' : 'text';
       }
@@ -195,7 +199,6 @@ export async function body(ref: MessageRef, ctx: CallContext): Promise<ReaderBod
     }
   }
   ctx.signal.throwIfAborted();
-  out.origins = out.html ? imageOriginsFromHtml(out.html) : [];
   return out;
 }
 
@@ -264,9 +267,13 @@ export async function composeKeys(): Promise<ComposeKeys> {
   };
 }
 
-/** The attachments a forward carries (all but the inline images the HTML body references). */
-export async function forwardFiles(msg: Message, html: string): Promise<{ files: File[]; html: string; preview: string }> {
-  const forwardHtml = html ? restoreForwardedImageSources(html) : html;
+/**
+ * The attachments a forward carries (all but the inline images the HTML body references), and the HTML it forwards:
+ * a decrypted message's inline images (`cids`, ReaderBody.cids) written in as data: URLs, since the server has no
+ * parts to send for them.
+ */
+export async function forwardFiles(msg: Message, html: string, cids: Record<string, string> | null): Promise<{ files: File[]; html: string }> {
+  const forwardHtml = html && cids ? withInlineImages(html, cids) : html;
   const inline = new Set(forwardHtml ? cidReferencesFromHtml(forwardHtml) : []);
   const files: File[] = [];
   for (const att of msg.attachments) {
@@ -275,9 +282,7 @@ export async function forwardFiles(msg: Message, html: string): Promise<{ files:
       files.push(new File([await bytes(attachmentUrl(msg, att.filename)) as BlobPart], att.filename, { type: att.content_type || 'application/octet-stream' }));
     } catch { /* skip the attachment */ }
   }
-  const draft = composeDraft('forward', msg, [], '', forwardHtml);
-  const preview = draft.forwardHtml ? prepareEmailHtml(draft.forwardHtml, { accountId: msg.account_id, mailbox: msg.mailbox, uid: msg.uid }) : '';
-  return { files, html: forwardHtml, preview };
+  return { files, html: forwardHtml };
 }
 
 async function unlockForSigning() {

@@ -1,11 +1,11 @@
-<!-- The message reader, inside .message-detail on /mail/ and /mail/view/ (resources: <mail-reader-data>). Props:
+<!-- The message reader, inside .message-detail on /mail/ and /mail/view/ (resources: <email-reader-data>). Props:
      `open` (MessageRef|null): the message to show;
      `defaultCal`: the calendar a calendar attachment is imported into.
      It reads the resources message, body, thread, threadEvents, mailboxes, identities, allowedOrigins, ignoredOrigins,
      caldavAccounts. Changes to the message itself reach the page's lists through the server's events
      (email_updated, email_removed). Events for the page and the dialogs around it:
-       `compose` (ComposeDraft): reply, reply all, forward (<mail-compose>);
-       `origins-open` (true): this message's image sources (<mail-origins>);
+       `compose` (ComposeDraft): reply, reply all, forward (<email-compose>);
+       `origins-open` (string[]): this message's image origins (<email-origins>);
        `ics-import` (ImportDraft): a calendar attachment (<import-dialog>);
        `thread-open` (ThreadRef): the thread button (<thread-dialog>);
        `mail-removed` (MessageRef): moved or deleted, the reader closes;
@@ -15,26 +15,27 @@
      Shortcuts (data-shortcut, src/islands/common.ts): r reply, a reply all, f forward, e archive, # delete,
      Shift+I / Shift+U mark read / unread (on the read toggle, whichever it does). -->
 <template data-sn-component="{ open: MessageRef | null; defaultCal: string }"
-          data-sn-emits="{ compose: ComposeDraft; 'origins-open': boolean; 'ics-import': ImportDraft; 'thread-open': ThreadRef; 'mail-removed': MessageRef; decrypt: void }">
+          data-sn-emits="{ compose: ComposeDraft; 'origins-open': string[] | null; 'ics-import': ImportDraft; 'thread-open': ThreadRef; 'mail-removed': MessageRef; decrypt: void }">
   <div data-sn-import="openpgp">
     <template data-sn-if="open && message && isRef(message, open)">
       <template data-sn-for="msg in [message]" data-sn-key="messageKey(msg)">
         <div class="reader" data-layout="stack" data-gap="none" data-grow
-             data-sn-state="{ meta: false, attsOpen: false, notice: true, mode: '', moveOpen: false, keyNote: '', keyError: '', unlockError: '', frame: 0 }"
+             data-sn-state="{ meta: false, attsOpen: false, notice: true, mode: '', moveOpen: false, keyNote: '', keyError: '', unlockError: '', imageVersion: 0 }"
              data-sn-let="{
                b: bodyOf(body, msg),
                sent: isSentMailbox(msg.mailbox),
                encrypted: msg.is_encrypted || !!b?.encrypted,
                html: b?.html ?? '',
                viewMode: mode || (b?.mode ?? 'text'),
-               imgs: bodyOrigins(b?.origins ?? [], allowedOrigins?.origins ?? [], ignoredOrigins?.origins ?? []),
+               tree: htmlAddsValue(html) ? email.parse(html, bodyImages(msg, b?.cids ?? null, imageVersion)) : null,
+               imgs: bodyOrigins(tree?.images.origins ?? [], allowedOrigins?.origins ?? [], ignoredOrigins?.origins ?? []),
                archive: archiveMailbox(msg, mailboxes),
                shown: shownAttachments(msg, encrypted),
                read: withFlag(msg, '\\Seen', !msg.is_read),
                star: withFlag(msg, '\\Flagged', !msg.is_flagged),
              }">
           <div class="detail-header" data-pad="sm">
-            <mail-header-fit class="detail-subject-row">
+            <email-header-fit class="detail-subject-row">
               <slot name="back"></slot>
               <div class="detail-subject-line">
                 <h2 class="detail-subject" data-sn-text="b?.subject || msg.subject || m.mail_noSubject()"></h2>
@@ -58,8 +59,8 @@
                           data-sn-text="m.mail_replyAll()"></button>
                   <button type="button" role="menuitem" data-icon="forward" data-shortcut="f"
                           data-sn-on-click="ancestor($el, '[popover]')?.hidePopover()"
-                          data-sn-call="mail.forwardFiles(msg, b?.html ?? '')"
-                          data-sn-then="emit('compose', composeDraft('forward', msg, identities, b?.text ?? '', $result.html, $result.files, '', $result.preview))"
+                          data-sn-call="mail.forwardFiles(msg, b?.html ?? '', b?.cids ?? null)"
+                          data-sn-then="emit('compose', composeDraft('forward', msg, identities, b?.text ?? '', $result.html, $result.files))"
                           data-sn-text="m.mail_forward()"></button>
                   <hr>
                   <button type="button" role="menuitem" data-icon="mail"
@@ -71,7 +72,7 @@
                   <template data-sn-if="htmlAddsValue(html)">
                     <template data-sn-if="!encrypted && imgs.all.length > 0">
                       <button type="button" role="menuitem" data-icon="image"
-                              data-sn-on-click="ancestor($el, '[popover]')?.hidePopover(); emit('origins-open', true)"
+                              data-sn-on-click="ancestor($el, '[popover]')?.hidePopover(); emit('origins-open', imgs.all)"
                               data-sn-text="m.mail_imageSourcesEmail()"></button>
                     </template>
                     <hr>
@@ -102,7 +103,7 @@
                         <button type="button" role="menuitem" data-sn-let="{ kind: folderKind(mb.name) }"
                                 data-sn-post="/email/message/move" data-sn-body="moveBody(msg, mb.name)"
                                 data-sn-then="emit('mail-removed', refOf(msg))">
-                          <mail-folder-icon data-sn-prop="{ kind }"></mail-folder-icon>
+                          <email-folder-icon data-sn-prop="{ kind }"></email-folder-icon>
                           <span data-truncate data-sn-text="folderName(mb.name)"></span>
                         </button>
                       </template>
@@ -117,7 +118,7 @@
                 </div>
                 <slot name="popout"></slot>
               </div>
-            </mail-header-fit>
+            </email-header-fit>
           </div>
 
           <div class="detail-meta" data-layout="stack" data-gap="xs" data-pad="sm">
@@ -215,33 +216,29 @@
               </div>
             </template>
             <template data-sn-if="viewMode === 'html' && htmlAddsValue(html)">
-              <template data-sn-if="encrypted">
-                <!-- Decrypted HTML: no allow-same-origin (inline images are data: URLs). -->
-                <mail-frame class="html-body" data-sn-prop="{html, isolated: true, version: frame, label: m.nav_mail()}"></mail-frame>
+              <template data-sn-if="!encrypted && imgs.blocked.length > 0 && notice">
+                <div class="images-notice" data-callout data-layout="row" data-gap="sm">
+                  <span data-icon="image" aria-hidden="true"></span>
+                  <span data-grow data-sn-text="m.mail_imagesBlocked()"></span>
+                  <template data-sn-for="origin in imgs.blocked" data-sn-key="origin">
+                    <span data-layout="row" data-gap="none" data-wrap="none">
+                      <button type="button" class="split-start" data-variant="outline" data-tone="accent" data-size="sm"
+                              data-sn-post="/email/image-origins" data-sn-body="{origin}"
+                              data-sn-then="refresh('allowedOrigins'); imageVersion = imageVersion + 1"
+                              data-sn-text="m.mail_allowOrigin({origin})"></button>
+                      <button type="button" class="split-end" data-variant="outline" data-tone="danger" data-size="sm" data-icon="ban" data-tooltip
+                              data-sn-post="/email/image-blacklist" data-sn-body="{origin}"
+                              data-sn-then="refresh('ignoredOrigins')"
+                              data-sn-attr="{'aria-label': m.mail_blockSilently()}"></button>
+                    </span>
+                  </template>
+                  <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-sn-on-click="notice = false"
+                          data-sn-attr="{'aria-label': m.mail_dismiss()}"></button>
+                </div>
               </template>
-              <template data-sn-else>
-                <template data-sn-if="imgs.blocked.length > 0 && notice">
-                  <div class="images-notice" data-callout data-layout="row" data-gap="sm">
-                    <span data-icon="image" aria-hidden="true"></span>
-                    <span data-grow data-sn-text="m.mail_imagesBlocked()"></span>
-                    <template data-sn-for="origin in imgs.blocked" data-sn-key="origin">
-                      <span data-layout="row" data-gap="none" data-wrap="none">
-                        <button type="button" class="split-start" data-variant="outline" data-tone="accent" data-size="sm"
-                                data-sn-post="/email/image-origins" data-sn-body="{origin}"
-                                data-sn-then="refresh('allowedOrigins'); frame = frame + 1"
-                                data-sn-text="m.mail_allowOrigin({origin})"></button>
-                        <button type="button" class="split-end" data-variant="outline" data-tone="danger" data-size="sm" data-icon="ban" data-tooltip
-                                data-sn-post="/email/image-blacklist" data-sn-body="{origin}"
-                                data-sn-then="refresh('ignoredOrigins')"
-                                data-sn-attr="{'aria-label': m.mail_blockSilently()}"></button>
-                      </span>
-                    </template>
-                    <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-sn-on-click="notice = false"
-                            data-sn-attr="{'aria-label': m.mail_dismiss()}"></button>
-                  </div>
-                </template>
-                <mail-frame class="mail-html-frame" data-sn-prop="{html, isolated: false, version: frame, label: m.nav_mail()}"></mail-frame>
-              </template>
+              <!-- The HTML body, parsed by sinter-mail (email.parse in the let above), as part of the page; a long one renders
+                   progressively (its first part at once, the rest in steps). -->
+              <div class="mail-html" data-sn-class="{ 'mail-light': !!tree && setsColors(tree) }"><mail-body data-sn-prop="{ body: tree && mailBody.progressive(tree) }"></mail-body></div>
             </template>
             <template data-sn-else>
               <template data-sn-if="b && b.text">

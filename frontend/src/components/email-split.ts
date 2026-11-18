@@ -1,7 +1,7 @@
-// The script of <mail-split>: the pointer drag of a resize handle.
-import { MailSplitComponent } from './mail-split.html';
+// The script of <email-split>: the pointer drag of a resize handle.
+import { EmailSplitComponent } from './email-split.html';
 
-export class MailSplit extends MailSplitComponent {
+export class EmailSplit extends EmailSplitComponent {
   connected() {
     this.root.addEventListener('pointerdown', this.#down);
   }

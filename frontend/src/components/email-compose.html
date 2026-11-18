@@ -1,4 +1,4 @@
-<!-- Compose dialog #mail-compose (/mail/ and /mail/view/). It wraps the part of the page that opens it; an opener
+<!-- Compose dialog #email-compose (/mail/ and /mail/view/). It wraps the part of the page that opens it; an opener
      emits `compose` with the draft: emit('compose', composeDraft(mode, msg, identities, text, html, files)).
      With `pending`, it also opens a draft another page left (share menu → send by email).
      Leaving the page while the open draft has been edited (Back or Forward: the modal dialog keeps the page's links
@@ -14,7 +14,7 @@
          edited: false,
          rcpt: { field: '', token: '' },
        }"
-       data-sn-on-compose="compose = $event.detail; edited = false; showModal('mail-compose')"
+       data-sn-on-compose="compose = $event.detail; edited = false; showModal('email-compose')"
        data-sn-on-navigate="edited && $event.preventDefault(); edited && (composeError = m.mail_leaveDraft())">
     <sn-resource name="composeKeys" call="mail.composeKeys()" when="!!compose"></sn-resource>
     <sn-resource name="recipientAddrs" src="/email/suggest-addrs?q={rcpt.token}" when="rcpt.token.length >= 2"></sn-resource>
@@ -23,9 +23,9 @@
     <!-- "Send by email" from the calendar/contacts share menu leaves a draft in sessionStorage.caley_compose
          (src/lib/share.ts); with `pending`, mail.pendingCompose() takes it once, after the identities have loaded (the draft's sender). -->
     <sn-resource name="pendingCompose" call="mail.pendingCompose()" when="pending && !!$meta.identities.loadedAt"
-                 then="$result && (compose = sharedDraft($result, identities)); $result && showModal('mail-compose')"></sn-resource>
+                 then="$result && (compose = sharedDraft($result, identities)); $result && showModal('email-compose')"></sn-resource>
     <slot></slot>
-    <dialog id="mail-compose" class="compose-dialog" data-layout="stack" data-gap="none" data-pad="none"
+    <dialog id="email-compose" class="compose-dialog" data-layout="stack" data-gap="none" data-pad="none"
             data-sn-on-close="composeError = ''; sending = false; edited = false">
       <template data-sn-if="compose">
         <div class="compose-inner" data-layout="stack" data-gap="none" data-grow
@@ -37,12 +37,12 @@
              }">
           <header class="compose-header" data-pad="sm">
             <h2 data-sn-text="composeTitle(compose.mode)"></h2>
-            <button type="button" commandfor="mail-compose" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
+            <button type="button" commandfor="email-compose" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
           </header>
           <form class="compose-form" data-layout="stack" data-gap="none" data-grow
                 data-sn-on-submit="sending = true; composeError = ''"
                 data-sn-call="mail.send({...compose, encrypt: compose.encrypt && canEnc}, identities, signing)"
-                data-sn-then="sending = false; close('mail-compose')"
+                data-sn-then="sending = false; close('email-compose')"
                 data-sn-catch="sending = false; composeError = loadErrorOr($error, $error.detail ?? m.mail_sendError())">
             <template data-sn-if="identities.length > 1">
               <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
@@ -114,8 +114,8 @@
             <textarea class="compose-body" data-grow data-sn-model="compose.body"
                       data-sn-attr="{rows: compose.forwardHtml ? 4 : 10, 'aria-label': m.mail_newMessage()}"></textarea>
             <template data-sn-if="compose.forwardHtml && compose.forwardRef">
-              <div class="compose-forward-preview">
-                <mail-frame data-sn-prop="{html: compose.forwardPreview, isolated: false, height: '240px', label: 'Forwarded message'}"></mail-frame>
+              <div class="compose-forward-preview" data-sn-let="{ fwd: email.parse(compose.forwardHtml, bodyImages(compose.forwardRef, null, 0)) }">
+                <div data-sn-class="{ 'mail-light': !!fwd && setsColors(fwd) }"><mail-body data-sn-early="off" data-sn-prop="{ body: fwd && mailBody.progressive(fwd) }"></mail-body></div>
               </div>
             </template>
             <template data-sn-if="compose.files.length > 0">
@@ -137,7 +137,7 @@
               <button type="button" data-variant="ghost" data-icon="paperclip"
                       data-sn-on-click="(/** @type {HTMLElement} */ ($el.closest('dialog').querySelector('.compose-files input'))).click()" data-sn-text="m.mail_attach()"></button>
               <div data-layout="row" data-gap="sm">
-                <button type="button" data-variant="secondary" commandfor="mail-compose" command="close" data-sn-text="m.mail_discard()"></button>
+                <button type="button" data-variant="secondary" commandfor="email-compose" command="close" data-sn-text="m.mail_discard()"></button>
                 <button type="submit" data-icon="send" data-sn-attr="{disabled: sending, 'aria-busy': sending ? 'true' : null}"
                         data-sn-text="sending ? m.mail_sending() : m.mail_send()"></button>
               </div>

@@ -79,13 +79,19 @@ export { caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErro
 // Errors of calls that may load openpgp: "reload the page" for a stale one (encryption tab, mail reader, compose).
 export { loadErrorOr } from './lib/errors.ts';
 
+// Mail bodies (src/components/email-reader.html, email-compose.html): sinter-mail's email.parse turns an HTML body into
+// the tree <mail-body> renders (no iframe, nothing to sanitize); mailBody.progressive(tree) numbers it for progressive
+// rendering (src/lib/mail-body.ts).
+export * as email from '@tiavision/sinter-mail';
+export * as mailBody from './lib/mail-body.ts';
+
 // Mail pages (mail/index.html, mail/view/index.html, src/components/mail-*.html).
 export {
   currentView, folderView, mailboxView, sameView, folderName, viewTitle, badgeCount, mailboxKey, sidebarSections, mailTitle,
   toggled, refOf, isRef, urlRef, filterActive, markRange, neighbor, archiveMailbox, moveTargets, bulkOf,
   withFlag, flagBody, moveBody, bulkFlagsBody, bulkMoveBody, bulkBody, inTrash, emptyTrashDays, validTrashDays, clampWidth,
   keyWidth, isSentMailbox, messageDateTime, shownAttachments, attachmentUrl, attachmentCount, pgpBadgeLabel, isIconBadge,
-  bodyOrigins, matching, isThreadCurrent, composeDraft, composeTitle, recipientToken, withRecipient, contactAddresses,
+  bodyOrigins, bodyImages, setsColors, matching, isThreadCurrent, composeDraft, composeTitle, recipientToken, withRecipient, contactAddresses,
   recipientHits, senderHits, senderLabel, canSign, canEncrypt, signs, newAccount, editAccount, discovered, accountBody, accountUi,
   identityBody, folderDraft, folderBody, subscribed, canPreviewAttachment, folderKind, htmlAddsValue,
   isIcsAttachment, formatDate, humanSize, textSegments, messageKey, senderName,

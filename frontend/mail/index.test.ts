@@ -21,8 +21,11 @@ const msg = (uid: number, subject: string, extra: Partial<Message> = {}): Messag
 const inbox = [msg(3, 'Third', { flags: [], is_read: false }), msg(2, 'Second'), msg(1, 'First')];
 
 
+// the HTML body the reader gets (mail.body), '' for a text body
+let htmlBody = '';
+
 // the app's retry policies: the flag toggles name one (data-sn-retry="flags")
-beforeEach(() => { localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'], retry: retryPolicies }); });
+beforeEach(() => { htmlBody = ''; localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'], retry: retryPolicies }); });
 afterEach(() => configure({ confirm: null as never, urlSchemes: [], retry: null }));
 
 async function show(routes: Record<string, RouteResponse> = {}, pending: { subject: string; files: File[] } | null = null, storage = memoryStorage(),
@@ -61,12 +64,12 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
     mail: {
       open: async (ref: { uid: number }) => { opened.push(ref); return current.find((m) => m.uid === ref.uid) ?? inbox[0]; },
       body: async (ref: { account_id: string; mailbox: string; uid: number }) => ({
-        key: `${ref.account_id} ${ref.mailbox} ${ref.uid}`, html: '', text: `body ${ref.uid}`, mode: 'text', encrypted: false, signed: false,
-        locked: false, badges: [], subject: '', error: '', files: [], importable: {}, origins: [],
+        key: `${ref.account_id} ${ref.mailbox} ${ref.uid}`, html: htmlBody, text: `body ${ref.uid}`, mode: htmlBody ? 'html' : 'text', encrypted: false, signed: false,
+        locked: false, badges: [], subject: '', error: '', files: [], importable: {}, cids: null,
       }),
       composeKeys: async () => ({ keys: [], vault: [], unlocked: [] }),
       send: async () => null,
-      forwardFiles: async () => ({ files: [], html: '', preview: '' }),
+      forwardFiles: async () => ({ files: [], html: '' }),
       popout: () => {}, unlock: async () => true, icsFile: async (_m: unknown, filename: string) => new File(['x'], filename),
       pendingCompose: () => { pendingCalls++; const p = pending; pending = null; return p; },
     },
@@ -317,17 +320,17 @@ test('the folder dialog creates a folder and saves an edited one, each with one 
     rules: [{ account_id: null, mailbox_pattern: null }] };
   const { root, settle, requests } = await show({ 'GET /api/email/folders': { folders: [folder] }, 'POST /api/email/folder': { folder_id: 'f2' } });
   const save = async (name: string) => {
-    const input = root.querySelector<HTMLInputElement>('#mail-folder input:not([type])')!;
+    const input = root.querySelector<HTMLInputElement>('#email-folder input:not([type])')!;
     input.value = name;
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    root.querySelector<HTMLFormElement>('#mail-folder form')!.requestSubmit();
+    root.querySelector<HTMLFormElement>('#email-folder form')!.requestSubmit();
     await settle();
     return requests.calls.filter((c) => c.method === 'POST' && c.path === '/api/email/folder').at(-1)!.body;
   };
   root.querySelector<HTMLButtonElement>('.sidebar-add button:last-child')!.click();
   await settle();
   expect(await save('followup-New')).toEqual({ folder_id: null, display_name: 'followup-New', rules: [{ account_id: null, mailbox_pattern: null }], only_flagged: false, only_attachments: false });
-  expect(root.querySelector<HTMLDialogElement>('#mail-folder')!.open).toBe(false);
+  expect(root.querySelector<HTMLDialogElement>('#email-folder')!.open).toBe(false);
 
   root.querySelector<HTMLButtonElement>('button[data-icon="pencil"]')!.click();
   await settle();
@@ -342,7 +345,7 @@ test('allowing an ignored image origin is one POST to the allow list (the server
   });
   root.querySelector<HTMLButtonElement>('.origins-trigger')!.click();
   await settle();
-  const allow = [...root.querySelectorAll<HTMLButtonElement>('#mail-origins button')].find((b) => b.textContent === m.mail_originsAllow())!;
+  const allow = [...root.querySelectorAll<HTMLButtonElement>('#email-origins button')].find((b) => b.textContent === m.mail_originsAllow())!;
   const loads = () => requests.calls.filter((c) => c.method === 'GET' && c.path.startsWith('/api/email/image-')).length;
   const before = loads();
   allow.click();
@@ -350,6 +353,31 @@ test('allowing an ignored image origin is one POST to the allow list (the server
   const writes = requests.calls.filter((c) => c.method !== 'GET' && c.path.startsWith('/api/email/image-'));
   expect(writes.map((c) => [c.method, c.path, c.body])).toEqual([['POST', '/api/email/image-origins', { origin: 'https://ads.example' }]]);
   expect(loads()).toBe(before + 2);   // both lists reloaded
+});
+
+test('an HTML body is part of the page (sinter-mail): its images through the proxy, again once their origin is allowed', async () => {
+  htmlBody = '<style>p { color: #c00 }</style><p>Hello <a href="https://shop.example/x">shop</a></p>'
+    + '<img src="https://img.example/a.png" alt="logo"><img src="cid:part1@x"><script>alert(1)</script>';
+  const { root, settle, requests } = await show({ 'POST /api/email/image-origins': null, 'PATCH /api/email/message/flags': null });
+  rows(root)[0].click();
+  await settle();
+  const body = root.querySelector('.reader .mail-html .mail')!;
+  expect(root.querySelector('.reader iframe')).toBeNull();
+  expect(body.querySelector('p')!.textContent).toBe('Hello shop');
+  expect((body.querySelector('p') as HTMLElement).style.color).toBe('rgb(204, 0, 0)');
+  expect(body.querySelector('script')).toBeNull();
+  const link = body.querySelector('a')!;
+  expect([link.getAttribute('href'), link.getAttribute('target'), link.getAttribute('rel')]).toEqual(['https://shop.example/x', '_blank', 'noopener noreferrer']);
+  const srcs = () => [...body.querySelectorAll('img')].map((i) => i.getAttribute('src'));
+  expect(srcs()).toEqual([
+    '/api/email/proxy-image?v=0&url=https%3A%2F%2Fimg.example%2Fa.png',
+    '/api/email/proxy-image?account_id=work&mailbox=INBOX&uid=3&cid=part1%40x',
+  ]);
+  const notice = root.querySelector('.reader .images-notice')!;
+  notice.querySelector<HTMLButtonElement>('button.split-start')!.click();
+  await settle();
+  expect(requests.calls.filter((c) => c.method === 'POST' && c.path === '/api/email/image-origins').map((c) => c.body)).toEqual([{ origin: 'https://img.example' }]);
+  expect(srcs()[0]).toBe('/api/email/proxy-image?v=1&url=https%3A%2F%2Fimg.example%2Fa.png');
 });
 
 test('removing the open virtual folder drops it and goes back to the inbox', async () => {
@@ -375,14 +403,14 @@ test('reply opens the compose dialog with the quoted message, and sends it', asy
   rows(root)[2].click();
   await settle();
   rows(root)[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));   // the reply button's shortcut
-  root.querySelector<HTMLDialogElement>('#mail-compose')!.showModal();
+  root.querySelector<HTMLDialogElement>('#email-compose')!.showModal();
   await settle();
   expect(root.querySelector<HTMLInputElement>('#compose-subject')!.value).toBe('Re: First');
   expect(root.querySelector<HTMLInputElement>('#compose-to')!.value).toBe('Sender 1 <s1@x>');
   expect(root.querySelector<HTMLTextAreaElement>('.compose-body')!.value).toContain('> body 1');
   root.querySelector<HTMLFormElement>('.compose-form')!.requestSubmit();
   await settle();
-  expect(root.querySelector<HTMLDialogElement>('#mail-compose')!.open).toBe(false);
+  expect(root.querySelector<HTMLDialogElement>('#email-compose')!.open).toBe(false);
 });
 
 test('leaving the page is refused while the open draft has been edited, with a note; untouched or discarded, it goes', async () => {
@@ -391,7 +419,7 @@ test('leaving the page is refused while the open draft has been edited, with a n
   await settle();
   rows(root)[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));
   await settle();
-  const dialog = root.querySelector<HTMLDialogElement>('#mail-compose')!;
+  const dialog = root.querySelector<HTMLDialogElement>('#email-compose')!;
   const leave = async () => {
     const click = new MouseEvent('click', { bubbles: true, cancelable: true });
     root.querySelector('nav[data-rail] a[href$="/calendar/"]')!.dispatchEvent(click);
@@ -408,7 +436,7 @@ test('leaving the page is refused while the open draft has been edited, with a n
   expect(await leave()).toBe(true);
   expect(dialog.querySelector('[role=alert]')!.textContent).toBe(m.mail_leaveDraft());
 
-  root.querySelector<HTMLButtonElement>(`#mail-compose footer button[commandfor="mail-compose"]`)!.click();   // Discard
+  root.querySelector<HTMLButtonElement>(`#email-compose footer button[commandfor="email-compose"]`)!.click();   // Discard
   await settle();
   expect(dialog.open).toBe(false);
   expect(await leave()).toBe(false);
@@ -431,7 +459,7 @@ test('a draft shared from another page opens compose once, from the default iden
     { identity_id: 'i1', account_id: 'work', name: 'Me', email: 'me@x', is_default: false, sort_order: 0 },
     { identity_id: 'i2', account_id: 'work', name: 'Also me', email: 'also@x', is_default: true, sort_order: 1 },
   ] } }, { subject: 'followup-Ada', files: [card] });
-  const dialog = root.querySelector<HTMLDialogElement>('#mail-compose')!;
+  const dialog = root.querySelector<HTMLDialogElement>('#email-compose')!;
   expect(dialog.open).toBe(true);
   expect(root.querySelector<HTMLInputElement>('#compose-subject')!.value).toBe('followup-Ada');
   expect(root.querySelector('.compose-attachments')!.textContent).toContain('followup-ada.vcf');
@@ -449,7 +477,7 @@ test('a draft shared from another page opens compose once, from the default iden
 test('without a shared draft, compose stays closed', async () => {
   const { root, pendingCalls } = await show();
   expect(pendingCalls()).toBe(1);
-  expect(root.querySelector<HTMLDialogElement>('#mail-compose')!.open).toBe(false);
+  expect(root.querySelector<HTMLDialogElement>('#email-compose')!.open).toBe(false);
 });
 
 test('a calendar attachment opens the import dialog with its draft', async () => {

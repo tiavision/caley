@@ -325,8 +325,9 @@ async fn main() -> anyhow::Result<()> {
 /// The production frontend (Vite build) loads only external scripts plus sinter's inline
 /// Speculation Rules (prefetch of the app's other pages), so `script-src 'self'
 /// 'inline-speculation-rules'` is safe (that keyword allows no executable inline script); inline `style=` attributes require
-/// `style-src 'unsafe-inline'`. Email HTML is rendered in a sandboxed srcdoc iframe
-/// whose images are proxied to same-origin or `data:`, both covered below.
+/// `style-src 'unsafe-inline'`. Email HTML is parsed in the page by sinter-mail and rendered as
+/// part of it (no iframe, so `frame-src 'none'`); its images are proxied to same-origin or `data:`,
+/// both covered below.
 async fn security_headers(req: Request, next: Next) -> Response {
     const CSP: &str = "default-src 'self'; \
         base-uri 'self'; \
@@ -337,7 +338,7 @@ async fn security_headers(req: Request, next: Next) -> Response {
         manifest-src 'self'; \
         style-src 'self' 'unsafe-inline'; \
         script-src 'self' 'inline-speculation-rules'; \
-        frame-src 'self'";
+        frame-src 'none'";
 
     let mut resp = next.run(req).await;
     let h = resp.headers_mut();

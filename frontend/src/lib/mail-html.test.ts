@@ -1,106 +1,63 @@
 import { describe, expect, it } from 'vitest';
-import { cidReferencesFromHtml, imageOriginsFromHtml, prepareEmailHtml, restoreForwardedImageSources } from './mail-html.ts';
+import { parse } from '@tiavision/sinter-mail';
+import type { Body, Element, Node } from '@tiavision/sinter-mail';
+import { cidReferencesFromHtml, withInlineImages } from './mail-html.ts';
+import { bodyImages, setsColors } from './mail.ts';
+import { progressive } from './mail-body.ts';
 
-function body(html: string): HTMLElement {
-  return new DOMParser().parseFromString(html, 'text/html').body;
+const ref = { account_id: 'acct 1', mailbox: 'INBOX/Receipts', uid: 42 };
+
+function elements(node: Body | Node, tag: string): Element[] {
+  if (node.type === 'text') return [];
+  const own = 'tag' in node && node.tag === tag ? [node] : [];
+  return [...own, ...node.children.flatMap((c) => elements(c, tag))];
 }
 
-describe('prepareEmailHtml', () => {
-  it('rewrites remote images through the proxy and reports origins', () => {
-    const html = prepareEmailHtml('<img src="https://img.example.test/pixel.png?x=1&y=2" alt="pixel">');
-    const img = body(html).querySelector('img')!;
-
-    expect(img.getAttribute('src')).toBe('/api/email/proxy-image?url=https%3A%2F%2Fimg.example.test%2Fpixel.png%3Fx%3D1%26y%3D2');
-    expect(imageOriginsFromHtml(html)).toEqual(['https://img.example.test']);
+describe('bodyImages (email.parse options)', () => {
+  it('sends remote images through the proxy, versioned, and lists their origins', () => {
+    const body = parse('<img src="https://img.example.test/pixel.png?x=1&y=2" alt="pixel">', bodyImages(ref, null, 3));
+    expect(elements(body, 'img')[0].attrs.src).toBe('/api/email/proxy-image?v=3&url=https%3A%2F%2Fimg.example.test%2Fpixel.png%3Fx%3D1%26y%3D2');
+    expect(body.images.origins).toEqual(['https://img.example.test']);
   });
 
-  it('rewrites cid images only when message context is available', () => {
-    const html = prepareEmailHtml('<img src="cid:logo@example.test">', {
-      accountId: 'acct 1',
-      mailbox: 'INBOX/Receipts',
-      uid: 42,
-    });
-    const img = body(html).querySelector('img')!;
+  it('loads inline images from the message, or from a decrypted message\'s parts', () => {
+    const html = '<img src="cid:logo@example.test">';
+    expect(elements(parse(html, bodyImages(ref, null, 0)), 'img')[0].attrs.src)
+      .toBe('/api/email/proxy-image?account_id=acct%201&mailbox=INBOX%2FReceipts&uid=42&cid=logo%40example.test');
+    const data = 'data:image/png;base64,iVBORw0KGgo=';
+    expect(elements(parse(html, bodyImages(ref, { 'logo@example.test': data }, 0)), 'img')[0].attrs.src).toBe(data);
+  });
+});
 
-    expect(img.getAttribute('src')).toBe('/api/email/proxy-image?account_id=acct%201&mailbox=INBOX%2FReceipts&uid=42&cid=logo%40example.test');
-
-    const withoutContext = prepareEmailHtml('<img src="cid:logo@example.test">');
-    expect(body(withoutContext).querySelector('img')!.hasAttribute('src')).toBe(false);
+describe('inline images of a forward', () => {
+  it('lists the cid references', () => {
+    expect(cidReferencesFromHtml('<img src="cid:logo@example.test"><img src="https://x.test/a.png"><img src=" CID:chart@example.test">'))
+      .toEqual(['logo@example.test', 'chart@example.test']);
   });
 
-  it('allows non-svg data images only on img src', () => {
-    const html = prepareEmailHtml(`
-      <img src="data:image/png;base64,iVBORw0KGgo=">
-      <img src="data:image/svg+xml;base64,PHN2Zy8+">
-      <a href="data:image/png;base64,iVBORw0KGgo=">data link</a>
-    `);
-    const doc = body(html);
-    const imgs = doc.querySelectorAll('img');
-
-    expect(imgs[0].getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=');
-    expect(imgs[1].hasAttribute('src')).toBe(false);
-    expect(doc.querySelector('a')!.hasAttribute('href')).toBe(false);
+  it('writes in the decrypted parts, keeping the others', () => {
+    expect(withInlineImages('<img src="cid:a.b@x"><img src="cid:c@x">', { 'a.b@x': 'data:image/png;base64,AA==' }))
+      .toBe('<img src="data:image/png;base64,AA=="><img src="cid:c@x">');
   });
+});
 
-  it('strips direct-load tags and attributes outside img src', () => {
-    const html = prepareEmailHtml(`
-      <picture><source src="https://tracker.example.test/source.png" srcset="https://tracker.example.test/2x.png 2x"><img srcset="https://tracker.example.test/set.png 2x" src="https://tracker.example.test/img.png"></picture>
-      <video poster="https://tracker.example.test/poster.png" src="https://tracker.example.test/movie.mp4"></video>
-      <table background="https://tracker.example.test/bg.png"><tr><td>ok</td></tr></table>
-    `);
-    const doc = body(html);
-
-    expect(doc.querySelector('picture')).toBeNull();
-    expect(doc.querySelector('source')).toBeNull();
-    expect(doc.querySelector('video')).toBeNull();
-    expect(doc.querySelector('img')!.hasAttribute('srcset')).toBe(false);
-    expect(doc.querySelector('img')!.getAttribute('src')).toBe('/api/email/proxy-image?url=https%3A%2F%2Ftracker.example.test%2Fimg.png');
-    expect(doc.querySelector('table')!.hasAttribute('background')).toBe(false);
+describe('setsColors', () => {
+  it('is true when the mail sets a text or background colour anywhere, by style or legacy attribute', () => {
+    expect(setsColors(parse('<p>plain <b>text</b></p>'))).toBe(false);
+    expect(setsColors(parse('<div><p style="color:#222">dark text, no background</p></div>'))).toBe(true);
+    expect(setsColors(parse('<table><tr><td bgcolor="#f5f5f5">row</td></tr></table>'))).toBe(true);
+    expect(setsColors(parse('<body style="background:#fff"><p>x</p></body>'))).toBe(true);
   });
+});
 
-  it('keeps safe links and strips unsafe links', () => {
-    const html = prepareEmailHtml(`
-      <a href="https://example.test/path">https</a>
-      <a href="mailto:user@example.test">mail</a>
-      <a href="javascript:alert(1)">js</a>
-      <a href=" DATA:text/html,<script>alert(1)</script>">data</a>
-    `);
-    const links = [...body(html).querySelectorAll('a')];
-
-    expect(links[0].getAttribute('href')).toBe('https://example.test/path');
-    expect(links[0].getAttribute('target')).toBe('_blank');
-    expect(links[0].getAttribute('rel')).toBe('noopener noreferrer');
-    expect(links[1].getAttribute('href')).toBe('mailto:user@example.test');
-    expect(links[2].hasAttribute('href')).toBe(false);
-    expect(links[3].hasAttribute('href')).toBe(false);
-  });
-
-  it('sanitizes inline styles', () => {
-    const html = prepareEmailHtml('<p style="color: red; background-image: url(https://tracker.example.test/x.png); position: fixed; font-weight: bold">text</p>');
-    const style = body(html).querySelector('p')!.getAttribute('style') ?? '';
-
-    expect(style).toContain('color: red');
-    expect(style).toContain('font-weight: bold');
-    expect(style).not.toContain('url');
-    expect(style).not.toContain('position');
-  });
-
-  it('restores prepared image URLs to portable sources for forwarding', () => {
-    const prepared = `
-      <img src="/api/email/proxy-image?account_id=acct%201&mailbox=INBOX&uid=42&cid=logo%40example.test">
-      <img src="/api/email/proxy-image?url=https%3A%2F%2Fimg.example.test%2Fpixel.png%3Fx%3D1">
-    `;
-    const html = restoreForwardedImageSources(prepared);
-    const imgs = [...body(html).querySelectorAll('img')];
-
-    expect(imgs[0].getAttribute('src')).toBe('cid:logo@example.test');
-    expect(imgs[1].getAttribute('src')).toBe('https://img.example.test/pixel.png?x=1');
-    expect(cidReferencesFromHtml(html)).toEqual(['logo@example.test']);
-  });
-
-  it('extracts cid references from prepared display HTML', () => {
-    const html = '<img src="/api/email/proxy-image?account_id=a&mailbox=m&uid=1&cid=chart%40example.test">';
-
-    expect(cidReferencesFromHtml(html)).toEqual(['chart@example.test']);
+describe('mailBody.progressive', () => {
+  it('numbers a copy of the frozen tree, the same copy for the same tree', () => {
+    const tree = parse('<p>a</p><p>b <b>c</b></p>', {});
+    const body = progressive(tree);
+    expect(body).not.toBe(tree);
+    expect(Object.isFrozen(tree)).toBe(true);
+    expect([body.head, body.children.map((c) => c.n)]).toEqual([200, [0, 2]]);
+    expect(progressive(tree)).toBe(body);
+    expect(progressive(parse('<p>a</p><p>b <b>c</b></p>', {}))).toBe(body);   // parse keeps one tree per source and options
   });
 });
