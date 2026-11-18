@@ -520,11 +520,19 @@ $phone: 639px;
 }
 
 // The reader's HTML body: a mail wider than the reader (a 600px newsletter on a phone) scrolls sideways in its box,
-// the reader vertically.
+// the reader vertically. The padding is the mail root's own, inside the background sinter-mail paints there (the
+// mail's <body> background, a newsletter's grey): on the box around it, it was a frame in the canvas's white. The
+// root is at least the box's width and as wide as a wider mail, so that background covers what scrolls in too.
 .mail-html {
   overflow-x: auto;
   overscroll-behavior-x: contain;
-  padding: var(--tm-space-sm) var(--tm-space-md);
+
+  > .mail {
+    box-sizing: border-box;
+    inline-size: fit-content;
+    min-inline-size: 100%;
+    padding: var(--tm-space-sm) var(--tm-space-md);
+  }
 }
 
 .detail-status {
