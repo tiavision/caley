@@ -241,8 +241,12 @@
             </template>
             <template data-sn-else>
               <!-- Month view (was MonthView.svelte) -->
-              <div class="month" data-layout="stack" data-sn-let="{ cells: monthCells(gridMonth) }">
-                <div class="month-view">
+              <!-- One grid per month (the single-item loop): a new month mounts a new grid, which fades in
+                   (calendar.scss), and its <month-fit> observes that grid. `days`: the response only once it is this
+                   month's (monthDaysOf()); until then the month's days show placeholders. -->
+              <div class="month" data-layout="stack">
+                <template data-sn-for="ym in [gridMonth]" data-sn-key="ym">
+                <div class="month-view" data-sn-let="{ cells: monthCells(ym), days: monthDaysOf(monthDays, ym) }">
                   <div class="dow" data-layout="grid" data-cols="7" data-gap="none" aria-hidden="true">
                     <template data-sn-for="(name, i) in monthGridHeader()" data-sn-key="i">
                       <span data-caption data-sn-text="name"></span>
@@ -250,10 +254,10 @@
                   </div>
                   <div class="month-grid" data-layout="grid" data-cols="7" data-gap="none" role="group" data-sn-class="{fitting: !fit.settled}"
                        data-sn-style="{'--row-count': String(cells.length / 7)}"
-                       data-sn-attr="{'aria-label': monthLabel(gridMonth, $locale)}">
+                       data-sn-attr="{'aria-label': monthLabel(ym, $locale)}">
                     <template data-sn-for="cell in cells" data-sn-key="cell.date_str">
                       <div class="month-cell" data-layout="stack" data-gap="none"
-                           data-sn-let="{ ce: cellEvents(monthDays, cell.date_str, fit.counts) }"
+                           data-sn-let="{ ce: cellEvents(days, cell.date_str, fit.counts) }"
                            data-sn-class="{'other-month': !cell.is_current_month, 'has-events': ce.all.length > 0, flow: !!fit.flow[cell.date_str]}"
                            data-sn-attr="{'data-date': cell.date_str}"
                            data-sn-style="{'--lines': String(fit.lines[cell.date_str] ?? 1)}"
@@ -262,7 +266,7 @@
                              rest run the full width (calendar.scss), so the number takes no row of its own. -->
                         <div class="cell-events" data-grow>
                           <span class="day-num" data-sn-attr="{'aria-current': cell.date_str === today ? 'date' : null}"><span data-sn-text="String(cell.day_number)"></span></span>
-                          <template data-sn-if="cell.is_current_month && !hasDay(monthDays, cell.date_str) && !$meta.monthDays.error">
+                          <template data-sn-if="cell.is_current_month && !hasDay(days, cell.date_str) && !$meta.monthDays.error">
                             <span class="placeholder-chip" aria-hidden="true"></span>
                           </template>
                           <template data-sn-if="ce.shown.length > 0">
@@ -298,8 +302,9 @@
                       </div>
                     </template>
                   </div>
-                    <month-fit data-sn-prop="{ data: monthDays }" data-sn-on-fit="fit = $event.detail"></month-fit>
+                  <month-fit data-sn-prop="{ data: days }" data-sn-on-fit="fit = $event.detail"></month-fit>
                 </div>
+                </template>
               </div>
             </template>
           </div>

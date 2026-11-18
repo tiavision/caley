@@ -107,7 +107,7 @@ export {
 export {
   userTz, addDays, mondayOf, monthOf, addMonths, weekRangeText, dayLabel, dayCollapsed, eventsOn, weekMove,
   weekPositions, weekColumnDate, farStep, inWeek, weekdayNames, monthGridHeader, monthNames, pickerYears, monthTitle,
-  pickerMonth, cellEvents, swipeStep, monthLabel, monthCells, monthRange, weekDates, hasDay,
+  pickerMonth, cellEvents, swipeStep, monthLabel, monthCells, monthRange, monthDaysOf, weekDates, hasDay,
 } from './lib/calendar.ts';
 export { threadOfEmail } from './lib/thread.ts';
 

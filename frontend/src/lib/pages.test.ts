@@ -1,7 +1,8 @@
 import '../test-messages.ts';
 // The small helpers the pages' handlers apply (`x = fn(…)`): calendar, search, contacts, create-calendar dialog.
 import { describe, expect, test } from 'vitest';
-import { farStep, hasDay, inWeek, monthCells, monthRange, swipeStep, weekDates } from './calendar.ts';
+import type { DayEventsJson } from '../types/calendar.ts';
+import { farStep, hasDay, inWeek, monthCells, monthDaysOf, monthRange, swipeStep, weekDates } from './calendar.ts';
 import { calendarKey, calendarsLabel, newCalendarBody, newCalendarDraft, sameEvent } from './events.ts';
 import { addressbooksLabel, sameContact } from './contacts.ts';
 import { elementIn } from './dom.ts';
@@ -14,6 +15,16 @@ const touch = (x: number, y: number) => ({ changedTouches: [{ clientX: x, client
 describe('calendar', () => {
   // The backend's grid (list_calendar in backend/src/calendar/mod.rs): from the Monday on or before the 1st, whole
   // weeks through the week of the last day. The page builds it itself, so both must agree.
+  test("monthDaysOf: the last month's response is not the next one's, though they share a row", () => {
+    const day = (iso: string) => ({ date_iso: iso, events: [] }) as unknown as DayEventsJson;
+    const range = (start: string, end: string) => { const out = []; for (let d = new Date(`${start}T12:00`); d <= new Date(`${end}T12:00`); d.setDate(d.getDate() + 1)) out.push(day(d.toISOString().slice(0, 10))); return out; };
+    const october = range('2026-09-28', '2026-11-01');
+    const november = range('2026-10-26', '2026-12-06');
+    expect(monthDaysOf(october, '2026-11')).toEqual([]); // has Oct 26 – Nov 1, the first row of November
+    expect(monthDaysOf(november, '2026-11')).toBe(november);
+    expect(monthDaysOf(null, '2026-11')).toEqual([]);
+  });
+
   test('monthCells: whole weeks around the month, as /api/calendar builds them', () => {
     expect(monthRange('2026-11')).toEqual({ start: '2026-10-26', end: '2026-12-06' }); // starts on a Sunday: 6 rows
     expect(monthRange('2026-06')).toEqual({ start: '2026-06-01', end: '2026-07-05' }); // starts on a Monday

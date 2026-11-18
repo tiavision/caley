@@ -153,6 +153,10 @@
   block-size: 100%;
   min-block-size: 0;
 }
+// A new month's grid (one per month, calendar/index.html) fades in, the old one gone at once: a short blink
+// rather than a jump, at every width (buttons, keys, swipes). Reduced motion keeps it: a fade does not move.
+.month-grid { animation: month-in 160ms ease-out; }
+@keyframes month-in { from { opacity: 0; } }
 // Weekday names: each at the end of its column, right above the day numbers (cell padding 2px + the number's 2px = xs),
 // in the case the messages give ("Mo", "Di"); the grid's top rule is the only line under them.
 .month-view .dow {

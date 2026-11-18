@@ -176,6 +176,18 @@ export function hasDay(days: readonly DayEventsJson[] | null | undefined, iso: s
   return !!days?.some((d) => d.date_iso === iso);
 }
 
+const NO_DAYS: readonly DayEventsJson[] = Object.freeze([]);
+
+/**
+ * The /api/events response if it is the month grid's `ym` (it has the grid's first and last day), else none. While
+ * the next month loads the resource still holds the last one, which shares the grid's first or last row with it:
+ * those cells would show the old response's events, then lose them while <month-fit> fits the new month.
+ */
+export function monthDaysOf(days: readonly DayEventsJson[] | null | undefined, ym: string): readonly DayEventsJson[] {
+  const { start, end } = monthRange(ym);
+  return days && hasDay(days, start) && hasDay(days, end) ? days : NO_DAYS;
+}
+
 /** A month of the picker's grid with its month or year changed by the selects. */
 export function pickerMonth(grid: MonthGridJson | null, field: 'month' | 'year', value: string): string {
   const year = field === 'year' ? Number(value) : grid?.year ?? new Date().getFullYear();
