@@ -45,7 +45,7 @@ p256 = { version = "0.14", features = ["ecdh"] }
 rust-stemmers = "1.2"
 async-imap = { version = "0.12", default-features = false, features = ["runtime-tokio"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
-tokio-rustls = "0.26"
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12"] }
 rustls-pki-types = "1"
 webpki-roots = "1.0"
 mail-parser = "1"
@@ -57,7 +57,6 @@ flate2 = "1"
 zstd = "0.14"
 tokio-util = { version = "0.7", features = ["io", "io-util"] }
 webauthn-rs = { version = "0.6", features = ["danger-allow-state-serialisation"] }
-openssl = { version = "0.10", features = ["vendored"] }
 utoipa = { version = "6", features = ["axum_extras", "preserve_order"] }
 utoipa-axum = "0.3"
 axum-extra = { version = "0.12", default-features = false, features = ["query", "form"] }

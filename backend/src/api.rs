@@ -7,12 +7,17 @@
 //!
 //! Paths in the annotations are relative to `/api` (`path = "/calendars"`), the spec's server.
 
+#[cfg(test)]
+use utoipa::OpenApi;
+use utoipa::ToSchema;
+#[cfg(test)]
 use utoipa::openapi::OpenApi as Spec;
-use utoipa::{OpenApi, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 
 use crate::oidc::AppState;
 
+// The spec is only written by the test below; the binary serves no spec.
+#[cfg(test)]
 #[derive(OpenApi)]
 #[openapi(
     info(title = "Caley", description = "Caley's JSON API: calendars, contacts, mail and OpenPGP keys."),
@@ -119,6 +124,7 @@ pub fn public() -> OpenApiRouter<AppState> {
 }
 
 /// The spec of every route under `/api`.
+#[cfg(test)]
 pub fn spec() -> Spec {
     let mut doc = ApiDoc::openapi();
     doc.merge(private().into_openapi());
