@@ -3,21 +3,16 @@
 //! The spec is `frontend/openapi.json`, which the frontend build reads (`sinter({ apis })`): every
 //! resource and action path, query parameter, request body and response type of the pages is checked
 //! against it. The test below fails when the file is stale; `UPDATE_OPENAPI=1 cargo test openapi`
-//! writes it.
+//! writes it. `caley --openapi` prints the spec (the Docker image builds the frontend against it).
 //!
 //! Paths in the annotations are relative to `/api` (`path = "/calendars"`), the spec's server.
 
-#[cfg(test)]
-use utoipa::OpenApi;
-use utoipa::ToSchema;
-#[cfg(test)]
 use utoipa::openapi::OpenApi as Spec;
+use utoipa::{OpenApi, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 
 use crate::oidc::AppState;
 
-// The spec is only written by the test below; the binary serves no spec.
-#[cfg(test)]
 #[derive(OpenApi)]
 #[openapi(
     info(title = "Caley", description = "Caley's JSON API: calendars, contacts, mail and OpenPGP keys."),
@@ -123,8 +118,7 @@ pub fn public() -> OpenApiRouter<AppState> {
         .merge(crate::oidc::public_routes())
 }
 
-/// The spec of every route under `/api`.
-#[cfg(test)]
+/// The spec of every route under `/api` (`caley --openapi` prints it).
 pub fn spec() -> Spec {
     let mut doc = ApiDoc::openapi();
     doc.merge(private().into_openapi());

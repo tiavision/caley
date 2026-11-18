@@ -1,11 +1,3 @@
-FROM node:26-bookworm AS frontend-build
-
-WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
-
 FROM rust:1-bookworm AS backend-build
 
 WORKDIR /app/backend
@@ -16,6 +8,18 @@ COPY backend/Cargo.toml backend/Cargo.lock ./
 COPY backend/src/ src/
 COPY backend/migrations migrations/
 RUN cargo build --release --target x86_64-unknown-linux-musl
+# The spec of the routes this binary serves, for the frontend build below.
+RUN target/x86_64-unknown-linux-musl/release/caley --openapi > /app/openapi.json
+
+FROM node:26-bookworm AS frontend-build
+
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+# The pages are checked against the binary's own spec, not the committed copy (which may be stale).
+COPY --from=backend-build /app/openapi.json openapi.json
+RUN npm run build
 
 FROM scratch
 

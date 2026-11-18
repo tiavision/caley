@@ -91,6 +91,12 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // `caley --openapi`: print the OpenAPI spec of the JSON API and exit, needing no configuration.
+    // The Dockerfile writes it into the frontend, whose build checks the pages against it.
+    if std::env::args().skip(1).eq(["--openapi"]) {
+        println!("{}", api::spec().to_pretty_json()?);
+        return Ok(());
+    }
     dotenv().ok();
     rustls::crypto::ring::default_provider()
         .install_default()
