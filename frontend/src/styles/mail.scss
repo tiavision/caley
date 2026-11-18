@@ -32,9 +32,10 @@ $phone: 639px;
   background: color-mix(in oklch, var(--tm-text) 25%, transparent);
 }
 
+// No border of its own beside the columns: the resize handle next to it is the line (a border made it a pixel wider
+// than the other handle's); the drawer (phones, below) has one.
 .mail-sidebar {
   background: var(--tm-bg);
-  border-inline-end: 1px solid var(--tm-border);
 }
 
 .section-header {
@@ -736,6 +737,7 @@ $phone: 639px;
     translate: -100% 0;
     transition: translate 0.25s var(--tm-ease);
     box-shadow: var(--tm-shadow-lg);
+    border-inline-end: 1px solid var(--tm-border);
 
     &.open {
       translate: 0 0;
