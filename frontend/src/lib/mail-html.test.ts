@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parse } from '@tiavision/sinter-mail';
 import type { Body, Element, Node } from '@tiavision/sinter-mail';
 import { cidReferencesFromHtml, withInlineImages } from './mail-html.ts';
-import { bodyImages, setsColors } from './mail.ts';
+import { bodyImages, keepsLight } from './mail.ts';
 import { progressive } from './mail-body.ts';
 
 const ref = { account_id: 'acct 1', mailbox: 'INBOX/Receipts', uid: 42 };
@@ -41,12 +41,20 @@ describe('inline images of a forward', () => {
   });
 });
 
-describe('setsColors', () => {
+describe('keepsLight', () => {
   it('is true when the mail sets a text or background colour anywhere, by style or legacy attribute', () => {
-    expect(setsColors(parse('<p>plain <b>text</b></p>'))).toBe(false);
-    expect(setsColors(parse('<div><p style="color:#222">dark text, no background</p></div>'))).toBe(true);
-    expect(setsColors(parse('<table><tr><td bgcolor="#f5f5f5">row</td></tr></table>'))).toBe(true);
-    expect(setsColors(parse('<body style="background:#fff"><p>x</p></body>'))).toBe(true);
+    expect(keepsLight(parse('<p>plain <b>text</b></p>'))).toBe(false);
+    expect(keepsLight(parse('<div><p style="color:#222">dark text, no background</p></div>'))).toBe(true);
+    expect(keepsLight(parse('<table><tr><td bgcolor="#f5f5f5">row</td></tr></table>'))).toBe(true);
+    expect(keepsLight(parse('<body style="background:#fff"><p>x</p></body>'))).toBe(true);
+  });
+  it('is false for a mail that says it works on a dark page: its color-scheme, or dark rules', () => {
+    expect(keepsLight(parse('<meta name="color-scheme" content="light dark"><p><a href="https://example.com/" style="color:#a85fb0">a</a></p>'))).toBe(false);
+    expect(keepsLight(parse('<html style="color-scheme: light dark"><p style="color:dimgray">x</p>'))).toBe(false);
+    expect(keepsLight(parse('<style>p { color: #222 } @media (prefers-color-scheme: dark) { p { color: #eee } }</style><p>x</p>'))).toBe(false);
+    // light only, or a dark rule that changes no colour: kept light
+    expect(keepsLight(parse('<meta name="color-scheme" content="only light"><p style="color:#222">x</p>'))).toBe(true);
+    expect(keepsLight(parse('<style>@media (prefers-color-scheme: dark) { img { width: 1px } }</style><p style="color:#222">x</p>'))).toBe(true);
   });
 });
 

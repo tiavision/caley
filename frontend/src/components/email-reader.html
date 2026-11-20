@@ -238,7 +238,7 @@
               </template>
               <!-- The HTML body, parsed by sinter-mail (email.parse in the let above), as part of the page; a long one renders
                    progressively (its first part at once, the rest in steps). -->
-              <div class="mail-html" data-sn-class="{ 'mail-light': !!tree && setsColors(tree) }"><mail-body data-sn-prop="{ body: tree && mailBody.progressive(tree) }"></mail-body></div>
+              <div class="mail-html" data-sn-class="{ 'mail-light': !!tree && keepsLight(tree) }"><mail-body data-sn-prop="{ body: tree && mailBody.progressive(tree) }"></mail-body></div>
             </template>
             <template data-sn-else>
               <template data-sn-if="b && b.text">

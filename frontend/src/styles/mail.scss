@@ -501,9 +501,11 @@ $phone: 639px;
   margin: 1em 40px;
 }
 
-// A mail that sets colours of its own (setsColors in src/lib/mail.ts) picked them against a white page, often a dark
-// text colour without a background: it keeps a light canvas in dark mode, the light scheme's canvas and text (system
-// colours follow color-scheme; temper's tokens are resolved for the page's). A mail without colours takes the app's.
+// A mail that sets colours of its own picked them against a white page, often a dark text colour without a background:
+// unless it says it works on a dark one too (keepsLight in src/lib/mail.ts), it keeps a light canvas in dark mode, the
+// light scheme's canvas and text (system colours follow color-scheme; temper's tokens are resolved for the page's).
+// A mail without colours takes the app's; one for dark pages too takes them as well, its own colours that change with
+// the scheme written light-dark() (sinter-mail), which color-scheme: light here would keep light.
 .mail-light {
   color-scheme: light;
   background: Canvas;

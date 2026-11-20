@@ -590,10 +590,13 @@ export function bodyImages(msg: MessageRef, cids: Record<string, string> | null,
 }
 
 /**
- * Does a mail body (email.parse) set colours of its own, text or background? Those were picked against a white page:
- * such a mail gets a light canvas in dark mode (.mail-light), one without takes the app's colours.
+ * Does a mail body (email.parse) keep a light canvas in dark mode (.mail-light)? A mail that sets colours of its own,
+ * text or background, picked them against a white page, unless it says it works on a dark one too (`schemes`: its
+ * `color-scheme`, or `prefers-color-scheme: dark` rules, whose colours then follow the page's scheme as
+ * `light-dark()`). A mail without colours, or one for dark pages, takes the app's colours.
  */
-export function setsColors(body: Body): boolean {
+export function keepsLight(body: Body): boolean {
+  if (body.schemes?.includes('dark')) return false;
   const colored = (n: Body | Node): boolean =>
     n.type !== 'text' && (!!n.style.color || !!n.style['background-color'] || n.children.some(colored));
   return colored(body);
