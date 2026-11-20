@@ -7,6 +7,7 @@ import * as helpers from '../src/sinter.helpers.ts';
 import '../src/islands/common.ts';                 // data-shortcut keys
 import page from './index.html?raw';
 import { app } from '../src/test-components.ts';
+import { EmailWidthComponent } from '../src/components/email-width.html';
 import { retryPolicies } from '../src/lib/retry-policies.ts';
 import type { Message } from '../src/lib/mail.ts';
 import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
@@ -29,7 +30,7 @@ beforeEach(() => { htmlBody = ''; localStorage.clear(); configure({ confirm: () 
 afterEach(() => configure({ confirm: null as never, urlSchemes: [], retry: null }));
 
 async function show(routes: Record<string, RouteResponse> = {}, pending: { subject: string; files: File[] } | null = null, storage = memoryStorage(),
-                    url = 'http://localhost/mail/') {
+                    url = 'http://localhost/mail/', scripts: Record<string, unknown> = {}) {
   const opened: unknown[] = [];
   let pendingCalls = 0;
   const listed = routes['GET /api/email/messages'];
@@ -74,7 +75,7 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
       pendingCompose: () => { pendingCalls++; const p = pending; pending = null; return p; },
     },
   };
-  const r = await render(page, { ...app, messages, requests, actions, helpers, storage, url, streams: { '/api/events/stream': stream } });
+  const r = await render(page, { ...app, scripts: { ...app.scripts, ...scripts }, messages, requests, actions, helpers, storage, url, streams: { '/api/events/stream': stream } });
   await r.settle();
   return { ...r, requests, stream, storage, opened, pendingCalls: () => pendingCalls };
 }
@@ -419,6 +420,19 @@ test('allowing an ignored image origin is one POST to the allow list (the server
   const writes = requests.calls.filter((c) => c.method !== 'GET' && c.path.startsWith('/api/email/image-'));
   expect(writes.map((c) => [c.method, c.path, c.body])).toEqual([['POST', '/api/email/image-origins', { origin: 'https://ads.example' }]]);
   expect(loads()).toBe(before + 2);   // both lists reloaded
+});
+
+test('a narrow reader (a phone) gets the mail\'s mobile layout: its @media rules for a narrow screen', async () => {
+  htmlBody = '<style>.col { width: 300px } @media (max-width: 600px) { .col { width: 100% !important } }</style><table class="col"><tr><td>x</td></tr></table>';
+  const narrow = { EmailWidth: class extends EmailWidthComponent { connected() { this.emit('narrow', true); } } };
+  const wide = await show({ 'PATCH /api/email/message/flags': null });
+  rows(wide.root)[0].click();
+  await wide.settle();
+  expect((wide.root.querySelector('.reader .mail-html .mail table') as HTMLElement).style.width).toBe('300px');
+  const phone = await show({ 'PATCH /api/email/message/flags': null }, null, memoryStorage(), 'http://localhost/mail/', { 'email-width': narrow });
+  rows(phone.root)[0].click();
+  await phone.settle();
+  expect((phone.root.querySelector('.reader .mail-html .mail table') as HTMLElement).style.width).toBe('100%');
 });
 
 test('an HTML body is part of the page (sinter-mail): its images through the proxy, again once their origin is allowed', async () => {

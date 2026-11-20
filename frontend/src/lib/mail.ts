@@ -575,14 +575,16 @@ export function bodyOrigins(all: string[], allowed: string[], ignored: string[])
 }
 
 /**
- * How email.parse treats a body's images (sinter-mail's ParseOptions): remote ones through the image proxy, which
+ * How email.parse reads a body (sinter-mail's ParseOptions): its @media rules for a phone when the reader is `narrow`
+ * (<email-width>), else for a wide screen; remote images through the image proxy, which
  * fetches only the origins the user allowed (a transparent pixel otherwise; `version` changes the URLs after an origin
  * is allowed, so the browser does not keep the pixel), inline ones (`cid:`) from the message's parts, or from `cids`
  * (a decrypted message's parts, as data: URLs).
  */
-export function bodyImages(msg: MessageRef, cids: Record<string, string> | null, version: number): ParseOptions {
+export function bodyImages(msg: MessageRef, cids: Record<string, string> | null, version: number, narrow = false): ParseOptions {
   const ref = `account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
   return {
+    media: narrow ? 'narrow' : 'wide',
     images: 'proxy',
     proxy: `/api/email/proxy-image?v=${version}&url={url}`,
     cid: cids ?? `/api/email/proxy-image?${ref}&cid={cid}`,

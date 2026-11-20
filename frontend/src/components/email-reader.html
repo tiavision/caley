@@ -16,7 +16,7 @@
      Shift+I / Shift+U mark read / unread (on the read toggle, whichever it does). -->
 <template data-sn-component="{ open: MessageRef | null; defaultCal: string }"
           data-sn-emits="{ compose: ComposeDraft; 'origins-open': string[] | null; 'ics-import': ImportDraft; 'thread-open': ThreadRef; 'mail-removed': MessageRef; decrypt: void }">
-  <div data-sn-import="openpgp">
+  <div data-sn-import="openpgp" data-sn-state="{ narrowMail: false }" data-sn-on-narrow="narrowMail = $event.detail">
     <template data-sn-if="open && message && isRef(message, open)">
       <template data-sn-for="msg in [message]" data-sn-key="messageKey(msg)">
         <div class="reader" data-layout="stack" data-gap="none" data-grow
@@ -27,7 +27,7 @@
                encrypted: msg.is_encrypted || !!b?.encrypted,
                html: b?.html ?? '',
                viewMode: mode || (b?.mode ?? 'text'),
-               tree: htmlAddsValue(html) ? email.parse(html, bodyImages(msg, b?.cids ?? null, imageVersion)) : null,
+               tree: htmlAddsValue(html) ? email.parse(html, bodyImages(msg, b?.cids ?? null, imageVersion, narrowMail)) : null,
                imgs: bodyOrigins(tree?.images.origins ?? [], allowedOrigins?.origins ?? [], ignoredOrigins?.origins ?? []),
                archive: archiveMailbox(msg, mailboxes),
                shown: shownAttachments(msg, encrypted),
@@ -238,7 +238,7 @@
               </template>
               <!-- The HTML body, parsed by sinter-mail (email.parse in the let above), as part of the page; a long one renders
                    progressively (its first part at once, the rest in steps). -->
-              <div class="mail-html" data-sn-class="{ 'mail-light': !!tree && keepsLight(tree) }"><mail-body data-sn-prop="{ body: tree && mailBody.progressive(tree) }"></mail-body></div>
+              <div class="mail-html" data-sn-class="{ 'mail-light': !!tree && keepsLight(tree) }"><email-width></email-width><mail-body data-sn-prop="{ body: tree && mailBody.progressive(tree) }"></mail-body></div>
             </template>
             <template data-sn-else>
               <template data-sn-if="b && b.text">
