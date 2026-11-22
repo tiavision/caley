@@ -14,9 +14,9 @@
      controls: /mail/'s pop-out button), `idle` (the text while no message is shown; "Select a message" by default). /mail/view/ fills only `idle`.
      Shortcuts (data-shortcut, src/islands/common.ts): r reply, a reply all, f forward, e archive, # delete,
      Shift+I / Shift+U mark read / unread (on the read toggle, whichever it does). -->
-<template data-sn-component="{ open: MessageRef | null; defaultCal: string }"
+<template data-sn-props="{ open: MessageRef | null; defaultCal: string }"
           data-sn-emits="{ compose: ComposeDraft; 'origins-open': string[] | null; 'ics-import': ImportDraft; 'thread-open': ThreadRef; 'mail-removed': MessageRef; decrypt: void }">
-  <div data-sn-import="openpgp" data-sn-state="{ narrowMail: false }" data-sn-on-narrow="narrowMail = $event.detail">
+  <div data-sn-import="openpgp" data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null) }" data-sn-on-media="media = $event.detail">
     <template data-sn-if="open && message && isRef(message, open)">
       <template data-sn-for="msg in [message]" data-sn-key="messageKey(msg)">
         <div class="reader" data-layout="stack" data-gap="none" data-grow
@@ -27,7 +27,7 @@
                encrypted: msg.is_encrypted || !!b?.encrypted,
                html: b?.html ?? '',
                viewMode: mode || (b?.mode ?? 'text'),
-               tree: htmlAddsValue(html) ? email.parse(html, bodyImages(msg, b?.cids ?? null, imageVersion, narrowMail)) : null,
+               tree: media && htmlAddsValue(html) ? email.parse(html, bodyImages(msg, b?.cids ?? null, imageVersion, media)) : null,
                imgs: bodyOrigins(tree?.images.origins ?? [], allowedOrigins?.origins ?? [], ignoredOrigins?.origins ?? []),
                archive: archiveMailbox(msg, mailboxes),
                shown: shownAttachments(msg, encrypted),
@@ -45,7 +45,7 @@
                         data-sn-class="{flagged: msg.is_flagged}"
                         data-sn-attr="{'aria-label': msg.is_flagged ? m.mail_unflag() : m.mail_flag()}"
                         data-sn-patch="/email/message/flags" data-sn-retry="flags" data-sn-body="flagBody(msg, '\\Flagged', !msg.is_flagged)"
-                        data-sn-optimistic="patch(message, star)"></button>
+                        data-sn-optimistic="merge(message, star)"></button>
                 <button type="button" data-variant="ghost" data-icon="reply" data-tooltip data-shortcut="r"
                         data-sn-on-click="emit('compose', composeDraft('reply', msg, identities, b?.text ?? '', b?.html ?? null))"
                         data-sn-attr="{'aria-label': m.mail_reply()}"></button>
@@ -67,7 +67,7 @@
                           data-sn-attr="{'data-shortcut': msg.is_read ? 'shift-u' : 'shift-i'}"
                           data-sn-on-click="ancestor($el, '[popover]')?.hidePopover()"
                           data-sn-patch="/email/message/flags" data-sn-retry="flags" data-sn-body="flagBody(msg, '\\Seen', !msg.is_read)"
-                          data-sn-optimistic="patch(message, read)"
+                          data-sn-optimistic="merge(message, read)"
                           data-sn-text="msg.is_read ? m.mail_markUnread() : m.mail_markRead()"></button>
                   <template data-sn-if="htmlAddsValue(html)">
                     <template data-sn-if="!encrypted && imgs.all.length > 0">
@@ -103,7 +103,7 @@
                         <button type="button" role="menuitem" data-sn-let="{ kind: folderKind(mb.name) }"
                                 data-sn-post="/email/message/move" data-sn-body="moveBody(msg, mb.name)"
                                 data-sn-then="emit('mail-removed', refOf(msg))">
-                          <email-folder-icon data-sn-prop="{ kind }"></email-folder-icon>
+                          <email-folder-icon data-sn-with="{ kind }"></email-folder-icon>
                           <span data-truncate data-sn-text="folderName(mb.name)"></span>
                         </button>
                       </template>
@@ -183,7 +183,7 @@
                       <template data-sn-if="b && b.importable[att.filename]">
                         <button type="button" data-variant="ghost" data-size="sm" data-icon="import" data-tooltip
                                 data-sn-post="/pgp/key" data-sn-body="b.importable[att.filename]"
-                                data-sn-then="keyNote = m.pgp_publicKeyImported(); keyError = ''; refresh('body')"
+                                data-sn-then="keyNote = m.pgp_publicKeyImported(); keyError = ''; refresh(body)"
                                 data-sn-catch="keyError = m.pgp_publicKeyImportError(); keyNote = ''"
                                 data-sn-attr="{'aria-label': m.pgp_importPublicKeyButton()}"></button>
                       </template>
@@ -224,11 +224,11 @@
                     <span data-layout="row" data-gap="none" data-wrap="none">
                       <button type="button" class="split-start" data-variant="outline" data-tone="accent" data-size="sm"
                               data-sn-post="/email/image-origins" data-sn-body="{origin}"
-                              data-sn-then="refresh('allowedOrigins'); imageVersion = imageVersion + 1"
+                              data-sn-then="refresh(allowedOrigins); imageVersion = imageVersion + 1"
                               data-sn-text="m.mail_allowOrigin({origin})"></button>
                       <button type="button" class="split-end" data-variant="outline" data-tone="danger" data-size="sm" data-icon="ban" data-tooltip
                               data-sn-post="/email/image-blacklist" data-sn-body="{origin}"
-                              data-sn-then="refresh('ignoredOrigins')"
+                              data-sn-then="refresh(ignoredOrigins)"
                               data-sn-attr="{'aria-label': m.mail_blockSilently()}"></button>
                     </span>
                   </template>
@@ -238,7 +238,7 @@
               </template>
               <!-- The HTML body, parsed by sinter-mail (email.parse in the let above), as part of the page; a long one renders
                    progressively (its first part at once, the rest in steps). -->
-              <div class="mail-html" data-sn-class="{ 'mail-light': !!tree && keepsLight(tree) }"><email-width></email-width><mail-body data-sn-prop="{ body: tree && mailBody.progressive(tree) }"></mail-body></div>
+              <div class="mail-html mail-scroll"><mail-width></mail-width><mail-body data-sn-with="{ body: tree && email.progressive(tree) }"></mail-body></div>
             </template>
             <template data-sn-else>
               <template data-sn-if="b && b.text">
@@ -255,11 +255,11 @@
                       <template data-sn-if="unlockError"><p data-tone="danger" role="alert" data-sn-text="unlockError"></p></template>
                       <template data-sn-if="b && b.locked">
                         <button type="button" data-icon="lock-open" data-sn-call="mail.unlock()"
-                                data-sn-then="unlockError = ''; refresh('body')" data-sn-catch="unlockError = loadErrorOr($error, $error.detail ?? m.pgp_unlockError())"
+                                data-sn-then="unlockError = ''; refresh(body)" data-sn-catch="unlockError = loadErrorOr($error, $error.detail ?? m.pgp_unlockError())"
                                 data-sn-text="m.pgp_unlockVaultButton()"></button>
                       </template>
                       <template data-sn-else>
-                        <button type="button" data-icon="lock-open" data-sn-on-click="emit('decrypt'); refresh('body')" data-sn-text="m.pgp_decryptButton()"></button>
+                        <button type="button" data-icon="lock-open" data-sn-on-click="emit('decrypt'); refresh(body)" data-sn-text="m.pgp_decryptButton()"></button>
                       </template>
                     </div>
                   </template>

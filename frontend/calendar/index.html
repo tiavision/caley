@@ -9,7 +9,7 @@
      Shortcuts: c new event, t today, n/p next/previous week or month (data-shortcut on those buttons, e edit in
      <event-detail>); Shift+N/P four weeks or three months (key filters below, farStep()), swipes (swipeStep()):
      days in the week view, months in the month view. -->
-<app-layout data-sn-prop="{ here: '/calendar/' }"
+<app-layout data-sn-with="{ here: '/calendar/' }"
             data-sn-state="{
               view: 'week',
               weekStart: mondayOf(todayIso($now)),
@@ -45,24 +45,24 @@
   <!-- The page's server events (shares the rail's connection). A changed event can move between
        days, so the day lists reload rather than patch one item. -->
   <sn-sync src="/events/stream">
-    <sn-event name="events_refetch" resource="weekDays" op="refetch"></sn-event>
-    <sn-event name="events_refetch" resource="monthDays" op="refetch"></sn-event>
-    <sn-event name="events_refetch" resource="monthGrid" op="refetch"></sn-event>
-    <sn-event name="event_updated" resource="weekDays" op="refetch"></sn-event>
-    <sn-event name="event_updated" resource="monthDays" op="refetch"></sn-event>
-    <sn-event name="event_updated" resource="monthGrid" op="refetch"></sn-event>
-    <sn-event name="event_removed" resource="weekDays" op="refetch" type="EventRemovedEvent"
-              then="detail = sameEvent(detail, {account_id, uid, calendar_href}) ? null : detail; !detail && close('event-detail')"></sn-event>
-    <sn-event name="event_removed" resource="monthDays" op="refetch"></sn-event>
-    <sn-event name="event_removed" resource="monthGrid" op="refetch"></sn-event>
-    <sn-event name="calendars_changed" resource="calendars" op="refetch"></sn-event>
-    <sn-event name="calendars_changed" resource="monthGrid" op="refetch"></sn-event>
+    <sn-event name="events_refetch" resource="weekDays" op="refresh"></sn-event>
+    <sn-event name="events_refetch" resource="monthDays" op="refresh"></sn-event>
+    <sn-event name="events_refetch" resource="monthGrid" op="refresh"></sn-event>
+    <sn-event name="event_updated" resource="weekDays" op="refresh"></sn-event>
+    <sn-event name="event_updated" resource="monthDays" op="refresh"></sn-event>
+    <sn-event name="event_updated" resource="monthGrid" op="refresh"></sn-event>
+    <sn-event name="event_removed" resource="weekDays" op="refresh" type="EventRemovedEvent"
+              then="detail = sameEvent(detail, $event) ? null : detail; !detail && closeDialog('event-detail')"></sn-event>
+    <sn-event name="event_removed" resource="monthDays" op="refresh"></sn-event>
+    <sn-event name="event_removed" resource="monthGrid" op="refresh"></sn-event>
+    <sn-event name="calendars_changed" resource="calendars" op="refresh"></sn-event>
+    <sn-event name="calendars_changed" resource="monthGrid" op="refresh"></sn-event>
   </sn-sync>
   <main data-layout="stack" data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
         data-sn-on-calendar-chosen="defaultCal = $event.detail">
     <div data-layout="stack" data-density="compact" data-grow data-sn-let="{ today: todayIso($now) }">
-      <event-form data-sn-on-event-saved="refresh('weekDays', 'monthGrid', 'monthDays')"
-                  data-sn-on-event-deleted="refresh('weekDays', 'monthGrid', 'monthDays')">
+      <event-form data-sn-on-event-saved="refresh(weekDays, monthGrid, monthDays)"
+                  data-sn-on-event-deleted="refresh(weekDays, monthGrid, monthDays)">
         <div class="cal" data-layout="stack" data-gap="sm" data-pad="sm" data-grow role="application"
              data-sn-on-touchstart="tx = $event.touches[0].clientX; ty = $event.touches[0].clientY"
              data-sn-on-touchend="swipeStep(tx, ty, $event, view) && view === 'week' && (weekStart = addDays(weekStart, swipeStep(tx, ty, $event, view))); swipeStep(tx, ty, $event, view) && (gridMonth = view === 'week' ? monthOf(weekStart) : addMonths(gridMonth, swipeStep(tx, ty, $event, view)))">
@@ -228,7 +228,7 @@
                           <button type="button" class="event-trigger" data-variant="item" data-size="sm" data-bar
                                   data-sn-style="{'--tm-tone': event.color || null}"
                                   data-sn-attr="{tabindex: pos[eventKey(event)] === tabPos ? '0' : '-1', 'data-pos': pos[eventKey(event)]}"
-                                  data-sn-on-click="detail = event; showModal('event-detail')">
+                                  data-sn-on-click="detail = event; openDialog('event-detail')">
                             <small data-muted data-sn-text="eventTimeLabel(event)"></small>
                             <span data-clamp="2" data-sn-text="event.summary"></span>
                           </button>
@@ -261,7 +261,7 @@
                            data-sn-class="{'other-month': !cell.is_current_month, 'has-events': ce.all.length > 0, flow: !!fit.flow[cell.date_str]}"
                            data-sn-attr="{'data-date': cell.date_str}"
                            data-sn-style="{'--lines': String(fit.lines[cell.date_str] ?? 1)}"
-                           data-sn-on-click="dayDate = cell.date_str; fit.narrow && ce.all.length > 0 && showModal('day-events')">
+                           data-sn-on-click="dayDate = cell.date_str; fit.narrow && ce.all.length > 0 && openDialog('day-events')">
                         <!-- The day number floats in the cell's top corner: only the first chip wraps around it, the
                              rest run the full width (calendar.scss), so the number takes no row of its own. -->
                         <div class="cell-events" data-grow>
@@ -274,7 +274,7 @@
                               <template data-sn-for="event in ce.shown" data-sn-key="eventKey(event)">
                                 <button type="button" class="event-trigger" data-variant="item" data-size="sm" data-bar tabindex="-1"
                                         data-sn-style="{'--tm-tone': event.color || null}" data-sn-attr="{title: event.summary}"
-                                        data-sn-on-click="$event.stopPropagation(); detail = event; showModal('event-detail')">
+                                        data-sn-on-click="$event.stopPropagation(); detail = event; openDialog('event-detail')">
                                   <span class="chip-text" data-sn-attr="{'data-day': String(cell.day_number), 'data-today': cell.date_str === today ? '' : null}" data-sn-text="event.summary"></span>
                                 </button>
                               </template>
@@ -282,7 +282,7 @@
                           </template>
                           <template data-sn-if="ce.hidden > 0">
                             <button type="button" class="cell-more" data-variant="link" data-size="sm" data-tone="neutral"
-                                    data-sn-on-click="$event.stopPropagation(); dayDate = cell.date_str; showModal('day-events')"
+                                    data-sn-on-click="$event.stopPropagation(); dayDate = cell.date_str; openDialog('day-events')"
                                     data-sn-text="`+${ce.hidden}`"></button>
                           </template>
                           <!-- Cells too short for chips (calendar.scss, a container query on the cell's height: a phone
@@ -291,7 +291,7 @@
                           <template data-sn-if="ce.all.length > 0">
                             <button type="button" class="cell-dots" data-variant="ghost" tabindex="-1"
                                     data-sn-attr="{'aria-label': dayLabel(cell.date_str, $locale, {dateStyle: 'long'})}"
-                                    data-sn-on-click="$event.stopPropagation(); dayDate = cell.date_str; showModal('day-events')">
+                                    data-sn-on-click="$event.stopPropagation(); dayDate = cell.date_str; openDialog('day-events')">
                               <template data-sn-for="event in ce.all.slice(0, 5)" data-sn-key="eventKey(event)">
                                 <span class="cell-dot" data-sn-style="{'--tm-tone': event.color || null}"></span>
                               </template>
@@ -302,7 +302,7 @@
                       </div>
                     </template>
                   </div>
-                  <month-fit data-sn-prop="{ data: days }" data-sn-on-fit="fit = $event.detail"></month-fit>
+                  <month-fit data-sn-with="{ data: days }" data-sn-on-fit="fit = $event.detail"></month-fit>
                 </div>
                 </template>
               </div>
@@ -318,7 +318,7 @@
           <header data-layout="row" data-gap="xs" data-wrap="none">
             <h2 data-grow data-sn-text="dayLabel(dayDate, $locale, {weekday: 'long', month: 'long', day: 'numeric'})"></h2>
             <button type="button" data-variant="ghost" data-icon="plus" data-sn-attr="{'aria-label': m.event_new()}"
-                    data-sn-on-click="close(); focusDate = dayDate; emit('event-new', newEventDraft(calendars, dayDate, defaultCal))"></button>
+                    data-sn-on-click="closeDialog(); focusDate = dayDate; emit('event-new', newEventDraft(calendars, dayDate, defaultCal))"></button>
             <button type="button" commandfor="day-events" command="close" data-sn-attr="{'aria-label': m.cal_month_close()}"></button>
           </header>
           <!-- the wrapper scrolls, so the list keeps its natural height (rows of a scrolling flex list would shrink) -->
@@ -326,7 +326,7 @@
             <div data-list>
               <template data-sn-for="event in eventsOn(monthDays, dayDate)" data-sn-key="eventKey(event)">
                 <button type="button" data-variant="item" data-bar data-sn-style="{'--tm-tone': event.color || null}"
-                        data-sn-on-click="close(); detail = event; showModal('event-detail')">
+                        data-sn-on-click="closeDialog(); detail = event; openDialog('event-detail')">
                   <small data-muted data-sn-text="eventTimeLabel(event)"></small>
                   <span data-clamp="2" data-sn-text="event.summary"></span>
                 </button>
@@ -335,13 +335,13 @@
           </div>
         </dialog>
 
-        <event-reminders data-sn-prop="{ days: weekDays }"></event-reminders>
+        <event-reminders data-sn-with="{ days: weekDays }"></event-reminders>
 
-        <event-detail data-sn-prop="{ event: detail, threads: true }"
-                      data-sn-on-event-threads="threadRef = threadOfEmail($event.detail.email, $event.detail.event); showModal('thread-dialog')"></event-detail>
-        <thread-dialog data-sn-prop="{ nodes: threadNodes, eventGroups: threadEventGroups, current: threadRef, links: true,
+        <event-detail data-sn-with="{ event: detail, threads: true }"
+                      data-sn-on-event-threads="threadRef = threadOfEmail($event.detail.email, $event.detail.event); openDialog('thread-dialog')"></event-detail>
+        <thread-dialog data-sn-with="{ nodes: threadNodes, eventGroups: threadEventGroups, current: threadRef, links: true,
                                        loading: $meta.threadNodes.loading || $meta.threadEventGroups.loading }"
-                       data-sn-on-event-open="detail = $event.detail; showModal('event-detail')"></thread-dialog>
+                       data-sn-on-event-open="detail = $event.detail; openDialog('event-detail')"></thread-dialog>
       </event-form>
     </div>
   </main>

@@ -9,7 +9,7 @@ import '../test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 const contact = { account_id: 'a1', uid: 'u 1', addressbook_href: '/ab/', fn_name: 'Ada Lovelace', emails: [], phones: [], addresses: [], org: '', has_photo: false };
 
 const page = `<div data-sn-state="{ item: null }">
-  <share-menu data-sn-prop="{ item }"></share-menu>
+  <share-menu data-sn-with="{ item }"></share-menu>
 </div>`;
 
 function actions(nativeShare: boolean, log: Array<[string, ShareItem]>) {

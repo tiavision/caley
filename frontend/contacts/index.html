@@ -3,7 +3,7 @@
      draft: the form dialog's ContactDraft (src/lib/contacts.ts); hiddenBooks: addressbookKey()s filtered out.
      Shortcuts: c = new contact, e = edit the open contact (data-shortcut on those buttons).
      `contact-saved` {detail: the contact}: the form saved it, the detail dialog shows it. -->
-<app-layout data-sn-prop="{ here: '/contacts/', title: 'Caley - Contacts' }"
+<app-layout data-sn-with="{ here: '/contacts/', title: 'Caley - Contacts' }"
             data-sn-state="{
               q: '',
               hiddenBooks: /** @type {string[]} */ ([]),
@@ -14,18 +14,20 @@
               edited: false,
             }">
   <!-- One request for both (preloaded in the head); `cache`: a return visit in this tab shows the last list at once. -->
-  <sn-resource name="contacts" src="/contacts" items="contacts" key="account_id,uid,addressbook_href" order="fn_name" cache></sn-resource>
-  <sn-resource name="addressbooks" src="/contacts" items="addressbooks" key="account_id,href" cache></sn-resource>
+  <sn-resource name="contacts" src="/contacts" select="contacts" key="account_id,uid,addressbook_href" order="fn_name" cache></sn-resource>
+  <sn-resource name="addressbooks" src="/contacts" select="addressbooks" key="account_id,href" cache></sn-resource>
   <!-- The page's server events (shares the rail's connection). -->
   <sn-sync src="/events/stream">
-    <sn-event name="contact_updated" resource="contacts" op="upsert" item="contact" fallback="refetch" type="ContactUpdatedEvent"></sn-event>
+    <!-- An update without the contact (it could not be read back) reloads the list. -->
+    <sn-event name="contact_updated" resource="contacts" op="upsert" value="$event.contact" when="$event.contact" type="ContactUpdatedEvent"></sn-event>
+    <sn-event name="contact_updated" resource="contacts" op="refresh" when="!$event.contact" type="ContactUpdatedEvent"></sn-event>
     <!-- Removed elsewhere while its detail dialog is open: close the dialog. -->
     <sn-event name="contact_removed" resource="contacts" op="remove" type="ContactRemovedEvent"
-              then="sel = sameContact(sel, {account_id, uid, addressbook_href}) ? null : sel; !sel && close('contact-detail')"></sn-event>
-    <sn-event name="contacts_refetch" resource="contacts" op="refetch"></sn-event>
-    <sn-event name="contacts_refetch" resource="addressbooks" op="refetch"></sn-event>
+              then="sel = sameContact(sel, $event) ? null : sel; !sel && closeDialog('contact-detail')"></sn-event>
+    <sn-event name="contacts_refetch" resource="contacts" op="refresh"></sn-event>
+    <sn-event name="contacts_refetch" resource="addressbooks" op="refresh"></sn-event>
   </sn-sync>
-  <main data-gutter data-sn-on-contact-saved="sel = $event.detail; showModal('contact-detail')">
+  <main data-gutter data-sn-on-contact-saved="sel = $event.detail; openDialog('contact-detail')">
     <div data-density="compact"
          data-sn-let="{
            shown: filterContacts(contacts, addressbooks, hiddenBooks, q),
@@ -75,11 +77,6 @@
               </template>
             </div>
           </template>
-          <template data-sn-else>
-            <template data-sn-if="!shown.length">
-              <p data-muted data-sn-text="m.contacts_noContacts()"></p>
-            </template>
-          </template>
         </template>
 
         <template data-sn-for="g in groupByLetter(shown)" data-sn-key="g.letter">
@@ -111,6 +108,10 @@
             </div>
           </section>
         </template>
+        <!-- the list's empty state: no contact (or none the search finds), once the contacts have loaded -->
+        <template data-sn-else>
+          <p data-muted data-sn-text="m.contacts_noContacts()"></p>
+        </template>
       </div>
 
       <button type="button" data-fab data-icon="plus" data-shortcut="c" data-sn-attr="{'aria-label': m.contacts_new()}"
@@ -122,11 +123,11 @@
         <header>
           <h2 data-sn-text="c?.fn_name || ''"></h2>
           <div data-layout="row" data-gap="xs" data-wrap="none">
-            <share-menu data-sn-prop="{ item: c ? contactShare(c) : null }"></share-menu>
+            <share-menu data-sn-with="{ item: c ? contactShare(c) : null }"></share-menu>
             <template data-sn-if="c">
               <button type="button" data-icon="pencil" data-variant="ghost" data-tooltip data-shortcut="e"
                       data-sn-attr="{'aria-label': m.contacts_edit()}"
-                      data-sn-on-click="draft = editDraft(c); formError = ''; close(); showModal('contact-form')"></button>
+                      data-sn-on-click="draft = editDraft(c); formError = ''; closeDialog(); openDialog('contact-form')"></button>
             </template>
             <button type="button" commandfor="contact-detail" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
           </div>
@@ -198,8 +199,8 @@
                     data-sn-delete="/contact"
                     data-sn-body="{account_id: c.account_id, uid: c.uid, addressbook_href: c.addressbook_href}"
                     data-sn-confirm="m.contacts_deleteConfirm()"
-                    data-sn-then="close('contact-detail'); remove(c)"
-                    data-sn-catch="close('contact-detail')"
+                    data-sn-then="closeDialog('contact-detail'); remove(c)"
+                    data-sn-catch="closeDialog('contact-detail')"
                     data-sn-text="m.contacts_delete()"></button>
           </footer>
         </template>
@@ -208,7 +209,7 @@
       <!-- Leaving the page while the open form has been edited (Back or Forward) is refused, with a note. -->
       <dialog id="contact-form" closedby="any" style="--tm-dialog-width: 36rem"
               data-sn-on-input="edited = true" data-sn-on-change="edited = true" data-sn-on-close="edited = false"
-              data-sn-on-navigate="edited && $event.preventDefault(); edited && (formError = m.draft_leave())">
+              data-sn-on-sn-navigate="edited && $event.preventDefault(); edited && (formError = m.draft_leave())">
         <header>
           <h2 data-sn-text="draft.uid ? m.contacts_edit() : m.contacts_new()"></h2>
           <button type="button" commandfor="contact-form" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
@@ -217,7 +218,7 @@
         <form data-layout="stack" data-gap="md"
               data-sn-post="/contact" data-sn-body="draftBody(draft)"
               data-sn-on-submit="saving = true; formError = ''"
-              data-sn-then="saving = false; upsert('contacts', $result); close(); emit('contact-saved', $result)"
+              data-sn-then="saving = false; upsert(contacts, $result); closeDialog(); emit('contact-saved', $result)"
               data-sn-catch="saving = false; formError = m.contacts_error()">
           <template data-sn-if="formError">
             <div data-callout data-tone="danger" role="alert" data-sn-text="formError"></div>

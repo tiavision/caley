@@ -3,7 +3,7 @@
        <share-menu data-sn-prop="{ item: c ? contactShare(c) : null }"></share-menu>
      On touch screens with the Web Share API the button opens the system share sheet instead of the menu.
      Once per page (it has the popover #share-menu), not inside a data-sn-for. Actions: src/actions/share.ts. -->
-<template data-sn-component="{ item: ShareItem | null }">
+<template data-sn-props="{ item: ShareItem | null }">
   <div data-layout="row" data-wrap="none">
     <sn-resource name="shareNative" call="share.native()"></sn-resource>
     <template data-sn-if="shareNative">

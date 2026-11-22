@@ -5,14 +5,14 @@
        </app-layout>
      `here` marks the page's rail item. The page reads `user` (map_url, …) and never declares it again. -->
 <!doctype html>
-<html lang="en" data-sn-layout="{ here: string; title?: string }">
+<html lang="en" data-sn-props="{ here: string; title?: string }">
 <head>
-  <app-head data-sn-prop="{ title }"></app-head>
+  <app-head data-sn-with="{ title }"></app-head>
   <slot name="head"></slot>
 </head>
 <body data-shell="fixed">
   <sn-resource name="user" src="/user"></sn-resource>
-  <app-nav data-sn-prop="{ here }"></app-nav>
+  <app-nav data-sn-with="{ here }"></app-nav>
   <slot></slot>
 </body>
 </html>

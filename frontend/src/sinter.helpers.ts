@@ -69,7 +69,7 @@ export {
 } from './lib/events.ts';
 
 // Thread dialog (src/components/thread-dialog.html).
-export { threadRows, messageUrl } from './lib/thread.ts';
+export { threadRows } from './lib/thread.ts';
 
 // ICS import dialog (src/components/import-dialog.html).
 export { calendarValue, importEventDate, importDraft, importSummary } from './lib/import.ts';
@@ -80,10 +80,9 @@ export { caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErro
 export { loadErrorOr } from './lib/errors.ts';
 
 // Mail bodies (src/components/email-reader.html, email-compose.html): sinter-mail's email.parse turns an HTML body into
-// the tree <mail-body> renders (no iframe, nothing to sanitize); mailBody.progressive(tree) numbers it for progressive
-// rendering (src/lib/mail-body.ts).
+// the tree <mail-body> renders (no iframe, nothing to sanitize); email.progressive(tree) numbers a copy of it for
+// progressive rendering.
 export * as email from '@tiavision/sinter-mail';
-export * as mailBody from './lib/mail-body.ts';
 
 // Mail pages (mail/index.html, mail/view/index.html, src/components/mail-*.html).
 export {
@@ -91,7 +90,7 @@ export {
   toggled, refOf, isRef, urlRef, filterActive, markRange, neighbor, archiveMailbox, moveTargets, bulkOf,
   withFlag, flagBody, moveBody, bulkFlagsBody, bulkMoveBody, bulkBody, inTrash, emptyTrashDays, validTrashDays, clampWidth,
   keyWidth, isSentMailbox, messageDateTime, shownAttachments, attachmentUrl, attachmentCount, pgpBadgeLabel, isIconBadge,
-  bodyOrigins, bodyImages, keepsLight, matching, isThreadCurrent, composeDraft, composeTitle, recipientToken, withRecipient, contactAddresses,
+  bodyOrigins, bodyImages, matching, isThreadCurrent, composeDraft, composeTitle, recipientToken, withRecipient, contactAddresses,
   recipientHits, senderHits, senderLabel, canSign, canEncrypt, signs, newAccount, editAccount, discovered, accountBody, accountUi,
   identityBody, folderDraft, folderBody, subscribed, canPreviewAttachment, folderKind, htmlAddsValue,
   isIcsAttachment, formatDate, humanSize, textSegments, messageKey, senderName,

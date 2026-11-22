@@ -1,4 +1,4 @@
-src/sinter.messages.d.ts
 dist/
 node_modules/
 .sinter/
+src/sinter.namespaces.d.ts

@@ -11,7 +11,7 @@ import {
 } from './mailUtils.ts';
 import type { Account, Attachment, Identity, Mailbox, Message, ThreadNode, VirtualFolder } from './MailTypes.ts';
 import { parseEnvelopeAddresses } from './addresses.ts';
-import type { Body, Node, ParseOptions } from '@tiavision/sinter-mail';
+import type { ParseOptions } from '@tiavision/sinter-mail';
 
 export type { Account, Attachment, Identity, Mailbox, Message, ThreadNode, VirtualFolder };
 export {
@@ -575,33 +575,20 @@ export function bodyOrigins(all: string[], allowed: string[], ignored: string[])
 }
 
 /**
- * How email.parse reads a body (sinter-mail's ParseOptions): its @media rules for a phone when the reader is `narrow`
- * (<email-width>), else for a wide screen; remote images through the image proxy, which
+ * How email.parse reads a body (sinter-mail's ParseOptions): its @media rules for the reader's width, `media` (a phone's
+ * below 640px, as sinter-mail's <mail-width> reports it, else a wide screen's); remote images through the image proxy, which
  * fetches only the origins the user allowed (a transparent pixel otherwise; `version` changes the URLs after an origin
  * is allowed, so the browser does not keep the pixel), inline ones (`cid:`) from the message's parts, or from `cids`
  * (a decrypted message's parts, as data: URLs).
  */
-export function bodyImages(msg: MessageRef, cids: Record<string, string> | null, version: number, narrow = false): ParseOptions {
+export function bodyImages(msg: MessageRef, cids: Record<string, string> | null, version: number, media: 'wide' | 'narrow' = 'wide'): ParseOptions {
   const ref = `account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
   return {
-    media: narrow ? 'narrow' : 'wide',
+    media,
     images: 'proxy',
     proxy: `/api/email/proxy-image?v=${version}&url={url}`,
     cid: cids ?? `/api/email/proxy-image?${ref}&cid={cid}`,
   };
-}
-
-/**
- * Does a mail body (email.parse) keep a light canvas in dark mode (.mail-light)? A mail that sets colours of its own,
- * text or background, picked them against a white page, unless it says it works on a dark one too (`schemes`: its
- * `color-scheme`, or `prefers-color-scheme: dark` rules, whose colours then follow the page's scheme as
- * `light-dark()`). A mail without colours, or one for dark pages, takes the app's colours.
- */
-export function keepsLight(body: Body): boolean {
-  if (body.schemes?.includes('dark')) return false;
-  const colored = (n: Body | Node): boolean =>
-    n.type !== 'text' && (!!n.style.color || !!n.style['background-color'] || n.children.some(colored));
-  return colored(body);
 }
 
 export function matching(origins: string[], q: string): string[] {

@@ -3,7 +3,7 @@
      opened by <nav-toggle>. It reads the layout's `user` resource.
      New-mail notifications: <email-notifier> (src/components/email-notifier.ts) shows the `new_email` events of the
      rail's own <sn-sync>; a page's <sn-sync> for the same URL shares its connection. /mail/ shows its own notifications. -->
-<template data-sn-component="{ here: string }">
+<template data-sn-props="{ here: string }">
   <nav data-rail popover id="nav" data-sn-permanent="rail" data-sn-attr="{'aria-label': m.nav_label()}" data-sn-state="{ collapsed: false }">
     <sn-resource name="notifications" call="notify.status()"></sn-resource>
     <sn-sync src="/events/stream"></sn-sync>
@@ -25,7 +25,7 @@
       </template>
       <template data-sn-if="notifications?.supported">
         <button type="button" data-icon="bell"
-                data-sn-call="notify.toggle(notifications)" data-sn-then="upsert('notifications', $result)"
+                data-sn-call="notify.toggle(notifications)" data-sn-then="upsert(notifications, $result)"
                 data-sn-attr="{
                   disabled: notifications.permission === 'denied',
                   'aria-pressed': notifications.enabled ? 'true' : 'false',

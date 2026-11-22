@@ -11,15 +11,15 @@ const root = import.meta.dirname;
 export default defineConfig({
   appType: 'mpa',
   plugins: [
-    // Every HTML entry is compiled by sinter (src/components/, src/layouts/, src/sinter.{config,helpers,actions,types}.ts). Messages are
-    // sinter's own: messages/{locale}.json of project.inlang (the inlang tooling edits the same files).
+    // Every HTML entry is compiled by sinter (src/components/, src/layouts/, src/sinter.{config,helpers,actions,types,content}.ts). The
+    // languages and messages come from the content module (src/sinter.content.ts): messages/{locale}.json of project.inlang.
     // fonts.preload: the UI font (Figtree, @fontsource-variable/figtree) is preloaded, so a first visit does not paint the fallback font first.
     // apis: the backend's JSON API (apis.ts, described by openapi.json).
-    // components: sinter-mail's <mail-body>, which renders a mail body parsed by its email.parse (src/sinter.helpers.ts).
+    // libraries: sinter-mail's <mail-body> (a mail body parsed by its email.parse, src/sinter.helpers.ts) and <mail-width>.
     // sinter-mail is not lazy: <mail-body>'s progressive steps (its mail-steps script) are part of every page that uses it.
     sinter({
       typecheck: true, strict: true, embed: true, localePrefix: true, swap: true, lazy: ['openpgp'], fonts: { preload: ['Figtree Variable'] },
-      components: ['@tiavision/sinter-mail'],
+      libraries: ['@tiavision/sinter-mail'],
       apis: apis('openapi.json'),
     }),
     // temper check on all markup and CSS (errors fail the build); serves the Lucide icons the markup names.

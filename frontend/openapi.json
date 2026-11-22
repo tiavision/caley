@@ -5165,7 +5165,8 @@
         "type": "object",
         "description": "Search results (a page; no `total`).",
         "required": [
-          "messages"
+          "messages",
+          "has_more"
         ],
         "properties": {
           "messages": {
@@ -5173,6 +5174,10 @@
             "items": {
               "$ref": "#/components/schemas/Message"
             }
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "whether there are more results past this page, in the direction asked for"
           }
         }
       },

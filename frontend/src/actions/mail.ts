@@ -5,7 +5,7 @@
 import type { CallContext } from '@tiaforge-ui/sinter';
 import { apiFetch } from '../lib/api.ts';
 import {
-  attachmentUrl, canEncrypt, messageKey, type ComposeDraft, type ComposeKeys, type Identity, type Message, type MessageRef,
+  attachmentUrl, canEncrypt, messageKey, type Autodiscovery, type ComposeDraft, type ComposeKeys, type Identity, type Message, type MessageRef,
 } from '../lib/mail.ts';
 import { cidReferencesFromHtml, htmlToPlainText, withInlineImages } from '../lib/mail-html.ts';
 import { attachmentDataUrl, canPreviewContentType, htmlAddsValue, isPgpPublicKeyAttachment, bareMailbox, keyHasEmail } from '../lib/mailUtils.ts';
@@ -23,6 +23,13 @@ import type * as openpgp from 'openpgp';
 import { SinterError } from '@tiaforge-ui/sinter';
 import { m } from '@tiaforge-ui/sinter/messages';
 import { pagePath } from '../lib/locale-path.ts';
+
+// ── Accounts ──────────────────────────────────────────────────────────────────
+
+/** The IMAP and SMTP servers of an address, for the account form's details step (src/components/email-account.html). */
+export function autodiscover(email: string, ctx: CallContext): Promise<Autodiscovery> {
+  return ctx.request(`/api/email/autodiscover?email=${encodeURIComponent(email)}`) as Promise<Autodiscovery>;
+}
 
 // ── Reading ───────────────────────────────────────────────────────────────────
 

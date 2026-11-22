@@ -9,7 +9,7 @@
          `thread-message` (the ThreadNode) for the page to open in place.
      An event row closes it and emits `event-open` (the EventJson) for the page's #event-detail.
      Open it with showModal('thread-dialog'). -->
-<template data-sn-component="{ nodes: ThreadNode[]; eventGroups: MessageEventGroupJson[]; loading: boolean; current: ThreadRef | null; links: boolean }"
+<template data-sn-props="{ nodes: ThreadNode[]; eventGroups: MessageEventGroupJson[]; loading: boolean; current: ThreadRef | null; links: boolean }"
           data-sn-emits="{ 'thread-message': ThreadNode; 'event-open': EventJson }">
   <dialog id="thread-dialog" closedby="any" data-layout="stack" style="--tm-dialog-width: 40rem">
     <header>
@@ -27,8 +27,9 @@
             <li class="thread-row" data-sn-style="{'--thread-depth': r.depth}">
               <template data-sn-if="r.kind === 'message'">
                 <a data-variant="item" data-layout="row" data-gap="sm" data-wrap="none"
-                   data-sn-attr="{href: messageUrl(r.node), 'aria-current': r.current ? 'true' : null}"
-                   data-sn-on-click="!links && $event.preventDefault(); !links && close(); emit('thread-message', r.node)">
+                   data-sn-href="/mail/?account_id={r.node.account_id}&mailbox={r.node.mailbox}&uid={r.node.uid}"
+                   data-sn-attr="{'aria-current': r.current ? 'true' : null}"
+                   data-sn-on-click="!links && $event.preventDefault(); !links && closeDialog(); emit('thread-message', r.node)">
                   <span class="thread-from" data-truncate data-sn-text="r.from || m.mail_unknownSender()"></span>
                   <span data-truncate data-grow data-muted data-sn-text="r.node.subject || m.mail_noSubject()"></span>
                   <small data-muted data-sn-text="r.date"></small>
@@ -38,7 +39,7 @@
                 <button type="button" data-variant="item" data-size="sm" data-layout="row" data-gap="sm" data-wrap="none" data-bar
                         data-sn-style="{'--tm-tone': r.event.color || null}"
                         data-sn-attr="{'aria-current': r.current ? 'true' : null}"
-                        data-sn-on-click="close(); emit('event-open', r.event)">
+                        data-sn-on-click="closeDialog(); emit('event-open', r.event)">
                   <span data-icon="calendar" aria-hidden="true"></span>
                   <span data-truncate data-grow data-sn-text="r.event.summary || '—'"></span>
                   <small data-muted data-sn-text="formatEventTime(r.event)"></small>

@@ -7,7 +7,7 @@
        - `event-edit` {event, scope: 'series'|'this_instance'}: the edit button (src/components/event-form.html);
        - `event-threads` {email: SourceEmailJson, event}: the threads button (src/components/thread-dialog.html).
      Shortcut: e = edit (data-shortcut on the edit button). Uses <share-menu>, so the page must not have another one. -->
-<template data-sn-component="{ event: EventJson | null; threads?: boolean }"
+<template data-sn-props="{ event: EventJson | null; threads?: boolean }"
           data-sn-emits="{ 'event-edit': { event: EventJson; scope: 'series' | 'this_instance' }; 'event-threads': { email: SourceEmailJson; event: EventJson } }">
   <dialog id="event-detail" closedby="any" data-sn-on-close="elementIn($el, '#event-edit-choice')?.hidePopover()">
     <sn-resource name="eventEmails" when="threads && event"
@@ -18,9 +18,9 @@
         <template data-sn-if="event && threads && eventEmails.length > 0">
           <button type="button" data-variant="ghost" data-icon="list-tree" data-tooltip
                   data-sn-attr="{'aria-label': m.mail_threads()}"
-                  data-sn-on-click="close(); emit('event-threads', { email: eventEmails[0], event })"></button>
+                  data-sn-on-click="closeDialog(); emit('event-threads', { email: eventEmails[0], event })"></button>
         </template>
-        <share-menu data-sn-prop="{ item: event ? eventShare(event) : null }"></share-menu>
+        <share-menu data-sn-with="{ item: event ? eventShare(event) : null }"></share-menu>
         <template data-sn-if="event?.is_recurring">
           <button type="button" class="event-edit" data-variant="ghost" data-icon="pencil" data-shortcut="e" popovertarget="event-edit-choice"
                   data-sn-attr="{'aria-label': m.event_edit()}"></button>
@@ -28,7 +28,7 @@
         <template data-sn-else>
           <button type="button" class="event-edit" data-variant="ghost" data-icon="pencil" data-shortcut="e" data-tooltip
                   data-sn-attr="{'aria-label': m.event_edit()}"
-                  data-sn-on-click="close(); emit('event-edit', { event, scope: 'series'})"></button>
+                  data-sn-on-click="closeDialog(); emit('event-edit', { event, scope: 'series'})"></button>
         </template>
         <button type="button" commandfor="event-detail" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
       </div>
@@ -36,10 +36,10 @@
 
     <div popover id="event-edit-choice" data-menu>
       <button type="button" popovertarget="event-edit-choice" popovertargetaction="hide"
-              data-sn-on-click="close('event-detail'); emit('event-edit', { event, scope: 'series'})"
+              data-sn-on-click="closeDialog('event-detail'); emit('event-edit', { event, scope: 'series'})"
               data-sn-text="m.event_editSeries()"></button>
       <button type="button" popovertarget="event-edit-choice" popovertargetaction="hide"
-              data-sn-on-click="close('event-detail'); emit('event-edit', { event, scope: 'this_instance' })"
+              data-sn-on-click="closeDialog('event-detail'); emit('event-edit', { event, scope: 'this_instance' })"
               data-sn-text="m.event_editInstance()"></button>
     </div>
 

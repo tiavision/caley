@@ -2,7 +2,7 @@
 <!-- The search is the URL: ?q=&start=&end=&cal=… (`cal` repeated: the checked calendars, none for every calendar).
      q: the search box (the URL's q once submitted); detail: the event <event-detail> shows.
      <event-form> wraps the page content that opens it. -->
-<app-layout data-sn-prop="{ here: '/search/', title: 'Caley - Search' }"
+<app-layout data-sn-with="{ here: '/search/', title: 'Caley - Search' }"
             data-sn-state="{
               q: $url.q ?? '',
               detail: /** @type {EventJson|null} */ (null),
@@ -13,7 +13,7 @@
   <main data-gutter data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
         data-sn-on-calendar-chosen="defaultCal = $event.detail">
     <event-form data-density="compact"
-                data-sn-on-event-saved="refresh('results')" data-sn-on-event-deleted="refresh('results')">
+                data-sn-on-event-saved="refresh(results)" data-sn-on-event-deleted="refresh(results)">
       <div data-layout="stack" data-gap="md" data-pad="sm">
         <div data-layout="row" data-gap="sm" data-wrap="none">
           <nav-toggle></nav-toggle>
@@ -21,7 +21,7 @@
                The dates (models on $url) and calendars below write their URL parameters when changed: they apply at once. -->
           <form data-layout="row" data-gap="sm" data-wrap="none" data-grow
                 data-sn-on-submit="$event.preventDefault();
-                                   q.trim() && q.trim() === $url.q && refresh('results');
+                                   q.trim() && q.trim() === $url.q && refresh(results);
                                    q.trim() && ($url.q = q.trim())">
             <input type="search" data-grow autofocus data-sn-model="q"
                    data-sn-attr="{placeholder: m.search_placeholder(), 'aria-label': m.search_placeholder()}">
@@ -76,7 +76,7 @@
                   <li data-pad="none">
                     <button type="button" class="search-result" data-variant="item" data-layout="stack" data-gap="none"
                             data-sn-attr="{'data-bar': item.color ? '' : null}" data-sn-style="{'--tm-tone': item.color || null}"
-                            data-sn-on-click="detail = item; showModal('event-detail')">
+                            data-sn-on-click="detail = item; openDialog('event-detail')">
                       <strong data-sn-text="item.summary"></strong>
                       <small data-muted data-sn-text="eventDateLong(item.dtstart, $locale) + (item.location ? ` · ${item.location}` : '')"></small>
                       <template data-sn-if="item.description">
@@ -94,7 +94,7 @@
         </template>
       </div>
 
-      <event-detail data-sn-prop="{ event: detail }"></event-detail>
+      <event-detail data-sn-with="{ event: detail }"></event-detail>
     </event-form>
   </main>
   <script type="module" src="/src/main/search.ts"></script>

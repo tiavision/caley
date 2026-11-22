@@ -1,9 +1,9 @@
 <!-- Virtual folder dialog #email-folder (/mail/): create or edit. It wraps the part of the page that opens it; an
      opener emits `folder-edit` with the draft: emit('folder-edit', folderDraft(f)) (null for a new folder).
      Resources: accounts, mailboxes, folders. -->
-<template data-sn-component="" data-sn-emits="{ 'folder-edit': FolderDraft }">
+<template data-sn-props="" data-sn-emits="{ 'folder-edit': FolderDraft }">
   <div data-sn-state="{ draft: folderDraft(null) }"
-       data-sn-on-folder-edit="draft = $event.detail; showModal('email-folder')">
+       data-sn-on-folder-edit="draft = $event.detail; openDialog('email-folder')">
     <slot></slot>
     <dialog id="email-folder" closedby="any">
       <header>
@@ -12,8 +12,8 @@
       </header>
       <form data-layout="stack" data-gap="md"
             data-sn-post="/email/folder" data-sn-body="folderBody(draft)"
-            data-sn-then="close('email-folder'); refresh('folders')"
-            data-sn-catch="refresh('folders')">
+            data-sn-then="closeDialog('email-folder'); refresh(folders)"
+            data-sn-catch="refresh(folders)">
         <label>
           <span data-sn-text="m.mail_name()"></span>
           <input data-sn-model="draft.name" data-sn-attr="{placeholder: m.mail_folderNamePlaceholder()}">

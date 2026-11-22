@@ -1,7 +1,7 @@
 <!-- "Create calendar" dialog (#create-calendar-dialog). Open it with commandfor="create-calendar-dialog"
      command="show-modal"; it starts empty each time it opens. The page declares the `caldavAccounts` resource
      (GET /api/caldav/accounts, items="accounts", key="account_id"); it is refreshed when the calendar exists. -->
-<template data-sn-component="">
+<template data-sn-props="">
   <dialog id="create-calendar-dialog" closedby="any" aria-labelledby="create-calendar-title"
           data-sn-state="{ cal: newCalendarDraft([]), calError: '' }"
           data-sn-on-toggle="$el.open && (cal = newCalendarDraft(caldavAccounts))"
@@ -19,7 +19,7 @@
           data-sn-post="/calendar" data-sn-encoding="form"
           data-sn-body="newCalendarBody(cal)"
           data-sn-on-submit="calError = ''"
-          data-sn-then="refresh('caldavAccounts'); close()"
+          data-sn-then="refresh(caldavAccounts); closeDialog()"
           data-sn-catch="calError = $error.status ? ($error.detail ?? m.cal_createCalendarError()) : m.cal_createCalendarError()">
       <label>
         <span data-sn-text="m.cal_createCalendarName()"></span>

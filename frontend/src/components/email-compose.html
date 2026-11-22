@@ -6,7 +6,7 @@
      nearest handler, so a field with its own input or change handler sets `edited` there too.
      Sending builds the MIME message here (signed/encrypted with OpenPGP when chosen) and posts it raw.
      Resources: identities. -->
-<template data-sn-component="{ pending?: boolean }" data-sn-emits="{ compose: ComposeDraft }">
+<template data-sn-props="{ pending?: boolean }" data-sn-emits="{ compose: ComposeDraft }">
   <div data-sn-state="{
          compose: /** @type {ComposeDraft|null} */ (null),
          composeError: '',
@@ -14,16 +14,16 @@
          edited: false,
          rcpt: { field: '', token: '' },
        }"
-       data-sn-on-compose="compose = $event.detail; edited = false; showModal('email-compose')"
-       data-sn-on-navigate="edited && $event.preventDefault(); edited && (composeError = m.mail_leaveDraft())">
+       data-sn-on-compose="compose = $event.detail; edited = false; openDialog('email-compose')"
+       data-sn-on-sn-navigate="edited && $event.preventDefault(); edited && (composeError = m.mail_leaveDraft())">
     <sn-resource name="composeKeys" call="mail.composeKeys()" when="!!compose"></sn-resource>
     <sn-resource name="recipientAddrs" src="/email/suggest-addrs?q={rcpt.token}" when="rcpt.token.length >= 2"></sn-resource>
     <!-- address suggestions: the contacts, loaded when compose first opens -->
-    <sn-resource name="composeContacts" src="/contacts" items="contacts" key="account_id,uid,addressbook_href" when="!!compose"></sn-resource>
+    <sn-resource name="composeContacts" src="/contacts" select="contacts" key="account_id,uid,addressbook_href" when="!!compose"></sn-resource>
     <!-- "Send by email" from the calendar/contacts share menu leaves a draft in sessionStorage.caley_compose
          (src/lib/share.ts); with `pending`, mail.pendingCompose() takes it once, after the identities have loaded (the draft's sender). -->
     <sn-resource name="pendingCompose" call="mail.pendingCompose()" when="pending && !!$meta.identities.loadedAt"
-                 then="$result && (compose = sharedDraft($result, identities)); $result && showModal('email-compose')"></sn-resource>
+                 then="$result && (compose = sharedDraft($result, identities)); $result && openDialog('email-compose')"></sn-resource>
     <slot></slot>
     <dialog id="email-compose" class="compose-dialog" data-layout="stack" data-gap="none" data-pad="none"
             data-sn-on-close="composeError = ''; sending = false; edited = false">
@@ -42,7 +42,7 @@
           <form class="compose-form" data-layout="stack" data-gap="none" data-grow
                 data-sn-on-submit="sending = true; composeError = ''"
                 data-sn-call="mail.send({...compose, encrypt: compose.encrypt && canEnc}, identities, signing)"
-                data-sn-then="sending = false; close('email-compose')"
+                data-sn-then="sending = false; closeDialog('email-compose')"
                 data-sn-catch="sending = false; composeError = loadErrorOr($error, $error.detail ?? m.mail_sendError())">
             <template data-sn-if="identities.length > 1">
               <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
@@ -57,9 +57,9 @@
             <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
               <label class="compose-label" for="compose-to" data-sn-text="m.mail_composeTo()"></label>
               <div class="compose-input-wrap" data-combo data-grow>
-                <input id="compose-to" class="compose-input" autocomplete="off" data-sn-model="compose.to" data-sn-listbox="compose-to-list"
+                <input id="compose-to" class="compose-input" autocomplete="off" data-sn-model="compose.to" data-sn-options="compose-to-list"
                        data-sn-on-input="edited = true; rcpt = {field: 'to', token: recipientToken(compose.to)}" data-sn-debounce-input="200"
-                       data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-dismiss="rcpt = {field: '', token: ''}"
+                       data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-sn-dismiss="rcpt = {field: '', token: ''}"
                        data-sn-attr="{placeholder: m.mail_composeToPlaceholder()}">
                 <div data-menu role="listbox" id="compose-to-list" data-sn-show="rcpt.field === 'to' && hits.length > 0">
                   <template data-sn-for="addr in hits" data-sn-key="addr">
@@ -81,9 +81,9 @@
               <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
                 <label class="compose-label" for="compose-cc" data-sn-text="m.mail_composeCc()"></label>
                 <div class="compose-input-wrap" data-combo data-grow>
-                  <input id="compose-cc" class="compose-input" autocomplete="off" data-sn-model="compose.cc" data-sn-listbox="compose-cc-list"
+                  <input id="compose-cc" class="compose-input" autocomplete="off" data-sn-model="compose.cc" data-sn-options="compose-cc-list"
                          data-sn-on-input="edited = true; rcpt = {field: 'cc', token: recipientToken(compose.cc)}" data-sn-debounce-input="200"
-                         data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-dismiss="rcpt = {field: '', token: ''}"
+                         data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-sn-dismiss="rcpt = {field: '', token: ''}"
                          data-sn-attr="{placeholder: m.mail_composeCcPlaceholder()}">
                   <div data-menu role="listbox" id="compose-cc-list" data-sn-show="rcpt.field === 'cc' && hits.length > 0">
                     <template data-sn-for="addr in hits" data-sn-key="addr">
@@ -95,9 +95,9 @@
               <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
                 <label class="compose-label" for="compose-bcc" data-sn-text="m.mail_composeBcc()"></label>
                 <div class="compose-input-wrap" data-combo data-grow>
-                  <input id="compose-bcc" class="compose-input" autocomplete="off" data-sn-model="compose.bcc" data-sn-listbox="compose-bcc-list"
+                  <input id="compose-bcc" class="compose-input" autocomplete="off" data-sn-model="compose.bcc" data-sn-options="compose-bcc-list"
                          data-sn-on-input="edited = true; rcpt = {field: 'bcc', token: recipientToken(compose.bcc)}" data-sn-debounce-input="200"
-                         data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-dismiss="rcpt = {field: '', token: ''}"
+                         data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-sn-dismiss="rcpt = {field: '', token: ''}"
                          data-sn-attr="{placeholder: m.mail_composeBccPlaceholder()}">
                   <div data-menu role="listbox" id="compose-bcc-list" data-sn-show="rcpt.field === 'bcc' && hits.length > 0">
                     <template data-sn-for="addr in hits" data-sn-key="addr">
@@ -115,7 +115,7 @@
                       data-sn-attr="{rows: compose.forwardHtml ? 4 : 10, 'aria-label': m.mail_newMessage()}"></textarea>
             <template data-sn-if="compose.forwardHtml && compose.forwardRef">
               <div class="compose-forward-preview" data-sn-let="{ fwd: email.parse(compose.forwardHtml, bodyImages(compose.forwardRef, null, 0)) }">
-                <div data-sn-class="{ 'mail-light': !!fwd && keepsLight(fwd) }"><mail-body data-sn-early="off" data-sn-prop="{ body: fwd && mailBody.progressive(fwd) }"></mail-body></div>
+                <mail-body data-sn-early="off" data-sn-with="{ body: fwd && email.progressive(fwd) }"></mail-body>
               </div>
             </template>
             <template data-sn-if="compose.files.length > 0">
@@ -146,7 +146,7 @@
           <!-- The file picker: its own form, so reset() clears it after the files went into the draft. -->
           <form class="compose-files" hidden>
             <input type="file" multiple data-sn-attr="{'aria-label': m.mail_attachFiles()}"
-                   data-sn-on-change="edited = true; compose.files = [...compose.files, ...$el.files]; reset()">
+                   data-sn-on-change="edited = true; compose.files = [...compose.files, ...$el.files]; $el.form.reset()">
           </form>
         </div>
       </template>

@@ -5,15 +5,15 @@
      It declares the `calendars` (CalendarJson[]) and `caldavAccounts` resources: the page reads them, never redeclares them.
      Events: `event-saved` and `event-deleted` (the draft) after the server accepted the change; `calendar-chosen`
      (a calendar key) when a calendar is picked or a new event saved: the page remembers it as its default calendar. -->
-<template data-sn-component=""
+<template data-sn-props=""
           data-sn-emits="{ 'event-new': EventDraft; 'event-saved': EventDraft; 'event-deleted': EventDraft; 'calendar-chosen': string }">
   <div data-sn-state="{ draft: /** @type {EventDraft|null} */ (null), eventError: '', summaryHints: false, attendeeRow: -1, attendeeQuery: '', edited: false }"
-       data-sn-on-event-new="draft = $event.detail; showModal('event-form')"
-       data-sn-on-event-edit="draft = editEventDraft($event.detail.event, $event.detail.scope); showModal('event-form')">
+       data-sn-on-event-new="draft = $event.detail; openDialog('event-form')"
+       data-sn-on-event-edit="draft = editEventDraft($event.detail.event, $event.detail.scope); openDialog('event-form')">
     <sn-resource name="calendars" src="/calendars"></sn-resource>
     <sn-resource name="caldavAccounts" src="/caldav/accounts"></sn-resource>
     <!-- attendee suggestions: loaded when the form first opens -->
-    <sn-resource name="attendeeContacts" src="/contacts" items="contacts" key="account_id,uid,addressbook_href" when="draft"></sn-resource>
+    <sn-resource name="attendeeContacts" src="/contacts" select="contacts" key="account_id,uid,addressbook_href" when="draft"></sn-resource>
     <slot></slot>
     <!-- Leaving the page while the open form has been edited (Back or Forward: the modal keeps the page's links out
          of reach) is refused, with a note: save or discard first. An event runs only the nearest handler, so a
@@ -21,7 +21,7 @@
     <dialog id="event-form" closedby="any"
             data-sn-on-toggle="$el.open && $el.querySelector('input')?.select()"
             data-sn-on-input="edited = true" data-sn-on-change="edited = true"
-            data-sn-on-navigate="edited && $event.preventDefault(); edited && (eventError = m.draft_leave())"
+            data-sn-on-sn-navigate="edited && $event.preventDefault(); edited && (eventError = m.draft_leave())"
             data-sn-on-close="eventError = ''; summaryHints = false; attendeeRow = -1; edited = false">
       <header>
         <h2 data-sn-text="draft?.mode === 'edit' ? m.event_edit() : m.event_create()"></h2>
@@ -35,15 +35,15 @@
       <template data-sn-if="draft">
         <form data-layout="stack" data-gap="md"
               data-sn-post="/event" data-sn-encoding="form" data-sn-body="eventFormBody(draft)"
-              data-sn-then="draft.mode === 'create' && emit('calendar-chosen', draft.cal); close(); emit('event-saved', draft)"
+              data-sn-then="draft.mode === 'create' && emit('calendar-chosen', draft.cal); closeDialog(); emit('event-saved', draft)"
               data-sn-catch="eventError = $error.detail ?? m.event_error()">
           <label>
             <span data-sn-text="m.event_summary()"></span>
             <div data-combo data-sn-let="{ hints: summaryHints ? summarySuggestions(draft.summary, $locale, $now) : [] }">
-              <input type="text" required autofocus data-sn-model="draft.summary" data-sn-listbox="event-summary-suggestions"
+              <input type="text" required autofocus data-sn-model="draft.summary" data-sn-options="event-summary-suggestions"
                      data-sn-attr="{'aria-expanded': hints.length > 0 ? 'true' : 'false'}"
                      data-sn-on-input="edited = true; summaryHints = true"
-                     data-sn-on-dismiss="summaryHints = false"
+                     data-sn-on-sn-dismiss="summaryHints = false"
                      data-sn-on-blur="summaryHints = false">
               <div data-menu role="listbox" id="event-summary-suggestions" data-sn-show="hints.length > 0">
                 <template data-sn-for="(s, i) in hints" data-sn-key="i">
@@ -124,10 +124,10 @@
               <div data-layout="row" data-gap="sm" style="--tm-grow-basis: 6rem"
                    data-sn-let="{ hits: attendeeRow === i ? attendeeSuggestions(attendeeContacts, attendeeQuery) : [] }">
                 <div data-combo data-grow>
-                  <input type="text" data-sn-listbox data-sn-model="draft.attendees[i].cn"
+                  <input type="text" data-sn-options data-sn-model="draft.attendees[i].cn"
                          data-sn-attr="{placeholder: m.event_attendeeName(), 'aria-label': m.event_attendeeName(), 'aria-expanded': hits.length > 0 ? 'true' : 'false'}"
                          data-sn-on-input="edited = true; attendeeRow = i; attendeeQuery = $el.value"
-                         data-sn-on-dismiss="attendeeRow = -1" data-sn-on-blur="attendeeRow = -1">
+                         data-sn-on-sn-dismiss="attendeeRow = -1" data-sn-on-blur="attendeeRow = -1">
                   <div data-menu role="listbox" data-sn-show="hits.length > 0">
                     <template data-sn-for="(s, j) in hits" data-sn-key="j">
                       <div role="option" tabindex="-1" data-sn-text="attendeeLabel(s)"
@@ -136,10 +136,10 @@
                   </div>
                 </div>
                 <div data-combo data-grow class="event-attendee-email">
-                  <input type="email" data-sn-listbox data-sn-model="draft.attendees[i].email"
+                  <input type="email" data-sn-options data-sn-model="draft.attendees[i].email"
                          data-sn-attr="{placeholder: m.event_attendeeEmail(), 'aria-label': m.event_attendeeEmail(), 'aria-expanded': hits.length > 0 ? 'true' : 'false'}"
                          data-sn-on-input="edited = true; attendeeRow = i; attendeeQuery = $el.value"
-                         data-sn-on-dismiss="attendeeRow = -1" data-sn-on-blur="attendeeRow = -1">
+                         data-sn-on-sn-dismiss="attendeeRow = -1" data-sn-on-blur="attendeeRow = -1">
                   <div data-menu role="listbox" data-sn-show="hits.length > 0">
                     <template data-sn-for="(s, j) in hits" data-sn-key="j">
                       <div role="option" tabindex="-1" data-sn-text="attendeeLabel(s)"
@@ -267,7 +267,7 @@
               <button type="button" data-variant="ghost" data-tone="danger" data-icon="trash-2"
                       data-sn-delete="/event?account_id={draft.cal.split('\0')[0]}&uid={draft.uid}&calendar_href={draft.cal.split('\0')[1]}&scope={draft.scope === 'this_instance' && draft.original_dtstart ? 'this_instance' : null}&original_dtstart={draft.scope === 'this_instance' && draft.original_dtstart ? draft.original_dtstart : null}&tz={draft.scope === 'this_instance' && draft.original_dtstart ? draft.original_tz : null}"
                       data-sn-confirm="m.event_deleteConfirm()"
-                      data-sn-then="close('event-form'); emit('event-deleted', draft)"
+                      data-sn-then="closeDialog('event-form'); emit('event-deleted', draft)"
                       data-sn-catch="eventError = $error.detail ?? m.event_error()"
                       data-sn-text="m.event_delete()"></button>
               <span data-grow></span>

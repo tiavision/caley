@@ -472,70 +472,23 @@ $phone: 639px;
 
 // A mail body (sinter-mail's <mail-body>: its root is .mail, the mail's elements are part of the page). The mail's own
 // styles are inline and win; what it leaves unset takes temper's styles, except where mails count on the browser's
-// defaults (compared on real mails: newsletters, legacy HTML, Outlook, Gmail replies, unstyled HTML):
-// - layout: tables and images as the browser draws them (temper's tables have padding, rules and full width, its
-//   images are blocks: layout tables would get lines, inline images their own line), and content-box sizing, which
-//   mails' widths with padding are written for. Images no wider than the reader.
-// - spacing: temper's reset takes every margin away; paragraphs, headings, lists and quotes get theirs back.
-// Text, links, code and pre keep temper's look.
-.mail,
-.mail :where(*) {
-  box-sizing: content-box;
-}
-
-.mail :where(table, caption, colgroup, col, thead, tbody, tfoot, tr, td, th, img) {
-  all: revert;
-}
-
-.mail :where(img) {
-  max-inline-size: 100%;
-}
-
-.mail :where(p, ul, ol, h1, h2, h3, h4, h5, h6) {
-  // temper-ignore: the mail's spacing, which its own margins (inline) must be able to replace; a gap would add to them
-  margin-block: 1em;
-}
-
-.mail :where(blockquote) {
-  // temper-ignore: the browser's quote indent, which a mail's own margin (Gmail's quotes) replaces
-  margin: 1em 40px;
-}
-
-// A mail that sets colours of its own picked them against a white page, often a dark text colour without a background:
-// unless it says it works on a dark one too (keepsLight in src/lib/mail.ts), it keeps a light canvas in dark mode, the
-// light scheme's canvas and text (system colours follow color-scheme; temper's tokens are resolved for the page's).
-// A mail without colours takes the app's; one for dark pages too takes them as well, its own colours that change with
-// the scheme written light-dark() (sinter-mail), which color-scheme: light here would keep light.
+// defaults (tables and images as drawn, content-box sizing, block margins), which sinter-mail's mail.css gives back
+// (imported by the mail pages' entries before this file). Text, links, code and pre keep temper's look.
+// A mail written for a white page (sinter-mail's body.light) keeps a light canvas in dark mode: mail.css's .mail-light,
+// on the mail's root. temper's colour tokens are resolved for the page's scheme (dark in dark mode): the ones the
+// mail's elements use (code and pre: fill, hr: border, kbd: strong border) are mixed from the canvas's colours there.
 .mail-light {
-  color-scheme: light;
-  background: Canvas;
-  color: CanvasText;
-  // temper's colour tokens are resolved for the page's scheme (dark in dark mode): the ones the mail's elements use
-  // (code and pre: fill, hr: border, kbd: strong border) are mixed from the canvas's colours here instead.
   --tm-fill: color-mix(in oklab, CanvasText 6%, Canvas);
   --tm-border: color-mix(in oklab, CanvasText 15%, Canvas);
   --tm-border-strong: color-mix(in oklab, CanvasText 30%, Canvas);
-
-  // the canvas's link colour; a mail's own link colours win (inline)
-  :where(a) {
-    color: LinkText;
-  }
 }
 
-// The reader's HTML body: a mail wider than the reader (a 600px newsletter on a phone) scrolls sideways in its box,
-// the reader vertically. The padding is the mail root's own, inside the background sinter-mail paints there (the
-// mail's <body> background, a newsletter's grey): on the box around it, it was a frame in the canvas's white. The
-// root is at least the box's width and as wide as a wider mail, so that background covers what scrolls in too.
-.mail-html {
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-
-  > .mail {
-    box-sizing: border-box;
-    inline-size: fit-content;
-    min-inline-size: 100%;
-    padding: var(--tm-space-sm) var(--tm-space-md);
-  }
+// The reader's HTML body, in mail.css's .mail-scroll: a mail wider than the reader (a 600px newsletter) scrolls
+// sideways in its box, the reader vertically. The padding is the mail root's own, inside the background sinter-mail
+// paints there (the mail's <body> background, a newsletter's grey): on the box around it, it was a frame in the
+// canvas's white.
+.mail-html > .mail {
+  padding: var(--tm-space-sm) var(--tm-space-md);
 }
 
 .detail-status {

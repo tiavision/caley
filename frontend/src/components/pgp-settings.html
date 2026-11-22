@@ -4,7 +4,7 @@
      It loads its resources (`vault`, `publicKeys`) once `opened` (the tab was opened at least once) and keeps them:
      `when` empties a resource while it is false, so it must not follow the open tab. All crypto and WebAuthn runs in
      src/actions/pgp-vault.ts and pgp-keys.ts; `vault` is their VaultView (no private key material). -->
-<template data-sn-component="{ opened: boolean }">
+<template data-sn-props="{ opened: boolean }">
   <!-- pk: the private key dialog (mode 'import': armored key, passphrase; mode 'create': name, email; device label;
        fingerprint once read or generated);
        ident: the identity dialog; ownPub: the own public key dialog; recovery: unlock dialog lists every approved device. -->
@@ -50,13 +50,13 @@
           <div data-layout="row" data-gap="sm">
             <template data-sn-if="vault.unlocked">
               <button type="button" data-variant="secondary" data-icon="lock"
-                      data-sn-call="pgpVault.lock()" data-sn-then="upsert('vault', $result)" data-sn-text="m.pgp_lockVault()"></button>
+                      data-sn-call="pgpVault.lock()" data-sn-then="upsert(vault, $result)" data-sn-text="m.pgp_lockVault()"></button>
             </template>
             <template data-sn-else>
               <template data-sn-if="localActive.length === 1">
                 <button type="button" data-icon="lock-open" data-sn-concurrency="block"
                         data-sn-call="pgpVault.unlock(localActive[0].cred_id)" data-sn-on-click="unlockError = ''"
-                        data-sn-then="upsert('vault', $result)"
+                        data-sn-then="upsert(vault, $result)"
                         data-sn-catch="unlockError = loadErrorOr($error, m.pgp_unlockError() + ' ' + $error.detail)"
                         data-sn-text="m.pgp_unlockVaultButton()"></button>
               </template>
@@ -68,13 +68,13 @@
             <template data-sn-if="vault.unlocked">
               <button type="button" data-variant="secondary" data-sn-concurrency="block"
                       data-sn-call="pgpVault.rotate()" data-sn-confirm="m.pgp_confirmRotate()"
-                      data-sn-then="upsert('vault', $result)" data-sn-catch="deviceError = loadErrorOr($error, $error.detail ?? $error.message)"
+                      data-sn-then="upsert(vault, $result)" data-sn-catch="deviceError = loadErrorOr($error, $error.detail ?? $error.message)"
                       data-sn-text="m.pgp_rotateVaultKey()"></button>
             </template>
             <button type="button" data-variant="outline" data-tone="danger" data-sn-concurrency="block"
                     data-sn-call="pgpVault.reset()" data-sn-confirm="m.pgp_confirmStartOver()"
                     data-sn-on-click="deviceError = ''; enrollError = ''"
-                    data-sn-then="upsert('vault', $result); justEnrolled = ''"
+                    data-sn-then="upsert(vault, $result); justEnrolled = ''"
                     data-sn-catch="deviceError = loadErrorOr($error, m.pgp_resetError()); enrollError = deviceError"
                     data-sn-text="m.pgp_startOverButton()"></button>
           </div>
@@ -118,7 +118,7 @@
                       <template data-sn-if="vault.unlocked">
                         <button type="button" data-variant="ghost" data-size="sm" data-tone="danger" data-icon="trash-2" data-tooltip
                                 data-sn-call="pgpVault.removeKey(key.fingerprint)" data-sn-confirm="m.pgp_confirmRemoveKey()"
-                                data-sn-then="upsert('vault', $result)" data-sn-catch="deviceError = loadErrorOr($error, $error.detail ?? $error.message)"
+                                data-sn-then="upsert(vault, $result)" data-sn-catch="deviceError = loadErrorOr($error, $error.detail ?? $error.message)"
                                 data-sn-attr="{'aria-label': m.pgp_removeKey()}"></button>
                       </template>
                     </div>
@@ -162,7 +162,7 @@
                     <button type="button" data-variant="ghost" data-size="sm" data-tone="danger" data-icon="trash-2" data-tooltip
                             data-sn-call="pgpVault.removeDevice(device.cred_id)"
                             data-sn-confirm="m.pgp_confirmRemoveDevice({device: device.label ?? m.pgp_defaultAccessMethod()})"
-                            data-sn-then="upsert('vault', $result)" data-sn-catch="deviceError = loadErrorOr($error, $error.detail ?? $error.message)"
+                            data-sn-then="upsert(vault, $result)" data-sn-catch="deviceError = loadErrorOr($error, $error.detail ?? $error.message)"
                             data-sn-attr="{'aria-label': m.pgp_removeDevice()}"></button>
                   </template>
                 </li>
@@ -185,12 +185,12 @@
                     <div data-layout="row" data-gap="xs" data-wrap="none">
                       <button type="button" data-variant="secondary" data-size="sm" data-sn-concurrency="block"
                               data-sn-call="pgpVault.approve(device.cred_id)" data-sn-confirm="m.pgp_confirmApprove({sas: device.sas})"
-                              data-sn-then="upsert('vault', $result)" data-sn-catch="deviceError = loadErrorOr($error, $error.detail ?? $error.message)"
+                              data-sn-then="upsert(vault, $result)" data-sn-catch="deviceError = loadErrorOr($error, $error.detail ?? $error.message)"
                               data-sn-text="m.pgp_approveDevice()"></button>
                       <button type="button" data-variant="ghost" data-size="sm" data-tone="danger" data-icon="trash-2" data-tooltip
                               data-sn-call="pgpVault.removeDevice(device.cred_id)"
                               data-sn-confirm="m.pgp_confirmRemoveDevice({device: device.label ?? m.pgp_defaultAccessMethod()})"
-                              data-sn-then="upsert('vault', $result)" data-sn-catch="deviceError = loadErrorOr($error, $error.detail ?? $error.message)"
+                              data-sn-then="upsert(vault, $result)" data-sn-catch="deviceError = loadErrorOr($error, $error.detail ?? $error.message)"
                               data-sn-attr="{'aria-label': m.pgp_removeDevice()}"></button>
                     </div>
                   </template>
@@ -231,7 +231,7 @@
             <button type="button" data-variant="outline" data-tone="danger" data-self="start" data-sn-concurrency="block"
                     data-sn-call="pgpVault.reset()" data-sn-confirm="m.pgp_confirmStartOver()"
                     data-sn-on-click="deviceError = ''; enrollError = ''"
-                    data-sn-then="upsert('vault', $result); justEnrolled = ''"
+                    data-sn-then="upsert(vault, $result); justEnrolled = ''"
                     data-sn-catch="deviceError = loadErrorOr($error, m.pgp_resetError()); enrollError = deviceError"
                     data-sn-text="m.pgp_startOverButton()"></button>
           </template>
@@ -337,7 +337,7 @@
       <template data-sn-if="pk.fingerprint">
         <form data-layout="stack" data-gap="md"
               data-sn-call="pgpVault.store(pk.label)" data-sn-on-submit="enrollError = ''"
-              data-sn-then="upsert('vault', $result); justEnrolled = pk.fingerprint; close()"
+              data-sn-then="upsert(vault, $result); justEnrolled = pk.fingerprint; closeDialog()"
               data-sn-catch="enrollError = enrollErrorText($error)">
           <p><strong data-sn-text="m.pgp_fingerprint() + ':'"></strong> <code data-sn-text="pk.fingerprint"></code></p>
           <template data-sn-if="!vault?.exists">
@@ -363,7 +363,7 @@
       <template data-sn-if="keyError"><div data-callout data-tone="danger" role="alert" data-sn-text="keyError"></div></template>
       <form data-layout="stack" data-gap="md"
             data-sn-call="pgpVault.addIdentity(ident.fingerprint, ident.name, ident.email, ident.comment)" data-sn-on-submit="keyError = ''"
-            data-sn-then="upsert('vault', $result); close()"
+            data-sn-then="upsert(vault, $result); closeDialog()"
             data-sn-catch="keyError = loadErrorOr($error, m.pgp_identityAddError() + ': ' + ($error.detail ?? $error.message))">
         <label>
           <span data-sn-text="m.pgp_identityName()"></span>
@@ -393,7 +393,7 @@
       <template data-sn-if="keyError"><div data-callout data-tone="danger" role="alert" data-sn-text="keyError"></div></template>
       <form data-layout="stack" data-gap="md"
             data-sn-call="pgpVault.updatePublic(ownPub.fingerprint, ownPub.armored)" data-sn-on-submit="keyError = ''"
-            data-sn-then="upsert('vault', $result); close()"
+            data-sn-then="upsert(vault, $result); closeDialog()"
             data-sn-catch="keyError = loadErrorOr($error, m.pgp_ownPublicKeyImportError() + ': ' + ($error.detail ?? $error.message))">
         <label>
           <span data-sn-text="m.pgp_keyFile()"></span>
@@ -421,7 +421,7 @@
       <template data-sn-if="enrollError"><div data-callout data-tone="danger" role="alert" data-sn-text="enrollError"></div></template>
       <form data-layout="stack" data-gap="md"
             data-sn-call="pgpVault.register(label)" data-sn-on-submit="enrollError = ''"
-            data-sn-then="upsert('vault', $result); close()"
+            data-sn-then="upsert(vault, $result); closeDialog()"
             data-sn-catch="enrollError = loadErrorOr($error, m.pgp_enrollError() + ': ' + ($error.detail ?? $error.message))">
         <label>
           <span data-sn-text="m.pgp_deviceLabel()"></span>
@@ -447,7 +447,7 @@
             <span data-grow data-sn-text="device.label ?? m.pgp_defaultAccessMethod()"></span>
             <button type="button" data-variant="secondary" data-size="sm" data-sn-concurrency="block"
                     data-sn-call="pgpVault.unlock(device.cred_id)" data-sn-on-click="unlockError = ''"
-                    data-sn-then="upsert('vault', $result); close()"
+                    data-sn-then="upsert(vault, $result); closeDialog()"
                     data-sn-catch="unlockError = loadErrorOr($error, m.pgp_unlockError() + ' ' + $error.detail)"
                     data-sn-text="m.pgp_unlockVaultButton()"></button>
           </li>
@@ -463,7 +463,7 @@
       <template data-sn-if="pubError"><div data-callout data-tone="danger" role="alert" data-sn-text="pubError"></div></template>
       <!-- Import: the key is read here (pgpKeys.publicKey, openpgp), then stored (#pub-key-save). -->
       <span hidden id="pub-key-save" data-sn-post="/pgp/key" data-sn-body="pubKey"
-            data-sn-then="upsert('publicKeys', $result); pubArmored = ''; pubSuccess = m.pgp_publicKeyImported(); close('pgp-public-key-dialog')"
+            data-sn-then="upsert(publicKeys, $result); pubArmored = ''; pubSuccess = m.pgp_publicKeyImported(); closeDialog('pgp-public-key-dialog')"
             data-sn-catch="pubError = m.pgp_publicKeyImportError()"></span>
       <form data-layout="stack" data-gap="md"
             data-sn-call="pgpKeys.publicKey(pubArmored)" data-sn-on-submit="pubError = ''; pubSuccess = ''"

@@ -340,7 +340,7 @@ test('reopening the import dialog shows the new draft: empty form, remembered ca
 
   let resets = 0;
   dialog.querySelector('form')!.addEventListener('reset', () => resets++);
-  button(root, m.event_cancel()).click();                     // closing resets the form: that empties the file input
+  button(dialog, m.event_cancel()).click();                     // closing resets the form: that empties the file input
   await settle();
   expect(dialog.open).toBe(false);
   expect(resets).toBe(1);

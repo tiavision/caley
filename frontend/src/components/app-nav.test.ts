@@ -8,7 +8,7 @@ import '../test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
 // A page of the app layout (src/layouts/app-layout.html), which has the rail.
 const page = (here: string) => `
-<app-layout data-sn-prop="{ here: '${here}' }">
+<app-layout data-sn-with="{ here: '${here}' }">
   <main><nav-toggle></nav-toggle></main>
 </app-layout>`;
 

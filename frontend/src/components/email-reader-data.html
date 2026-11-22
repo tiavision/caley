@@ -3,9 +3,9 @@
      `open` (MessageRef|null): the message in the reader; `threadRef` (ThreadRef|null, <thread-dialog>); `wiped`: the
      key of the encrypted message whose decrypted content was dropped while the page was hidden, or ''.
      The root is the #mark-read action: once the body is there, an unread message is marked read. -->
-<template data-sn-component="{ open: MessageRef | null; threadRef: ThreadRef | null; wiped: string }">
+<template data-sn-props="{ open: MessageRef | null; threadRef: ThreadRef | null; wiped: string }">
   <span hidden id="mark-read" data-sn-patch="/email/message/flags" data-sn-retry="flags" data-sn-body="flagBody(open, '\\Seen', true)"
-        data-sn-optimistic="patch(message, markedRead(message))">
+        data-sn-optimistic="merge(message, markedRead(message))">
     <sn-resource name="message" call="mail.open(open)" when="open" type="Message"></sn-resource>
     <!-- Once the body is there, an unread message is marked read (#mark-read); the read message keeps later loads of the
          body (unlock, key import) from marking it again. -->

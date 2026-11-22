@@ -8,9 +8,9 @@
      remembered calendar: data-sn-on-ics-imported="$event.detail.errors === 0 && (defaultCal = $event.detail.calendar)".
      It closes itself 1.5 s after an import without errors (<close-after>). The content stays while the dialog is
      closed; closing resets the form, which empties the file input, the one control no binding sets. -->
-<template data-sn-component="" data-sn-emits="{ 'ics-import': ImportDraft; 'ics-imported': ImportResult }">
+<template data-sn-props="" data-sn-emits="{ 'ics-import': ImportDraft; 'ics-imported': ImportResult }">
   <div data-sn-state="{ imp: /** @type {ImportDraft|null} */ (null) }"
-       data-sn-on-ics-import="imp = $event.detail; showModal('import-ics')">
+       data-sn-on-ics-import="imp = $event.detail; openDialog('import-ics')">
     <slot></slot>
     <dialog id="import-ics" closedby="any" aria-labelledby="import-ics-title" data-sn-on-close="imp = null; $el.querySelector('form').reset()">
       <header>
@@ -24,14 +24,14 @@
         <div data-callout data-tone="success" role="status" data-sn-text="imp.success"></div>
       </template>
       <template data-sn-if="imp.done">
-        <close-after data-sn-prop="{ ms: 1500 }"></close-after>
+        <close-after data-sn-with="{ ms: 1500 }"></close-after>
       </template>
 
       <form data-layout="stack" data-gap="md"
             data-sn-call="ics.run(imp)"
             data-sn-on-submit="imp.error = ''; imp.success = ''"
-            data-sn-then="imp.success = importSummary($result); imp.done = $result.errors === 0; emit('ics-imported', $result); refresh('caldavAccounts')"
-            data-sn-catch="imp.error = $error.status ? ($error.detail ?? m.cal_importError()) : m.cal_importError(); refresh('caldavAccounts')">
+            data-sn-then="imp.success = importSummary($result); imp.done = $result.errors === 0; emit('ics-imported', $result); refresh(caldavAccounts)"
+            data-sn-catch="imp.error = $error.status ? ($error.detail ?? m.cal_importError()) : m.cal_importError(); refresh(caldavAccounts)">
         <label>
           <span data-sn-text="m.cal_importFile()"></span>
           <input type="file" accept=".ics,.ical,text/calendar" data-sn-attr="{required: !imp.file}"

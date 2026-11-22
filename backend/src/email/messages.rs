@@ -136,6 +136,8 @@ pub struct ThreadResponse {
 #[derive(serde::Serialize, ToSchema)]
 pub struct SearchResponse {
     pub messages: Vec<Message>,
+    /// whether there are more results past this page, in the direction asked for
+    pub has_more: bool,
 }
 
 /// Addresses seen in the user's mail that contain the query.
@@ -1185,6 +1187,7 @@ pub async fn search(
     if raw_q.is_empty() && filters.is_empty() {
         return Json(SearchResponse {
             messages: Vec::new(),
+            has_more: false,
         })
         .into_response();
     }
@@ -1196,7 +1199,11 @@ pub async fn search(
     };
     let cursor = parse_cursor(q.cursor_sent_at, q.cursor_rowid);
     let direction = parse_direction(q.direction.as_deref());
-    let limit = q.limit.unwrap_or(51).min(200);
+    let limit = q.limit.unwrap_or(51).clamp(1, 200);
+    let backward = matches!(
+        direction,
+        email_db::PageDirection::Backward | email_db::PageDirection::Last
+    );
 
     let scope = if let Some(folder_id) = q.folder_id.as_deref() {
         email_db::SearchScope::Virtual { folder_id }
@@ -1216,16 +1223,26 @@ pub async fn search(
         scope,
         &fts_query,
         &filters,
-        limit,
+        // one more than the page: whether there are more results
+        limit + 1,
         cursor,
         direction,
     )
     .await;
 
     match result {
-        Ok(messages) => {
+        Ok(mut messages) => {
+            let has_more = messages.len() as i64 > limit;
+            if has_more {
+                // the extra one is the farthest from the cursor: last going forward, first going backward
+                if backward {
+                    messages.remove(0);
+                } else {
+                    messages.pop();
+                }
+            }
             let messages = messages.iter().map(message_to_json).collect();
-            Json(SearchResponse { messages }).into_response()
+            Json(SearchResponse { messages, has_more }).into_response()
         }
         Err(e) => {
             eprintln!("[email] search error: {e}");

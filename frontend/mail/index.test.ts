@@ -6,8 +6,7 @@ import { render, memoryStorage, mockRequests, mockStream, type RouteResponse } f
 import * as helpers from '../src/sinter.helpers.ts';
 import '../src/islands/common.ts';                 // data-shortcut keys
 import page from './index.html?raw';
-import { app } from '../src/test-components.ts';
-import { EmailWidthComponent } from '../src/components/email-width.html';
+import { app, mailWidth } from '../src/test-components.ts';
 import { retryPolicies } from '../src/lib/retry-policies.ts';
 import type { Message } from '../src/lib/mail.ts';
 import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
@@ -63,12 +62,13 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
     maps: { open: async () => {} },
     notify: { status: () => ({ supported: false, permission: 'default', enabled: false }), toggle: async (s: unknown) => s },
     mail: {
-      open: async (ref: { uid: number }) => { opened.push(ref); return current.find((m) => m.uid === ref.uid) ?? inbox[0]; },
+      open: async (ref: { uid: number }) => { opened.push(ref); return current.find((msg) => msg.uid === ref.uid) ?? inbox[0]; },
       body: async (ref: { account_id: string; mailbox: string; uid: number }) => ({
         key: `${ref.account_id} ${ref.mailbox} ${ref.uid}`, html: htmlBody, text: `body ${ref.uid}`, mode: htmlBody ? 'html' : 'text', encrypted: false, signed: false,
         locked: false, badges: [], subject: '', error: '', files: [], importable: {}, cids: null,
       }),
       composeKeys: async () => ({ keys: [], vault: [], unlocked: [] }),
+      autodiscover: async () => ({ found: false }),
       send: async () => null,
       forwardFiles: async () => ({ files: [], html: '' }),
       popout: () => {}, unlock: async () => true, icsFile: async (_m: unknown, filename: string) => new File(['x'], filename),
@@ -129,6 +129,27 @@ test('searches the folder with filters, and pages by cursor', async () => {
   root.querySelector<HTMLButtonElement>('button[aria-label="Unread only"]')!.click();
   await settle();
   expect(requests.calls.at(-1)!.url).toContain('&unread_only=true');
+});
+
+test('a search page offers the next one only when the server says there are more (has_more), not because it is full', async () => {
+  const page = Array.from({ length: 50 }, (_, i) => msg(100 - i, `Hit ${i}`));
+  let more = false;
+  const { root, settle, advance } = await show({ 'GET /api/email/search': () => ({ messages: page, has_more: more }) });
+  const next = () => root.querySelector<HTMLButtonElement>(`.pagination-bar button[aria-label="${m.mail_nextPageAria()}"]`)!;
+  const search = root.querySelector<HTMLInputElement>('.message-list-header > input[type=search]')!;
+  search.value = 'hit';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  await advance(300);
+  await settle();
+  expect(subjects(root)).toHaveLength(50);
+  expect(next().disabled).toBe(true);    // exactly 50 results: no empty next page
+
+  more = true;
+  search.value = 'hits';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  await advance(300);
+  await settle();
+  expect(next().disabled).toBe(false);
 });
 
 const ref = (uid: number) => ({ account_id: 'work', mailbox: 'INBOX', uid });
@@ -424,12 +445,11 @@ test('allowing an ignored image origin is one POST to the allow list (the server
 
 test('a narrow reader (a phone) gets the mail\'s mobile layout: its @media rules for a narrow screen', async () => {
   htmlBody = '<style>.col { width: 300px } @media (max-width: 600px) { .col { width: 100% !important } }</style><table class="col"><tr><td>x</td></tr></table>';
-  const narrow = { EmailWidth: class extends EmailWidthComponent { connected() { this.emit('narrow', true); } } };
   const wide = await show({ 'PATCH /api/email/message/flags': null });
   rows(wide.root)[0].click();
   await wide.settle();
   expect((wide.root.querySelector('.reader .mail-html .mail table') as HTMLElement).style.width).toBe('300px');
-  const phone = await show({ 'PATCH /api/email/message/flags': null }, null, memoryStorage(), 'http://localhost/mail/', { 'email-width': narrow });
+  const phone = await show({ 'PATCH /api/email/message/flags': null }, null, memoryStorage(), 'http://localhost/mail/', { 'mail-width': mailWidth('narrow') });
   rows(phone.root)[0].click();
   await phone.settle();
   expect((phone.root.querySelector('.reader .mail-html .mail table') as HTMLElement).style.width).toBe('100%');

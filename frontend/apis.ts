@@ -10,21 +10,24 @@ export function apis<T>(openapi: T) {
     main: {
       base: '/api',
       openapi,
+      // How the lists page (the mail list by offset, the mail search by keyset): the page size is `limit`, a keyset
+      // page's direction `direction`.
+      paginate: { params: { size: 'limit', direction: 'direction' }, directions: { first: 'forward', prev: 'backward', next: 'forward' } },
       // What each list endpoint returns, said once (the types come from the spec). /contacts is read as two
       // lists (its contacts, its address books), so its resources say which.
       defaults: {
         'GET /events': { key: 'date_iso' },
-        'GET /email/thread': { items: 'messages', key: 'account_id,mailbox,uid' },
+        'GET /email/thread': { select: 'messages', key: 'account_id,mailbox,uid' },
         'GET /email/thread-events': { key: 'account_id,mailbox,uid' },
-        'GET /email/identities': { items: 'identities', key: 'identity_id' },
-        'GET /email/accounts': { items: 'accounts', key: 'account_id' },
-        'GET /email/mailboxes': { items: 'mailboxes', key: 'account_id,name' },
-        'GET /email/folders': { items: 'folders', key: 'folder_id' },
-        'GET /email/messages': { items: 'messages', total: 'total', key: 'account_id,mailbox,uid' },
-        'GET /email/search': { items: 'messages', key: 'account_id,mailbox,uid' },
-        'GET /email/suggest-addrs': { items: 'addrs' },
+        'GET /email/identities': { select: 'identities', key: 'identity_id' },
+        'GET /email/accounts': { select: 'accounts', key: 'account_id' },
+        'GET /email/mailboxes': { select: 'mailboxes', key: 'account_id,name' },
+        'GET /email/folders': { select: 'folders', key: 'folder_id' },
+        'GET /email/messages': { select: 'messages', total: 'total', key: 'account_id,mailbox,uid' },
+        'GET /email/search': { select: 'messages', key: 'account_id,mailbox,uid' },
+        'GET /email/suggest-addrs': { select: 'addrs' },
         'GET /search': { key: 'account_id,calendar_href,uid,dtstart' },
-        'GET /caldav/accounts': { items: 'accounts', key: 'account_id' },
+        'GET /caldav/accounts': { select: 'accounts', key: 'account_id' },
         'GET /calendar/event-emails': { key: 'account_id,mailbox,uid' },
         'GET /calendars': { key: 'account_id,href' },
         'GET /pgp/keys': { key: 'fingerprint' },
