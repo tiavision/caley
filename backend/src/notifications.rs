@@ -6,7 +6,14 @@
 //! What is sent: every `NewEmail` the SSE broadcaster sends (sse.rs hands it over), calendar reminders
 //! (reminders.rs), and a test (`POST /api/notifications/test`). An endpoint that answers 404 or 410 is gone and forgotten.
 //! Not under `/api/push`: that is the CalDAV servers' push to Caley (sync.rs).
+//!
+//! The endpoints are URLs a signed-in user gives, so the server only posts to public addresses: an endpoint
+//! whose host is (or resolves only to) a loopback, private, link-local, shared or other non-public address
+//! is refused when subscribed, and sending resolves through `PublicOnly`, so a name that later resolves to
+//! such an address (DNS rebinding) gets nothing; redirects are not followed. `NOTIFICATIONS_ALLOW_PRIVATE`
+//! allows them, for a push service (e.g. ntfy) on the server's own network.
 
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -43,6 +50,8 @@ pub struct Notifier {
     contact: Option<String>,
     http: reqwest::Client,
     vapid: OnceCell<SigningKey>,
+    /// endpoints on non-public addresses allowed (`NOTIFICATIONS_ALLOW_PRIVATE`)
+    allow_private: bool,
 }
 
 /// What a device gets (JSON, encrypted for it): the app shows it as a notification.
@@ -76,15 +85,19 @@ pub(crate) enum Payload {
 }
 
 impl Notifier {
-    pub fn new(db: Db, key: [u8; 32], app_base_url: &str) -> anyhow::Result<Self> {
-        let http = reqwest::Client::builder()
+    pub fn new(db: Db, key: [u8; 32], app_base_url: &str, allow_private: bool) -> anyhow::Result<Self> {
+        let mut http = reqwest::Client::builder()
             .use_preconfigured_tls(crate::imap_client::tls_config())
             .timeout(Duration::from_secs(15))
-            .build()?;
+            .redirect(reqwest::redirect::Policy::none());
+        if !allow_private {
+            http = http.dns_resolver(Arc::new(PublicOnly));
+        }
+        let http = http.build()?;
         let contact = app_base_url
             .starts_with("https://")
             .then(|| app_base_url.trim_end_matches('/').to_owned());
-        Ok(Self { db, key, contact, http, vapid: OnceCell::new() })
+        Ok(Self { db, key, contact, http, vapid: OnceCell::new(), allow_private })
     }
 
     /// A message the SSE broadcaster sends: new mail goes to the user's devices too.
@@ -169,6 +182,12 @@ impl Notifier {
         let auth = URL_SAFE_NO_PAD.decode(auth).map_err(|e| failed(e.to_string()))?;
         let body = encrypt(json, &ua_public, &auth, &random_secret(), rand::random()).map_err(|e| failed(e.to_string()))?;
         let url = url::Url::parse(endpoint).map_err(|e| failed(e.to_string()))?;
+        // an address in the URL is not resolved (PublicOnly): checked here
+        if let Some(url::Host::Ipv4(_) | url::Host::Ipv6(_)) = url.host() {
+            if !self.allow_private && !url.host_str().and_then(literal_ip).is_some_and(is_public) {
+                return Err(failed("not a public address".into()));
+            }
+        }
         let authorization = vapid_authorization(vapid, &url.origin().ascii_serialization(), self.contact.as_deref())
             .map_err(|e| failed(e.to_string()))?;
         let response = self
@@ -218,6 +237,75 @@ impl Notifier {
 enum Delivery {
     Gone,
     Failed(String),
+}
+
+/// Resolves the push services' names to their public addresses only (see the module).
+struct PublicOnly;
+
+impl reqwest::dns::Resolve for PublicOnly {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_owned();
+        Box::pin(async move {
+            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+                .await?
+                .filter(|addr| is_public(addr.ip()))
+                .collect();
+            if addrs.is_empty() {
+                return Err(format!("{host}: no public address").into());
+            }
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+/// `host` as an address, if it is one (an IPv6 one in brackets, as URLs write it).
+fn literal_ip(host: &str) -> Option<IpAddr> {
+    host.trim_start_matches('[').trim_end_matches(']').parse().ok()
+}
+
+/// Whether `ip` is on the public internet: not loopback, private (RFC 1918, IPv6 unique local), link-local,
+/// shared (100.64/10), unspecified, broadcast, multicast, benchmarking or documentation; IPv4 in IPv6 as IPv4.
+fn is_public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            !(v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_multicast()
+                || v4.is_documentation()
+                || a == 0
+                || (a == 100 && (64..128).contains(&b))
+                || (a == 198 && (18..20).contains(&b))
+                || a >= 240)
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_public(IpAddr::V4(v4));
+            }
+            let first = v6.segments()[0];
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || (first & 0xfe00) == 0xfc00
+                || (first & 0xffc0) == 0xfe80
+                || (first == 0x2001 && v6.segments()[1] == 0x0db8))
+        }
+    }
+}
+
+/// Whether the server may post to `endpoint`'s host: a public address, or a name with one.
+async fn reachable_publicly(url: &url::Url) -> bool {
+    let Some(host) = url.host_str() else { return false };
+    if let Some(ip) = literal_ip(host) {
+        return is_public(ip);
+    }
+    match tokio::net::lookup_host((host, 0)).await {
+        Ok(mut addrs) => addrs.any(|addr| is_public(addr.ip())),
+        Err(_) => false,
+    }
 }
 
 fn host(endpoint: &str) -> String {
@@ -359,17 +447,21 @@ pub async fn vapid(State(state): State<AppState>, _user: CurrentUser) -> impl In
     request_body = Subscription,
     responses(
         (status = 204, description = "stored"),
-        (status = 400, body = ApiError, description = "not an https endpoint, keys of the wrong size, or an unknown timezone"),
+        (status = 400, body = ApiError, description = "not an https endpoint, keys of the wrong size, an unknown timezone, or an endpoint not on a public address (unless NOTIFICATIONS_ALLOW_PRIVATE)"),
         (status = 500, description = "plain text: database error")
     )
 )]
 pub async fn subscribe(State(state): State<AppState>, user: CurrentUser, Json(body): Json<Subscription>) -> impl IntoResponse {
-    let https = url::Url::parse(&body.endpoint).is_ok_and(|u| u.scheme() == "https" && u.host_str().is_some());
+    let url = url::Url::parse(&body.endpoint).ok().filter(|u| u.scheme() == "https" && u.host_str().is_some());
+    let https = url.is_some();
     let key_ok = URL_SAFE_NO_PAD.decode(&body.p256dh).is_ok_and(|k| k.len() == 65 && PublicKey::from_sec1_bytes(&k).is_ok());
     let auth_ok = URL_SAFE_NO_PAD.decode(&body.auth).is_ok_and(|a| a.len() == 16);
     let timezone_ok = body.timezone.as_deref().is_none_or(|tz| tz.parse::<chrono_tz::Tz>().is_ok());
     if !https || body.endpoint.len() > 1000 || !key_ok || !auth_ok || !timezone_ok {
         return (StatusCode::BAD_REQUEST, Json(ApiError::new("invalid subscription"))).into_response();
+    }
+    if !state.notifier.allow_private && !reachable_publicly(url.as_ref().unwrap()).await {
+        return (StatusCode::BAD_REQUEST, Json(ApiError::new("endpoint not on a public address"))).into_response();
     }
     let result = sqlx::query(
         "INSERT INTO notification_subscriptions(endpoint, user_id, p256dh, auth, timezone, created_at) VALUES(?, ?, ?, ?, ?, ?)
@@ -519,7 +611,7 @@ mod tests {
             .unwrap();
 
         let broadcaster = crate::sse::SseBroadcaster::new();
-        broadcaster.set_notifier(Arc::new(Notifier::new(db, [7; 32], "https://caley.example").unwrap()));
+        broadcaster.set_notifier(Arc::new(Notifier::new(db, [7; 32], "https://caley.example", true).unwrap()));
         broadcaster.send(
             "u@example",
             SseMessage::NewEmail {
@@ -548,6 +640,58 @@ mod tests {
                 "url": "/mail/view/?account_id=work&mailbox=INBOX&uid=42",
             })
         );
+    }
+
+    #[test]
+    fn public_addresses() {
+        for ip in ["93.184.215.14", "2606:4700::6810:84e5", "::ffff:8.8.8.8"] {
+            assert!(is_public(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in [
+            "127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.178.20", "169.254.169.254", "100.64.0.1", "0.0.0.0",
+            "255.255.255.255", "224.0.0.1", "198.18.0.1", "::1", "::", "fd00::1", "fe80::1", "::ffff:127.0.0.1", "2001:db8::1",
+        ] {
+            assert!(!is_public(ip.parse().unwrap()), "{ip}");
+        }
+    }
+
+    /// Without NOTIFICATIONS_ALLOW_PRIVATE nothing is posted to a private address: not by its name (the
+    /// resolver), not as an address in the URL.
+    #[tokio::test]
+    async fn private_endpoints_get_nothing() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let dir = std::env::temp_dir().join(format!("caley-private-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::init_db(dir.join("t.db").to_str().unwrap()).await.unwrap();
+        let notifier = Notifier::new(db, [7; 32], "https://caley.example", false).unwrap();
+        let key = SigningKey::from(random_secret());
+        let device = random_secret().public_key().to_sec1_point(false);
+        let p256dh = URL_SAFE_NO_PAD.encode(device.as_bytes());
+        let auth = URL_SAFE_NO_PAD.encode([1u8; 16]);
+
+        // a push service on this machine, counting the connections it gets
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = Arc::clone(&connections);
+        tokio::spawn(async move {
+            while listener.accept().await.is_ok() {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+
+        for endpoint in [format!("http://localhost:{port}/push"), format!("http://127.0.0.1:{port}/push")] {
+            assert!(
+                matches!(notifier.post(&endpoint, &p256dh, &auth, b"{}", &key).await, Err(Delivery::Failed(_))),
+                "{endpoint}"
+            );
+        }
+        assert_eq!(connections.load(std::sync::atomic::Ordering::SeqCst), 0, "no connection to a private address");
+
+        // allowed, the same service is reached
+        let allowing = Notifier::new(notifier.db.clone(), [7; 32], "https://caley.example", true).unwrap();
+        let _ = allowing.post(&format!("http://localhost:{port}/push"), &p256dh, &auth, b"{}", &key).await;
+        assert_eq!(connections.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     /// The VAPID header's JWT verifies with the key it names.

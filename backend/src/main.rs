@@ -96,6 +96,10 @@ struct Cli {
     webauthn_extra_origins: Vec<String>,
     #[arg(long, env = "DEMO_MODE", default_value_t = false)]
     demo_mode: bool,
+    /// Push endpoints on loopback, private and other non-public addresses allowed (notifications.rs),
+    /// for a push service such as ntfy on the server's own network.
+    #[arg(long, env = "NOTIFICATIONS_ALLOW_PRIVATE", default_value_t = false)]
+    notifications_allow_private: bool,
 }
 
 #[tokio::main]
@@ -148,7 +152,7 @@ async fn main() -> anyhow::Result<()> {
         && args.oidc_client_secret.is_some();
 
     let sse_broadcaster = Arc::new(sse::SseBroadcaster::new());
-    let notifier = Arc::new(notifications::Notifier::new(db.clone(), encryption_key, &args.app_base_url)?);
+    let notifier = Arc::new(notifications::Notifier::new(db.clone(), encryption_key, &args.app_base_url, args.notifications_allow_private)?);
     sse_broadcaster.set_notifier(Arc::clone(&notifier));
     reminders::spawn(db.clone(), encryption_key, Arc::clone(&notifier));
 

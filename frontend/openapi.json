@@ -2533,7 +2533,7 @@
             "description": "stored"
           },
           "400": {
-            "description": "not an https endpoint, keys of the wrong size, or an unknown timezone",
+            "description": "not an https endpoint, keys of the wrong size, an unknown timezone, or an endpoint not on a public address (unless NOTIFICATIONS_ALLOW_PRIVATE)",
             "content": {
               "application/json": {
                 "schema": {

@@ -271,7 +271,7 @@ mod tests {
             .await
             .unwrap();
 
-        let notifier = Notifier::new(db.clone(), key, "https://caley.example").unwrap();
+        let notifier = Notifier::new(db.clone(), key, "https://caley.example", true).unwrap();
         assert_eq!(tick(&db, &key, &notifier, now).await.unwrap(), 1);
         assert!(rx.recv().await.is_some());
         assert_eq!(tick(&db, &key, &notifier, now + 60).await.unwrap(), 0, "not twice");
