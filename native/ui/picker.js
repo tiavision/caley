@@ -120,12 +120,12 @@ document.getElementById('adding').addEventListener('toggle', (e) => {
 });
 render();
 
-// a start of the app opens the server used last; coming back to choose (`?pick`) does not
-const [last] = servers();
-if (last && !new URLSearchParams(location.search).has('pick')) open(last.origin);
-// shown again from the back/forward cache: the buttons as they were before a connect
+// a start of the app opens the server used last before this page paints (start.js); coming back to choose
+// (`?pick`) shows the list
+// shown again from the back/forward cache: the buttons as they were before a connect, the page visible
 window.addEventListener('pageshow', (e) => {
   if (!e.persisted) return;
+  delete document.documentElement.dataset.opening;
   const button = document.querySelector('#add button[type=submit]');
   button.disabled = false;
   button.textContent = t('connect');
