@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The server picker (the app's own page). The servers' pages are remote and get no IPC: no capability lists their origins.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

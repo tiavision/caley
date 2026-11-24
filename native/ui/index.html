@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Caley</title>
+  <link rel="stylesheet" href="picker.css">
+  <script src="picker.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <img src="logo.png" alt="" width="72" height="72">
+      <h1>Caley</h1>
+    </header>
+
+    <section id="saved" hidden>
+      <h2 data-t="saved"></h2>
+      <ul id="servers"></ul>
+    </section>
+
+    <details id="adding">
+      <summary data-t="add"></summary>
+      <form id="add" novalidate>
+        <label for="address" data-t="address"></label>
+        <input id="address" name="address" type="url" inputmode="url" autocomplete="url"
+               autocapitalize="off" spellcheck="false" placeholder="caley.example.com" required>
+        <p class="hint" data-t="hint"></p>
+        <p id="error" role="alert"></p>
+        <button type="submit" data-t="connect"></button>
+      </form>
+    </details>
+  </main>
+</body>
+</html>

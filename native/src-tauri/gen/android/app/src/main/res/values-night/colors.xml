@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Caley's page background (temper's tm-bg token), behind the system bars (MainActivity.kt) -->
+    <color name="caley_background">#FF090A0E</color>
+</resources>
