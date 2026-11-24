@@ -17,6 +17,9 @@
     <sn-resource name="mailboxes" src="/email/mailboxes?account_id={open.account_id}" when="open"></sn-resource>
     <sn-resource name="identities" src="/email/identities"></sn-resource>
     <email-reader-data data-sn-with="{ open, threadRef, wiped }"></email-reader-data>
+    <!-- sinter-mail's warm-up: parses a sample mail while the page waits for the message, so the parser is compiled
+         before the real body arrives. -->
+    <mail-warm></mail-warm>
     <sn-sync src="/events/stream">
       <sn-event name="emails_refetch" resource="message" op="refresh" type="MailboxEvent"
                 when="open && $event.account_id === open.account_id && $event.mailbox === open.mailbox"></sn-event>

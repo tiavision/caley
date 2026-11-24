@@ -1390,7 +1390,7 @@
     },
     "/email/message/raw": {
       "get": {
-        "summary": "The message's MIME source (for PGP processing).",
+        "summary": "The message's MIME source, as the reader reads it (sinter-mail's `mail.mime`). With `omit`, a cut message: the\nbodies of large attachments left out, where they were in `Mail-Holes` (JSON, `[{ start, end, size }]`, offsets of\nthe whole message, `size` decoded). Without it the whole message, which answers a `Range` (one range of bytes,\n`If-Range` with its `ETag`), so a cut body is fetched when it is opened. Both carry the whole message's `ETag`.",
         "operationId": "get_raw_message",
         "parameters": [
           {
@@ -1418,11 +1418,35 @@
               "format": "int32",
               "minimum": 0
             }
+          },
+          {
+            "name": "omit",
+            "in": "query",
+            "description": "leave out the bodies of attachments larger than this many bytes (encoded): a cut message (sinter-mail's\n\"Large attachments: cut messages\"), the cuts in the `Mail-Holes` header. Inline images count from 512 KiB\n(or this, if larger).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "the cached .eml",
+            "description": "the cached .eml, or with `omit` the cut message",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "the whole message's"
+              },
+              "Mail-Holes": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "with `omit`: the cuts (JSON)"
+              }
+            },
             "content": {
               "message/rfc822": {
                 "schema": {
@@ -1431,8 +1455,21 @@
               }
             }
           },
+          "206": {
+            "description": "the range of the whole message a `Range` asked for",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/Binary"
+                }
+              }
+            }
+          },
           "404": {
             "description": "no such account or no cached source (plain text)"
+          },
+          "416": {
+            "description": "a range outside the message (plain text)"
           },
           "500": {
             "description": "database error (plain text)"
@@ -4633,9 +4670,6 @@
           "flags",
           "has_attachments",
           "body_cached",
-          "body_text",
-          "body_html",
-          "autocrypt_headers",
           "is_read",
           "is_flagged",
           "is_encrypted",
@@ -4721,25 +4755,7 @@
           },
           "body_cached": {
             "type": "boolean",
-            "description": "whether the body was cached (GET /email/message only; false in lists)"
-          },
-          "body_text": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "body_html": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "autocrypt_headers": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
+            "description": "whether the body was cached (GET /email/message only; false in lists). The reader reads the body from the\nmessage's source (`/email/message/raw`)."
           },
           "is_read": {
             "type": "boolean"

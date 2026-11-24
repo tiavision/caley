@@ -65,10 +65,8 @@ pub struct AttachmentRow {
     pub content_id: Option<String>,
 }
 
+/// What `/email/message` says of a cached body (the reader reads the body itself from the message's source).
 pub struct MessageBodyRow {
-    pub body_text: Option<String>,
-    pub body_html: Option<String>,
-    pub autocrypt_headers: Vec<String>,
     pub is_signed: bool,
 }
 
@@ -255,35 +253,25 @@ where
     Ok(())
 }
 
+/// Records that the message's body was synced (its source is the cached .eml), and whether it is signed.
 pub async fn upsert_message_render_body<'e, E>(
     executor: E,
     account_id: &str,
     mailbox: &str,
     uid: u32,
-    body_text: Option<&str>,
-    body_html: Option<&str>,
-    autocrypt_headers: &[String],
     is_signed: bool,
 ) -> Result<()>
 where
     E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
 {
     sqlx::query(
-        "INSERT INTO cached_message_bodies
-            (account_id, mailbox, uid, body_text, body_html, autocrypt_headers, is_signed)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(account_id, mailbox, uid) DO UPDATE SET
-            body_text = excluded.body_text,
-            body_html = excluded.body_html,
-            autocrypt_headers = excluded.autocrypt_headers,
-            is_signed = excluded.is_signed",
+        "INSERT INTO cached_message_bodies (account_id, mailbox, uid, is_signed)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(account_id, mailbox, uid) DO UPDATE SET is_signed = excluded.is_signed",
     )
     .bind(account_id)
     .bind(mailbox)
     .bind(uid as i64)
-    .bind(body_text)
-    .bind(body_html)
-    .bind(serde_json::to_string(autocrypt_headers)?)
     .bind(is_signed as i64)
     .execute(executor)
     .await?;
@@ -297,7 +285,7 @@ pub async fn get_message_render_body(
     uid: u32,
 ) -> Result<Option<MessageBodyRow>> {
     let row = sqlx::query(
-        "SELECT body_text, body_html, autocrypt_headers, is_signed
+        "SELECT is_signed
          FROM cached_message_bodies WHERE account_id = ? AND mailbox = ? AND uid = ?",
     )
     .bind(account_id)
@@ -306,15 +294,7 @@ pub async fn get_message_render_body(
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|r| {
-        let autocrypt_json: String = r.get(2);
-        MessageBodyRow {
-            body_text: r.get(0),
-            body_html: r.get(1),
-            autocrypt_headers: serde_json::from_str(&autocrypt_json).unwrap_or_default(),
-            is_signed: r.get::<i64, _>(3) != 0,
-        }
-    }))
+    Ok(row.map(|r| MessageBodyRow { is_signed: r.get::<i64, _>(0) != 0 }))
 }
 
 pub async fn delete_message(
@@ -1115,7 +1095,6 @@ mod tests {
         sqlx::query(
             "CREATE TABLE cached_message_bodies (
                 account_id TEXT NOT NULL, mailbox TEXT NOT NULL, uid INTEGER NOT NULL,
-                body_text TEXT, body_html TEXT, autocrypt_headers TEXT NOT NULL DEFAULT '[]',
                 is_signed INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (account_id, mailbox, uid),
                 FOREIGN KEY (account_id, mailbox, uid)
@@ -1132,18 +1111,7 @@ mod tests {
     async fn stores_and_reads_render_body() {
         let pool = thread_pool().await;
         insert_thread_message(&pool, "account", "INBOX", 1, "message", None, 1).await;
-        let headers = vec!["addr=alice@example.test; keydata=YWJj".to_owned()];
-
-        upsert_message_render_body(
-            &pool,
-            "account",
-            "INBOX",
-            1,
-            Some("Hello"),
-            Some("<p>Hello</p>"),
-            &headers,
-            true,
-        )
+        upsert_message_render_body(&pool, "account", "INBOX", 1, true)
         .await
         .unwrap();
 
@@ -1151,9 +1119,6 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(body.body_text.as_deref(), Some("Hello"));
-        assert_eq!(body.body_html.as_deref(), Some("<p>Hello</p>"));
-        assert_eq!(body.autocrypt_headers, headers);
         assert!(body.is_signed);
     }
 

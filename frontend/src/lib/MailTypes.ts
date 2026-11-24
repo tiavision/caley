@@ -69,9 +69,6 @@ export interface Message {
   flags: string[];
   has_attachments: boolean;
   body_cached: boolean;
-  body_text: string | null;
-  body_html: string | null;
-  autocrypt_headers: string[];
   is_read: boolean;
   is_flagged: boolean;
   is_encrypted: boolean;

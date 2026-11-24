@@ -80,6 +80,7 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
         };
       },
       openPart: (_ref: unknown, step: string) => { openedParts.push(step); },
+      verify: () => {},
       wipe: () => {},
       composeKeys: async () => ({ keys: [], vault: [], unlocked: [] }),
       autodiscover: async () => ({ found: false }),

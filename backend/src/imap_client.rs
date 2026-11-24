@@ -206,11 +206,10 @@ pub struct AttachmentPart {
     pub part_index: usize,
 }
 
+/// What the sync keeps of a message's body: its text for the search index, and whether it is signed (the reader reads
+/// the body itself from the message's source).
 pub struct MessageRenderBody {
-    pub body_text: Option<String>,
-    pub body_html: Option<String>,
     pub search_text: String,
-    pub autocrypt_headers: Vec<String>,
     pub is_signed: bool,
 }
 
@@ -601,68 +600,26 @@ fn parse_body_bytes(bytes: &[u8]) -> Result<(MessageRenderBody, bool, Vec<Attach
         None => {
             let text = String::from_utf8_lossy(bytes).into_owned();
             return Ok((
-                MessageRenderBody {
-                    body_text: Some(text.clone()),
-                    body_html: None,
-                    search_text: text,
-                    autocrypt_headers: extract_header_values(bytes, "autocrypt"),
-                    is_signed: detect_pgp_signed(bytes),
-                },
+                MessageRenderBody { search_text: text, is_signed: detect_pgp_signed(bytes) },
                 false,
                 Vec::new(),
             ));
         }
     };
 
-    let body_text = msg.body_text(0).map(|text| text.as_ref().to_owned());
-    let body_html = msg.body_html(0).map(|html| html.as_ref().to_owned());
-    let search_text = body_text
-        .clone()
-        .unwrap_or_else(|| body_html.as_deref().map(strip_tags).unwrap_or_default());
+    let search_text = msg
+        .body_text(0)
+        .map(|text| text.as_ref().to_owned())
+        .unwrap_or_else(|| msg.body_html(0).map(|html| strip_tags(&html)).unwrap_or_default());
 
     let attachments = extract_attachments(&msg);
     let has_attachments = !attachments.is_empty();
 
     Ok((
-        MessageRenderBody {
-            body_text,
-            body_html,
-            search_text,
-            autocrypt_headers: extract_header_values(bytes, "autocrypt"),
-            is_signed: detect_pgp_signed(bytes),
-        },
+        MessageRenderBody { search_text, is_signed: detect_pgp_signed(bytes) },
         has_attachments,
         attachments,
     ))
-}
-
-fn extract_header_values(bytes: &[u8], name: &str) -> Vec<String> {
-    let raw = String::from_utf8_lossy(bytes);
-    let header_end = raw
-        .find("\r\n\r\n")
-        .or_else(|| raw.find("\n\n"))
-        .unwrap_or(raw.len());
-    let mut unfolded: Vec<String> = Vec::new();
-    for line in raw[..header_end].lines() {
-        if line.starts_with(' ') || line.starts_with('\t') {
-            if let Some(previous) = unfolded.last_mut() {
-                previous.push(' ');
-                previous.push_str(line.trim());
-            }
-        } else {
-            unfolded.push(line.trim_end_matches('\r').to_owned());
-        }
-    }
-    let prefix = format!("{}:", name.to_ascii_lowercase());
-    unfolded
-        .into_iter()
-        .filter_map(|line| {
-            let lower = line.to_ascii_lowercase();
-            lower
-                .starts_with(&prefix)
-                .then(|| line[prefix.len()..].trim().to_owned())
-        })
-        .collect()
 }
 
 fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
@@ -1026,17 +983,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn extracts_render_body_and_unfolded_autocrypt_header() {
+    fn extracts_the_search_text_of_an_alternative() {
         let raw = b"From: Alice <alice@example.test>\r\nAutocrypt: addr=alice@example.test;\r\n keydata=YWJj\r\nContent-Type: multipart/alternative; boundary=alt\r\n\r\n--alt\r\nContent-Type: text/plain\r\n\r\nHello\r\n--alt\r\nContent-Type: text/html\r\n\r\n<p>Hello</p>\r\n--alt--\r\n";
 
         let (body, _, _) = parse_body_bytes(raw).unwrap();
 
-        assert_eq!(body.body_text.as_deref(), Some("Hello"));
-        assert_eq!(body.body_html.as_deref(), Some("<p>Hello</p>"));
-        assert_eq!(
-            body.autocrypt_headers,
-            vec!["addr=alice@example.test; keydata=YWJj"]
-        );
+        assert_eq!(body.search_text, "Hello");
         assert!(!body.is_signed);
     }
 

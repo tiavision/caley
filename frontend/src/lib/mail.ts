@@ -629,7 +629,7 @@ export function bodyImages(
 /**
  * The parse options of each of the reader's blocks (null: not HTML, or `media` not known yet): a decrypted part's
  * remote images blocked until `consent`, the sender's legacy header copy left out, its inline images (`cids`, by part
- * id: blob: URLs of a message read in the browser; null: the server serves them by content id). The markup parses
+ * id: a decrypted part's as data: URLs; a part without an entry, or no `cids`: the server serves them by content id). The markup parses
  * with email.parse: this module never imports the parser, since every page imports the helpers.
  */
 export function partOptions(
@@ -639,7 +639,7 @@ export function partOptions(
   return (parts ?? []).map((part) => ({
     part,
     options: part.kind === 'html' && media
-      ? { ...bodyImages(msg, cids ? cids[part.id] ?? {} : null, version, media, part.encrypted, consent), legacyDisplay: part.legacyDisplay }
+      ? { ...bodyImages(msg, cids?.[part.id] ?? null, version, media, part.encrypted, consent), legacyDisplay: part.legacyDisplay }
       : null,
   }));
 }

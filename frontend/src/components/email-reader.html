@@ -16,7 +16,7 @@
      Shift+I / Shift+U mark read / unread (on the read toggle, whichever it does). -->
 <template data-sn-props="{ open: MessageRef | null; defaultCal: string }"
           data-sn-emits="{ compose: ComposeDraft; 'origins-open': string[] | null; 'ics-import': ImportDraft; 'thread-open': ThreadRef; 'mail-removed': MessageRef; decrypt: void }">
-  <div data-sn-import="openpgp" data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null) }" data-sn-on-media="media = $event.detail">
+  <div data-sn-import="openpgp, @tiavision/sinter-mail" data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null) }" data-sn-on-media="media = $event.detail">
     <!-- One switch per message: the reader keeps the last message read in full (busy) until the open one's body is in
          (shownMessages), instead of emptying for the message and again for its body. -->
     <template data-sn-if="shownMessages(message, body, open).length > 0">
@@ -30,8 +30,11 @@
                encrypted: msg.is_encrypted || !!b?.encrypted,
                html: b?.html ?? '',
                viewMode: mode || (b?.mode ?? 'text'),
-               views: partOptions(viewMode === 'text' ? b?.textParts : b?.parts, msg, b?.cids ?? null, imageVersion, media, consent)
-                 .map(v => ({ part: v.part, tree: (v.options && email.parse(v.part.html, v.options)) ?? null })),
+               /* the parse in a let of its own: sinter-mail is lazy, and a let that calls it is undefined until it has
+                  loaded (data-sn-import loads it with the reader), so the parts render without it, their trees after */
+               opts: partOptions(viewMode === 'text' ? b?.textParts : b?.parts, msg, b?.cids ?? null, imageVersion, media, consent),
+               trees: opts.map(v => (v.options && email.parse(v.part.html, v.options)) ?? null),
+               views: opts.map((v, i) => ({ part: v.part, tree: trees?.[i] ?? null })),
                encImgs: !consent && viewOrigins(views, true).length > 0,
                imgs: bodyOrigins(viewOrigins(views), allowedOrigins?.origins ?? [], ignoredOrigins?.origins ?? []),
                archive: archiveMailbox(msg, mailboxes),
@@ -214,6 +217,16 @@
           </template>
 
           <div class="detail-body" data-layout="stack" data-gap="sm">
+            <!-- Signed over attachments the server left out (a cut message, `pending`): the mail is shown, its signature
+                 checked only when the reader asks, which downloads the whole message (mail.verify, then the body again). -->
+            <template data-sn-if="b && b.pending">
+              <div data-callout data-layout="row" data-gap="sm" data-align="center">
+                <span data-icon="signature" aria-hidden="true"></span>
+                <span data-grow data-sn-text="m.pgp_verifyPrompt({ size: humanSize(b.wholeSize) })"></span>
+                <button type="button" data-variant="outline" data-size="sm" data-sn-call="mail.verify(msg)" data-sn-then="refresh(body)"
+                        data-sn-attr="{'aria-busy': $meta.body.loading ? 'true' : null}" data-sn-text="m.pgp_verifyButton()"></button>
+              </div>
+            </template>
             <template data-sn-if="(b && b.badges.some(x => !isIconBadge(x))) || keyNote || keyError">
               <div data-layout="stack" data-gap="xs" data-pad="sm">
                 <template data-sn-if="b && b.badges.some(x => !isIconBadge(x))">
@@ -282,12 +295,13 @@
                   <template data-sn-else data-sn-if="v.part.kind === 'forwarded'">
                     <p class="mail-forwarded" data-muted data-icon="forward" data-sn-text="m.mail_forwardedMessage({from: v.part.text})"></p>
                   </template>
-                  <template data-sn-else data-sn-if="v.part.reason === 'not-root'">
-                    <!-- Encrypted inside the message (a forward, a footer around it): opened only when the reader asks. -->
+                  <template data-sn-else data-sn-if="v.part.reason === 'not-root' || v.part.reason === 'incomplete'">
+                    <!-- Encrypted inside the message (a forward, a footer around it): opened only when the reader asks; one
+                         whose ciphertext the server left out (a cut message, 'incomplete', no step) reads the whole message. -->
                     <div data-callout data-layout="row" data-gap="sm">
                       <span data-icon="lock" aria-hidden="true"></span>
                       <span data-grow data-sn-text="m.pgp_encryptedPart()"></span>
-                      <button type="button" data-variant="outline" data-size="sm" data-sn-call="mail.openPart(msg, v.part.step)"
+                      <button type="button" data-variant="outline" data-size="sm" data-sn-call="mail.openPart(msg, v.part.step, v.part.id)"
                               data-sn-then="refresh(body)" data-sn-text="m.pgp_openPart()"></button>
                     </div>
                   </template>

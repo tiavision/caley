@@ -75,13 +75,9 @@ pub struct Message {
     /// IMAP flags (`\Seen`, `\Flagged`, ...)
     pub flags: Vec<String>,
     pub has_attachments: bool,
-    /// whether the body was cached (GET /email/message only; false in lists)
+    /// whether the body was cached (GET /email/message only; false in lists). The reader reads the body from the
+    /// message's source (`/email/message/raw`).
     pub body_cached: bool,
-    #[schema(required)]
-    pub body_text: Option<String>,
-    #[schema(required)]
-    pub body_html: Option<String>,
-    pub autocrypt_headers: Vec<String>,
     pub is_read: bool,
     pub is_flagged: bool,
     pub is_encrypted: bool,
@@ -328,21 +324,42 @@ async fn load_raw_eml(
 }
 
 
-/// The message's MIME source (for PGP processing).
+/// Which message's source, and whether its large attachments are left out.
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct RawMessageQuery {
+    pub account_id: String,
+    pub mailbox: String,
+    pub uid: u32,
+    /// leave out the bodies of attachments larger than this many bytes (encoded): a cut message (sinter-mail's
+    /// "Large attachments: cut messages"), the cuts in the `Mail-Holes` header. Inline images count from 512 KiB
+    /// (or this, if larger).
+    #[serde(default)]
+    pub omit: Option<usize>,
+}
+
+/// The message's MIME source, as the reader reads it (sinter-mail's `mail.mime`). With `omit`, a cut message: the
+/// bodies of large attachments left out, where they were in `Mail-Holes` (JSON, `[{ start, end, size }]`, offsets of
+/// the whole message, `size` decoded). Without it the whole message, which answers a `Range` (one range of bytes,
+/// `If-Range` with its `ETag`), so a cut body is fetched when it is opened. Both carry the whole message's `ETag`.
 #[utoipa::path(
     get,
     path = "/email/message/raw",
-    params(GetMessageQuery),
+    params(RawMessageQuery),
     responses(
-        (status = 200, body = crate::api::Binary, content_type = "message/rfc822", description = "the cached .eml"),
+        (status = 200, body = crate::api::Binary, content_type = "message/rfc822", description = "the cached .eml, or with `omit` the cut message",
+         headers(("ETag" = String, description = "the whole message's"), ("Mail-Holes" = String, description = "with `omit`: the cuts (JSON)"))),
+        (status = 206, body = crate::api::Binary, content_type = "application/octet-stream", description = "the range of the whole message a `Range` asked for"),
         (status = 404, description = "no such account or no cached source (plain text)"),
+        (status = 416, description = "a range outside the message (plain text)"),
         (status = 500, description = "database error (plain text)")
     )
 )]
 pub async fn get_raw_message(
     State(state): State<AppState>,
     user: CurrentUser,
-    Query(q): Query<GetMessageQuery>,
+    Query(q): Query<RawMessageQuery>,
+    headers: axum::http::HeaderMap,
 ) -> Response {
     match email_db::get_account(
         &state.db,
@@ -360,21 +377,91 @@ pub async fn get_raw_message(
         }
     }
 
-    match load_raw_eml(&state.data_dir, &q.account_id, &q.mailbox, q.uid).await {
-        Some(raw) => (
+    let Some(raw) = load_raw_eml(&state.data_dir, &q.account_id, &q.mailbox, q.uid).await else {
+        return (StatusCode::NOT_FOUND, "message source not found").into_response();
+    };
+    raw_response(raw, q.omit, &headers)
+}
+
+/// The response of `get_raw_message` for the whole message `raw`.
+fn raw_response(raw: Vec<u8>, omit: Option<usize>, request: &axum::http::HeaderMap) -> Response {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(&raw);
+    let etag = format!("\"{}\"", digest[..16].iter().map(|b| format!("{b:02x}")).collect::<String>());
+    let common = [
+        (header::CACHE_CONTROL, "private, no-store".to_owned()),
+        (header::HeaderName::from_static("x-content-type-options"), "nosniff".to_owned()),
+        (header::ETAG, etag.clone()),
+    ];
+
+    if let Some(over) = omit {
+        let options = super::cut::CutOptions { over, related_over: over.max(512 * 1024), ..Default::default() };
+        let (cut, holes) = super::cut::cut(&raw, &options);
+        let holes = serde_json::to_string(&holes).unwrap_or_else(|_| "[]".to_owned());
+        return (
+            common,
             [
-                (header::CONTENT_TYPE, "message/rfc822"),
-                (header::CACHE_CONTROL, "private, no-store"),
-                (
-                    header::HeaderName::from_static("x-content-type-options"),
-                    "nosniff",
-                ),
+                (header::CONTENT_TYPE, "message/rfc822".to_owned()),
+                (header::HeaderName::from_static("mail-holes"), holes),
             ],
-            raw,
+            cut,
         )
-            .into_response(),
-        None => (StatusCode::NOT_FOUND, "message source not found").into_response(),
+            .into_response();
     }
+
+    let range = request.get(header::RANGE).and_then(|v| v.to_str().ok());
+    let current = request
+        .get(header::IF_RANGE)
+        .and_then(|v| v.to_str().ok())
+        .is_none_or(|v| v == etag);
+    if let (Some(range), true) = (range, current) {
+        return match byte_range(range, raw.len()) {
+            Some((from, to)) => (
+                StatusCode::PARTIAL_CONTENT,
+                common,
+                [
+                    (header::CONTENT_TYPE, "application/octet-stream".to_owned()),
+                    (header::CONTENT_RANGE, format!("bytes {from}-{to}/{}", raw.len())),
+                ],
+                raw[from..=to].to_vec(),
+            )
+                .into_response(),
+            None => (
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                [(header::CONTENT_RANGE, format!("bytes */{}", raw.len()))],
+                "range not satisfiable",
+            )
+                .into_response(),
+        };
+    }
+    (
+        common,
+        [
+            (header::CONTENT_TYPE, "message/rfc822".to_owned()),
+            (header::ACCEPT_RANGES, "bytes".to_owned()),
+        ],
+        raw,
+    )
+        .into_response()
+}
+
+/// One range of a `Range: bytes=…` header (`a-b`, `a-`, `-n`) within `len` bytes: its first and last byte.
+fn byte_range(value: &str, len: usize) -> Option<(usize, usize)> {
+    let spec = value.trim().strip_prefix("bytes=")?;
+    if spec.contains(',') || len == 0 {
+        return None;
+    }
+    let (a, b) = spec.split_once('-')?;
+    let (a, b) = (a.trim(), b.trim());
+    let (from, to) = if a.is_empty() {
+        let n: usize = b.parse().ok()?;
+        (len.checked_sub(n.min(len)).filter(|_| n > 0)?, len - 1)
+    } else {
+        let from: usize = a.parse().ok()?;
+        let to = if b.is_empty() { len - 1 } else { b.parse::<usize>().ok()?.min(len - 1) };
+        (from, to)
+    };
+    (from <= to && from < len).then_some((from, to))
 }
 
 /// The conversation of a message.
@@ -1300,11 +1387,6 @@ pub(super) fn message_to_json_with_attachments(
         sent_at: m.sent_at,
         has_attachments: m.has_attachments,
         body_cached: render_body.is_some(),
-        body_text: render_body.and_then(|body| body.body_text.clone()),
-        body_html: render_body.and_then(|body| body.body_html.clone()),
-        autocrypt_headers: render_body
-            .map(|body| body.autocrypt_headers.clone())
-            .unwrap_or_default(),
         is_read: flags.iter().any(|f| f == "\\Seen"),
         is_flagged: flags.iter().any(|f| f == "\\Flagged"),
         is_encrypted: m.is_encrypted,
@@ -1395,21 +1477,57 @@ mod tests {
     }
 
     #[test]
-    fn message_detail_contains_cached_body_but_never_raw_mime() {
+    fn message_detail_says_the_body_is_cached_but_carries_neither_it_nor_raw_mime() {
         let message = thread_row("INBOX", 1, "message", 1);
-        let body = MessageBodyRow {
-            body_text: Some("Hello".to_owned()),
-            body_html: Some("<p>Hello</p>".to_owned()),
-            autocrypt_headers: Vec::new(),
-            is_signed: false,
-        };
+        let body = MessageBodyRow { is_signed: false };
 
         let json =
             serde_json::to_value(message_to_json_with_attachments(&message, &[], Some(&body)))
                 .unwrap();
 
         assert_eq!(json["body_cached"], true);
-        assert_eq!(json["body_text"], "Hello");
+        assert!(json.get("body_text").is_none() && json.get("body_html").is_none());
         assert!(json.get("raw_eml").is_none());
+    }
+}
+
+#[cfg(test)]
+mod raw_tests {
+    use super::*;
+
+    #[test]
+    fn byte_ranges() {
+        assert_eq!(byte_range("bytes=0-9", 100), Some((0, 9)));
+        assert_eq!(byte_range("bytes=90-200", 100), Some((90, 99)));
+        assert_eq!(byte_range("bytes=95-", 100), Some((95, 99)));
+        assert_eq!(byte_range("bytes=-10", 100), Some((90, 99)));
+        assert_eq!(byte_range("bytes=100-", 100), None);
+        assert_eq!(byte_range("bytes=5-1", 100), None);
+        assert_eq!(byte_range("bytes=0-1,5-6", 100), None);
+        assert_eq!(byte_range("items=0-1", 100), None);
+    }
+
+    #[tokio::test]
+    async fn the_whole_message_cut_and_by_range() {
+        let raw = b"Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nHi\r\n\
+                    --b\r\nContent-Type: application/pdf\r\n\r\n0123456789abcdef\r\n--b--\r\n".to_vec();
+        let none = axum::http::HeaderMap::new();
+        let cut = raw_response(raw.clone(), Some(8), &none);
+        assert_eq!(cut.status(), StatusCode::OK);
+        let holes: serde_json::Value = serde_json::from_str(cut.headers()["mail-holes"].to_str().unwrap()).unwrap();
+        let (start, end) = (holes[0]["start"].as_u64().unwrap() as usize, holes[0]["end"].as_u64().unwrap() as usize);
+        assert_eq!(&raw[start..end], b"0123456789abcdef");
+        let etag = cut.headers()[header::ETAG].clone();
+
+        let mut ranged = axum::http::HeaderMap::new();
+        ranged.insert(header::RANGE, format!("bytes={start}-{}", end - 1).parse().unwrap());
+        ranged.insert(header::IF_RANGE, etag);
+        let part = raw_response(raw.clone(), None, &ranged);
+        assert_eq!(part.status(), StatusCode::PARTIAL_CONTENT);
+        let body = axum::body::to_bytes(part.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(&body[..], b"0123456789abcdef");
+
+        ranged.insert(header::IF_RANGE, "\"other\"".parse().unwrap());
+        assert_eq!(raw_response(raw, None, &ranged).status(), StatusCode::OK);   // changed: the whole message
     }
 }

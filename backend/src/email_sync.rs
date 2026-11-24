@@ -609,9 +609,6 @@ impl EmailSyncManager {
                         has_attach,
                         body_idx,
                         is_encrypted,
-                        body_text: (!is_encrypted).then_some(render_body.body_text).flatten(),
-                        body_html: (!is_encrypted).then_some(render_body.body_html).flatten(),
-                        autocrypt_headers: render_body.autocrypt_headers,
                         is_signed: render_body.is_signed,
                         attachments: att_params,
                     });
@@ -636,9 +633,6 @@ impl EmailSyncManager {
                         account_id,
                         mailbox,
                         m.uid,
-                        m.body_text.as_deref(),
-                        m.body_html.as_deref(),
-                        &m.autocrypt_headers,
                         m.is_signed,
                     )
                     .await?;
@@ -671,9 +665,6 @@ struct PreparedMessage {
     has_attach: bool,
     body_idx: String,
     is_encrypted: bool,
-    body_text: Option<String>,
-    body_html: Option<String>,
-    autocrypt_headers: Vec<String>,
     is_signed: bool,
     attachments: Vec<PreparedAttachment>,
 }

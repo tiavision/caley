@@ -34,7 +34,7 @@ export async function knownKeys(records: StoredPublicKey[]): Promise<KnownKey[]>
   return out;
 }
 
-export type Results = Required<Pick<MimeOptions, 'decrypted' | 'verdicts' | 'open'>>;
+export type Results = Required<Pick<MimeOptions, 'decrypted' | 'verdicts' | 'open'>> & Pick<MimeOptions, 'holes'>;
 
 /**
  * `raw` read by mail.mime with every step settled into `r` (new objects each time: mail.mime caches by identity;
@@ -45,9 +45,11 @@ export async function settle(raw: Uint8Array, r: Results, me: openpgp.PrivateKey
   let msg = await mail.mime(raw, r);
   let keys: KnownKey[] | null = null;
   // each round settles every pending step; a message has at most 16
-  for (let round = 0; round <= 16 && msg.steps.some((s) => s.state === 'pending'); round++) {
+  // a step whose bytes were cut out (a cut message, `holes`) takes no result: the caller reads the whole message
+  const pending = (m: Message) => m.steps.filter((x) => x.state === 'pending' && !x.incomplete);
+  for (let round = 0; round <= 16 && pending(msg).length; round++) {
     keys ??= await known();
-    for (const s of msg.steps.filter((x) => x.state === 'pending')) {
+    for (const s of pending(msg)) {
       if (s.kind === 'decrypt') r.decrypted = { ...r.decrypted, [s.id]: await decryptStep(await mail.bytes(raw, s.ciphertext, r), me, keys) };
       else r.verdicts = { ...r.verdicts, [s.id]: await verifyStep(s, (ref) => mail.bytes(raw, ref, r), keys) };
     }

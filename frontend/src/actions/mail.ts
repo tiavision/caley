@@ -11,7 +11,7 @@ import { cidReferencesFromHtml, htmlToPlainText, withInlineImages } from '../lib
 import { htmlAddsValue, isPgpPublicKeyAttachment, bareMailbox, keyHasEmail } from '../lib/mailUtils.ts';
 import { messageBadges, protectedReply, protectedSubject, quotable, readerParts, type ReaderPart } from '../lib/mail-reader.ts';
 import * as mail from '@tiavision/sinter-mail';
-import type { ImageType, Message as MimeMessage, Ref } from '@tiavision/sinter-mail';
+import type { ImageType, Message as MimeMessage, MimeOptions, Ref } from '@tiavision/sinter-mail';
 // openpgp is a lazy package (sinter({ lazy }) in vite.config.ts): these modules import it as usual, sinter loads it
 // on the first call, and a failed load is a SinterError (stale when a deploy removed it).
 import { getKeys, isUnlocked, onLock, openVault } from '../lib/pgp/session.ts';
@@ -94,6 +94,10 @@ export interface ReaderBody {
   cids: Record<string, Record<string, string>> | null;
   /** a decrypted message's inline images as data: URLs by content id, written into a forward; null for other messages */
   forwardCids: Record<string, string> | null;
+  /** read from the cut message, a signature unchecked: its signed bytes include a cut attachment, so checking it needs
+   * the whole message (`wholeSize` bytes), which the reader fetches when asked (mail.verify) */
+  pending: boolean;
+  wholeSize: number;
 }
 
 // Bytes of the open message's decrypted attachments (for key import and calendar import), by file name.
@@ -144,9 +148,40 @@ async function importableKeys(msg: Message, files: { filename: string; content_t
 
 // ── Messages read here: sinter-mail's mail.mime, and the OpenPGP steps it asks for ──────────────────────────────
 
-// The open message's raw bytes (never changed: mail.mime caches by identity) and the encrypted parts the reader chose
-// to open in it. Dropped when another message is read.
-let current: { key: string; raw: Uint8Array; open: string[] } | null = null;
+// The open message's source (its bytes never changed: mail.mime caches by identity), the encrypted parts the reader
+// chose to open in it (by step id; `openIds`: by part id, one whose ciphertext was cut and has no step until the
+// whole message is read), and whether it needs the whole message (`whole`: a signature over cut attachments to
+// verify, a cut encrypted part to open). Dropped when another message is read.
+let current: { key: string; src: Source; open: string[]; openIds?: string[]; whole?: boolean } | null = null;
+
+type Hole = NonNullable<MimeOptions['holes']>[number];
+
+/**
+ * A message's source as the server sends it (`/api/email/message/raw`): cut (`omit`: the bodies of attachments over
+ * 64 KiB left out, where they were in `Mail-Holes`; sinter-mail's "Large attachments: cut messages"), so its text
+ * renders without downloading the attachments first, or whole. Every message is fetched cut first: an armored
+ * ciphertext is never cut (so it comes whole in that one request), a base64 one is, and is then fetched whole to
+ * decrypt. `etag` is the whole message's, for the Range requests of cut bodies.
+ */
+interface Source { url: string; raw: Uint8Array; holes: Hole[]; etag: string }
+
+const OMIT = 64 * 1024;
+
+async function source(msg: Message, whole: boolean): Promise<Source> {
+  const url = messageUrl('message/raw', msg);
+  const res = await apiFetch(whole ? url : `${url}&omit=${OMIT}`);
+  if (!res.ok) throw new Error(`${res.status}`);
+  const holes = whole ? [] : JSON.parse(res.headers.get('Mail-Holes') ?? '[]') as Hole[];
+  return { url, raw: new Uint8Array(await res.arrayBuffer()), holes, etag: res.headers.get('ETag') ?? '' };
+}
+
+/** The decoded bytes of a Ref; one that touches a cut body (`missing`) with that range of the whole message fetched. */
+async function partBytes(src: Source, ref: Ref, r: Results): Promise<Uint8Array> {
+  if (!ref.missing) return mail.bytes(src.raw, ref, r);
+  const res = await apiFetch(src.url, { headers: { Range: `bytes=${ref.missing.start}-${ref.missing.end - 1}`, 'If-Range': src.etag } });
+  if (res.status !== 206) throw new Error(`the part: HTTP ${res.status}`);
+  return mail.bytes(src.raw, ref, { ...r, fetched: new Uint8Array(await res.arrayBuffer()) });
+}
 
 /** Every message a message holds: itself and the ones forwarded inline in it. */
 function messagesOf(msg: MimeMessage): MimeMessage[] {
@@ -154,8 +189,8 @@ function messagesOf(msg: MimeMessage): MimeMessage[] {
 }
 
 /** The decoded bytes and their image type, by the magic number (never the declared type, never SVG). */
-async function image(raw: Uint8Array, ref: Ref, r: Results): Promise<{ bytes: Uint8Array; type: ImageType | null }> {
-  const data = await mail.bytes(raw, ref, r);
+async function image(src: Source, ref: Ref, r: Results): Promise<{ bytes: Uint8Array; type: ImageType | null }> {
+  const data = await partBytes(src, ref, r);
   return { bytes: data, type: await mail.imageType(data) };
 }
 
@@ -165,10 +200,34 @@ function dataUrl(data: Uint8Array, type: string): string {
   return `data:${type};base64,${btoa(binary)}`;
 }
 
-/** The reader's body of a message read from its raw bytes. */
-async function fromRaw(msg: Message, raw: Uint8Array, out: ReaderBody): Promise<ReaderBody> {
-  const r: Results = { decrypted: {}, verdicts: {}, open: [...(current?.open ?? [])] };
-  const mime = await settle(raw, r, getKeys(), async () => knownKeys(await listPublicKeys().catch(() => [])));
+/**
+ * The reader's body of a message read from its source; null when the source is cut and that is not enough to show
+ * it: a cut the reader does not accept (`cut: 'invalid'`), or a ciphertext that was cut (a decrypt step
+ * `incomplete`): read the whole message. A signature over a cut body (a verify step `incomplete`) is left
+ * unchecked: the body is shown `pending`, the message marked signed, until the reader asks to verify it.
+ */
+async function fromRaw(msg: Message, src: Source, out: ReaderBody): Promise<ReaderBody | null> {
+  const raw = src.raw;
+  const r: Results = { decrypted: {}, verdicts: {}, open: [...(current?.open ?? [])], holes: src.holes };
+  let mime: MimeMessage;
+  try {
+    // encrypted parts the reader asked to open while their ciphertext was cut: their steps, now that they have one
+    if (current?.openIds?.length) {
+      const ids = new Set(current.openIds);
+      const steps = messagesOf(await mail.mime(raw, r)).flatMap((x) => x.parts)
+        .flatMap((p) => (p.type === 'encrypted' && ids.has(p.id) && p.step ? [p.step] : []));
+      r.open = [...new Set([...r.open, ...steps])];
+      current.open = r.open;
+    }
+    mime = await settle(raw, r, getKeys(), async () => knownKeys(await listPublicKeys().catch(() => [])));
+  } catch (e) {
+    // holes the reader refuses (malformed, out of order: a TypeError, as any invalid option): read the whole message
+    if (src.holes.length && e instanceof TypeError) return null;
+    throw e;
+  }
+  if (src.holes.length && (mime.cut !== 'valid' || mime.steps.some((s) => s.incomplete && s.kind === 'decrypt'))) return null;
+  out.pending = mime.steps.some((s) => s.incomplete);
+  out.wholeSize = raw.length + src.holes.reduce((n, h) => n + h.end - h.start, 0);
   const text = await mail.mime(raw, { ...r, prefer: 'text' });
   const decrypts = mime.steps.filter((s) => s.kind === 'decrypt');
   out.encrypted ||= decrypts.length > 0 || mime.parts.some((p) => p.type === 'encrypted');
@@ -184,6 +243,7 @@ async function fromRaw(msg: Message, raw: Uint8Array, out: ReaderBody): Promise<
   }
   // locked is not failed: nothing was tried yet, and nothing is known of the sender
   out.badges = [...new Set(out.badges)].filter((x) => !out.locked || (x !== 'decrypt_failed' && x !== 'from_unknown'));
+  if (out.pending) out.badges.push('signed');
   out.subject = protectedSubject(mime);
   out.reply = protectedReply(mime);
   out.quotable = quotable(mime);
@@ -193,21 +253,24 @@ async function fromRaw(msg: Message, raw: Uint8Array, out: ReaderBody): Promise<
   out.text = out.textParts.filter((p) => p.kind === 'text' && p.depth === 0 && !p.opened).map((p) => p.text).join('\n\n');
   out.mode = out.parts.some((p) => p.kind === 'html' && htmlAddsValue(p.html)) ? 'html' : 'text';
 
-  // inline images: blob: URLs of the bytes' own image type, per HTML part; a decrypted one also as data: for a forward
+  // inline images: a decrypted one as a data: URL of its bytes' own image type (the CSP's img-src allows 'self' and
+  // data:), per HTML part, and for a forward; any other the server serves by content id (bodyImages), so the body
+  // renders without waiting for it and a cut one is never fetched here
   const all = messagesOf(mime);
   const attachment = (id: string) => all.flatMap((x) => x.attachments).find((a) => a.id === id);
   out.cids = {};
   for (const x of all) {
     for (const p of x.parts) {
       if (p.type !== 'html') continue;
+      const inline = p.inline.map((i) => ({ contentId: i.contentId, a: attachment(i.attachment) }))
+        .filter((i): i is { contentId: string; a: NonNullable<typeof i.a> } => !!i.a?.protection.encrypted);
+      if (!inline.length) continue;
       const cid: Record<string, string> = {};
-      for (const { contentId, attachment: id } of p.inline) {
-        const a = attachment(id);
-        if (!a) continue;
-        const { bytes: data, type } = await image(raw, a.ref, r);
+      for (const { contentId, a } of inline) {
+        const { bytes: data, type } = await image(src, a.ref, r);
         if (!type) continue;
-        cid[contentId] = blobUrl(data, `image/${type}`);
-        if (a.protection.encrypted && x === mime) (out.forwardCids ??= {})[contentId] = dataUrl(data, `image/${type}`);
+        cid[contentId] = dataUrl(data, `image/${type}`);
+        if (x === mime) (out.forwardCids ??= {})[contentId] = cid[contentId];
       }
       out.cids[p.id] = cid;
     }
@@ -216,7 +279,7 @@ async function fromRaw(msg: Message, raw: Uint8Array, out: ReaderBody): Promise<
   // decrypted attachments (the server has only the ciphertext): offered as files, an image shown by its bytes' type
   for (const a of mime.attachments) {
     if (!a.protection.encrypted || a.kind === 'related') continue;
-    const { bytes: data, type } = await image(raw, a.ref, r);
+    const { bytes: data, type } = await image(src, a.ref, r);
     decryptedData.set(a.filename, data);
     const shownType = type ? `image/${type}` : 'application/octet-stream';
     out.files.push({ filename: a.filename, content_type: shownType, size: a.size, content_id: null, url: blobUrl(data, shownType) });
@@ -224,26 +287,23 @@ async function fromRaw(msg: Message, raw: Uint8Array, out: ReaderBody): Promise<
   const declared = mime.attachments.filter((a) => a.protection.encrypted && a.kind !== 'related')
     .map((a) => ({ filename: a.filename, content_type: a.kind === 'pgp-keys' ? 'application/pgp-keys' : a.contentType }));
   out.importable = await importableKeys(msg, out.encrypted ? declared : msg.attachments);
-  if (!msg.body_cached) void harvestAutocrypt(mime.outer.autocrypt, msg).catch(() => {});
+  void harvestAutocrypt(mime.outer.autocrypt, msg).catch(() => {});
   return out;
 }
 
-/** The reader's body of a plain message the server has parsed (its cached HTML and text). */
-function fromServer(msg: Message, out: ReaderBody): ReaderBody {
-  const base = { legacyDisplay: false, encrypted: false, opened: false, mark: '', reason: '', step: '', depth: 0 };
-  const html = msg.body_html ?? '';
-  const text = msg.body_text ?? '';
-  out.html = html;
-  out.text = text;
-  out.mode = htmlAddsValue(html) ? 'html' : 'text';
-  out.textParts = [{ ...base, id: '1', kind: 'text', html: '', text }];
-  out.parts = html ? [{ ...base, id: '1', kind: 'html', html, text: '' }] : out.textParts;
-  return out;
+function blank(msg: Message): ReaderBody {
+  return {
+    key: messageKey(msg), message: msg, parts: [], textParts: [], html: '', text: '', quotable: true, mode: 'text',
+    encrypted: msg.is_encrypted, signed: msg.is_signed, locked: false, badges: [], subject: '', reply: null, error: '',
+    files: [], importable: {}, cids: null, forwardCids: null, pending: false, wholeSize: 0,
+  };
 }
 
 /**
- * The reader's body of `msg`: a plain message from the server's cache; anything else (encrypted, signed, not cached)
- * read here by sinter-mail's mail.mime from the raw message, its OpenPGP steps run with the unlocked and trusted keys.
+ * The reader's body of `msg`, read here from its source by sinter-mail's mail.mime, its OpenPGP steps run with the
+ * unlocked and trusted keys: from the cut message (its large attachments left on the server), whole when the cut is
+ * not enough to show it (a cut ciphertext among them). A signature over a cut attachment is checked once the reader
+ * asks (`pending`, mail.verify()): that downloads the attachments.
  */
 export async function body(ref: MessageRef, ctx: CallContext): Promise<ReaderBody> {
   const msg = await fetchMessage(ref, ctx, false);
@@ -251,37 +311,35 @@ export async function body(ref: MessageRef, ctx: CallContext): Promise<ReaderBod
   forget();
   const key = messageKey(msg);
   if (current?.key !== key) current = null;
-  const out: ReaderBody = {
-    key, message: msg, parts: [], textParts: [], html: '', text: '', quotable: true, mode: 'text', encrypted: msg.is_encrypted,
-    signed: msg.is_signed, locked: false, badges: [], subject: '', reply: null, error: '', files: [], importable: {},
-    cids: null, forwardCids: null,
-  };
-  void harvestAutocrypt(msg.autocrypt_headers, msg).catch(() => {});
-  if (msg.body_cached && !msg.is_encrypted && !msg.is_signed) {
-    out.importable = await importableKeys(msg, msg.attachments);
-    return fromServer(msg, out);
-  }
-  let raw: Uint8Array;
   try {
-    raw = current?.raw ?? await bytes(messageUrl('message/raw', msg));
-  } catch {
-    if (ctx.signal.aborted) throw ctx.signal.reason;
-    // the raw message is unavailable: a cached body still renders without it
-    out.importable = await importableKeys(msg, msg.attachments).catch(() => ({}));
-    return msg.body_cached && !msg.is_encrypted ? fromServer(msg, out) : out;
-  }
-  ctx.signal.throwIfAborted();
-  current ??= { key, raw, open: [] };
-  try {
-    await fromRaw(msg, raw, out);
+    const want = current?.whole && current.src.holes.length > 0;
+    let src = (!want && current?.src) || await source(msg, !!want);
+    ctx.signal.throwIfAborted();
+    current = { key, src, open: current?.open ?? [], openIds: current?.openIds, whole: current?.whole };
+    let out = await fromRaw(msg, src, blank(msg));
+    if (!out) {
+      // the cut is not enough (one the reader does not accept, or a step that needs a cut body): the whole message
+      ctx.signal.throwIfAborted();
+      forget();
+      src = await source(msg, true);
+      ctx.signal.throwIfAborted();
+      current = { ...current, key, src };
+      out = await fromRaw(msg, src, blank(msg));   // never null: a whole message has no holes
+    }
+    ctx.signal.throwIfAborted();
+    return out ?? blank(msg);
   } catch (e) {
-    // openpgp that could not be loaded (offline, or removed by a deploy) is not a decryption failure
     if (ctx.signal.aborted) throw ctx.signal.reason;
-    if (!(e instanceof SinterError)) throw e;
-    out.error = m.pgp_loadError();
+    // openpgp that could not be loaded (offline, or removed by a deploy) is not a decryption failure
+    if (e instanceof SinterError) return { ...blank(msg), error: m.pgp_loadError() };
+    if (e instanceof Error && /^\d+$/.test(e.message)) return { ...blank(msg), error: m.mail_bodyError() };
+    throw e;
   }
-  ctx.signal.throwIfAborted();
-  return out;
+}
+
+/** Asks to verify the signature of the open message (a `pending` body): the reader then reloads its body, read whole. */
+export function verify(ref: MessageRef): void {
+  if (current?.key === messageKey(ref)) current.whole = true;
 }
 
 /**
@@ -293,9 +351,21 @@ export function wipe(): void {
   void mail.forget();
 }
 
-/** Opens an encrypted part inside the open message (one the reader chose: not the message's own root); the reader then reloads its body. */
-export function openPart(ref: MessageRef, step: string): void {
-  if (current?.key === messageKey(ref) && !current.open.includes(step)) current.open = [...current.open, step];
+/**
+ * Opens an encrypted part inside the open message (one the reader chose: not the message's own root), by its step,
+ * or, in a cut message, by its part id in the whole message (a cut message's steps take no result); the reader then
+ * reloads its body.
+ */
+export function openPart(ref: MessageRef, step: string, part = ''): void {
+  if (current?.key !== messageKey(ref)) return;
+  if (step && !step.endsWith('#cut')) {
+    if (!current.open.includes(step)) current.open = [...current.open, step];
+  } else if (part) {
+    // a cut message's step (`<part>#cut`, which no step of the whole message matches) or none (its ciphertext was
+    // cut, reason 'incomplete'): the whole message is read, the part opened in it by its id
+    current.whole = true;
+    current.openIds = [...(current.openIds ?? []), part];
+  }
 }
 
 /** Unlocks the synced OpenPGP vault with this device's passkey; the reader then reloads its body. */
