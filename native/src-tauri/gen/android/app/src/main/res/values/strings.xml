@@ -6,4 +6,9 @@
     <string name="shell_saved">Saved to Downloads: %1$s</string>
     <string name="shell_save_failed">Could not save %1$s</string>
     <string name="shell_downloading">Downloading %1$s</string>
+    <!-- Authenticator.kt -->
+    <string name="auth_title">Confirm it\'s you</string>
+    <string name="auth_description">Caley uses this device\'s screen lock as a passkey for this server.</string>
+    <string name="auth_no_screen_lock">Set up a screen lock (PIN, pattern or password) to use passkeys in Caley.</string>
+    <string name="auth_no_credential">This device has no passkey for this server.</string>
 </resources>

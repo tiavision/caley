@@ -31,8 +31,8 @@ import java.io.File
 /**
  * What the server's pages get from the app (res/raw/shell_bridge.js, injected at document start): Android
  * notifications behind `Notification`, the share sheet behind `navigator.share`, saving downloads of data the
- * page made (blob:/data: links), and Android's download manager for downloads from the server, with the
- * page's cookies. The page and the app talk over the `caleyShell` web message channel, top frames only; the
+ * page made (blob:/data: links), Android's download manager for downloads from the server, with the page's
+ * cookies, and passkeys behind `navigator.credentials` (Authenticator.kt). The page and the app talk over the `caleyShell` web message channel, top frames only; the
  * picker (the app's own page) gets none of it.
  */
 class ShellBridge(private val activity: MainActivity, private val webView: WebView) {
@@ -44,6 +44,8 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
   // a page's notification ("<page>:<id>") → the Android one (tag, id)
   private val shown = mutableMapOf<String, Pair<String?, Int>>()
   private var nextId = 1
+  // the server's passkeys (Authenticator.kt), Android 11+
+  private val authenticator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Authenticator(activity) else null
 
   fun install() {
     if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) ||
@@ -51,7 +53,7 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
     ) return
     WebViewCompat.addWebMessageListener(webView, "caleyShell", setOf("*")) { _, message, origin, isMainFrame, reply ->
       val data = message.data
-      if (isMainFrame && origin.host != "tauri.localhost" && data != null) handle(JSONObject(data), reply)
+      if (isMainFrame && origin.host != "tauri.localhost" && data != null) handle(JSONObject(data), origin, reply)
     }
     inject()
     webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
@@ -83,16 +85,28 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
     script?.remove()
     val source = activity.resources.openRawResource(R.raw.shell_bridge).bufferedReader().use { it.readText() }
       .replace("__PERMISSION__", permission())
+      .replace("__WEBAUTHN__", (authenticator != null).toString())
     script = WebViewCompat.addDocumentStartJavaScript(webView, source, setOf("*"))
   }
 
-  private fun handle(message: JSONObject, reply: JavaScriptReplyProxy) {
+  private fun handle(message: JSONObject, origin: Uri, reply: JavaScriptReplyProxy) {
     val id = message.optInt("id")
     when (message.optString("type")) {
       "hello" -> page = reply
       "permission" -> requestPermission { answer(reply, id, it) }
       "notify" -> notify(message)
       "close" -> shown.remove("${message.optString("page")}:${message.optInt("id")}")?.let { (tag, n) -> notifications.cancel(tag, n) }
+      "webauthn.create", "webauthn.get" -> {
+        val authenticator = authenticator ?: return answer(reply, id, null, error = "not supported", name = "NotSupportedError")
+        val done = { result: Result<JSONObject> ->
+          result.fold(
+            { answer(reply, id, it) },
+            { answer(reply, id, null, error = it.message ?: "failed", name = (it as? Authenticator.Failure)?.name) },
+          )
+        }
+        if (message.optString("type") == "webauthn.create") authenticator.create(message, origin, done)
+        else authenticator.get(message, origin, done)
+      }
       "share" -> {
         share(message)
         answer(reply, id, null)
@@ -112,9 +126,10 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
     }
   }
 
-  private fun answer(reply: JavaScriptReplyProxy, id: Int, value: String?, error: String? = null) {
+  private fun answer(reply: JavaScriptReplyProxy, id: Int, value: Any?, error: String? = null, name: String? = null) {
     val message = JSONObject().put("reply", id).put("value", value ?: JSONObject.NULL)
     if (error != null) message.put("error", error)
+    if (name != null) message.put("name", name)
     reply.postMessage(message.toString())
   }
 

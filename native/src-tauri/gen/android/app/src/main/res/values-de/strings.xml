@@ -4,4 +4,9 @@
     <string name="shell_saved">In Downloads gespeichert: %1$s</string>
     <string name="shell_save_failed">%1$s konnte nicht gespeichert werden</string>
     <string name="shell_downloading">%1$s wird heruntergeladen</string>
+    <!-- Authenticator.kt -->
+    <string name="auth_title">Bestätige, dass du es bist</string>
+    <string name="auth_description">Caley nutzt die Displaysperre dieses Geräts als Passkey für diesen Server.</string>
+    <string name="auth_no_screen_lock">Richte eine Displaysperre ein (PIN, Muster oder Passwort), um Passkeys in Caley zu nutzen.</string>
+    <string name="auth_no_credential">Dieses Gerät hat keinen Passkey für diesen Server.</string>
 </resources>
