@@ -2,8 +2,6 @@ package app.caley
 
 import android.Manifest
 import android.app.DownloadManager
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.ClipData
 import android.content.ContentValues
@@ -59,11 +57,7 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
     webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
       download(url, userAgent, contentDisposition, mimeType)
     }
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      activity.getSystemService(NotificationManager::class.java).createNotificationChannel(
-        NotificationChannel(CHANNEL, activity.getString(R.string.shell_channel), NotificationManager.IMPORTANCE_DEFAULT)
-      )
-    }
+    Push.channel(activity)
   }
 
   /** Back in front: the permission may have been changed in the system settings meanwhile. */
@@ -92,7 +86,13 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
   private fun handle(message: JSONObject, origin: Uri, reply: JavaScriptReplyProxy) {
     val id = message.optInt("id")
     when (message.optString("type")) {
-      "hello" -> page = reply
+      "hello" -> {
+        page = reply
+        activity.pageOpened()
+        Push.follow(activity, originOf(origin), message.optBoolean("mail"))
+      }
+      // Caley's mail notification switch changed (registers this server with UnifiedPush, or not)
+      "mail" -> Push.follow(activity, originOf(origin), message.optBoolean("on"))
       "permission" -> requestPermission { answer(reply, id, it) }
       "notify" -> notify(message)
       "close" -> shown.remove("${message.optString("page")}:${message.optInt("id")}")?.let { (tag, n) -> notifications.cancel(tag, n) }
@@ -165,7 +165,7 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
       PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
     val body = message.optString("body")
-    val notification = NotificationCompat.Builder(activity, CHANNEL)
+    val notification = NotificationCompat.Builder(activity, Push.channel(activity))
       .setSmallIcon(R.drawable.ic_stat_caley)
       .setColor(activity.getColor(R.color.caley_accent))
       .setContentTitle(message.optString("title"))
@@ -234,6 +234,8 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
     toast(R.string.shell_downloading, name)
   }
 
+  private fun originOf(origin: Uri) = "${origin.scheme}://${origin.host}${if (origin.port != -1) ":${origin.port}" else ""}"
+
   private fun toast(text: Int, name: String) =
     Toast.makeText(activity, activity.getString(text, name), Toast.LENGTH_SHORT).show()
 
@@ -242,7 +244,6 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
   private fun safeName(name: String) = name.replace(Regex("[/\\\\:*?\"<>|\\x00-\\x1f]"), "_").ifBlank { "download" }
 
   companion object {
-    private const val CHANNEL = "caley"
     private const val EXTRA_CLICK = "app.caley.notification"
   }
 }

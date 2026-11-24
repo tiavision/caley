@@ -13,12 +13,25 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    // started by a pushed notification's tap: its page, once a server page has loaded (pageOpened)
+    pendingOpen = intent.getStringExtra(Push.EXTRA_OPEN)
+  }
+
+  private var webView: WebView? = null
+  private var pendingOpen: String? = null
+
+  /** A server's page loaded (the bridge's hello): the page a pushed notification asked for, if one waits. */
+  fun pageOpened() {
+    val url = pendingOpen ?: return
+    pendingOpen = null
+    webView?.loadUrl(url)
   }
 
   // Android draws apps edge to edge (enforced for targetSdk 35+), but Caley's pages do not keep clear of
   // the status bar, the navigation bar or the keyboard: the webview's container is padded by them instead,
   // its background (colors.xml, Caley's page background in light and dark) showing behind the bars.
   override fun onWebViewCreate(webView: WebView) {
+    this.webView = webView
     val container = findViewById<View>(android.R.id.content)
     container.setBackgroundColor(getColor(R.color.caley_background))
     ViewCompat.setOnApplyWindowInsetsListener(container) { view, insets ->
@@ -49,6 +62,12 @@ class MainActivity : TauriActivity() {
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     bridge?.opened(intent)
+    // a pushed notification's tap: its page now, or once the webview (made after the activity, when Android
+    // recreated it) has a server page
+    intent.getStringExtra(Push.EXTRA_OPEN)?.let { url ->
+      val view = webView
+      if (view != null && view.url?.startsWith("http://tauri.localhost") == false) view.loadUrl(url) else pendingOpen = url
+    }
   }
 
   // Tauri's app plugin adds its own Back handler (only back in the webview, or leave) once the app is set up,

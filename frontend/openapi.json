@@ -2514,6 +2514,99 @@
         }
       }
     },
+    "/notifications/subscription": {
+      "put": {
+        "summary": "Stores a device's subscription (again, for an endpoint the user had: its keys may be new).",
+        "operationId": "subscribe",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Subscription"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "stored"
+          },
+          "400": {
+            "description": "not an https endpoint, or keys of the wrong size",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "plain text: database error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Forgets a device's subscription (also when there was none).",
+        "operationId": "unsubscribe",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionEndpoint"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "deleted"
+          },
+          "500": {
+            "description": "plain text: database error"
+          }
+        }
+      }
+    },
+    "/notifications/test": {
+      "post": {
+        "summary": "Sends a test notification to each of the user's devices.",
+        "operationId": "test",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestSent"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notifications/vapid": {
+      "get": {
+        "summary": "The key a device registers its Web Push endpoint with (VAPID).",
+        "operationId": "vapid",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VapidKey"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "plain text: no key"
+          }
+        }
+      }
+    },
     "/pgp/devices/pending": {
       "post": {
         "summary": "Adds a device waiting for approval by an active device (`approve_device` of `PUT /pgp/vault`).",
@@ -5428,6 +5521,53 @@
           }
         }
       },
+      "Subscription": {
+        "type": "object",
+        "description": "A device's Web Push subscription.",
+        "required": [
+          "endpoint",
+          "p256dh",
+          "auth"
+        ],
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "description": "the push endpoint (https), as the device's push service gave it"
+          },
+          "p256dh": {
+            "type": "string",
+            "description": "the device's P-256 public key (RFC 8291), uncompressed, base64url"
+          },
+          "auth": {
+            "type": "string",
+            "description": "the device's 16-byte auth secret, base64url"
+          }
+        }
+      },
+      "SubscriptionEndpoint": {
+        "type": "object",
+        "required": [
+          "endpoint"
+        ],
+        "properties": {
+          "endpoint": {
+            "type": "string"
+          }
+        }
+      },
+      "TestSent": {
+        "type": "object",
+        "description": "How many devices a test notification went to.",
+        "required": [
+          "sent"
+        ],
+        "properties": {
+          "sent": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "ThreadNode": {
         "type": "object",
         "description": "A message of a conversation.",
@@ -5687,6 +5827,19 @@
           "oidc_signed_in": {
             "type": "boolean",
             "description": "whether the user's OIDC sign-in is kept for mail accounts that sign in with it (JMAP)"
+          }
+        }
+      },
+      "VapidKey": {
+        "type": "object",
+        "description": "The server's VAPID public key, which a device registers its Web Push endpoint with.",
+        "required": [
+          "public_key"
+        ],
+        "properties": {
+          "public_key": {
+            "type": "string",
+            "description": "uncompressed P-256 point, base64url (87 characters)"
           }
         }
       },

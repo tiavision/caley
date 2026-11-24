@@ -29,6 +29,7 @@ pub(crate) async fn app_state() -> AppState {
     let broadcaster = Arc::new(crate::sse::SseBroadcaster::new());
     let tokens = Arc::new(crate::oidc_tokens::OidcTokens::new(db.clone(), key, None));
     let origin = url::Url::parse("http://localhost:3000").unwrap();
+    let notifier = Arc::new(crate::notifications::Notifier::new(db.clone(), key, origin.as_str()).unwrap());
     AppState {
         sync_manager: crate::sync::SyncManager::new(
             db.clone(),
@@ -53,6 +54,7 @@ pub(crate) async fn app_state() -> AppState {
         do_oidc_logout: false,
         oidc_user_id_claim: crate::oidc::UserIdClaim::Sub,
         encryption_key: key,
+        notifier,
         sse_broadcaster: broadcaster,
         oidc_enabled: true,
         search_mode: crate::search::SearchMode::Default,

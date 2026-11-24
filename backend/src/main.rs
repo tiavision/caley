@@ -15,6 +15,7 @@ mod etag;
 mod imap_client;
 mod jmap;
 mod landing;
+mod notifications;
 mod local_auth;
 mod oidc;
 mod oidc_tokens;
@@ -146,6 +147,8 @@ async fn main() -> anyhow::Result<()> {
         && args.oidc_client_secret.is_some();
 
     let sse_broadcaster = Arc::new(sse::SseBroadcaster::new());
+    let notifier = Arc::new(notifications::Notifier::new(db.clone(), encryption_key, &args.app_base_url)?);
+    sse_broadcaster.set_notifier(Arc::clone(&notifier));
 
     let sync_manager = sync::SyncManager::new(
         db.clone(),
@@ -259,6 +262,7 @@ async fn main() -> anyhow::Result<()> {
         sync_manager,
         email_sync_manager,
         sse_broadcaster,
+        notifier,
         oidc_enabled: use_oidc,
         search_mode,
         map_url: args.map_url,

@@ -9,4 +9,10 @@
     <string name="auth_description">Caley nutzt die Displaysperre dieses Geräts als Passkey für diesen Server.</string>
     <string name="auth_no_screen_lock">Richte eine Displaysperre ein (PIN, Muster oder Passwort), um Passkeys in Caley zu nutzen.</string>
     <string name="auth_no_credential">Dieses Gerät hat keinen Passkey für diesen Server.</string>
+    <!-- Push.kt: Caley's own texts (frontend/messages) for new mail -->
+    <string name="push_registration">Caley – %1$s</string>
+    <string name="push_new_mail">Neue E-Mail</string>
+    <string name="push_unknown_sender">(unbekannt)</string>
+    <string name="push_no_subject">(kein Betreff)</string>
+    <string name="push_test">Benachrichtigungen dieses Servers erreichen dieses Telefon.</string>
 </resources>

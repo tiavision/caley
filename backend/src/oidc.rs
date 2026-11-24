@@ -93,6 +93,8 @@ pub struct AppState {
     pub sync_manager: Arc<crate::sync::SyncManager>,
     pub email_sync_manager: Arc<EmailSyncManager>,
     pub sse_broadcaster: Arc<crate::sse::SseBroadcaster>,
+    /// Web Push to the user's devices (notifications.rs)
+    pub notifier: Arc<crate::notifications::Notifier>,
     pub oidc_enabled: bool,
     pub search_mode: SearchMode,
     pub map_url: String,

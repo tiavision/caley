@@ -11,4 +11,10 @@
     <string name="auth_description">Caley uses this device\'s screen lock as a passkey for this server.</string>
     <string name="auth_no_screen_lock">Set up a screen lock (PIN, pattern or password) to use passkeys in Caley.</string>
     <string name="auth_no_credential">This device has no passkey for this server.</string>
+    <!-- Push.kt: Caley's own texts (frontend/messages) for new mail -->
+    <string name="push_registration">Caley – %1$s</string>
+    <string name="push_new_mail">New mail</string>
+    <string name="push_unknown_sender">(unknown)</string>
+    <string name="push_no_subject">(no subject)</string>
+    <string name="push_test">Notifications from this server reach this phone.</string>
 </resources>

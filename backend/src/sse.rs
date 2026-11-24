@@ -1,7 +1,7 @@
 use axum::response::IntoResponse;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt as _;
@@ -85,16 +85,26 @@ pub enum SseMessage {
 
 pub struct SseBroadcaster {
     channels: Mutex<HashMap<String, broadcast::Sender<SseMessage>>>,
+    /// new mail also goes to the user's devices (notifications.rs), whether a page is open or not
+    notifier: std::sync::OnceLock<Arc<crate::notifications::Notifier>>,
 }
 
 impl SseBroadcaster {
     pub fn new() -> Self {
         Self {
             channels: Mutex::new(HashMap::new()),
+            notifier: std::sync::OnceLock::new(),
         }
     }
 
+    pub fn set_notifier(&self, notifier: Arc<crate::notifications::Notifier>) {
+        let _ = self.notifier.set(notifier);
+    }
+
     pub fn send(&self, user_id: &str, msg: SseMessage) {
+        if let Some(notifier) = self.notifier.get() {
+            notifier.broadcast(user_id, &msg);
+        }
         let channels = self.channels.lock().unwrap();
         if let Some(tx) = channels.get(user_id) {
             let _ = tx.send(msg);

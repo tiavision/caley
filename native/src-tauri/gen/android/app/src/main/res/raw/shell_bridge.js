@@ -5,6 +5,7 @@
 // - `navigator.share` (Android's share sheet, a file or text),
 // - saving `<a download>` links to blob:/data: URLs the page made (to Downloads; links to the server's URLs
 //   are Android's download manager's, ShellBridge.kt's download listener),
+// - Caley's mail notification switch, reported to the app, which registers the server for push (Push.kt),
 // - WebAuthn (`navigator.credentials.create/get` with `publicKey`, the PRF extension included): the app is
 //   the authenticator (Authenticator.kt, keys in the Android Keystore behind the screen lock), since the
 //   WebView offers no passkeys for a server the app cannot name in advance. Android 11+ (`__WEBAUTHN__`).
@@ -51,8 +52,27 @@
       permission = message.permission;
     }
   });
+  // Caley's mail notification switch (src/lib/mail-notifications.ts): while it is on, the app registers this
+  // server for notifications while no page is open (Push.kt); reported now and whenever the page sets it
+  const MAIL = 'mail-notifications-enabled';
+  const mailOn = () => {
+    try {
+      return localStorage.getItem(MAIL) === '1';
+    } catch {
+      return false;
+    }
+  };
+  for (const method of ['setItem', 'removeItem']) {
+    const original = Storage.prototype[method];
+    Storage.prototype[method] = function (key, ...rest) {
+      const result = original.call(this, key, ...rest);
+      if (this === window.localStorage && key === MAIL) send({ type: 'mail', on: mailOn() });
+      return result;
+    };
+  }
+
   // the channel ShellBridge.kt answers on and sends notification clicks to
-  send({ type: 'hello' });
+  send({ type: 'hello', mail: mailOn() });
 
   class Notification extends EventTarget {
     static get permission() {

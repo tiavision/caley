@@ -108,6 +108,7 @@ pub fn private() -> OpenApiRouter<AppState> {
         .merge(crate::local_auth::routes())
         .merge(crate::email::routes())
         .merge(crate::pgp::routes())
+        .merge(crate::notifications::routes())
 }
 
 /// The routes anyone may call, relative to `/api`.
