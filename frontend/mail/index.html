@@ -20,9 +20,6 @@
   <sn-resource name="identities" src="/email/identities" cache></sn-resource>
   <sn-resource name="contacts" src="/contacts" select="contacts" key="account_id,uid,addressbook_href" when="needContacts"></sn-resource>
   <email-reader-data data-sn-with="{ open: urlRef($url.account_id, $url.mailbox, $url.uid), threadRef, wiped }"></email-reader-data>
-  <!-- sinter-mail's warm-up: parses a sample mail while the page waits for the message, so the parser is compiled
-       before the real body arrives. -->
-  <mail-warm></mail-warm>
 
   <!-- cur: the list shown, the URL's view, else `view`, the one remembered from the last visit (persisted). The
        lists' `then` check it once they have arrived (currentView(): it while it exists, else the first inbox) and
