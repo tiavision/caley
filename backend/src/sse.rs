@@ -79,6 +79,8 @@ pub enum SseMessage {
     SyncStarted { account_id: String, mailbox: String },
     /// A mailbox sync has completed (or failed — spinner must always stop)
     SyncCompleted { account_id: String, mailbox: String },
+    /// The PGP vault or its devices changed — client should re-fetch /api/pgp/vault
+    VaultChanged,
 }
 
 pub struct SseBroadcaster {
@@ -119,7 +121,8 @@ impl SseBroadcaster {
         content_type = "text/event-stream",
         description = "Server-sent events, each an `event:` name with a `data:` line. With data `1` \
 (re-fetch): `events_refetch` (/api/events), `calendars_changed` (/api/calendars), `contacts_refetch` \
-(/api/contacts), `accounts_changed` (the email accounts). With JSON data: \
+(/api/contacts), `accounts_changed` (the email accounts), `vault_changed` (/api/pgp/vault: the vault, its keys or its \
+devices, e.g. a pending device approved). With JSON data: \
 `event_updated` `{account_id, uid, calendar_href, event?: EventJson}`, \
 `event_removed` `{account_id, uid, calendar_href}`, \
 `contact_updated` `{account_id, uid, addressbook_href, contact?: ContactJson}`, \
@@ -232,6 +235,9 @@ pub async fn events_stream(
                 Some(Event::default().event("sync_completed").data(
                     serde_json::json!({ "account_id": account_id, "mailbox": mailbox }).to_string(),
                 ))
+            }
+            Ok(SseMessage::VaultChanged) => {
+                Some(Event::default().event("vault_changed").data("1"))
             }
             Err(_) => None,
         };

@@ -467,7 +467,11 @@ pub async fn delete_credential(
     Json(body): Json<DeleteCredentialBody>,
 ) -> impl IntoResponse {
     match db::delete_webauthn_credential(&state.db, &body.cred_id, &user.user_id).await {
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Ok(_) => {
+            // a device of the vault goes with its credential
+            state.sse_broadcaster.send(&user.user_id, crate::sse::SseMessage::VaultChanged);
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => {
             eprintln!("[pgp] delete_credential: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
@@ -514,7 +518,10 @@ pub async fn reset_vault(State(state): State<AppState>, user: CurrentUser) -> im
     }
     .await;
     match result {
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Ok(_) => {
+            state.sse_broadcaster.send(&user.user_id, crate::sse::SseMessage::VaultChanged);
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => {
             eprintln!("[pgp] reset vault: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
@@ -824,7 +831,10 @@ pub async fn initialize_vault(
     }
     .await;
     match result {
-        Ok(_) => StatusCode::CREATED.into_response(),
+        Ok(_) => {
+            state.sse_broadcaster.send(&user.user_id, crate::sse::SseMessage::VaultChanged);
+            StatusCode::CREATED.into_response()
+        }
         Err(e) => {
             eprintln!("[pgp] initialize vault: {e}");
             (StatusCode::CONFLICT, "vault already exists").into_response()
@@ -896,6 +906,7 @@ pub async fn create_pending_device(
             .bind(&user.user_id)
             .execute(&state.db)
             .await;
+            state.sse_broadcaster.send(&user.user_id, crate::sse::SseMessage::VaultChanged);
             StatusCode::CREATED.into_response()
         }
         Err(e) => {
@@ -984,10 +995,13 @@ pub async fn update_vault(
     }
     .await;
     match result {
-        Ok(_) => Json(VaultRevision {
-            revision: body.expected_revision + 1,
-        })
-        .into_response(),
+        Ok(_) => {
+            state.sse_broadcaster.send(&user.user_id, crate::sse::SseMessage::VaultChanged);
+            Json(VaultRevision {
+                revision: body.expected_revision + 1,
+            })
+            .into_response()
+        }
         Err(e) => {
             eprintln!("[pgp] apply vault update: {e}");
             (StatusCode::BAD_REQUEST, "invalid vault update").into_response()

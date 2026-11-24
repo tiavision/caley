@@ -32,6 +32,11 @@
        }">
     <sn-resource name="vault" call="pgpVault.status()" when="opened" type="VaultView"></sn-resource>
     <sn-resource name="publicKeys" src="/pgp/keys" when="opened"></sn-resource>
+    <!-- another device changed the vault (approved this one waiting with its emoji, added a key): read it again -->
+    <sn-sync src="/events/stream">
+      <sn-event name="vault_changed" resource="vault" op="refresh"></sn-event>
+      <sn-event name="vault_changed" resource="publicKeys" op="refresh"></sn-event>
+    </sn-sync>
     <template data-sn-if="vault">
       <template data-sn-if="vault.exists">
         <section data-layout="stack" data-gap="md">

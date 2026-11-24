@@ -42,6 +42,7 @@ import { enroll, unlock as webauthnUnlock, listCredentials } from './webauthn.ts
 import { importPrivateKey, generatePrivateKey, getFingerprint, getKeyIdentities, getPrimaryEmail, addKeyIdentity, extractPublicKey } from './keyring.ts';
 import { parsePublicKey, listPublicKeys, type StoredPublicKey } from './public-keys.ts';
 import { openVault, addKey as sessionAddKey, removeKey as sessionRemoveKey, getWrappingKey, getKeys, lock as sessionLock, isUnlocked } from './session.ts';
+import { SinterError } from '@tiaforge-ui/sinter';
 import { apiFetch } from '../api.ts';
 import { downloadFile } from '../share.ts';
 import { m } from '@tiaforge-ui/sinter/messages';
@@ -80,6 +81,7 @@ export interface VaultView {
 
 let vault: VaultData | null = null;
 let manifest: VaultManifest | null = null;          // decrypted while unlocked
+let openedBy: string | null = null;                  // the device (credential id) that unlocked it, while unlocked
 let imported: openpgp.PrivateKey | null = null;      // a key being imported, until it is added or the dialog closes
 let ownPublic = new Map<string, StoredPublicKey>();
 let storedIdentities = new Map<string, string[]>();
@@ -176,12 +178,34 @@ export async function status(): Promise<VaultView> {
     listCredentials().catch(() => []),
     listPublicKeys().catch(() => []),
   ]);
+  // a revision this page did not write: another device changed the vault (vault_changed)
+  const changedElsewhere = !!v && !!vault && v.revision !== vault.revision;
   vault = v;
+  if (isUnlocked() && (!v || changedElsewhere)) await reopen();
   const localPending = vault ? localPendingDevices(vault)[0] : undefined;
   pairing = localPending ? await pairingSas(localPending) : '';
   hasCredentials = credentials.length > 0;
   await cacheOwnPublicKeys(publicKeys);
   return view();
+}
+
+/**
+ * The vault, changed by another device while this page has it open, opened again with the key this page holds:
+ * validated as at unlock (manifest, commitments, the local checkpoint) and its keys decrypted again, so the next
+ * change builds on it. Locked when that key no longer opens it (rotated, this device removed, the vault reset).
+ */
+async function reopen(): Promise<void> {
+  const key = getWrappingKey();
+  try {
+    if (!vault || !key || !openedBy) throw new Error('vault gone');
+    manifest = await validateVault(vault, key, openedBy);
+    openVault(key, await decryptPrivateKeys(key, vault.keys));
+  } catch (err) {
+    sessionLock();
+    manifest = null;
+    openedBy = null;
+    if (err instanceof SinterError) throw err;
+  }
 }
 
 /** Unlocks the vault with one of its approved passkeys (WebAuthn PRF). */
@@ -194,6 +218,7 @@ export async function unlock(credId: string): Promise<VaultView> {
     manifest = await validateVault(vault, key, d.cred_id);
     const keys = await decryptPrivateKeys(key, vault.keys);
     openVault(key, keys);
+    openedBy = d.cred_id;
     for (const [fp, privateKey] of keys) await uploadPublicKey(privateKey, fp);
     await reloadPublicKeys();
     rememberLocalDevice(d.cred_id);
@@ -207,6 +232,7 @@ export async function unlock(credId: string): Promise<VaultView> {
 export async function lock(): Promise<VaultView> {
   sessionLock();
   manifest = null;
+  openedBy = null;
   return view();
 }
 
@@ -217,6 +243,7 @@ export async function reset(): Promise<VaultView> {
   clearLocalVaultState();
   vault = null;
   manifest = null;
+  openedBy = null;
   hasCredentials = false;
   pairing = '';
   return view();
@@ -270,6 +297,7 @@ async function create(label: string): Promise<VaultView> {
     await rememberVaultCheckpoint(next, encrypted, bundle.cred_id);
     await uploadPublicKey(key, fingerprint);
     openVault(vaultKey, new Map([[fingerprint, key]]));
+    openedBy = bundle.cred_id;
     manifest = next;
     vault = { revision: 1, manifest: encrypted, keys: [record], devices: [{ ...bundle, device_label: name, status: 'active', wrap }] };
     imported = null;
