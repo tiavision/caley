@@ -65,6 +65,10 @@ pub struct Inner {
     /// what the server accepts: `Basic <b64>` or `Bearer <token>`
     pub authorization: String,
     pub oauth: FakeOAuth,
+    /// the session's URLs absolute (on the fake's own origin), as Stalwart writes them, instead of relative
+    pub absolute_urls: bool,
+    /// the fake's own URL (the router's copy of `FakeJmap` was made before it was known)
+    pub base_url: String,
 }
 
 /// The fake's OAuth server: one registered client, codes and tokens it gave.
@@ -220,6 +224,7 @@ impl FakeJmap {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        fake.inner.lock().unwrap().base_url = format!("http://{addr}");
         FakeJmap {
             url: format!("http://{addr}"),
             ..fake
@@ -528,24 +533,44 @@ fn unauthorized() -> Response {
         .into_response()
 }
 
+/// The session. Without credentials, as Stalwart answers it: the capabilities and URLs, no account; with wrong ones,
+/// 401.
 async fn session(State(fake): State<FakeJmap>, headers: HeaderMap) -> Response {
-    if !authorized(&fake, &headers) {
+    let anonymous = !headers.contains_key("authorization");
+    if !anonymous && !authorized(&fake, &headers) {
         return unauthorized();
     }
-    let max = fake.inner.lock().unwrap().max_objects;
+    let (max, base) = {
+        let inner = fake.inner.lock().unwrap();
+        let base = if inner.absolute_urls {
+            inner.base_url.clone()
+        } else {
+            String::new()
+        };
+        (inner.max_objects, base)
+    };
+    let (accounts, primary, username) = if anonymous {
+        (json!({}), json!({}), "")
+    } else {
+        (
+            json!({ ACCOUNT: { "name": "user@example.com", "isPersonal": true, "isReadOnly": false } }),
+            json!({ super::MAIL: ACCOUNT, super::SUBMISSION: ACCOUNT }),
+            "user@example.com",
+        )
+    };
     axum::Json(json!({
         "capabilities": {
             super::CORE: { "maxObjectsInGet": max, "maxObjectsInSet": max, "maxCallsInRequest": 16 },
             super::MAIL: {},
             super::SUBMISSION: {},
         },
-        "accounts": { ACCOUNT: { "name": "user@example.com", "isPersonal": true, "isReadOnly": false } },
-        "primaryAccounts": { super::MAIL: ACCOUNT, super::SUBMISSION: ACCOUNT },
-        "username": "user@example.com",
-        "apiUrl": "/jmap/",
-        "downloadUrl": "/jmap/download/{accountId}/{blobId}/{name}?accept={type}",
-        "uploadUrl": "/jmap/upload/{accountId}/",
-        "eventSourceUrl": "/jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}",
+        "accounts": accounts,
+        "primaryAccounts": primary,
+        "username": username,
+        "apiUrl": format!("{base}/jmap/"),
+        "downloadUrl": format!("{base}/jmap/download/{{accountId}}/{{blobId}}/{{name}}?accept={{type}}"),
+        "uploadUrl": format!("{base}/jmap/upload/{{accountId}}/"),
+        "eventSourceUrl": format!("{base}/jmap/eventsource/?types={{types}}&closeafter={{closeafter}}&ping={{ping}}"),
         "state": "x",
     }))
     .into_response()

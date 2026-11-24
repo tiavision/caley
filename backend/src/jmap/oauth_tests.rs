@@ -389,3 +389,105 @@ async fn without_a_session_user_the_way_back_goes_to_the_login_page() {
     let s = tower_sessions::Session::new(None, std::sync::Arc::new(store), None);
     assert_eq!(location(&callback(&state, &s, "code=c&state=s").await), "/");
 }
+
+/// A domain's web server in front of the mail server, as Caddy on the user's domain: it hands `/.well-known/jmap` and
+/// `/jmap/session` on to the mail server (whose session names the API on the mail server's own host) and answers
+/// every other path with an empty 200, its OAuth metadata paths too.
+async fn front_of(fake: &FakeJmap) -> String {
+    use axum::{Router, http::HeaderMap, response::IntoResponse, routing::get};
+    let to = fake.url.clone();
+    let session = move |headers: HeaderMap| {
+        let to = to.clone();
+        async move {
+            let mut req = reqwest::Client::new().get(format!("{to}/jmap/session"));
+            if let Some(a) = headers.get("authorization") {
+                req = req.header("authorization", a.to_str().unwrap());
+            }
+            let r = req.send().await.unwrap();
+            let status = StatusCode::from_u16(r.status().as_u16()).unwrap();
+            (
+                status,
+                [("content-type", "application/json")],
+                r.bytes().await.unwrap(),
+            )
+                .into_response()
+        }
+    };
+    let app = Router::new()
+        .route(
+            "/.well-known/jmap",
+            get(|| async { axum::response::Redirect::temporary("/jmap/session") }),
+        )
+        .route("/jmap/session", get(session))
+        .fallback(|| async { StatusCode::OK });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn the_oauth_metadata_is_found_on_the_host_of_the_api_when_another_host_serves_the_session() {
+    let fake = FakeJmap::start().await;
+    fake.inner.lock().unwrap().absolute_urls = true;
+    let front = front_of(&fake).await;
+    let state = app_state().await;
+    let s = session(&state).await;
+    let (back, params) = sign_in(
+        &state,
+        &s,
+        AccountBody {
+            jmap_url: Some(front.clone()),
+            ..body(&fake)
+        },
+    )
+    .await;
+    assert!(
+        location(&back).contains("account_id="),
+        "{}",
+        location(&back)
+    );
+    assert_eq!(params["client_id"], "caley");
+    let account = only_account(&state).await;
+    assert_eq!(
+        account.jmap_url.as_deref(),
+        Some(format!("{front}/.well-known/jmap").as_str())
+    );
+    stop(&state, &account.account_id);
+    fake.deliver(
+        &[&fake.mailbox_id("inbox")],
+        &mail("Through the front", "a@example.org"),
+        &[],
+    );
+    state
+        .email_sync_manager
+        .jmap_sync(&account, USER, None)
+        .await
+        .unwrap();
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cached_messages WHERE account_id = ?")
+        .bind(&account.account_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+    assert_eq!(n, 1);
+}
+
+#[tokio::test]
+async fn a_host_answering_empty_metadata_is_no_oauth_server() {
+    let fake = FakeJmap::start().await;
+    let front = front_of(&fake).await;
+    let state = app_state().await;
+    let s = session(&state).await;
+    // relative URLs in the session: the API is on the front's host, which has no metadata
+    let r = save_in(
+        &state,
+        &s,
+        AccountBody {
+            jmap_url: Some(front.clone()),
+            ..body(&fake)
+        },
+    )
+    .await;
+    let (status, _) = json(r).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

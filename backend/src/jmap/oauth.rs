@@ -44,32 +44,72 @@ pub struct Endpoints {
     pub token_endpoint: String,
 }
 
-/// The OAuth endpoints of the JMAP server at `session_url`: the authorization server metadata on its origin
-/// (RFC 8414), else its OpenID configuration.
+/// The OAuth endpoints of the JMAP server at `session_url`: the authorization server metadata (RFC 8414), else its
+/// OpenID configuration, on the origin of the session's `apiUrl` first (the session may be served by another host
+/// than the server: a domain's `/.well-known/jmap` handed on to the mail server, whose API is on its own host), then
+/// on the session URL's origins (after its redirects, and as given). An answer that is not metadata (a web server
+/// answering every path with an empty 200) is passed over.
 pub async fn discover(http: &reqwest::Client, session_url: &url::Url) -> Result<Endpoints> {
-    let origin = session_url.origin().ascii_serialization();
-    let mut last = anyhow!("no answer");
-    for path in [
-        "/.well-known/oauth-authorization-server",
-        "/.well-known/openid-configuration",
-    ] {
-        let url = super::rewrite(format!("{origin}{path}"));
-        match http
-            .get(&url)
-            .header("accept", "application/json")
-            .timeout(Duration::from_secs(10))
-            .send()
-            .await
-        {
-            Ok(r) if r.status().is_success() => match r.json_bytes().await {
-                Ok(e) => return Ok(e),
-                Err(e) => last = e,
-            },
-            Ok(r) => last = anyhow!("{url} answered {}", r.status()),
-            Err(e) => last = anyhow!("{url}: {e}"),
+    let mut origins: Vec<String> = Vec::new();
+    if let Ok((api, final_url)) = anonymous_session(http, session_url).await {
+        origins.extend(api);
+        origins.push(final_url.origin().ascii_serialization());
+    }
+    origins.push(session_url.origin().ascii_serialization());
+    origins.dedup();
+    let mut tried = Vec::new();
+    for origin in origins.iter().filter(|o| *o != "null") {
+        if tried.contains(origin) {
+            continue;
+        }
+        tried.push(origin.clone());
+        for path in [
+            "/.well-known/oauth-authorization-server",
+            "/.well-known/openid-configuration",
+        ] {
+            let url = super::rewrite(format!("{origin}{path}"));
+            let Ok(r) = http
+                .get(&url)
+                .header("accept", "application/json")
+                .timeout(Duration::from_secs(10))
+                .send()
+                .await
+            else {
+                continue;
+            };
+            if r.status().is_success()
+                && let Ok(e) = r.json_bytes().await
+            {
+                return Ok(e);
+            }
         }
     }
-    Err(anyhow!("the server offers no OAuth sign-in ({last})"))
+    Err(anyhow!(
+        "the server offers no OAuth sign-in (no OAuth metadata at {})",
+        tried.join(", ")
+    ))
+}
+
+/// The session as the server answers it without credentials (Stalwart: its URLs, no account): the origin of its
+/// `apiUrl` if it says one, and the URL it was answered from.
+async fn anonymous_session(
+    http: &reqwest::Client,
+    session_url: &url::Url,
+) -> Result<(Option<String>, url::Url)> {
+    let r = http
+        .get(super::rewrite(session_url.to_string()))
+        .header("accept", "application/json")
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await?;
+    let final_url = r.url().clone();
+    let body: serde_json::Value = serde_json::from_slice(&r.bytes().await?).unwrap_or_default();
+    let api = body
+        .get("apiUrl")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|a| final_url.join(a).ok())
+        .map(|u| u.origin().ascii_serialization());
+    Ok((api, final_url))
 }
 
 trait JsonBytes {
@@ -79,7 +119,12 @@ trait JsonBytes {
 impl JsonBytes for reqwest::Response {
     async fn json_bytes(self) -> Result<Endpoints> {
         let bytes = self.bytes().await?;
-        serde_json::from_slice(&bytes).map_err(|e| anyhow!("not OAuth metadata: {e}"))
+        let e: Endpoints =
+            serde_json::from_slice(&bytes).map_err(|e| anyhow!("not OAuth metadata: {e}"))?;
+        if e.authorization_endpoint.is_empty() || e.token_endpoint.is_empty() {
+            return Err(anyhow!("OAuth metadata without endpoints"));
+        }
+        Ok(e)
     }
 }
 
