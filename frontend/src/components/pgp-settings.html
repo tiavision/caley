@@ -1,6 +1,6 @@
 <!-- Settings → Encryption: the synced OpenPGP private-key vault (passkeys with PRF, devices, keys, identities)
      and trusted senders' public keys. In the settings page's encryption tab panel:
-       <pgp-settings data-sn-prop="{ opened: encOpened }"></pgp-settings>
+       <pgp-settings data-sn-with="{ opened: encOpened }"></pgp-settings>
      It loads its resources (`vault`, `publicKeys`) once `opened` (the tab was opened at least once) and keeps them:
      `when` empties a resource while it is false, so it must not follow the open tab. All crypto and WebAuthn runs in
      src/actions/pgp-vault.ts and pgp-keys.ts; `vault` is their VaultView (no private key material). -->
@@ -199,9 +199,11 @@
             </ul>
           </template>
 
-          <template data-sn-if="localPending.length > 0 && vault.pairingSas">
-            <div data-callout role="status" data-sn-text="m.pgp_pairingWaiting({sas: vault.pairingSas})"></div>
-          </template>
+          <div class="live-region" role="status">
+            <template data-sn-if="localPending.length > 0 && vault.pairingSas">
+              <div data-callout data-sn-text="m.pgp_pairingWaiting({sas: vault.pairingSas})"></div>
+            </template>
+          </div>
           <template data-sn-if="!vault.unlocked && localActive.length === 0 && localPending.length === 0">
             <div data-layout="row" data-gap="sm">
               <button type="button" data-variant="secondary" commandfor="pgp-access-dialog" command="show-modal"
@@ -249,7 +251,7 @@
         </div>
         <p data-muted data-sn-text="m.pgp_publicKeysHint()"></p>
         <template data-sn-if="pubError"><div data-callout data-tone="danger" role="alert" data-sn-text="pubError"></div></template>
-        <template data-sn-if="pubSuccess"><div data-callout data-tone="success" role="status" data-sn-text="pubSuccess"></div></template>
+        <div class="live-region" role="status"><template data-sn-if="pubSuccess"><div data-callout data-tone="success" data-sn-text="pubSuccess"></div></template></div>
 
         <template data-sn-if="publicKeys.some(k => !k.is_own)">
           <h4 data-sn-text="m.pgp_trustedKeys()"></h4>
@@ -317,7 +319,7 @@
           <label>
             <span data-sn-text="m.pgp_keyFile()"></span>
             <input type="file" accept=".asc,.gpg,.pgp,.key,.txt,application/pgp-keys"
-                   data-sn-call="pgpKeys.keyFile($el.files[0])" data-sn-trigger="change" data-sn-on-change="pkError = ''"
+                   data-sn-call="pgpKeys.keyFile($el.files?.[0])" data-sn-trigger="change" data-sn-on-change="pkError = ''"
                    data-sn-then="pk.armored = $result || pk.armored" data-sn-catch="pkError = loadErrorOr($error, m.pgp_keyFileError())">
           </label>
           <label>
@@ -398,7 +400,7 @@
         <label>
           <span data-sn-text="m.pgp_keyFile()"></span>
           <input type="file" accept=".asc,.gpg,.pgp,.key,.txt,application/pgp-keys"
-                 data-sn-call="pgpKeys.keyFile($el.files[0])" data-sn-trigger="change" data-sn-on-change="keyError = ''"
+                 data-sn-call="pgpKeys.keyFile($el.files?.[0])" data-sn-trigger="change" data-sn-on-change="keyError = ''"
                  data-sn-then="ownPub.armored = $result || ownPub.armored" data-sn-catch="keyError = loadErrorOr($error, m.pgp_keyFileError())">
         </label>
         <label>
@@ -462,7 +464,7 @@
       </header>
       <template data-sn-if="pubError"><div data-callout data-tone="danger" role="alert" data-sn-text="pubError"></div></template>
       <!-- Import: the key is read here (pgpKeys.publicKey, openpgp), then stored (#pub-key-save). -->
-      <span hidden id="pub-key-save" data-sn-post="/pgp/key" data-sn-body="pubKey"
+      <span hidden id="pub-key-save" data-sn-post="/pgp/key" data-sn-when="pubKey" data-sn-body="pubKey"
             data-sn-then="upsert(publicKeys, $result); pubArmored = ''; pubSuccess = m.pgp_publicKeyImported(); closeDialog('pgp-public-key-dialog')"
             data-sn-catch="pubError = m.pgp_publicKeyImportError()"></span>
       <form data-layout="stack" data-gap="md"
@@ -472,7 +474,7 @@
         <label>
           <span data-sn-text="m.pgp_keyFile()"></span>
           <input type="file" accept=".asc,.gpg,.pgp,.key,.txt,application/pgp-keys"
-                 data-sn-call="pgpKeys.keyFile($el.files[0])" data-sn-trigger="change" data-sn-on-change="pubError = ''"
+                 data-sn-call="pgpKeys.keyFile($el.files?.[0])" data-sn-trigger="change" data-sn-on-change="pubError = ''"
                  data-sn-then="pubArmored = $result || pubArmored" data-sn-catch="pubError = loadErrorOr($error, m.pgp_keyFileError())">
         </label>
         <label>

@@ -3342,22 +3342,13 @@
         ],
         "properties": {
           "filename": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "content_type": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "size": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": "integer",
             "format": "int64",
             "description": "bytes"
           },

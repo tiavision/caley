@@ -1,25 +1,32 @@
 <!-- Share button and its menu (download, send by mail) for one file: `item`, a ShareItem from the helpers
-     `contactShare(c)` or `eventShare(ev)` (src/lib/share.ts), null while there is none:
-       <share-menu data-sn-prop="{ item: c ? contactShare(c) : null }"></share-menu>
+     `contactShare(c)` or `eventShare(ev)` (src/lib/share.ts), null while there is none (no button then):
+       <share-menu data-sn-with="{ item: c ? contactShare(c) : null }"></share-menu>
      On touch screens with the Web Share API the button opens the system share sheet instead of the menu.
      Once per page (it has the popover #share-menu), not inside a data-sn-for. Actions: src/actions/share.ts. -->
 <template data-sn-props="{ item: ShareItem | null }">
   <div data-layout="row" data-wrap="none">
     <sn-resource name="shareNative" call="share.native()"></sn-resource>
-    <template data-sn-if="shareNative">
-      <button type="button" data-icon="share-2" data-variant="ghost" data-sn-attr="{'aria-label': m.share_share()}"
-              data-sn-call="share.send(item)" data-sn-concurrency="block"></button>
+    <!-- the file for the system share sheet, ready before the tap (share.prepare: the sheet opens only right after it) -->
+    <sn-resource name="shareFile" call="share.prepare(item)" when="shareNative && item"></sn-resource>
+    <template data-sn-if="item">
+      <template data-sn-if="shareNative">
+        <!-- Never disabled: a tap before the file is ready fetches it first; a sheet the browser refuses (the tap too
+             long ago, a share still open) opens the menu instead, so a tap always shows something. -->
+        <button type="button" data-icon="share-2" data-variant="ghost" data-sn-attr="{'aria-label': m.share_share()}"
+                data-sn-call="share.send(item, shareFile)" data-sn-concurrency="block"
+                data-sn-catch="elementIn($el.parentElement ?? $el, '#share-menu')?.showPopover({ source: $el })"></button>
+      </template>
+      <template data-sn-else>
+        <button type="button" data-icon="share-2" data-variant="ghost" popovertarget="share-menu"
+                data-sn-attr="{'aria-label': m.share_share()}"></button>
+      </template>
+      <div popover id="share-menu" data-menu>
+        <button type="button" data-icon="download" popovertarget="share-menu" popovertargetaction="hide"
+                data-sn-call="share.download(item)" data-sn-concurrency="block"
+                data-sn-text="item.type === 'text/calendar' ? m.share_downloadIcs() : m.share_downloadVCard()"></button>
+        <button type="button" data-icon="mail" popovertarget="share-menu" popovertargetaction="hide"
+                data-sn-call="share.email(item)" data-sn-concurrency="block" data-sn-text="m.share_email()"></button>
+      </div>
     </template>
-    <template data-sn-else>
-      <button type="button" data-icon="share-2" data-variant="ghost" popovertarget="share-menu"
-              data-sn-attr="{'aria-label': m.share_share()}"></button>
-    </template>
-    <div popover id="share-menu" data-menu>
-      <button type="button" data-icon="download" popovertarget="share-menu" popovertargetaction="hide"
-              data-sn-call="share.download(item)" data-sn-concurrency="block"
-              data-sn-text="item?.type === 'text/calendar' ? m.share_downloadIcs() : m.share_downloadVCard()"></button>
-      <button type="button" data-icon="mail" popovertarget="share-menu" popovertargetaction="hide"
-              data-sn-call="share.email(item)" data-sn-concurrency="block" data-sn-text="m.share_email()"></button>
-    </div>
   </div>
 </template>

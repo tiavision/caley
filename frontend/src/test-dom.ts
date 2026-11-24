@@ -5,7 +5,9 @@ if (!HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.showModal = function () { if (this.open) return; this.open = true; this.dispatchEvent(new Event('toggle')); };
   HTMLDialogElement.prototype.close = function () { if (!this.open) return; this.open = false; this.dispatchEvent(new Event('toggle')); this.dispatchEvent(new Event('close')); };
 }
-if (!HTMLElement.prototype.hidePopover) HTMLElement.prototype.hidePopover = function () {};
+// Popovers: jsdom has none; showPopover() marks the element `data-popover-open` (a test reads that), hidePopover() unmarks it.
+if (!HTMLElement.prototype.showPopover) HTMLElement.prototype.showPopover = function () { this.setAttribute('data-popover-open', ''); };
+if (!HTMLElement.prototype.hidePopover) HTMLElement.prototype.hidePopover = function () { this.removeAttribute('data-popover-open'); };
 if (!Element.prototype.scrollTo) Element.prototype.scrollTo = function () {};   // jsdom lays nothing out
 
 // Command invokers: a click on a [commandfor] button runs its command after the click's handlers, as the

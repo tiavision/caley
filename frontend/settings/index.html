@@ -135,41 +135,43 @@
 
     <dialog id="caldav-account-dialog" closedby="any" aria-labelledby="caldav-account-title">
       <header>
-        <h2 id="caldav-account-title" data-sn-text="draft.account_id ? m.mail_editAccountHeading() : m.settings_addAccountHeading()"></h2>
+        <h2 id="caldav-account-title" data-sn-text="draft?.account_id ? m.mail_editAccountHeading() : m.settings_addAccountHeading()"></h2>
         <button type="button" commandfor="caldav-account-dialog" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
       </header>
-      <form data-layout="stack" data-gap="md"
-            data-sn-post="/caldav/account" data-sn-encoding="form"
-            data-sn-body="caldavBody(draft)"
-            data-sn-on-submit="draftError = ''"
-            data-sn-then="refresh(caldavAccounts); closeDialog()"
-            data-sn-catch="draftError = $error.status ? ($error.detail ?? m.event_error()) : m.event_error()">
-        <label>
-          <span data-sn-text="m.settings_accountName()"></span>
-          <input type="text" data-sn-model="draft.display_name">
-        </label>
-        <label>
-          <span data-sn-text="m.settings_baseUrl()"></span>
-          <input type="url" required data-sn-attr="{placeholder: m.settings_baseUrlPlaceholder()}" data-sn-model="draft.caldav_base_url">
-        </label>
-        <label>
-          <span data-sn-text="m.settings_username()"></span>
-          <input type="text" autocomplete="username" required data-sn-attr="{placeholder: m.settings_usernamePlaceholder()}" data-sn-model="draft.caldav_username">
-        </label>
-        <label>
-          <span data-sn-text="m.settings_password()"></span>
-          <input type="password" autocomplete="current-password"
-                 data-sn-attr="{placeholder: draft.has_password ? m.settings_passwordHint() : m.settings_passwordPlaceholder()}"
-                 data-sn-model="draft.caldav_password">
-        </label>
-        <template data-sn-if="draftError">
-          <div data-callout data-tone="danger" role="alert" data-sn-text="draftError"></div>
-        </template>
-        <footer>
-          <button type="button" data-variant="ghost" commandfor="caldav-account-dialog" command="close" data-sn-text="m.event_cancel()"></button>
-          <button type="submit" data-sn-text="m.settings_submit()"></button>
-        </footer>
-      </form>
+      <template data-sn-if="draft">
+        <form data-layout="stack" data-gap="md"
+              data-sn-post="/caldav/account" data-sn-encoding="form"
+              data-sn-body="caldavBody(draft)"
+              data-sn-on-submit="draftError = ''"
+              data-sn-then="refresh(caldavAccounts); closeDialog()"
+              data-sn-catch="draftError = $error.status ? ($error.detail ?? m.event_error()) : m.event_error()">
+          <label>
+            <span data-sn-text="m.settings_accountName()"></span>
+            <input type="text" data-sn-model="draft.display_name">
+          </label>
+          <label>
+            <span data-sn-text="m.settings_baseUrl()"></span>
+            <input type="url" required data-sn-attr="{placeholder: m.settings_baseUrlPlaceholder()}" data-sn-model="draft.caldav_base_url">
+          </label>
+          <label>
+            <span data-sn-text="m.settings_username()"></span>
+            <input type="text" autocomplete="username" required data-sn-attr="{placeholder: m.settings_usernamePlaceholder()}" data-sn-model="draft.caldav_username">
+          </label>
+          <label>
+            <span data-sn-text="m.settings_password()"></span>
+            <input type="password" autocomplete="current-password"
+                   data-sn-attr="{placeholder: draft.has_password ? m.settings_passwordHint() : m.settings_passwordPlaceholder()}"
+                   data-sn-model="draft.caldav_password">
+          </label>
+          <template data-sn-if="draftError">
+            <div data-callout data-tone="danger" role="alert" data-sn-text="draftError"></div>
+          </template>
+          <footer>
+            <button type="button" data-variant="ghost" commandfor="caldav-account-dialog" command="close" data-sn-text="m.event_cancel()"></button>
+            <button type="submit" data-sn-text="m.settings_submit()"></button>
+          </footer>
+        </form>
+      </template>
     </dialog>
 
     <create-calendar-dialog></create-calendar-dialog>

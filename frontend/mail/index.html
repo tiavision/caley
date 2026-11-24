@@ -20,6 +20,9 @@
   <sn-resource name="identities" src="/email/identities" cache></sn-resource>
   <sn-resource name="contacts" src="/contacts" select="contacts" key="account_id,uid,addressbook_href" when="needContacts"></sn-resource>
   <email-reader-data data-sn-with="{ open: urlRef($url.account_id, $url.mailbox, $url.uid), threadRef, wiped }"></email-reader-data>
+  <!-- sinter-mail's warm-up: parses a sample mail while the page waits for the message, so the parser is compiled
+       before the real body arrives. -->
+  <mail-warm></mail-warm>
 
   <!-- cur: the list shown, the URL's view, else `view`, the one remembered from the last visit (persisted). The
        lists' `then` check it once they have arrived (currentView(): it while it exists, else the first inbox) and
@@ -71,7 +74,7 @@
            sel: noSelection(),
            drag: noDrag(),
            pageValue: /** @type {number|null} */ (1),
-           trash: { choice: '30', custom: /** @type {number|null} */ (30), error: '', busy: false },
+           trash: { account_id: '', mailbox: '', choice: '30', custom: /** @type {number|null} */ (30), error: '', busy: false },
            hit: /** @type {Message|null} */ (null),
          }"
          data-sn-let="{
@@ -146,7 +149,9 @@
       </sn-sync>
       <!-- New-mail notifications: the rail shows none on this page, the page shows them itself. -->
       <template data-sn-if="$meta.unread.loadedAt"><email-notifier></email-notifier></template>
-      <email-hidden-watch data-sn-on-page-hidden="wiped = body && body.encrypted ? body.key : wiped"></email-hidden-watch>
+      <!-- Hidden or left: an encrypted message's body is dropped (wiped), and what was decrypted with it (#wipe). -->
+      <span hidden id="wipe" data-sn-call="mail.wipe()"></span>
+      <email-hidden-watch data-sn-on-page-hidden="body && body.encrypted && run('wipe'); wiped = body && body.encrypted ? body.key : wiped"></email-hidden-watch>
 
       <!-- sidebarW, listW: the widths of the folder and message columns, set with the two <email-split>s (persisted). -->
       <div class="mail-layout" data-grow data-sn-state="{ sidebarW: 220, listW: 320 }" data-sn-persist="mail-widths"
@@ -216,7 +221,7 @@
                      data-sn-on-dragleave="drag.over === item.key && (drag.over = null)"
                      data-sn-on-drop="isRef(open, drag.msg) && ($url.uid = null)"
                      data-sn-post="/email/message/move" data-sn-trigger="drop"
-                     data-sn-body="moveBody(drag.msg, mb.name)"
+                     data-sn-when="drag.msg" data-sn-body="moveBody(drag.msg, mb.name)"
                      data-sn-optimistic="remove(drag.msg)"
                      data-sn-then="refresh(messages, results, unread)">
                   <button type="button" class="sidebar-item" data-variant="item" data-size="sm" data-layout="row" data-gap="sm" data-wrap="none"
@@ -285,7 +290,7 @@
                   </template>
                   <template data-sn-if="cur.account_id && cur.mailbox && !cur.folder_id && folderKind(cur.mailbox) === 'trash'">
                     <button type="button" data-variant="ghost" data-tone="danger" data-icon="trash-2" data-tooltip commandfor="mail-empty-trash" command="show-modal"
-                            data-sn-on-click="trash = {choice: '30', custom: 30, error: '', busy: false}"
+                            data-sn-on-click="trash = {account_id: cur.account_id, mailbox: cur.mailbox, choice: '30', custom: 30, error: '', busy: false}"
                             data-sn-attr="{'aria-label': m.mail_emptyTrash()}"></button>
                   </template>
                   <button type="button" data-variant="ghost" data-icon="user" data-tooltip popovertarget="mail-filter-addr"
@@ -375,9 +380,12 @@
             </template>
             <template data-sn-if="cur.folder_id || cur.mailbox">
               <!-- a model on $url.q: written at each typing pause, the first of a run a history entry -->
-              <input type="search" data-sn-model="$url.q"
-                     data-sn-on-input="sel = unmarked(sel); $url.uid = null"
-                     data-sn-attr="{placeholder: m.mail_searchPlaceholder(), 'aria-label': m.mail_searchPlaceholder()}">
+              <div data-field>
+                <span data-icon="search" aria-hidden="true"></span>
+                <input type="search" data-sn-model="$url.q"
+                       data-sn-on-input="sel = unmarked(sel); $url.uid = null"
+                       data-sn-attr="{placeholder: m.mail_searchPlaceholder(), 'aria-label': m.mail_searchPlaceholder()}">
+              </div>
             </template>
             <template data-sn-if="searching && !$meta.results.loading">
               <small data-muted data-sn-text="results.length === 1 ? m.mail_result1() : m.mail_resultsN({n: results.length})"></small>
@@ -466,7 +474,7 @@
               </div>
             </div>
           </template>
-          <template data-sn-if="!sel.selecting && (searching ? results.length > 0 : $meta.messages.total > 0)">
+          <template data-sn-if="!sel.selecting && (searching ? results.length > 0 : ($meta.messages.total ?? 0) > 0)">
             <nav class="pagination-bar" data-layout="row" data-gap="xs" data-justify="center" data-wrap="none" data-pad="xs">
               <template data-sn-if="searching">
                 <button type="button" data-variant="ghost" data-size="sm" data-icon="chevrons-left" data-tooltip data-sn-on-click="page(results, 'first'); sel = unmarked(sel)"
@@ -484,9 +492,9 @@
                 <button type="button" data-variant="ghost" data-size="sm" data-icon="chevron-left" data-tooltip data-sn-on-click="page(messages, 'prev'); sel = unmarked(sel)"
                         data-sn-attr="{disabled: !$meta.messages.hasPrev, 'aria-label': m.mail_prevPageAria()}"></button>
                 <button type="button" class="page-status" data-variant="ghost" data-size="sm" popovertarget="mail-page-jump"
-                        data-sn-on-click="pageValue = $meta.messages.page"
+                        data-sn-on-click="pageValue = $meta.messages.page ?? null"
                         data-sn-attr="{title: m.mail_jumpToPageAria()}"
-                        data-sn-text="m.mail_pageStatus({start: $meta.messages.from, end: $meta.messages.to, total: $meta.messages.total})"></button>
+                        data-sn-text="m.mail_pageStatus({start: $meta.messages.from ?? 0, end: $meta.messages.to ?? 0, total: $meta.messages.total ?? 0})"></button>
                 <form popover id="mail-page-jump" class="page-jump" data-layout="row" data-gap="xs" data-wrap="none" data-pad="xs"
                       data-sn-on-submit="$event.preventDefault(); pageValue && page(messages, pageValue); sel = pageValue ? unmarked(sel) : sel; $el.hidePopover()">
                   <input class="page-input" data-size="sm" type="number" min="1" autofocus data-sn-model="pageValue"
@@ -603,9 +611,9 @@
       <dialog id="mail-empty-trash" closedby="any" data-sn-on-cancel="trash.busy && $event.preventDefault()"
               data-sn-let="{ days: emptyTrashDays(trash.choice, trash.custom) }">
         <form data-sn-post="/email/trash/empty"
-              data-sn-body="{account_id: cur.account_id, mailbox: cur.mailbox, days}"
+              data-sn-body="{account_id: trash.account_id, mailbox: trash.mailbox, days}"
               data-sn-on-submit="trash.busy = true; trash.error = ''"
-              data-sn-then="inMailbox(open, cur) && ($url.uid = null); sel = unmarked(sel); refresh(messages, results, unread); closeDialog()"
+              data-sn-then="inMailbox(open, trash) && ($url.uid = null); sel = unmarked(sel); refresh(messages, results, unread); closeDialog()"
               data-sn-catch="trash.busy = false; trash.error = $error.body?.error === 'savedate_unsupported' ? m.mail_emptyTrashUnsupported() : m.mail_emptyTrashError()">
           <header>
             <h2 data-sn-text="m.mail_emptyTrash()"></h2>

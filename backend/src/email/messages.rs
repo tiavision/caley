@@ -93,13 +93,10 @@ pub struct Message {
 /// An attachment of a message (GET /email/attachment downloads it).
 #[derive(serde::Serialize, ToSchema)]
 pub struct Attachment {
-    #[schema(required)]
-    pub filename: Option<String>,
-    #[schema(required)]
-    pub content_type: Option<String>,
+    pub filename: String,
+    pub content_type: String,
     /// bytes
-    #[schema(required)]
-    pub size: Option<i64>,
+    pub size: i64,
     /// the Content-ID of an inline part (`cid:` images)
     #[schema(required)]
     pub content_id: Option<String>,
@@ -1315,9 +1312,10 @@ pub(super) fn message_to_json_with_attachments(
         attachments: attachments
             .iter()
             .map(|a| Attachment {
-                filename: a.filename.clone(),
-                content_type: a.content_type.clone(),
-                size: a.size,
+                // The sync always stores the three (`untitled` for a part without a name); the columns allow NULL.
+                filename: a.filename.clone().unwrap_or_else(|| "untitled".to_owned()),
+                content_type: a.content_type.clone().unwrap_or_else(|| "application/octet-stream".to_owned()),
+                size: a.size.unwrap_or(0),
                 content_id: a.content_id.clone(),
             })
             .collect(),

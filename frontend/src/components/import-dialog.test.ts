@@ -44,24 +44,25 @@ async function show() {
 test('an attachment opens it with the file set; after an import it closes and reopens empty', async () => {
   const { root, settle, requests } = await show();
   const dialog = root.querySelector<HTMLDialogElement>('#import-ics')!;
-  const input = dialog.querySelector<HTMLInputElement>('input[type=file]')!;
+  expect(dialog.querySelector('form')).toBeNull();           // no draft yet: the form renders with the first one
 
   root.querySelector<HTMLButtonElement>('#attachment')!.click();
   await settle();
+  const input = dialog.querySelector<HTMLInputElement>('input[type=file]')!;
   expect(dialog.open).toBe(true);
   expect(dialog.querySelector('small[data-truncate]')!.textContent).toBe('invite.ics');
   expect(input.required).toBe(false);                        // the file comes with the draft, not the input
   dialog.querySelector('form')!.requestSubmit();
   await settle();
   expect(String(requests.calls.at(-2)!.body)).toContain('name="email_uid"');
-  expect(dialog.querySelector('[role=status]')!.textContent).toBe(m.cal_importSuccess({ n: 3 }));
+  expect(dialog.querySelector('[role=status]')!.textContent!.trim()).toBe(m.cal_importSuccess({ n: 3 }));
   await new Promise((resolve) => setTimeout(resolve, 1600));
   expect(dialog.open).toBe(false);
 
   root.querySelector<HTMLButtonElement>('#plain')!.click();
   await settle();
   expect(dialog.open).toBe(true);
-  expect(dialog.querySelector('[role=status]')).toBeNull();
+  expect(dialog.querySelector('[role=status]')!.textContent!.trim()).toBe('');   // the live region stays, empty
   expect(dialog.querySelector('small[data-truncate]')).toBeNull();
   expect(input.required).toBe(true);
   expect(dialog.querySelector<HTMLSelectElement>('select')!.value).toBe('acc\0/cal/work/');

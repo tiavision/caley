@@ -287,7 +287,7 @@ test('imports an ICS file into the remembered calendar, after a preview', async 
   await settle();
   const body = multipart(requests.calls.find((c) => c.path === '/api/import')!.body);
   expect([body.account_id, body.calendar_href]).toEqual(['acc', '/cal/work/']);
-  expect(dialog.querySelector('[role=status]')!.textContent).toBe(m.cal_importSuccess({ n: 1 }));
+  expect(dialog.querySelector('[role=status]')!.textContent!.trim()).toBe(m.cal_importSuccess({ n: 1 }));
   expect(JSON.parse(storage.getItem('sn:event-default-calendar')!)).toEqual({ defaultCal: 'acc\0/cal/work/' });
   await new Promise((resolve) => setTimeout(resolve, 1600));
   expect(dialog.open).toBe(false);
@@ -312,7 +312,7 @@ test('imports into a new calendar, which the import creates (one request)', asyn
   const body = multipart(requests.calls.find((c) => c.path === '/api/import')!.body);
   expect([body.account_id, body.new_calendar_name, body.calendar_href]).toEqual(['acc', 'Trips', undefined]);
   expect(JSON.parse(storage.getItem('sn:event-default-calendar') ?? '{}').defaultCal ?? '').toBe('');   // not remembered after errors
-  expect(dialog.querySelector('[role=status]')!.textContent).toBe(`${m.cal_importSuccess({ n: 2 })} · ${m.cal_importPartial({ n: 1 })}`);
+  expect(dialog.querySelector('[role=status]')!.textContent!.trim()).toBe(`${m.cal_importSuccess({ n: 2 })} · ${m.cal_importPartial({ n: 1 })}`);
   expect(dialog.open).toBe(true);
 });
 
@@ -537,7 +537,7 @@ test('encryption tab: trusted sender keys, import and remove', async () => {
   expect(requests.calls.at(-1)).toMatchObject({ method: 'POST', path: '/api/pgp/key' });
   expect(requests.calls.at(-1)!.body).toEqual({ fingerprint: 'FFFF', email: 'carol@example.com', armored: 'carol@example.com', is_own: false, source: 'imported' });
   expect(trusted()).toEqual(['bob@example.com', 'carol@example.com']);
-  expect(root.querySelector('#settings-panel-encryption [role=status]')!.textContent).toBe(m.pgp_publicKeyImported());
+  expect(root.querySelector('#settings-panel-encryption [role=status] [data-tone=success]')!.textContent).toBe(m.pgp_publicKeyImported());
 
   const remove = root.querySelectorAll<HTMLButtonElement>('#settings-panel-encryption li button[data-tone=danger]');
   remove[remove.length - 2]!.click();

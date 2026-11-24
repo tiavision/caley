@@ -17,6 +17,9 @@
     <sn-resource name="mailboxes" src="/email/mailboxes?account_id={open.account_id}" when="open"></sn-resource>
     <sn-resource name="identities" src="/email/identities"></sn-resource>
     <email-reader-data data-sn-with="{ open, threadRef, wiped }"></email-reader-data>
+    <!-- sinter-mail's warm-up: parses a sample mail while the page waits for the message, so the parser is compiled
+         before the real body arrives. -->
+    <mail-warm></mail-warm>
     <sn-sync src="/events/stream">
       <sn-event name="emails_refetch" resource="message" op="refresh" type="MailboxEvent"
                 when="open && $event.account_id === open.account_id && $event.mailbox === open.mailbox"></sn-event>
@@ -31,7 +34,9 @@
       <sn-event name="accounts_changed" resource="mailboxes" op="refresh"></sn-event>
           <sn-event name="calendars_changed" resource="caldavAccounts" op="refresh"></sn-event>
     </sn-sync>
-    <email-hidden-watch data-sn-on-page-hidden="wiped = body && body.encrypted ? body.key : wiped"></email-hidden-watch>
+    <!-- Hidden or left: an encrypted message's body is dropped (wiped), and what was decrypted with it (#wipe). -->
+    <span hidden id="wipe" data-sn-call="mail.wipe()"></span>
+    <email-hidden-watch data-sn-on-page-hidden="body && body.encrypted && run('wipe'); wiped = body && body.encrypted ? body.key : wiped"></email-hidden-watch>
     <main data-layout="stack" data-gap="none"
           data-sn-let="{
              ownThread: !threadRef || threadRef.current,

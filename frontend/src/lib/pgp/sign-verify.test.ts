@@ -4,8 +4,16 @@
 import { describe, expect, it } from 'vitest';
 import * as openpgp from 'openpgp';
 import { buildProtectedMime, type ProtectedComposeMessage } from './compose';
-import { detectPgpMessage, verifySignedMessage } from './keyring';
+import * as mail from '@tiavision/sinter-mail';
 import { autocryptKeys } from './autocrypt';
+import { settle } from './steps';
+
+/** The message as the reader reads it (src/actions/mail.ts body()): mail.mime with its steps settled, `key` trusted for the sender. */
+async function read(raw: Uint8Array, key: openpgp.PublicKey) {
+  return settle(raw, { decrypted: {}, verdicts: {}, open: [] }, [], async () => [{ key, addresses: ['tester@example.com'] }]);
+}
+const verified = async (raw: Uint8Array, key: openpgp.PublicKey) => (await read(raw, key)).summary.signed === 'all';
+const bad = async (raw: Uint8Array, key: openpgp.PublicKey) => (await read(raw, key)).parts.some((p) => p.protection.signed === 'bad');
 
 // Uses real openpgp crypto (no mock) to guard the PGP/MIME signing pipeline:
 // the signed octets must match exactly what other clients verify, and our
@@ -40,7 +48,7 @@ describe('PGP/MIME sign + verify', () => {
     const { privateKey, publicKey } = await signingKey();
     const mime = await buildProtectedMime(baseMessage(privateKey));
 
-    expect(await verifySignedMessage(mime, [publicKey])).toContain('verified');
+    expect(await verified(mime, publicKey)).toBe(true);
   });
 
   it('advertises the key via Autocrypt header, not an attachment (K-9 #6511)', async () => {
@@ -84,8 +92,7 @@ describe('PGP/MIME sign + verify', () => {
     const boundary = /boundary="([^"]+)"/.exec(text)![1];
     const mangled = text.replace(`\r\n--${boundary}\r\nContent-Type: application/pgp-signature`,
       `\r\n\r\n--${boundary}\r\nContent-Type: application/pgp-signature`);
-    expect(await verifySignedMessage(new TextEncoder().encode(mangled), [publicKey]))
-      .not.toContain('verified');
+    expect(await verified(new TextEncoder().encode(mangled), publicKey)).toBe(false);
   });
 
   it('rejects a tampered body instead of re-canonicalizing it to valid', async () => {
@@ -93,8 +100,7 @@ describe('PGP/MIME sign + verify', () => {
     const mime = await buildProtectedMime(baseMessage(privateKey));
     const tampered = new TextDecoder().decode(mime).replace('Hello world', 'Hello WORLD');
 
-    expect(await verifySignedMessage(new TextEncoder().encode(tampered), [publicKey]))
-      .toContain('verification_failed');
+    expect(await bad(new TextEncoder().encode(tampered), publicKey)).toBe(true);
   });
 
   it('signs multipart/mixed messages with attachments as exact MIME octets', async () => {
@@ -116,11 +122,10 @@ describe('PGP/MIME sign + verify', () => {
     const signedBoundary = /^Content-Type: multipart\/signed;[^\r\n]+boundary="([^"]+)"/m.exec(text)![1];
     const mixedBoundary = /Content-Type: multipart\/mixed; boundary="([^"]+)"/.exec(text)![1];
     expect(text).toContain(`--${mixedBoundary}--\r\n\r\n--${signedBoundary}\r\nContent-Type: application/pgp-signature`);
-    expect(await verifySignedMessage(mime, [publicKey])).toContain('verified');
+    expect(await verified(mime, publicKey)).toBe(true);
 
     const tampered = text.replace('YXR0YWNoZWQgY29udGVudA==', 'YXR0YWNoZWQgY29udGVuZA==');
-    expect(await verifySignedMessage(new TextEncoder().encode(tampered), [publicKey]))
-      .toContain('verification_failed');
+    expect(await bad(new TextEncoder().encode(tampered), publicKey)).toBe(true);
   });
 
   it('keeps a forwarded signature.asc attachment inside the signed content', async () => {
@@ -133,53 +138,39 @@ describe('PGP/MIME sign + verify', () => {
 
     expect(text.match(/filename="signature\.asc"/g)).toHaveLength(1);
     expect(text).toContain('filename="OpenPGP_signature"');
-    expect(await verifySignedMessage(mime, [publicKey])).toContain('verified');
+    expect(await verified(mime, publicKey)).toBe(true);
   });
 });
 
-describe('PGP message detection', () => {
+describe('what mail.mime asks the reader to do', () => {
   const enc = new TextEncoder();
+  const kinds = async (raw: Uint8Array) => (await mail.mime(raw)).steps.map((x) => x.kind);
 
-  it('detects PGP/MIME signed mail', () => {
+  it('a PGP/MIME signed message: verify its signature', async () => {
     const raw = enc.encode(
-      'From: tester@example.com\r\nContent-Type: multipart/signed; boundary="s"; protocol="application/pgp-signature"\r\n\r\n' +
+      'From: tester@example.com\r\nContent-Type: multipart/signed; boundary="s"; protocol="application/pgp-signature"; micalg=pgp-sha256\r\n\r\n' +
       '--s\r\nContent-Type: text/plain\r\n\r\nHello\r\n' +
       '--s\r\nContent-Type: application/pgp-signature\r\n\r\n-----BEGIN PGP SIGNATURE-----\r\nx\r\n-----END PGP SIGNATURE-----\r\n--s--\r\n',
     );
-
-    expect(detectPgpMessage(raw)).toEqual({ isEncrypted: false, isSigned: true });
+    expect(await kinds(raw)).toEqual(['verify']);
   });
 
-  it('detects inline clear-signed mail', () => {
-    const raw = enc.encode('Content-Type: text/plain\r\n\r\n-----BEGIN PGP SIGNED MESSAGE-----\r\nHash: SHA256\r\n\r\nHello');
-
-    expect(detectPgpMessage(raw)).toEqual({ isEncrypted: false, isSigned: true });
+  it('an inline clear-signed body: verify the block', async () => {
+    const raw = enc.encode('Content-Type: text/plain\r\n\r\n-----BEGIN PGP SIGNED MESSAGE-----\r\nHash: SHA256\r\n\r\nHello\r\n-----BEGIN PGP SIGNATURE-----\r\n\r\nx\r\n-----END PGP SIGNATURE-----\r\n');
+    expect(await kinds(raw)).toEqual(['verify-cleartext']);
   });
 
-  it('detects PGP/MIME encrypted mail', () => {
-    const raw = enc.encode(
-      'Content-Type: multipart/encrypted; protocol="application/pgp-encrypted"; boundary="e"\r\n\r\n' +
-      '--e\r\nContent-Type: application/pgp-encrypted\r\n\r\nVersion: 1\r\n--e--\r\n',
-    );
-
-    expect(detectPgpMessage(raw)).toEqual({ isEncrypted: true, isSigned: false });
+  it('an inline encrypted body: decrypt it', async () => {
+    const raw = enc.encode('Content-Type: text/plain\r\n\r\n-----BEGIN PGP MESSAGE-----\r\n\r\nx\r\n-----END PGP MESSAGE-----\r\n');
+    expect(await kinds(raw)).toEqual(['decrypt']);
   });
 
-  it('detects inline encrypted mail', () => {
-    const raw = enc.encode('Content-Type: text/plain\r\n\r\n-----BEGIN PGP MESSAGE-----\r\nx\r\n-----END PGP MESSAGE-----');
-
-    expect(detectPgpMessage(raw)).toEqual({ isEncrypted: true, isSigned: false });
+  it('armor quoted in a reply is text, not a step (the old detection scanned the raw bytes for it)', async () => {
+    const raw = enc.encode('Content-Type: text/plain\r\n\r\nYou wrote:\r\n> -----BEGIN PGP MESSAGE-----\r\n> x\r\n> -----END PGP MESSAGE-----\r\n');
+    expect(await kinds(raw)).toEqual([]);
   });
 
-  it('ignores ordinary mail', () => {
-    const raw = enc.encode('Content-Type: text/plain\r\n\r\nHello');
-
-    expect(detectPgpMessage(raw)).toEqual({ isEncrypted: false, isSigned: false });
-  });
-
-  it('scans beyond the initial header block', () => {
-    const raw = enc.encode(`${'X-Filler: value\r\n'.repeat(400)}\r\n-----BEGIN PGP SIGNED MESSAGE-----\r\nHash: SHA256\r\n\r\nHello`);
-
-    expect(detectPgpMessage(raw)).toEqual({ isEncrypted: false, isSigned: true });
+  it('ordinary mail: nothing', async () => {
+    expect(await kinds(enc.encode('Content-Type: text/plain\r\n\r\nHello'))).toEqual([]);
   });
 });

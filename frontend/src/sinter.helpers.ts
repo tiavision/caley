@@ -80,8 +80,7 @@ export { caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErro
 export { loadErrorOr } from './lib/errors.ts';
 
 // Mail bodies (src/components/email-reader.html, email-compose.html): sinter-mail's email.parse turns an HTML body into
-// the tree <mail-body> renders (no iframe, nothing to sanitize); email.progressive(tree) numbers a copy of it for
-// progressive rendering.
+// the tree <mail-body> renders (no iframe, nothing to sanitize; built by its script builder).
 export * as email from '@tiavision/sinter-mail';
 
 // Mail pages (mail/index.html, mail/view/index.html, src/components/mail-*.html).
@@ -90,7 +89,7 @@ export {
   toggled, refOf, isRef, urlRef, filterActive, markRange, neighbor, archiveMailbox, moveTargets, bulkOf,
   withFlag, flagBody, moveBody, bulkFlagsBody, bulkMoveBody, bulkBody, inTrash, emptyTrashDays, validTrashDays, clampWidth,
   keyWidth, isSentMailbox, messageDateTime, shownAttachments, attachmentUrl, attachmentCount, pgpBadgeLabel, isIconBadge,
-  bodyOrigins, bodyImages, matching, isThreadCurrent, composeDraft, composeTitle, recipientToken, withRecipient, contactAddresses,
+  bodyOrigins, bodyImages, partOptions, viewOrigins, replyOf, shownMessages, matching, isThreadCurrent, composeDraft, composeTitle, recipientToken, withRecipient, contactAddresses,
   recipientHits, senderHits, senderLabel, canSign, canEncrypt, signs, newAccount, editAccount, discovered, accountBody, accountUi,
   identityBody, folderDraft, folderBody, subscribed, canPreviewAttachment, folderKind, htmlAddsValue,
   isIcsAttachment, formatDate, humanSize, textSegments, messageKey, senderName,

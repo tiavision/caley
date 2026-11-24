@@ -46,10 +46,17 @@
                 <span data-sn-text="m.settings_username()"></span>
                 <input type="text" name="caldav_username" autocomplete="username" required data-sn-attr="{placeholder: m.settings_usernamePlaceholder()}">
               </label>
-              <label>
-                <span data-sn-text="m.settings_password()"></span>
-                <input type="password" name="caldav_password" autocomplete="current-password" required data-sn-attr="{placeholder: m.settings_passwordPlaceholder()}">
-              </label>
+              <!-- The field with its show/hide button (temper's data-field): <label for>, so the button's name is not part of
+                   the field's. -->
+              <div data-layout="stack" data-gap="xs" data-sn-state="{ shown: false }">
+                <label for="login-password" data-sn-text="m.settings_password()"></label>
+                <div data-field>
+                  <input id="login-password" type="password" name="caldav_password" autocomplete="current-password" required
+                         data-sn-attr="{type: shown ? 'text' : 'password', placeholder: m.settings_passwordPlaceholder()}">
+                  <button type="button" data-variant="ghost" data-sn-on-click="shown = !shown"
+                          data-sn-attr="{'data-icon': shown ? 'eye-off' : 'eye', 'aria-pressed': shown ? 'true' : 'false', 'aria-label': m.login_showPassword()}"></button>
+                </div>
+              </div>
 
               <template data-sn-if="error">
                 <p data-callout data-tone="danger" role="alert" data-sn-text="error"></p>

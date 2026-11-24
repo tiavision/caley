@@ -459,17 +459,6 @@ $phone: 639px;
   font-size: var(--tm-text-sm);
 }
 
-.split-start {
-  border-start-end-radius: 0;
-  border-end-end-radius: 0;
-}
-
-.split-end {
-  border-start-start-radius: 0;
-  border-end-start-radius: 0;
-  border-inline-start-width: 0;
-}
-
 // A mail body (sinter-mail's <mail-body>: its root is .mail, the mail's elements are part of the page). The mail's own
 // styles are inline and win; what it leaves unset takes temper's styles, except where mails count on the browser's
 // defaults (tables and images as drawn, content-box sizing, block margins), which sinter-mail's mail.css gives back
@@ -713,4 +702,16 @@ $phone: 639px;
 // A wrapper that only scopes state (the default calendar of the import dialog).
 .mail-contents {
   display: contents;
+}
+
+// The reader's body blocks (src/components/email-reader.html): one per part sinter-mail's mail.mime shows. A forwarded
+// message's parts are indented by their depth; a part decrypted from inside someone else's message (opened) sits in a
+// box of its own, so it never reads as the message's own text.
+.mail-part {
+  padding-inline-start: calc(var(--depth, 0) * var(--tm-space-md));
+}
+.mail-part-opened {
+  border: 1px dashed var(--tm-border-strong);
+  border-radius: var(--tm-radius);
+  padding: var(--tm-space-sm);
 }

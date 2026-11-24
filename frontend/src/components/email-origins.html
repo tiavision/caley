@@ -16,7 +16,10 @@
         <h2 data-sn-text="only ? m.mail_imageSourcesThisEmail() : m.mail_imageSources()"></h2>
         <button type="button" commandfor="email-origins" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
       </header>
-      <input type="search" data-sn-model="q" data-sn-attr="{placeholder: m.mail_originsFilter(), 'aria-label': m.mail_originsFilter()}">
+      <div data-field>
+        <span data-icon="search" aria-hidden="true"></span>
+        <input type="search" data-sn-model="q" data-sn-attr="{placeholder: m.mail_originsFilter(), 'aria-label': m.mail_originsFilter()}">
+      </div>
       <template data-sn-if="only">
         <section data-layout="stack" data-gap="xs" data-sn-let="{ shownOrigins: matching(inMail.blocked, q) }">
           <h3 data-caption data-sn-text="m.mail_originsBlocked()"></h3>

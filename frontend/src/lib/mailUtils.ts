@@ -1,4 +1,3 @@
-import type { DecryptedAttachment } from './pgp/mime.ts';
 import type { Attachment, BodySegment, FolderKind, Message, ThreadNode, ThreadTreeNode } from './MailTypes.ts';
 
 // ── Attachment type checks ────────────────────────────────────────────────────
@@ -63,17 +62,6 @@ export function bareMailbox(value: string | null): string {
 
 export function keyHasEmail(key: { users: { userID?: { email?: string } }[] }, email: string): boolean {
   return key.users.some(user => user.userID?.email?.trim().toLowerCase() === email.toLowerCase());
-}
-
-// ── PGP attachment data helpers ───────────────────────────────────────────────
-
-export function attachmentDataUrl(attachment: DecryptedAttachment): string {
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < attachment.data.length; offset += chunkSize) {
-    binary += String.fromCharCode(...attachment.data.subarray(offset, offset + chunkSize));
-  }
-  return `data:${attachment.contentType};base64,${btoa(binary)}`;
 }
 
 // ── Message key helpers ───────────────────────────────────────────────────────

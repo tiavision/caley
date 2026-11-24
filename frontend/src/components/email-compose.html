@@ -114,8 +114,8 @@
             <textarea class="compose-body" data-grow data-sn-model="compose.body"
                       data-sn-attr="{rows: compose.forwardHtml ? 4 : 10, 'aria-label': m.mail_newMessage()}"></textarea>
             <template data-sn-if="compose.forwardHtml && compose.forwardRef">
-              <div class="compose-forward-preview" data-sn-let="{ fwd: email.parse(compose.forwardHtml, bodyImages(compose.forwardRef, null, 0)) }">
-                <mail-body data-sn-early="off" data-sn-with="{ body: fwd && email.progressive(fwd) }"></mail-body>
+              <div class="compose-forward-preview" data-sn-let="{ fwd: email.parse(compose.forwardHtml, bodyImages(compose.forwardRef, null, 0)) ?? null }">
+                <mail-body data-sn-early="off" data-sn-with="{ body: fwd }"></mail-body>
               </div>
             </template>
             <template data-sn-if="compose.files.length > 0">
@@ -135,7 +135,7 @@
             </template>
             <footer class="compose-footer" data-layout="row" data-gap="sm" data-justify="between" data-pad="sm">
               <button type="button" data-variant="ghost" data-icon="paperclip"
-                      data-sn-on-click="(/** @type {HTMLElement} */ ($el.closest('dialog').querySelector('.compose-files input'))).click()" data-sn-text="m.mail_attach()"></button>
+                      data-sn-on-click="$el.closest('dialog')?.querySelector(/** @type {'input'} */ ('.compose-files input'))?.click()" data-sn-text="m.mail_attach()"></button>
               <div data-layout="row" data-gap="sm">
                 <button type="button" data-variant="secondary" commandfor="email-compose" command="close" data-sn-text="m.mail_discard()"></button>
                 <button type="submit" data-icon="send" data-sn-attr="{disabled: sending, 'aria-busy': sending ? 'true' : null}"
@@ -146,7 +146,7 @@
           <!-- The file picker: its own form, so reset() clears it after the files went into the draft. -->
           <form class="compose-files" hidden>
             <input type="file" multiple data-sn-attr="{'aria-label': m.mail_attachFiles()}"
-                   data-sn-on-change="edited = true; compose.files = [...compose.files, ...$el.files]; $el.form.reset()">
+                   data-sn-on-change="edited = true; compose.files = [...compose.files, ...($el.files ?? [])]; $el.form?.reset()">
           </form>
         </div>
       </template>

@@ -31,9 +31,18 @@ export function getKeys(): openpgp.PrivateKey[] {
   return [...privateKeys.values()];
 }
 
+const lockListeners = new Set<() => void>();
+
+/** Runs `fn` whenever the vault locks: the mail actions drop what the keys decrypted (sinter-mail's mail.mime cache). */
+export function onLock(fn: () => void) {
+  lockListeners.add(fn);
+}
+
+/** Locks the vault: the keys go, and what was decrypted with them (onLock). */
 export function lock() {
   wrappingKey = null;
   privateKeys.clear();
+  for (const fn of lockListeners) fn();
 }
 
 export function isUnlocked(): boolean {

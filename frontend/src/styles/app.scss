@@ -11,10 +11,7 @@ $ui-font: 'Figtree Variable', system-ui, -apple-system, 'Segoe UI', Roboto, 'Not
   --tm-font-sans: #{$ui-font};
 }
 
-// The family written out here too (temper's body reads --tm-font-sans): sinter 0.17's fonts.preload check looks for a
-// font-family naming the preloaded family and does not follow var() (reported upstream; drop once it does).
 body {
-  font-family: $ui-font;
   font-variant-numeric: tabular-nums;
 }
 
@@ -49,12 +46,9 @@ a.mail-attachment-chip:hover {
   min-block-size: 0;
 }
 
-// TODO: drop after the next temper release (data-gutter, temper 7e87ede, unreleased). The pages whose <main> scrolls
-// itself (settings, search, contacts) reserve the scrollbar space, so their centered column does not shift when a
-// tab or loaded data makes it shorter or taller than the screen (classic scrollbars: Chrome on Linux and Windows).
-:where([data-gutter]) {
-  scrollbar-gutter: stable;
-}
+// A live region that is always on the page (role="status" around a data-sn-if: sinter's SN545) without a box of its
+// own, so an empty one adds no gap to the stack around it and its message lays out as the stack's own child.
+.live-region { display: contents; }
 
 // Page transitions: cross-document view transitions between the app pages (same-origin navigations).
 // The rail keeps its place and cross-fades (only aria-current changes); <main> cross-fades with a short lift. The two
@@ -113,10 +107,10 @@ body[data-shell] > main {
   padding-inline: 0;
 }
 
-// TODO: drop once temper collapses the rail on short screens itself (requested upstream 2026-11-12). A screen wide
-// enough for the rail but short (a phone or small tablet held sideways) gets the icon-only rail, whatever the
-// collapse toggle says, so the page next to it keeps its width; the toggle is hidden there, it could not expand it.
-// These are temper's collapsed-rail rules (app.css, feedback.css for the tooltips) under that condition.
+// Caley's own rule (temper keeps the rail as the toggle says on every height): a screen wide enough for the rail but
+// short (a phone or small tablet held sideways) gets the icon-only rail, whatever the collapse toggle says, so the page
+// next to it keeps its width; the toggle is hidden there, it could not expand it. These are temper's collapsed-rail
+// rules (app.css, feedback.css for the tooltips) under that condition, so temper check's TM208 on the badge is expected.
 @media (width >= 48rem) and (height < 30rem) {
   [data-rail] {
     --_w: var(--tm-rail-width-collapsed, calc(var(--tm-control-h) + 2 * var(--tm-space-sm) + 1px));

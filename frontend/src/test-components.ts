@@ -10,8 +10,9 @@ const ts = import.meta.glob(['./components/*.ts', '!./components/*.test.ts'], { 
 // sinter-mail's components (<mail-body> and its internal ones), which the build takes from sinter({ libraries }):
 // render() has no option for a component library, so they are passed as components of the app.
 const library = import.meta.glob<string>('../node_modules/@tiavision/sinter-mail/sinter/components/**/*.html', { query: '?raw', import: 'default', eager: true });
-// and their scripts: <mail-body> renders a progressive body (email.progressive) only through mail-steps.ts. jsdom lays
-// nothing out and has no ResizeObserver, so <mail-width> reports a wide reader at once (`mailWidth('narrow')`: a phone's).
+// and their scripts: <mail-body> renders a body from data through its script builder (mail-view.ts), without which it
+// renders nothing. jsdom lays nothing out and has no ResizeObserver, so <mail-width> reports a wide reader at once
+// (`mailWidth('narrow')`: a phone's).
 const libraryScripts = import.meta.glob(['../node_modules/@tiavision/sinter-mail/sinter/components/**/*.ts', '!**/mail-width.ts'], { eager: true });
 const layouts = import.meta.glob<string>('./layouts/*.html', { query: '?raw', import: 'default', eager: true });
 
@@ -27,7 +28,16 @@ export function mailWidth(media: 'wide' | 'narrow') {
 }
 
 // the build's APIs, with the spec (paths in the markup are relative to /api: mocks still name the full URL)
+// sinter-mail is a lazy package (vite.config.ts): its helper namespace `email` (src/sinter.helpers.ts) reaches the pages
+// as a helper that waits, which render() takes as `lazyHelpers`; here it loads at once.
+const lazyHelpers = {
+  email: {
+    members: ['parse', 'plain', 'text', 'links', 'unquoted', 'progressive', 'mime', 'bytes', 'imageType', 'forget'],
+    load: () => import('@tiavision/sinter-mail'),
+  },
+};
+
 export const app = {
-  components, layouts: layoutFiles, apis: apis(spec),
+  components, layouts: layoutFiles, apis: apis(spec), lazyHelpers,
   scripts: { ...Object.fromEntries(Object.entries(libraryScripts).map(([p, mod]) => [name(p), mod])), 'mail-width': mailWidth('wide') },
 };

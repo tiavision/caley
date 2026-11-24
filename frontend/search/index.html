@@ -17,9 +17,10 @@
       <div data-layout="stack" data-gap="md" data-pad="sm">
         <div data-layout="row" data-gap="sm" data-wrap="none">
           <nav-toggle></nav-toggle>
-          <!-- Submitting puts the words into the URL, which loads the search; the same words again reload it.
+          <!-- The field and its button are one unit (temper's data-join).
+               Submitting puts the words into the URL, which loads the search; the same words again reload it.
                The dates (models on $url) and calendars below write their URL parameters when changed: they apply at once. -->
-          <form data-layout="row" data-gap="sm" data-wrap="none" data-grow
+          <form data-join data-grow
                 data-sn-on-submit="$event.preventDefault();
                                    q.trim() && q.trim() === $url.q && refresh(results);
                                    q.trim() && ($url.q = q.trim())">
@@ -58,40 +59,38 @@
             <progress data-sn-attr="{'aria-label': m.search_loading()}"></progress>
           </template>
         </div>
-        <template data-sn-if="$meta.results.loading && !results.length">
-          <p aria-busy="true" aria-live="polite" data-sn-text="m.search_loading()"></p>
-        </template>
-        <template data-sn-else>
-          <template data-sn-if="$meta.results.error && !$meta.results.loading">
-            <p data-tone="danger" aria-live="polite" data-sn-text="m.search_error()"></p>
+        <!-- The status (loading, nothing found) is one live region, always on the page, so a screen reader announces
+             each text as it changes; an error is an alert, announced as it appears. -->
+        <div class="live-region" role="status">
+          <template data-sn-if="$meta.results.loading && !results.length">
+            <p aria-busy="true" data-sn-text="m.search_loading()"></p>
           </template>
-          <template data-sn-else>
-            <template data-sn-if="$url.q && $meta.results.loadedAt && !$meta.results.loading && !results.length">
-              <p data-muted aria-live="polite" data-sn-text="m.search_noResults()"></p>
-            </template>
-            <template data-sn-else>
-              <ul data-list aria-live="polite" data-sn-show="results.length > 0"
-                  data-sn-attr="{'aria-busy': $meta.results.loading ? 'true' : null}">
-                <template data-sn-for="item in results">
-                  <li data-pad="none">
-                    <button type="button" class="search-result" data-variant="item" data-layout="stack" data-gap="none"
-                            data-sn-attr="{'data-bar': item.color ? '' : null}" data-sn-style="{'--tm-tone': item.color || null}"
-                            data-sn-on-click="detail = item; openDialog('event-detail')">
-                      <strong data-sn-text="item.summary"></strong>
-                      <small data-muted data-sn-text="eventDateLong(item.dtstart, $locale) + (item.location ? ` · ${item.location}` : '')"></small>
-                      <template data-sn-if="item.description">
-                        <small data-muted data-truncate data-sn-text="item.description"></small>
-                      </template>
-                      <template data-sn-if="calendarName(calendars, item)">
-                        <small data-caption data-sn-text="calendarName(calendars, item)"></small>
-                      </template>
-                    </button>
-                  </li>
+          <template data-sn-else data-sn-if="$url.q && $meta.results.loadedAt && !$meta.results.loading && !results.length && !$meta.results.error">
+            <p data-muted data-sn-text="m.search_noResults()"></p>
+          </template>
+        </div>
+        <template data-sn-if="$meta.results.error && !$meta.results.loading">
+          <p data-tone="danger" role="alert" data-sn-text="m.search_error()"></p>
+        </template>
+        <ul data-list data-sn-show="results.length > 0 && !($meta.results.error && !$meta.results.loading)"
+            data-sn-attr="{'aria-busy': $meta.results.loading ? 'true' : null}">
+          <template data-sn-for="item in results">
+            <li data-pad="none">
+              <button type="button" class="search-result" data-variant="item" data-layout="stack" data-gap="none"
+                      data-sn-attr="{'data-bar': item.color ? '' : null}" data-sn-style="{'--tm-tone': item.color || null}"
+                      data-sn-on-click="detail = item; openDialog('event-detail')">
+                <strong data-sn-text="item.summary"></strong>
+                <small data-muted data-sn-text="eventDateLong(item.dtstart, $locale) + (item.location ? ` · ${item.location}` : '')"></small>
+                <template data-sn-if="item.description">
+                  <small data-muted data-truncate data-sn-text="item.description"></small>
                 </template>
-              </ul>
-            </template>
+                <template data-sn-if="calendarName(calendars, item)">
+                  <small data-caption data-sn-text="calendarName(calendars, item)"></small>
+                </template>
+              </button>
+            </li>
           </template>
-        </template>
+        </ul>
       </div>
 
       <event-detail data-sn-with="{ event: detail }"></event-detail>

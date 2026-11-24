@@ -16,9 +16,12 @@ export default defineConfig({
     // fonts.preload: the UI font (Figtree, @fontsource-variable/figtree) is preloaded, so a first visit does not paint the fallback font first.
     // apis: the backend's JSON API (apis.ts, described by openapi.json).
     // libraries: sinter-mail's <mail-body> (a mail body parsed by its email.parse, src/sinter.helpers.ts) and <mail-width>.
-    // sinter-mail is not lazy: <mail-body>'s progressive steps (its mail-steps script) are part of every page that uses it.
+    // lazy: openpgp, and sinter-mail: its parser, its MIME reader and its component scripts (<mail-body>'s builder,
+    // <mail-width>, <mail-warm>) load on first use, off the mail pages' bundle; <mail-warm> starts that while the page
+    // waits for the message. The actions await every mail.* call.
+    // compileHints: V8 compiles each page module as it loads (the mail pages parse a mail in the browser at once).
     sinter({
-      typecheck: true, strict: true, embed: true, localePrefix: true, swap: true, lazy: ['openpgp'], fonts: { preload: ['Figtree Variable'] },
+      typecheck: true, strict: true, embed: true, localePrefix: true, swap: true, compileHints: true, lazy: ['openpgp', '@tiavision/sinter-mail'], fonts: { preload: ['Figtree Variable'] },
       libraries: ['@tiavision/sinter-mail'],
       apis: apis('openapi.json'),
     }),

@@ -11,7 +11,8 @@ import {
 } from './mailUtils.ts';
 import type { Account, Attachment, Identity, Mailbox, Message, ThreadNode, VirtualFolder } from './MailTypes.ts';
 import { parseEnvelopeAddresses } from './addresses.ts';
-import type { ParseOptions } from '@tiavision/sinter-mail';
+import type { Body, ParseOptions } from '@tiavision/sinter-mail';
+import type { ReaderPart } from './mail-reader.ts';
 
 export type { Account, Attachment, Identity, Mailbox, Message, ThreadNode, VirtualFolder };
 export {
@@ -261,7 +262,7 @@ export function noReader(): Reader {
 }
 
 /** Whether `ref` is a message of the view's mailbox. */
-export function inMailbox(ref: MessageRef | null, view: MailView): boolean {
+export function inMailbox(ref: MessageRef | null, view: Pick<MailView, 'account_id' | 'mailbox'>): boolean {
   return !!ref && ref.account_id === view.account_id && ref.mailbox === view.mailbox;
 }
 
@@ -520,6 +521,20 @@ export function keyWidth(which: 'sidebar' | 'list', e: KeyboardEvent, width: num
 // ── Reader ────────────────────────────────────────────────────────────────────
 
 /** The decrypted/parsed body (mail.body()) when it is the one of `msg`, else null (still loading another one). */
+/**
+ * The message the reader shows, as a list of one (or none): the open one once its body is in (the live `message`
+ * resource, where flags change); until then the one whose body was read last, so a click does not empty the reader
+ * twice (the message, then its body); the open message without a body when there is none (its body not loaded or
+ * dropped: a wiped encrypted one).
+ */
+export function shownMessages(message: Message | null, body: { message: Message } | null, open: MessageRef | null): Message[] {
+  if (!open) return [];
+  const live = message && isRef(message, open) ? message : null;
+  if (body && isRef(body.message, open)) return [live ?? body.message];
+  if (body) return [body.message];
+  return live ? [live] : [];
+}
+
 export function bodyOf<B extends { key: string }>(body: B | null | undefined, msg: Message): B | null {
   return body && body.key === messageKey(msg) ? body : null;
 }
@@ -554,6 +569,12 @@ export function pgpBadgeLabel(badge: string): string {
     case 'missing_key': return m.pgp_badgeMissingKey();
     case 'unsupported_alg': return m.pgp_badgeUnsupportedAlg();
     case 'verification_failed': return m.pgp_badgeVerificationFailed();
+    case 'decrypt_failed': return m.pgp_badgeDecryptFailed();
+    case 'signed_part': return m.pgp_badgeSignedPart();
+    case 'signature_expired': return m.pgp_badgeSignatureExpired();
+    case 'signature_revoked': return m.pgp_badgeSignatureRevoked();
+    case 'from_differs': return m.pgp_badgeFromDiffers();
+    case 'from_unknown': return m.pgp_badgeFromUnknown();
     default: return badge;
   }
 }
@@ -581,14 +602,52 @@ export function bodyOrigins(all: string[], allowed: string[], ignored: string[])
  * is allowed, so the browser does not keep the pixel), inline ones (`cid:`) from the message's parts, or from `cids`
  * (a decrypted message's parts, as data: URLs).
  */
-export function bodyImages(msg: MessageRef, cids: Record<string, string> | null, version: number, media: 'wide' | 'narrow' = 'wide'): ParseOptions {
+export function bodyImages(
+  msg: MessageRef, cids: Record<string, string> | null, version: number, media: 'wide' | 'narrow' = 'wide',
+  encrypted = false, consent = false,
+): ParseOptions {
   const ref = `account_id=${encodeURIComponent(msg.account_id)}&mailbox=${encodeURIComponent(msg.mailbox)}&uid=${msg.uid}`;
   return {
     media,
+    // a decrypted body: no remote image until the reader consents for this message (origins are still listed)
+    encrypted,
+    consent: encrypted && consent,
     images: 'proxy',
     proxy: `/api/email/proxy-image?v=${version}&url={url}`,
     cid: cids ?? `/api/email/proxy-image?${ref}&cid={cid}`,
   };
+}
+
+/**
+ * The parse options of each of the reader's blocks (null: not HTML, or `media` not known yet): a decrypted part's
+ * remote images blocked until `consent`, the sender's legacy header copy left out, its inline images (`cids`, by part
+ * id: blob: URLs of a message read in the browser; null: the server serves them by content id). The markup parses
+ * with email.parse: this module never imports the parser, since every page imports the helpers.
+ */
+export function partOptions(
+  parts: ReaderPart[] | null | undefined, msg: MessageRef, cids: Record<string, Record<string, string>> | null,
+  version: number, media: 'wide' | 'narrow' | null, consent: boolean,
+): { part: ReaderPart; options: ParseOptions | null }[] {
+  return (parts ?? []).map((part) => ({
+    part,
+    options: part.kind === 'html' && media
+      ? { ...bodyImages(msg, cids ? cids[part.id] ?? {} : null, version, media, part.encrypted, consent), legacyDisplay: part.legacyDisplay }
+      : null,
+  }));
+}
+
+/** One block of the reader's body and, for an HTML part, its tree (sinter-mail's parse). */
+export interface PartView { part: ReaderPart; tree: Body | null }
+
+/** The remote image origins of the reader's HTML blocks; `encrypted`: only the decrypted ones'. */
+export function viewOrigins(views: PartView[], encrypted = false): string[] {
+  return [...new Set(views.filter((v) => !encrypted || v.part.encrypted).flatMap((v) => v.tree?.images.origins ?? []))];
+}
+
+/** The message a reply or forward starts from: the protected subject and reply addresses where the body has them. */
+export function replyOf(msg: Message, b: { subject: string; reply: string[] | null } | null): Message {
+  if (!b) return msg;
+  return { ...msg, subject: b.subject || msg.subject, ...(b.reply ? { reply_to: b.reply } : {}) };
 }
 
 export function matching(origins: string[], q: string): string[] {
@@ -857,9 +916,10 @@ export function discovered(form: AccountForm, d: Autodiscovery | null): AccountF
   return next;
 }
 
+/** The account form's body (POST /api/email/account); the port field is `required`, so it is set when the form submits. */
 export function accountBody(f: AccountForm) {
   return {
-    account_id: f.account_id, display_name: f.display_name, sender_name: f.sender_name || null, host: f.host, port: f.port,
+    account_id: f.account_id, display_name: f.display_name, sender_name: f.sender_name || null, host: f.host, port: f.port ?? 0,
     username: f.username, password: f.password, use_tls: f.use_tls, smtp_host: f.smtp_host || null, smtp_port: f.smtp_port || null,
   };
 }

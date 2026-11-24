@@ -12,11 +12,22 @@ export function native(): boolean {
   return window.matchMedia('(pointer: coarse)').matches && typeof navigator.share === 'function';
 }
 
-/** Opens the system share sheet with the file (or only the title where files cannot be shared). */
-export async function send(item: ShareItem, ctx: CallContext): Promise<void> {
-  const file = new File([await content(item, ctx)], item.filename, { type: item.type });
+/**
+ * The file the share sheet gets, fetched ahead (a `call` resource of <share-menu>): browsers open the sheet only
+ * right after the tap (Safari strictly), so send() must not wait for the network first.
+ */
+export async function prepare(item: ShareItem, ctx: CallContext): Promise<File> {
+  return new File([await content(item, ctx)], item.filename, { type: item.type });
+}
+
+/**
+ * Opens the system share sheet with `item`'s file: the one prepared ahead when it is this item's (nothing awaited
+ * before the sheet), else fetched now (the browser may then refuse: the menu opens instead, `data-sn-catch`).
+ */
+export async function send(item: ShareItem, file: File | null, ctx: CallContext): Promise<void> {
+  const ready = file && file.name === item.filename && file.type === item.type ? file : await prepare(item, ctx);
   try {
-    await navigator.share(navigator.canShare?.({ files: [file] }) ? { title: item.title, files: [file] } : { title: item.title });
+    await navigator.share(navigator.canShare?.({ files: [ready] }) ? { title: item.title, files: [ready] } : { title: item.title });
   } catch (err) {
     if (!(err instanceof Error && err.name === 'AbortError')) throw err;
   }

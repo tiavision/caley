@@ -21,11 +21,17 @@ const msg = (uid: number, subject: string, extra: Partial<Message> = {}): Messag
 const inbox = [msg(3, 'Third', { flags: [], is_read: false }), msg(2, 'Second'), msg(1, 'First')];
 
 
-// the HTML body the reader gets (mail.body), '' for a text body
+// the HTML body the reader gets (mail.body), '' for a text body; `decrypted`: it is a decrypted body
 let htmlBody = '';
+let decrypted = false;
+// the body's parts, instead of the one HTML or text part above (test of the reader's blocks)
+let partsOverride: object[] | null = null;
+// while set, mail.body waits for it (a body that takes a while)
+let bodyGate: Promise<void> | null = null;
+const openedParts: string[] = [];
 
 // the app's retry policies: the flag toggles name one (data-sn-retry="flags")
-beforeEach(() => { htmlBody = ''; localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'], retry: retryPolicies }); });
+beforeEach(() => { bodyGate = null; htmlBody = ''; decrypted = false; partsOverride = null; openedParts.length = 0; localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'], retry: retryPolicies }); });
 afterEach(() => configure({ confirm: null as never, urlSchemes: [], retry: null }));
 
 async function show(routes: Record<string, RouteResponse> = {}, pending: { subject: string; files: File[] } | null = null, storage = memoryStorage(),
@@ -58,15 +64,23 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
   const stream = mockStream();
   const actions = {
     ics: { preview: async () => [], run: async () => ({ imported: 0, errors: 0, calendar: '' }) },
-    share: { native: () => false, send: async () => {}, download: async () => {}, email: async () => {} },
+    share: { native: () => false, prepare: async () => null, send: async () => {}, download: async () => {}, email: async () => {} },
     maps: { open: async () => {} },
     notify: { status: () => ({ supported: false, permission: 'default', enabled: false }), toggle: async (s: unknown) => s },
     mail: {
       open: async (ref: { uid: number }) => { opened.push(ref); return current.find((msg) => msg.uid === ref.uid) ?? inbox[0]; },
-      body: async (ref: { account_id: string; mailbox: string; uid: number }) => ({
-        key: `${ref.account_id} ${ref.mailbox} ${ref.uid}`, html: htmlBody, text: `body ${ref.uid}`, mode: htmlBody ? 'html' : 'text', encrypted: false, signed: false,
-        locked: false, badges: [], subject: '', error: '', files: [], importable: {}, cids: null,
-      }),
+      body: async (ref: { account_id: string; mailbox: string; uid: number }) => {
+        await bodyGate;
+        const part = { id: '1', html: '', text: '', legacyDisplay: false, encrypted: decrypted, opened: false, mark: '', reason: '', step: '', depth: 0 };
+        const textParts = [{ ...part, kind: 'text', text: `body ${ref.uid}` }];
+        return {
+          key: `${ref.account_id} ${ref.mailbox} ${ref.uid}`, message: current.find((msg) => msg.uid === ref.uid) ?? inbox[0], parts: partsOverride ?? (htmlBody ? [{ ...part, kind: 'html', html: htmlBody }] : textParts), textParts: partsOverride ?? textParts,
+          html: htmlBody, text: `body ${ref.uid}`, quotable: !decrypted, mode: htmlBody ? 'html' : 'text', encrypted: decrypted, signed: false,
+          locked: false, badges: [], subject: '', reply: null, error: '', files: [], importable: {}, cids: null, forwardCids: null,
+        };
+      },
+      openPart: (_ref: unknown, step: string) => { openedParts.push(step); },
+      wipe: () => {},
       composeKeys: async () => ({ keys: [], vault: [], unlocked: [] }),
       autodiscover: async () => ({ found: false }),
       send: async () => null,
@@ -104,7 +118,7 @@ test('shows the first inbox with its unread count, then opens a message in the r
   expect(rows(root)[0].getAttribute('aria-current')).toBe('true');
   expect(marks()).toEqual([{ account_id: 'work', mailbox: 'INBOX', uid: 3, flags: ['\\Seen'], set: true }]);
 
-  expect(root.querySelector('[id^="mail-actions-"] button[data-icon="mail"]')!.textContent).toBe(m.mail_markUnread());   // the reader shows it read
+  expect(root.querySelector('[id^="mail-actions-"] button[data-icon="mail"] > span')!.textContent).toBe(m.mail_markUnread());   // the reader shows it read
   rows(root)[1].click();                                          // a read message is not marked
   await settle();
   expect(marks()).toHaveLength(1);
@@ -118,7 +132,7 @@ test('searches the folder with filters, and pages by cursor', async () => {
       return q.get('direction') === 'forward' && q.get('cursor_rowid') ? { messages: [], total: 3 } : { messages: inbox, total: 3 };
     },
   });
-  const search = root.querySelector<HTMLInputElement>('.message-list-header > input[type=search]')!;
+  const search = root.querySelector<HTMLInputElement>('.message-list-header [data-field] > input[type=search]')!;
   search.value = 'sec';
   search.dispatchEvent(new Event('input', { bubbles: true }));
   await advance(300);
@@ -136,7 +150,7 @@ test('a search page offers the next one only when the server says there are more
   let more = false;
   const { root, settle, advance } = await show({ 'GET /api/email/search': () => ({ messages: page, has_more: more }) });
   const next = () => root.querySelector<HTMLButtonElement>(`.pagination-bar button[aria-label="${m.mail_nextPageAria()}"]`)!;
-  const search = root.querySelector<HTMLInputElement>('.message-list-header > input[type=search]')!;
+  const search = root.querySelector<HTMLInputElement>('.message-list-header [data-field] > input[type=search]')!;
   search.value = 'hit';
   search.dispatchEvent(new Event('input', { bubbles: true }));
   await advance(300);
@@ -244,7 +258,7 @@ test('the reader\'s star and read toggles stay on success; the list follows the 
   root.querySelector<HTMLButtonElement>('[id^="mail-actions-"] button[data-icon="mail"]')!.click();
   await settle();
   expect(patched()).toEqual({ account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Seen'], set: false });
-  expect(root.querySelector('[id^="mail-actions-"] button[data-icon="mail"]')!.textContent).toBe(m.mail_markRead());
+  expect(root.querySelector('[id^="mail-actions-"] button[data-icon="mail"] > span')!.textContent).toBe(m.mail_markRead());
   stream.emit('email_updated', { account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Flagged'] });
   await settle();
   expect(rows(root)[1].classList.contains('unread')).toBe(true);
@@ -474,10 +488,74 @@ test('an HTML body is part of the page (sinter-mail): its images through the pro
     '/api/email/proxy-image?account_id=work&mailbox=INBOX&uid=3&cid=part1%40x',
   ]);
   const notice = root.querySelector('.reader .images-notice')!;
-  notice.querySelector<HTMLButtonElement>('button.split-start')!.click();
+  notice.querySelector<HTMLButtonElement>('[data-join] > button')!.click();
   await settle();
   expect(requests.calls.filter((c) => c.method === 'POST' && c.path === '/api/email/image-origins').map((c) => c.body)).toEqual([{ origin: 'https://img.example' }]);
   expect(srcs()[0]).toBe('/api/email/proxy-image?v=1&url=https%3A%2F%2Fimg.example%2Fa.png');
+});
+
+test('a decrypted body loads no remote image until the reader asks, for this message only (sinter-mail\'s encrypted, consent)', async () => {
+  htmlBody = '<p>Secret</p><img src="https://img.example/a.png" alt="logo"><img src="cid:part1@x">';
+  decrypted = true;
+  const { root, settle } = await show({ 'PATCH /api/email/message/flags': null });
+  rows(root)[0].click();
+  await settle();
+  const srcs = () => [...root.querySelectorAll('.reader .mail-html .mail img')].map((i) => i.getAttribute('src'));
+  expect(srcs()).toEqual([null, '/api/email/proxy-image?account_id=work&mailbox=INBOX&uid=3&cid=part1%40x']);   // the inline one stays
+  const notice = root.querySelector('.reader .images-notice')!;
+  expect(notice.textContent).toContain(m.mail_imagesEncrypted());
+  notice.querySelector<HTMLButtonElement>('button')!.click();
+  await settle();
+  expect(srcs()[0]).toBe('/api/email/proxy-image?v=0&url=https%3A%2F%2Fimg.example%2Fa.png');
+  rows(root)[1].click();                                           // another message: no consent carried over
+  await settle();
+  rows(root)[0].click();
+  await settle();
+  expect(srcs()[0]).toBeNull();
+});
+
+test('the body\'s parts in order: a signed part marked, an encrypted part from inside the message opened only on request, then shown apart', async () => {
+  const base = { html: '', text: '', legacyDisplay: false, encrypted: false, opened: false, mark: '', reason: '', step: '', depth: 0 };
+  partsOverride = [
+    { ...base, id: '1.1', kind: 'text', text: 'My own words', mark: 'signed_part' },
+    { ...base, id: '1.2', kind: 'encrypted', reason: 'not-root', step: '1.2#ab' },
+  ];
+  const { root, settle } = await show({ 'PATCH /api/email/message/flags': null });
+  rows(root)[0].click();
+  await settle();
+  const parts = () => [...root.querySelectorAll('.reader .mail-part')];
+  expect(parts().map((p) => p.querySelector('[data-badge]')?.textContent ?? '')).toEqual([m.pgp_badgeSignedPart(), '']);
+  expect(parts()[0].querySelector('.body-text')!.textContent).toBe('My own words');
+  expect(parts()[0].textContent).not.toContain(m.pgp_unlockToRead());   // a text part is only its text
+  expect(parts()[1].textContent).toContain(m.pgp_encryptedPart());
+
+  partsOverride = [partsOverride[0], { ...base, id: '1.2#ab/1', kind: 'text', text: 'Someone else\'s secret', encrypted: true, opened: true }];
+  parts()[1].querySelector<HTMLButtonElement>('button')!.click();
+  await settle();
+  expect(openedParts).toEqual(['1.2#ab']);
+  const box = parts()[1];
+  expect(box.classList.contains('mail-part-opened')).toBe(true);
+  expect(box.textContent).toContain(m.pgp_openedPart());
+  expect(box.querySelector('.body-text')!.textContent).toBe('Someone else\'s secret');
+});
+
+test('opening another message keeps the reader on the last one (busy) until the next one\'s body is in: it never empties', async () => {
+  const { root, settle, flush } = await show({ 'PATCH /api/email/message/flags': null });
+  rows(root)[0].click();
+  await settle();
+  const subject = () => root.querySelector('.reader .detail-subject')?.textContent ?? null;
+  const first = subject();
+  expect(first).not.toBeNull();
+  let release = () => {};
+  bodyGate = new Promise((resolve) => { release = resolve; });
+  rows(root)[1].click();
+  await flush();
+  expect(subject()).toBe(first);                                  // still the last one, not "Loading…"
+  expect(root.querySelector('.reader')!.getAttribute('aria-busy')).toBe('true');
+  release();
+  await settle();
+  expect(subject()).not.toBe(first);
+  expect(root.querySelector('.reader')!.hasAttribute('aria-busy')).toBe(false);
 });
 
 test('removing the open virtual folder drops it and goes back to the inbox', async () => {
@@ -683,7 +761,7 @@ test('a message and a mailbox are history entries: Back returns to the message, 
 
 test('the search and its filters are in the URL; another mailbox drops them', async () => {
   const { root, settle, advance, url, requests } = await show({ 'GET /api/email/search': { messages: [msg(2, 'Second')] } });
-  const search = root.querySelector<HTMLInputElement>('.message-list-header > input[type=search]')!;
+  const search = root.querySelector<HTMLInputElement>('.message-list-header [data-field] > input[type=search]')!;
   search.value = 'sec';
   search.dispatchEvent(new Event('input', { bubbles: true }));
   await advance(300);

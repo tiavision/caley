@@ -4,6 +4,7 @@ import { m } from '@tiaforge-ui/sinter/messages';
 import { messages } from '../test-messages.ts';
 import { contactShare, eventShare, type ShareItem } from '../lib/share.ts';
 import { app } from '../test-components.ts';
+import * as helpers from '../sinter.helpers.ts';
 import '../test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
 const contact = { account_id: 'a1', uid: 'u 1', addressbook_href: '/ab/', fn_name: 'Ada Lovelace', emails: [], phones: [], addresses: [], org: '', has_photo: false };
@@ -12,11 +13,15 @@ const page = `<div data-sn-state="{ item: null }">
   <share-menu data-sn-with="{ item }"></share-menu>
 </div>`;
 
-function actions(nativeShare: boolean, log: Array<[string, ShareItem]>) {
+function actions(nativeShare: boolean, log: Array<[string, unknown]>) {
   return {
     share: {
       native: () => nativeShare,
-      send: async (item: ShareItem) => { log.push(['send', item]); },
+      prepare: async (item: ShareItem) => { log.push(['prepare', item.filename]); return new File(['BEGIN:VCARD'], item.filename, { type: item.type }); },
+      send: async (item: ShareItem, file: File | null) => {
+        log.push(['send', [item.title, file?.name]]);
+        if (item.title === 'Refused') throw Object.assign(new Error('not allowed'), { name: 'NotAllowedError' });
+      },
       download: async (item: ShareItem) => { log.push(['download', item]); },
       email: async (item: ShareItem) => { log.push(['email', item]); },
     },
@@ -24,9 +29,9 @@ function actions(nativeShare: boolean, log: Array<[string, ShareItem]>) {
 }
 
 async function show(nativeShare: boolean, item: ShareItem) {
-  const log: Array<[string, ShareItem]> = [];
+  const log: Array<[string, unknown]> = [];
   const html = page.replace('<div data-sn-state="{ item: null }"', `<div data-sn-state="{ item: ${JSON.stringify(item).replace(/"/g, "'")} }"`);
-  const r = await render(html, { requests: mockRequests({}), actions: actions(nativeShare, log), messages, ...app });
+  const r = await render(html, { requests: mockRequests({}), actions: actions(nativeShare, log), helpers, messages, ...app });
   await r.settle();
   return { ...r, log };
 }
@@ -58,12 +63,21 @@ test('an event offers the .ics download', async () => {
   expect(root.querySelector('#share-menu button')!.textContent).toBe('Download .ics');
 });
 
-test('on touch screens with Web Share: the button opens the share sheet', async () => {
+test('on touch screens with Web Share: the file is ready before the tap, which opens the share sheet with it at once', async () => {
   const item = contactShare(contact);
   const { root, settle, log } = await show(true, item);
+  expect(log).toEqual([['prepare', 'Ada Lovelace.vcf']]);          // fetched ahead: the sheet opens only right after a tap
   const button = root.querySelector<HTMLButtonElement>('button[data-icon="share-2"]')!;
   expect(button.hasAttribute('popovertarget')).toBe(false);
   button.click();
   await settle();
-  expect(log).toEqual([['send', item]]);
+  expect(log.at(-1)).toEqual(['send', ['Ada Lovelace', 'Ada Lovelace.vcf']]);
+  expect(root.querySelector('#share-menu')!.matches(':popover-open')).toBe(false);
+});
+
+test('a share sheet the browser refuses opens the menu instead: a tap always shows something', async () => {
+  const { root, settle } = await show(true, { ...contactShare(contact), title: 'Refused' });
+  root.querySelector<HTMLButtonElement>('button[data-icon="share-2"]')!.click();
+  await settle();
+  expect(root.querySelector('#share-menu')!.hasAttribute('data-popover-open')).toBe(true);   // showPopover() (src/test-dom.ts)
 });

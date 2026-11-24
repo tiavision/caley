@@ -8,14 +8,16 @@ import {
   attachmentUrl, canEncrypt, messageKey, type Autodiscovery, type ComposeDraft, type ComposeKeys, type Identity, type Message, type MessageRef,
 } from '../lib/mail.ts';
 import { cidReferencesFromHtml, htmlToPlainText, withInlineImages } from '../lib/mail-html.ts';
-import { attachmentDataUrl, canPreviewContentType, htmlAddsValue, isPgpPublicKeyAttachment, bareMailbox, keyHasEmail } from '../lib/mailUtils.ts';
+import { htmlAddsValue, isPgpPublicKeyAttachment, bareMailbox, keyHasEmail } from '../lib/mailUtils.ts';
+import { messageBadges, protectedReply, protectedSubject, quotable, readerParts, type ReaderPart } from '../lib/mail-reader.ts';
+import * as mail from '@tiavision/sinter-mail';
+import type { ImageType, Message as MimeMessage, Ref } from '@tiavision/sinter-mail';
 // openpgp is a lazy package (sinter({ lazy }) in vite.config.ts): these modules import it as usual, sinter loads it
 // on the first call, and a failed load is a SinterError (stale when a deploy removed it).
-import { detectPgpMessage, parseMimeMessage } from '../lib/pgp/mime.ts';
-import { getKeys, isUnlocked, openVault } from '../lib/pgp/session.ts';
+import { getKeys, isUnlocked, onLock, openVault } from '../lib/pgp/session.ts';
 import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
-import { listPublicKeys, parsePublicKey, publicKeyBody, readVerificationKeys, savePublicKey, type PublicKeyBody } from '../lib/pgp/public-keys.ts';
-import { decryptMessage, verifySignedMessage } from '../lib/pgp/keyring.ts';
+import { listPublicKeys, parsePublicKey, publicKeyBody, savePublicKey, type PublicKeyBody } from '../lib/pgp/public-keys.ts';
+import { knownKeys, settle, type Results } from '../lib/pgp/steps.ts';
 import { decryptPrivateKeys, eraseBytes, localActiveDevice, readVault, rememberLocalDevice, unwrapVaultKey, validateVault } from '../lib/pgp/vault.ts';
 import { unlock as webauthnUnlock } from '../lib/pgp/webauthn.ts';
 import { buildProtectedMime, parseEnvelopeAddresses } from '../lib/pgp/compose.ts';
@@ -23,6 +25,9 @@ import type * as openpgp from 'openpgp';
 import { SinterError } from '@tiaforge-ui/sinter';
 import { m } from '@tiaforge-ui/sinter/messages';
 import { pagePath } from '../lib/locale-path.ts';
+
+// Locking the vault drops what its keys decrypted: the plaintexts mail.mime keeps in its cache.
+onLock(() => void mail.forget());
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
 
@@ -60,9 +65,16 @@ export interface DecryptedFile { filename: string; content_type: string; size: n
 /** What the reader shows for a message body (plain, signed or encrypted). */
 export interface ReaderBody {
   key: string;
-  /** the HTML body as the message has it: the reader renders it with email.parse and <mail-body> (sinter-mail) */
+  /** the message as it was when this body was read: the reader keeps showing it until the next one's body is in */
+  message: Message;
+  /** the blocks to show in reading order, with a multipart/alternative's HTML (mode 'html') or its text ('text') */
+  parts: ReaderPart[];
+  textParts: ReaderPart[];
+  /** the first HTML body and the text, for forwards and replies (a reply quotes `text` only when `quotable`) */
   html: string;
   text: string;
+  /** nothing was decrypted, or a good signature binds the sender shown: a reply may quote it */
+  quotable: boolean;
   mode: 'html' | 'text';
   encrypted: boolean;
   signed: boolean;
@@ -71,13 +83,17 @@ export interface ReaderBody {
   badges: string[];
   /** the protected subject of a decrypted message */
   subject: string;
+  /** whom a reply goes to when protected headers say so (else null: the message's From and Reply-To) */
+  reply: string[] | null;
   error: string;
   /** decrypted attachments, as blob: URLs */
   files: DecryptedFile[];
   /** the public keys not stored yet, by the name of the attachment that holds them: the bodies of POST /pgp/key */
   importable: Record<string, PublicKeyBody>;
-  /** a decrypted message's inline images (`cid:` parts) as data: URLs, by content id; null for other messages */
-  cids: Record<string, string> | null;
+  /** inline images of a message read here (part id → content id → blob: URL); null: the server serves them */
+  cids: Record<string, Record<string, string>> | null;
+  /** a decrypted message's inline images as data: URLs by content id, written into a forward; null for other messages */
+  forwardCids: Record<string, string> | null;
 }
 
 // Bytes of the open message's decrypted attachments (for key import and calendar import), by file name.
@@ -90,6 +106,12 @@ function forget() {
   decryptedData = new Map();
 }
 
+function blobUrl(bytes: Uint8Array, type: string): string {
+  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }));
+  blobUrls.push(url);
+  return url;
+}
+
 async function bytes(url: string): Promise<Uint8Array> {
   const res = await apiFetch(url);
   if (!res.ok) throw new Error(`${res.status}`);
@@ -97,7 +119,7 @@ async function bytes(url: string): Promise<Uint8Array> {
 }
 
 /** Stores the sender's Autocrypt keys; in the background (body() does not wait), errors ignored. */
-async function harvestAutocrypt(headers: string[], msg: Message) {
+async function harvestAutocrypt(headers: readonly string[], msg: Message) {
   if (headers.length === 0) return;
   const raw = new TextEncoder().encode(`${headers.map((v) => `Autocrypt: ${v}`).join('\r\n')}\r\n\r\n`);
   for (const key of await autocryptKeys(raw, msg.from)) {
@@ -120,93 +142,160 @@ async function importableKeys(msg: Message, files: { filename: string; content_t
   return out;
 }
 
-const verificationKeys = () => listPublicKeys().then(readVerificationKeys).catch(() => []);
+// ── Messages read here: sinter-mail's mail.mime, and the OpenPGP steps it asks for ──────────────────────────────
 
-async function decrypt(msg: Message, raw: Uint8Array, body: ReaderBody): Promise<ReaderBody> {
-  const result = await decryptMessage(getKeys(), raw, await verificationKeys());
-  if (result.badges.some((b) => b === 'decrypt_failed' || b === 'missing_key' || b === 'unsupported_alg')) {
-    return { ...body, badges: result.badges, error: m.pgp_decryptFailed() };
+// The open message's raw bytes (never changed: mail.mime caches by identity) and the encrypted parts the reader chose
+// to open in it. Dropped when another message is read.
+let current: { key: string; raw: Uint8Array; open: string[] } | null = null;
+
+/** Every message a message holds: itself and the ones forwarded inline in it. */
+function messagesOf(msg: MimeMessage): MimeMessage[] {
+  return [msg, ...msg.parts.flatMap((p) => (p.type === 'message' ? messagesOf(p.message) : []))];
+}
+
+/** The decoded bytes and their image type, by the magic number (never the declared type, never SVG). */
+async function image(raw: Uint8Array, ref: Ref, r: Results): Promise<{ bytes: Uint8Array; type: ImageType | null }> {
+  const data = await mail.bytes(raw, ref, r);
+  return { bytes: data, type: await mail.imageType(data) };
+}
+
+function dataUrl(data: Uint8Array, type: string): string {
+  let binary = '';
+  for (let i = 0; i < data.length; i += 0x8000) binary += String.fromCharCode(...data.subarray(i, i + 0x8000));
+  return `data:${type};base64,${btoa(binary)}`;
+}
+
+/** The reader's body of a message read from its raw bytes. */
+async function fromRaw(msg: Message, raw: Uint8Array, out: ReaderBody): Promise<ReaderBody> {
+  const r: Results = { decrypted: {}, verdicts: {}, open: [...(current?.open ?? [])] };
+  const mime = await settle(raw, r, getKeys(), async () => knownKeys(await listPublicKeys().catch(() => [])));
+  const text = await mail.mime(raw, { ...r, prefer: 'text' });
+  const decrypts = mime.steps.filter((s) => s.kind === 'decrypt');
+  out.encrypted ||= decrypts.length > 0 || mime.parts.some((p) => p.type === 'encrypted');
+  out.signed ||= mime.steps.some((s) => s.kind !== 'decrypt');
+  out.badges = messageBadges(mime);
+  for (const s of decrypts) {
+    const d = r.decrypted[s.id];
+    if (d?.status === 'locked') out.locked = true;
+    else if (d && d.status !== 'ok') {
+      out.badges.push(d.status === 'no-key' ? 'missing_key' : d.status === 'unsupported' ? 'unsupported_alg' : 'decrypt_failed');
+      out.error = m.pgp_decryptFailed();
+    } else if (s.state === 'failed') out.error = m.pgp_decryptFailed();
   }
-  const files = result.attachments.map((a) => {
-    const url = URL.createObjectURL(new Blob([a.data as BlobPart], { type: canPreviewContentType(a.contentType) ? a.contentType : 'application/octet-stream' }));
-    blobUrls.push(url);
-    decryptedData.set(a.filename, a.data);
-    return { filename: a.filename, content_type: a.contentType, size: a.data.byteLength, content_id: null, url };
-  });
-  const next: ReaderBody = { ...body, badges: result.badges, subject: result.subject ?? '', files };
-  next.cids = {};
-  for (const a of result.attachments) {
-    if (a.contentId && /^image\/(png|jpeg|gif|webp|avif)$/i.test(a.contentType)) next.cids[a.contentId] = attachmentDataUrl(a);
+  // locked is not failed: nothing was tried yet, and nothing is known of the sender
+  out.badges = [...new Set(out.badges)].filter((x) => !out.locked || (x !== 'decrypt_failed' && x !== 'from_unknown'));
+  out.subject = protectedSubject(mime);
+  out.reply = protectedReply(mime);
+  out.quotable = quotable(mime);
+  out.parts = readerParts(mime);
+  out.textParts = readerParts(text).map((p) => (p.kind === 'html' ? { ...p, kind: 'text', text: htmlToPlainText(p.html), html: '' } : p));
+  out.html = out.parts.find((p) => p.kind === 'html' && p.depth === 0 && !p.opened)?.html ?? '';
+  out.text = out.textParts.filter((p) => p.kind === 'text' && p.depth === 0 && !p.opened).map((p) => p.text).join('\n\n');
+  out.mode = out.parts.some((p) => p.kind === 'html' && htmlAddsValue(p.html)) ? 'html' : 'text';
+
+  // inline images: blob: URLs of the bytes' own image type, per HTML part; a decrypted one also as data: for a forward
+  const all = messagesOf(mime);
+  const attachment = (id: string) => all.flatMap((x) => x.attachments).find((a) => a.id === id);
+  out.cids = {};
+  for (const x of all) {
+    for (const p of x.parts) {
+      if (p.type !== 'html') continue;
+      const cid: Record<string, string> = {};
+      for (const { contentId, attachment: id } of p.inline) {
+        const a = attachment(id);
+        if (!a) continue;
+        const { bytes: data, type } = await image(raw, a.ref, r);
+        if (!type) continue;
+        cid[contentId] = blobUrl(data, `image/${type}`);
+        if (a.protection.encrypted && x === mime) (out.forwardCids ??= {})[contentId] = dataUrl(data, `image/${type}`);
+      }
+      out.cids[p.id] = cid;
+    }
   }
-  if (result.html) {
-    next.html = result.html;
-    next.text = result.text ?? htmlToPlainText(result.html);
-    next.mode = htmlAddsValue(result.html) ? 'html' : 'text';
-  } else if (result.text) {
-    next.html = '';
-    next.text = result.text;
-    next.mode = 'text';
+
+  // decrypted attachments (the server has only the ciphertext): offered as files, an image shown by its bytes' type
+  for (const a of mime.attachments) {
+    if (!a.protection.encrypted || a.kind === 'related') continue;
+    const { bytes: data, type } = await image(raw, a.ref, r);
+    decryptedData.set(a.filename, data);
+    const shownType = type ? `image/${type}` : 'application/octet-stream';
+    out.files.push({ filename: a.filename, content_type: shownType, size: a.size, content_id: null, url: blobUrl(data, shownType) });
   }
-  next.importable = await importableKeys(msg, files);
-  return next;
+  const declared = mime.attachments.filter((a) => a.protection.encrypted && a.kind !== 'related')
+    .map((a) => ({ filename: a.filename, content_type: a.kind === 'pgp-keys' ? 'application/pgp-keys' : a.contentType }));
+  out.importable = await importableKeys(msg, out.encrypted ? declared : msg.attachments);
+  if (!msg.body_cached) void harvestAutocrypt(mime.outer.autocrypt, msg).catch(() => {});
+  return out;
+}
+
+/** The reader's body of a plain message the server has parsed (its cached HTML and text). */
+function fromServer(msg: Message, out: ReaderBody): ReaderBody {
+  const base = { legacyDisplay: false, encrypted: false, opened: false, mark: '', reason: '', step: '', depth: 0 };
+  const html = msg.body_html ?? '';
+  const text = msg.body_text ?? '';
+  out.html = html;
+  out.text = text;
+  out.mode = htmlAddsValue(html) ? 'html' : 'text';
+  out.textParts = [{ ...base, id: '1', kind: 'text', html: '', text }];
+  out.parts = html ? [{ ...base, id: '1', kind: 'html', html, text: '' }] : out.textParts;
+  return out;
 }
 
 /**
- * The reader's body of `msg` (MailApp.openMessage): the cached body, or the raw MIME parsed here; signatures
- * verified, Autocrypt keys harvested, and an encrypted message decrypted when a key is unlocked.
+ * The reader's body of `msg`: a plain message from the server's cache; anything else (encrypted, signed, not cached)
+ * read here by sinter-mail's mail.mime from the raw message, its OpenPGP steps run with the unlocked and trusted keys.
  */
 export async function body(ref: MessageRef, ctx: CallContext): Promise<ReaderBody> {
   const msg = await fetchMessage(ref, ctx, false);
   ctx.signal.throwIfAborted();
   forget();
-  let out: ReaderBody = {
-    key: messageKey(msg), html: '', text: '', mode: 'text', encrypted: msg.is_encrypted, signed: msg.is_signed,
-    locked: false, badges: [], subject: '', error: '', files: [], importable: {}, cids: null,
+  const key = messageKey(msg);
+  if (current?.key !== key) current = null;
+  const out: ReaderBody = {
+    key, message: msg, parts: [], textParts: [], html: '', text: '', quotable: true, mode: 'text', encrypted: msg.is_encrypted,
+    signed: msg.is_signed, locked: false, badges: [], subject: '', reply: null, error: '', files: [], importable: {},
+    cids: null, forwardCids: null,
   };
-  if (msg.body_cached && !msg.is_encrypted) {
-    out.html = msg.body_html ?? '';
-    out.text = msg.body_text ?? '';
-    out.mode = htmlAddsValue(msg.body_html) ? 'html' : 'text';
-  }
   void harvestAutocrypt(msg.autocrypt_headers, msg).catch(() => {});
-  let raw: Uint8Array | null = null;
-  if (!msg.body_cached || msg.is_encrypted || msg.is_signed) {
-    try {
-      raw = await bytes(messageUrl('message/raw', msg));
-      ctx.signal.throwIfAborted();
-      const detected = detectPgpMessage(raw);
-      out.encrypted ||= detected.isEncrypted;
-      out.signed ||= detected.isSigned;
-      if (!out.encrypted && !msg.body_cached) {
-        const parsed = parseMimeMessage(raw);
-        out.html = parsed.html ?? '';
-        out.text = parsed.text ?? '';
-        out.mode = htmlAddsValue(parsed.html) ? 'html' : 'text';
-      }
-      if (!msg.body_cached) {
-        void harvestAutocrypt(new TextDecoder().decode(raw).split(/\r?\n\r?\n/, 1)[0]
-          .replace(/\r?\n[ \t]+/g, ' ').split(/\r?\n/)
-          .filter((line) => line.toLowerCase().startsWith('autocrypt:'))
-          .map((line) => line.slice(line.indexOf(':') + 1).trim()), msg).catch(() => {});
-      }
-      if (detected.isSigned && !out.encrypted) {
-        out.badges = await verifySignedMessage(raw, await verificationKeys());
-      }
-    } catch {
-      if (ctx.signal.aborted) throw ctx.signal.reason;
-      // Raw MIME unavailable: the message still renders without it.
-    }
+  if (msg.body_cached && !msg.is_encrypted && !msg.is_signed) {
+    out.importable = await importableKeys(msg, msg.attachments);
+    return fromServer(msg, out);
   }
-  out.importable = await importableKeys(msg, msg.attachments);
-  if (out.encrypted && raw) {
-    if (getKeys().length === 0) out.locked = true;
-    else {
-      // openpgp that could not be loaded (offline, or removed by a deploy) is not a decryption failure.
-      try { out = await decrypt(msg, raw, out); } catch (e) { out.error = e instanceof SinterError ? m.pgp_loadError() : m.pgp_decryptFailed(); }
-    }
+  let raw: Uint8Array;
+  try {
+    raw = current?.raw ?? await bytes(messageUrl('message/raw', msg));
+  } catch {
+    if (ctx.signal.aborted) throw ctx.signal.reason;
+    // the raw message is unavailable: a cached body still renders without it
+    out.importable = await importableKeys(msg, msg.attachments).catch(() => ({}));
+    return msg.body_cached && !msg.is_encrypted ? fromServer(msg, out) : out;
+  }
+  ctx.signal.throwIfAborted();
+  current ??= { key, raw, open: [] };
+  try {
+    await fromRaw(msg, raw, out);
+  } catch (e) {
+    // openpgp that could not be loaded (offline, or removed by a deploy) is not a decryption failure
+    if (ctx.signal.aborted) throw ctx.signal.reason;
+    if (!(e instanceof SinterError)) throw e;
+    out.error = m.pgp_loadError();
   }
   ctx.signal.throwIfAborted();
   return out;
+}
+
+/**
+ * Drops what the open message decrypted (the page was hidden or left): its attachments' blob: URLs and bytes, and the
+ * plaintexts sinter-mail's mail.mime keeps in its cache. The reader reads the body again when it is shown.
+ */
+export function wipe(): void {
+  forget();
+  void mail.forget();
+}
+
+/** Opens an encrypted part inside the open message (one the reader chose: not the message's own root); the reader then reloads its body. */
+export function openPart(ref: MessageRef, step: string): void {
+  if (current?.key === messageKey(ref) && !current.open.includes(step)) current.open = [...current.open, step];
 }
 
 /** Unlocks the synced OpenPGP vault with this device's passkey; the reader then reloads its body. */
@@ -248,7 +337,8 @@ export async function icsFile(msg: MessageRef, filename: string, contentType: st
 }
 
 /** Opens the message in its own window (/mail/view/). */
-export function popout(msg: MessageRef): void {
+export function popout(msg: MessageRef | null): void {
+  if (!msg) return;
   const params = new URLSearchParams({ account_id: msg.account_id, mailbox: msg.mailbox, uid: String(msg.uid) });
   window.open(pagePath(`/mail/view/?${params}`), '_blank', 'popup=yes,width=980,height=760,noopener,noreferrer');
 }

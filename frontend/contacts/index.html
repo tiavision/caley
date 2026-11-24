@@ -40,8 +40,11 @@
       <div class="contacts-page" data-layout="stack" data-gap="md" data-pad="sm">
         <div class="contacts-toolbar" data-layout="row" data-gap="sm">
           <nav-toggle></nav-toggle>
-          <input type="search" data-grow style="--tm-grow-basis: 12rem" data-sn-model="q"
-                 data-sn-attr="{placeholder: m.contacts_filterplaceholder(), 'aria-label': m.contacts_filterplaceholder()}">
+          <div data-field data-grow style="--tm-grow-basis: 12rem">
+            <span data-icon="search" aria-hidden="true"></span>
+            <input type="search" data-sn-model="q"
+                   data-sn-attr="{placeholder: m.contacts_filterplaceholder(), 'aria-label': m.contacts_filterplaceholder()}">
+          </div>
           <template data-sn-if="addressbooks.length > 1">
             <button type="button" popovertarget="ab-menu" data-variant="outline"
                     data-sn-text="addressbooksLabel(nBooks, addressbooks.length)"></button>

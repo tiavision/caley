@@ -38,7 +38,7 @@ async function show(routes: Record<string, RouteResponse> = {}, books = [book('/
   const stream = mockStream();
   const actions = {
     notify: { status: () => ({ supported: false, permission: 'default', enabled: false }), toggle: async (s: unknown) => s },
-    share: { native: () => false, send: async () => {}, download: async () => {}, email: async () => {} },
+    share: { native: () => false, prepare: async () => null, send: async () => {}, download: async () => {}, email: async () => {} },
     maps: { open: async (...args: unknown[]) => { calls.push(['maps.open', args.slice(0, 2)]); } },
   };
   const r = await render(page, { ...app,
@@ -262,7 +262,7 @@ test('placeholder cards until the contacts arrive; a failed load says so', async
     messages, requests, helpers, streams: { '/api/events/stream': mockStream() },
     actions: {
       notify: { status: () => ({ supported: false, permission: 'default', enabled: false }), toggle: async (s: unknown) => s },
-      share: { native: () => false, send: async () => {}, download: async () => {}, email: async () => {} },
+      share: { native: () => false, prepare: async () => null, send: async () => {}, download: async () => {}, email: async () => {} },
       maps: { open: async () => {} },
     },
   });

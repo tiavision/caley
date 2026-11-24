@@ -39,7 +39,7 @@ async function show(routes: Record<string, RouteResponse> = {}, url?: string) {
   });
   const actions = {
     notify: { status: () => ({ supported: false, permission: 'default', enabled: false }), toggle: async (s: unknown) => s },
-    share: { native: () => false, send: async () => {}, download: async () => {}, email: async () => {} },
+    share: { native: () => false, prepare: async () => null, send: async () => {}, download: async () => {}, email: async () => {} },
     maps: { open: async () => {} },
   };
   const r = await render(page, { ...app,
