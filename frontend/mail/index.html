@@ -15,7 +15,9 @@
               detail: /** @type {EventJson|null} */ (null),
               threadRef: /** @type {ThreadRef|null} */ (null),
               needContacts: false,
-            }">
+            }"
+            data-sn-on-keydown-j="pageKey($event) && elementIn($el, '.mail-page')?.dispatchEvent(listStep(1))"
+            data-sn-on-keydown-k="pageKey($event) && elementIn($el, '.mail-page')?.dispatchEvent(listStep(-1))">
   <sn-resource name="unread" src="/email/unread-counts" cache></sn-resource>
   <sn-resource name="identities" src="/email/identities" cache></sn-resource>
   <sn-resource name="contacts" src="/contacts" select="contacts" key="account_id,uid,addressbook_href" when="needContacts"></sn-resource>
@@ -61,7 +63,8 @@
            view-removed: the virtual folder or account shown was removed: no view, no marks;
                         mail-removed (the reader moved or deleted its message), thread-open, decrypt: see src/components/email-reader.html.
          Changes to messages (flags, moves, deletions) reach the lists through the server's events. -->
-    <!-- Keys without a control of their own: j/k here, Escape and the scroll keys on the reader, the marking and
+    <!-- Keys without a control of their own: j/k (the layout's tag: on <body>, so they work wherever the focus is,
+         dispatched here as list-step; not while rows are marked), Escape and the scroll keys on the reader, the marking and
          arrow keys on the rows (key filters; the others are data-shortcut on their buttons). -->
     <div class="mail-page" data-layout="stack" data-gap="none" data-density="compact" data-grow
          data-sn-state="{
@@ -99,15 +102,13 @@
          data-sn-on-view-removed="view = currentView(noView(), accounts, mailboxes, folders); sel = unmarked(sel);
                                   navigate(viewHref(view), { replace: true })"
          data-sn-on-mail-view="sel = cleared(sel, null); searchBox = noSearchBox()"
-         data-sn-on-list-step="hit = neighbor(list, open ? messageKey(open) : sel.cursor, $event.detail);
+         data-sn-on-list-step="hit = bulk.messages.length ? null : neighbor(list, open ? messageKey(open) : sel.cursor, $event.detail);
                                hit && emit('mail-open', hit);
                                hit && elementIn($el, '.message-detail')?.focus();
-                               !hit && page(list, $event.detail > 0 ? 'next' : 'prev')"
+                               !hit && !bulk.messages.length && page(list, $event.detail > 0 ? 'next' : 'prev')"
          data-sn-on-reader-back="sel.cursor = open ? messageKey(open) : sel.cursor; $url.uid = null"
          data-sn-on-sn-navigate="sel.selecting && $event.kind === 'traverse' && $event.preventDefault();
-                              sel = sel.selecting && $event.kind === 'traverse' ? cleared(sel) : sel"
-         data-sn-on-keydown-j="pageKey($event, bulk.messages.length) && emit('list-step', 1)"
-         data-sn-on-keydown-k="pageKey($event, bulk.messages.length) && emit('list-step', -1)">
+                              sel = sel.selecting && $event.kind === 'traverse' ? cleared(sel) : sel">
       <sn-resource name="messages"
                    src="/email/messages?account_id={cur.account_id}&mailbox={cur.mailbox}&folder_id={cur.folder_id}"
                    when="(cur.mailbox || cur.folder_id) && !searching" cache

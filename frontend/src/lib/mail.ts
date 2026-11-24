@@ -480,11 +480,19 @@ function pageKeyTarget(e: KeyboardEvent): Element | null {
 }
 
 /**
- * Whether a key filter on the mail page may take this press: no rows marked, and not from a dialog (the dialogs
- * sit inside the page; key filters already leave fields alone).
+ * Whether a page-wide key filter may take this press: not from a dialog, not while one is open (the dialogs sit
+ * inside the page; key filters already leave fields alone).
  */
-export function pageKey(e: KeyboardEvent, marked: number): boolean {
-  return marked === 0 && !!pageKeyTarget(e);
+export function pageKey(e: KeyboardEvent): boolean {
+  return !!pageKeyTarget(e);
+}
+
+/**
+ * The mail page's `list-step` event (j/k: the next or previous message), for the layout's key filters to dispatch
+ * at `.mail-page`: they are on `<body>`, so they see every key, and its handler is in the page's scope.
+ */
+export function listStep(by: number): CustomEvent<number> {
+  return new CustomEvent('list-step', { detail: by, bubbles: true });
 }
 
 /** The reader's part that PageUp/PageDown/Home/End scroll: `.message-detail`, else its `.detail-body`, whichever can. */

@@ -366,6 +366,13 @@ test('keyboard: j/k open the neighbours, Ctrl/Shift+Space mark, Escape clears, S
   press(handle, 'k');
   await settle();
   expect(subject()).toBe('Third');
+  const body = root.ownerDocument.body;                          // nothing focused, or the rail: the keys are the page's
+  press(body, 'j');
+  await settle();
+  expect(subject()).toBe('Second');
+  press(root.querySelector('nav a')!, 'k');
+  await settle();
+  expect(subject()).toBe('Third');
 
   press(rows(root)[0], 'U', { shiftKey: true });                 // the read toggle in the actions menu
   await settle();

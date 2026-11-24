@@ -145,16 +145,15 @@ describe('reader and list', () => {
 });
 
 describe('keys', () => {
-  test('pageKey: not with marks, from a dialog or with Ctrl', () => {
+  test('pageKey: not from a dialog or with Ctrl', () => {
     document.body.innerHTML = '<div class="page"><button></button><dialog><button></button></dialog></div>';
     const [page, inDialog] = [...document.querySelectorAll('button')];
     const at = (el: Element, init: KeyboardEventInit = {}) => { const e = new KeyboardEvent('keydown', { key: 'j', ...init }); el.dispatchEvent(e); return e; };
-    expect(pageKey(at(page!), 0)).toBe(true);
-    expect(pageKey(at(page!), 2)).toBe(false);
-    expect(pageKey(at(page!, { ctrlKey: true }), 0)).toBe(false);
+    expect(pageKey(at(page!))).toBe(true);
+    expect(pageKey(at(page!, { ctrlKey: true }))).toBe(false);
     document.querySelector('dialog')!.setAttribute('open', '');
-    expect(pageKey(at(inDialog!), 0)).toBe(false);
-    expect(pageKey(at(page!), 0)).toBe(false);                        // a dialog is open
+    expect(pageKey(at(inDialog!))).toBe(false);
+    expect(pageKey(at(page!))).toBe(false);                        // a dialog is open
   });
   test('scrollTopFor: Home, End and 90% pages', () => {
     const el = { scrollTop: 100, clientHeight: 200, scrollHeight: 1000 } as HTMLElement;
