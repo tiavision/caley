@@ -136,12 +136,34 @@ fn add_menu(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Desktop: the window in Caley's page background (temper's `--tm-bg`, light or dark as the system is)
+/// before the webview first paints, which takes WebView2 most of a second; then shown (it is made hidden,
+/// tauri.conf.json), so it never shows white.
+#[cfg(desktop)]
+fn show_window(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::Manager;
+    use tauri::window::Color;
+
+    let Some(window) = app.get_webview_window("main") else {
+        return Ok(());
+    };
+    let background = match window.theme().unwrap_or(tauri::Theme::Light) {
+        tauri::Theme::Dark => Color(0x09, 0x0a, 0x0e, 0xff),
+        _ => Color(0xf8, 0xfa, 0xff, 0xff),
+    };
+    window.set_background_color(Some(background))?;
+    window.show()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|_app| {
             #[cfg(desktop)]
-            add_menu(_app)?;
+            {
+                add_menu(_app)?;
+                show_window(_app)?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![probe_server])
