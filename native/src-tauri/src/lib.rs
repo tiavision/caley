@@ -155,9 +155,30 @@ fn show_window(app: &tauri::App) -> tauri::Result<()> {
     window.show()
 }
 
+/// Desktop: notifications allowed for the server's pages. WebView2 denies them at once without a handler
+/// (no prompt), so Caley's notification switch could not be turned on; whether Caley notifies stays its
+/// own setting, as in a browser that allowed the site. Every other permission is the webview's default.
+#[cfg(desktop)]
+fn permission(
+    webview: tauri::Webview,
+    kind: tauri::webview::PermissionKind,
+) -> tauri::webview::PermissionResponse {
+    use tauri::webview::{PermissionKind, PermissionResponse};
+    let from_server = webview
+        .url()
+        .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str() != Some("tauri.localhost"));
+    match kind {
+        PermissionKind::Notifications if from_server => PermissionResponse::Allow,
+        _ => PermissionResponse::Default,
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder.on_permission_request(permission);
+    builder
         .setup(|_app| {
             #[cfg(desktop)]
             {
