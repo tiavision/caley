@@ -3,8 +3,8 @@
 //! signed by this server (VAPID, RFC 8292). The app on Android (native/) registers one per server
 //! through UnifiedPush, whose distributor (e.g. ntfy) delivers it; any Web Push endpoint works.
 //!
-//! What is sent: every `NewEmail` the SSE broadcaster sends (sse.rs hands it over), and a test
-//! (`POST /api/notifications/test`). An endpoint that answers 404 or 410 is gone and forgotten.
+//! What is sent: every `NewEmail` the SSE broadcaster sends (sse.rs hands it over), calendar reminders
+//! (reminders.rs), and a test (`POST /api/notifications/test`). An endpoint that answers 404 or 410 is gone and forgotten.
 //! Not under `/api/push`: that is the CalDAV servers' push to Caley (sync.rs).
 
 use std::sync::Arc;
@@ -48,7 +48,7 @@ pub struct Notifier {
 /// What a device gets (JSON, encrypted for it): the app shows it as a notification.
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum Payload {
+pub(crate) enum Payload {
     NewEmail {
         account_id: String,
         mailbox: String,
@@ -56,6 +56,20 @@ enum Payload {
         from: Option<String>,
         subject: Option<String>,
         /// the message on the server, without a language prefix (the server adds the visitor's)
+        url: String,
+    },
+    /// a calendar alarm (reminders.rs)
+    Reminder {
+        summary: String,
+        location: String,
+        /// the occurrence's start and end, epoch seconds (in the device's timezone for floating times)
+        start: Option<i64>,
+        end: Option<i64>,
+        all_day: bool,
+        /// the occurrence's date (`YYYY-MM-DD`)
+        date: String,
+        /// the notification's tag, the one the calendar page gives its own (event-reminders.ts)
+        tag: String,
         url: String,
     },
     Test,
@@ -93,17 +107,20 @@ impl Notifier {
             let this = Arc::clone(self);
             let user_id = user_id.to_owned();
             tokio::spawn(async move {
-                this.send(&user_id, &payload).await;
+                this.send(&user_id, None, &payload).await;
             });
         }
     }
 
-    /// Sends `payload` to each of the user's devices; returns to how many it went.
-    async fn send(&self, user_id: &str, payload: &Payload) -> usize {
+    /// Sends `payload` to each of the user's devices (those in `timezone`, if given; a device that gave
+    /// none counts as UTC); returns to how many it went.
+    pub(crate) async fn send(&self, user_id: &str, timezone: Option<&str>, payload: &Payload) -> usize {
         let subscriptions = match sqlx::query(
-            "SELECT endpoint, p256dh, auth FROM notification_subscriptions WHERE user_id = ?",
+            "SELECT endpoint, p256dh, auth FROM notification_subscriptions
+             WHERE user_id = ? AND (?2 IS NULL OR COALESCE(timezone, 'UTC') = ?2)",
         )
         .bind(user_id)
+        .bind(timezone)
         .fetch_all(&self.db)
         .await
         {
@@ -300,6 +317,9 @@ pub struct Subscription {
     pub p256dh: String,
     /// the device's 16-byte auth secret, base64url
     pub auth: String,
+    /// the device's timezone (IANA), which reminders of all-day and floating events are timed in; UTC if none
+    #[serde(default)]
+    pub timezone: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -339,7 +359,7 @@ pub async fn vapid(State(state): State<AppState>, _user: CurrentUser) -> impl In
     request_body = Subscription,
     responses(
         (status = 204, description = "stored"),
-        (status = 400, body = ApiError, description = "not an https endpoint, or keys of the wrong size"),
+        (status = 400, body = ApiError, description = "not an https endpoint, keys of the wrong size, or an unknown timezone"),
         (status = 500, description = "plain text: database error")
     )
 )]
@@ -347,17 +367,20 @@ pub async fn subscribe(State(state): State<AppState>, user: CurrentUser, Json(bo
     let https = url::Url::parse(&body.endpoint).is_ok_and(|u| u.scheme() == "https" && u.host_str().is_some());
     let key_ok = URL_SAFE_NO_PAD.decode(&body.p256dh).is_ok_and(|k| k.len() == 65 && PublicKey::from_sec1_bytes(&k).is_ok());
     let auth_ok = URL_SAFE_NO_PAD.decode(&body.auth).is_ok_and(|a| a.len() == 16);
-    if !https || body.endpoint.len() > 1000 || !key_ok || !auth_ok {
+    let timezone_ok = body.timezone.as_deref().is_none_or(|tz| tz.parse::<chrono_tz::Tz>().is_ok());
+    if !https || body.endpoint.len() > 1000 || !key_ok || !auth_ok || !timezone_ok {
         return (StatusCode::BAD_REQUEST, Json(ApiError::new("invalid subscription"))).into_response();
     }
     let result = sqlx::query(
-        "INSERT INTO notification_subscriptions(endpoint, user_id, p256dh, auth, created_at) VALUES(?, ?, ?, ?, ?)
-         ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth",
+        "INSERT INTO notification_subscriptions(endpoint, user_id, p256dh, auth, timezone, created_at) VALUES(?, ?, ?, ?, ?, ?)
+         ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth,
+           timezone = excluded.timezone",
     )
     .bind(&body.endpoint)
     .bind(&user.user_id)
     .bind(&body.p256dh)
     .bind(&body.auth)
+    .bind(&body.timezone)
     .bind(chrono::Utc::now().timestamp())
     .execute(&state.db)
     .await;
@@ -402,7 +425,7 @@ pub async fn unsubscribe(State(state): State<AppState>, user: CurrentUser, Json(
     responses((status = 200, body = TestSent))
 )]
 pub async fn test(State(state): State<AppState>, user: CurrentUser) -> impl IntoResponse {
-    Json(TestSent { sent: state.notifier.send(&user.user_id, &Payload::Test).await })
+    Json(TestSent { sent: state.notifier.send(&user.user_id, None, &Payload::Test).await })
 }
 
 pub fn routes() -> OpenApiRouter<AppState> {

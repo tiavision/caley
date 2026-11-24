@@ -42,8 +42,11 @@ export class EventReminders extends EventRemindersComponent {
             fire = base + (alarm.direction.startsWith('before') ? -1 : 1) * parseInt(alarm.value || '0') * parseInt(alarm.unit || '1') * 60000;
           }
           if (isNaN(fire) || fire <= now || fire > horizon) continue;
+          // the tag the server's reminder of this alarm has (backend/src/reminders.rs, pushed to the user's devices):
+          // the page's and the pushed one replace each other, as do two pages'
+          const tag = `reminder|${ev.uid}|${Math.round(fire / 1000)}`;
           this.#timers.push(setTimeout(() => {
-            if (Notification.permission === 'granted') new Notification(ev.summary, { body: formatEventTime(ev) });
+            if (Notification.permission === 'granted') new Notification(ev.summary, { body: formatEventTime(ev), tag });
           }, fire - now));
         }
       }

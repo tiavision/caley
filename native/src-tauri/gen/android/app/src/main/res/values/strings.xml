@@ -16,5 +16,7 @@
     <string name="push_new_mail">New mail</string>
     <string name="push_unknown_sender">(unknown)</string>
     <string name="push_no_subject">(no subject)</string>
+    <string name="push_no_title">Untitled event</string>
+    <string name="push_all_day">All day</string>
     <string name="push_test">Notifications from this server reach this phone.</string>
 </resources>

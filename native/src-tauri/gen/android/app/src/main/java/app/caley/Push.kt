@@ -27,8 +27,8 @@ import java.util.concurrent.Executors
  * pages have mail notifications on (Caley's switch in the rail: `mail-notifications-enabled`, which
  * res/raw/shell_bridge.js reports) and Android allows notifications. The endpoint and the device's Web Push
  * keys (the connector makes them and decrypts what arrives) go to the server's
- * `/api/notifications/subscription` with the page's session cookie; the server sends new mail there
- * (backend/src/notifications.rs). No distributor on the phone: nothing changes, the pages notify while open.
+ * `/api/notifications/subscription` with the page's session cookie, with the phone's timezone; the server sends
+ * new mail (backend/src/notifications.rs) and calendar reminders (backend/src/reminders.rs) there. No distributor on the phone: nothing changes, the pages notify while open.
  */
 object Push {
   private const val TAG = "CaleyPush"
@@ -65,7 +65,16 @@ object Push {
       // the server's VAPID key; none (an older server, or signed out): no notifications from it
       val vapid = runCatching { JSONObject(request(origin, "GET", "/api/notifications/vapid")).getString("public_key") }
         .onFailure { Log.i(TAG, "$origin: no notifications ($it)") }.getOrNull() ?: return@execute
+      // the subscription the server has, again: the phone's timezone may have changed, or the server may have
+      // lost it (the connector reports an endpoint only when it changes)
+      stored(activity, origin)?.let { runCatching { put(activity, origin, it) } }
       activity.runOnUiThread {
+        // a registration whose subscription the app cannot read (kept by an earlier version): afresh, so the
+        // connector reports the endpoint and its keys again
+        if (prefs(activity).contains(origin) && stored(activity, origin) == null) {
+          UnifiedPush.unregister(activity, origin)
+          prefs(activity).edit().remove(origin).apply()
+        }
         UnifiedPush.tryUseCurrentOrDefaultDistributor(activity) { ok ->
           if (ok) UnifiedPush.register(activity, origin, activity.getString(R.string.push_registration, hostOf(origin)), vapid)
           else Log.i(TAG, "no UnifiedPush distributor")
@@ -80,14 +89,21 @@ object Push {
       return
     }
     val previous = endpoint(context, origin)
+    val subscription = JSONObject().put("endpoint", endpoint.url).put("p256dh", keys.pubKey).put("auth", keys.auth)
     io.execute {
       runCatching {
         if (previous != null && previous != endpoint.url) unsubscribeAt(origin, previous)
-        request(origin, "PUT", "/api/notifications/subscription",
-          JSONObject().put("endpoint", endpoint.url).put("p256dh", keys.pubKey).put("auth", keys.auth))
-        prefs(context).edit().putString(origin, endpoint.url).apply()
+        put(context, origin, subscription)
       }.onFailure { Log.w(TAG, "$origin: subscription not stored ($it)") }
     }
+  }
+
+  // the subscription to the server, with the timezone reminders of all-day and floating events are timed in
+  // (backend/src/reminders.rs); kept (the endpoint and the device's public keys) to send again
+  private fun put(context: Context, origin: String, subscription: JSONObject) {
+    request(origin, "PUT", "/api/notifications/subscription",
+      JSONObject(subscription.toString()).put("timezone", java.util.TimeZone.getDefault().id))
+    prefs(context).edit().putString(origin, subscription.toString()).apply()
   }
 
   internal fun unsubscribe(context: Context, origin: String) {
@@ -109,6 +125,13 @@ object Push {
         context.getString(R.string.push_new_mail),
         "${message.optString("from").ifEmpty { context.getString(R.string.push_unknown_sender) }}\n" +
           message.optString("subject").ifEmpty { context.getString(R.string.push_no_subject) },
+        message.optString("url"),
+      )
+      "reminder" -> listOf(
+        // the tag the calendar page gives its own reminder (event-reminders.ts)
+        message.optString("tag"),
+        message.optString("summary").ifEmpty { context.getString(R.string.push_no_title) },
+        listOf(eventTime(context, message), message.optString("location")).filter { it.isNotEmpty() }.joinToString("\n"),
         message.optString("url"),
       )
       "test" -> listOf("test", "Caley", context.getString(R.string.push_test), "/")
@@ -137,6 +160,14 @@ object Push {
     }
   }
 
+  // a reminder's time as the phone writes it: "All day", or its start and end
+  private fun eventTime(context: Context, message: JSONObject): String {
+    if (message.optBoolean("all_day")) return context.getString(R.string.push_all_day)
+    val format = android.text.format.DateFormat.getTimeFormat(context)
+    val time = { key: String -> if (message.isNull(key)) null else format.format(java.util.Date(message.getLong(key) * 1000)) }
+    return listOfNotNull(time("start"), time("end")).joinToString(" – ")
+  }
+
   private fun unsubscribeAt(origin: String, endpoint: String) =
     request(origin, "DELETE", "/api/notifications/subscription", JSONObject().put("endpoint", endpoint))
 
@@ -163,7 +194,10 @@ object Push {
 
   private fun prefs(context: Context) = context.getSharedPreferences("push", Context.MODE_PRIVATE)
 
-  private fun endpoint(context: Context, origin: String) = prefs(context).getString(origin, null)
+  private fun stored(context: Context, origin: String): JSONObject? =
+    prefs(context).getString(origin, null)?.let { runCatching { JSONObject(it) }.getOrNull() }
+
+  private fun endpoint(context: Context, origin: String) = stored(context, origin)?.optString("endpoint")
 
   private fun hostOf(origin: String) = origin.substringAfter("://")
 }

@@ -14,5 +14,7 @@
     <string name="push_new_mail">Neue E-Mail</string>
     <string name="push_unknown_sender">(unbekannt)</string>
     <string name="push_no_subject">(kein Betreff)</string>
+    <string name="push_no_title">Termin ohne Titel</string>
+    <string name="push_all_day">Ganztägig</string>
     <string name="push_test">Benachrichtigungen dieses Servers erreichen dieses Telefon.</string>
 </resources>

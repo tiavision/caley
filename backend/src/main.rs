@@ -21,6 +21,7 @@ mod oidc;
 mod oidc_tokens;
 mod pgp;
 mod public_origin;
+mod reminders;
 mod search;
 mod session_store;
 mod settings;
@@ -149,6 +150,7 @@ async fn main() -> anyhow::Result<()> {
     let sse_broadcaster = Arc::new(sse::SseBroadcaster::new());
     let notifier = Arc::new(notifications::Notifier::new(db.clone(), encryption_key, &args.app_base_url)?);
     sse_broadcaster.set_notifier(Arc::clone(&notifier));
+    reminders::spawn(db.clone(), encryption_key, Arc::clone(&notifier));
 
     let sync_manager = sync::SyncManager::new(
         db.clone(),
