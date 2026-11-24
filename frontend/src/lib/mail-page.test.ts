@@ -4,7 +4,8 @@ import { describe, expect, test } from 'vitest';
 import {
   accountUi, addableSender, afterBulk, bodyOf, canDrop, cleared, currentView, folderView, inMailbox, mailboxView, noView, listStatus, markedRead, noReader, noSearch,
   noSelection, openedAt, opensRow, pageKey, readerOn, rowClick, scrollTopFor, searchActive, senderAdded, sharedDraft,
-  siblingRow, unmarked, urlRef, urlView, shownView, viewHref, urlLags, noSearchBox, mailSearch, type Account, type Mailbox, type Message, type VirtualFolder,
+  siblingRow, unmarked, urlRef, urlView, shownView, viewHref, urlLags, noSearchBox, mailSearch, newAccount, editAccount, discovered,
+  accountBody, needsPassword, type Account, type Mailbox, type Message, type VirtualFolder,
 } from './mail.ts';
 import { caldavBody, caldavDraft, enrollErrorText, keyImportError, withCalendarActive } from './settings.ts';
 import { loadErrorOr } from './errors.ts';
@@ -172,6 +173,33 @@ describe('dialogs', () => {
     expect(accountUi('basic')).toEqual({ step: 'basic', discovery: null, advanced: false, error: '', busy: false });
     expect(accountUi('details').advanced).toBe(true);
     expect(accountUi('details', { found: true } as never).advanced).toBe(false);
+    expect(accountUi('details', { found: false, jmap_url: 'https://x/.well-known/jmap' }).advanced).toBe(false);
+  });
+  test('autodiscovery takes a JMAP server over IMAP, with the OIDC sign-in when there is one', () => {
+    const form = { ...newAccount(), username: 'me@example.com' };
+    const imapAndJmap = { found: true, jmap_url: 'https://example.com/.well-known/jmap', provider_name: 'Ex', imap_host: 'imap.example.com',
+      imap_port: 993, imap_use_tls: true, imap_username: 'me@example.com', smtp_host: 'smtp.example.com', smtp_port: 587 };
+    expect(discovered(form, imapAndJmap, true)).toMatchObject({ protocol: 'jmap', jmap_url: imapAndJmap.jmap_url, auth: 'oidc', host: 'imap.example.com', display_name: 'Ex' });
+    expect(discovered(form, imapAndJmap, false)).toMatchObject({ protocol: 'jmap', auth: 'password' });
+    expect(discovered(form, { found: true, imap_host: 'imap.example.com' }, true)).toMatchObject({ protocol: 'imap', auth: 'password', host: 'imap.example.com' });
+    expect(discovered(form, null)).toMatchObject({ protocol: 'imap', display_name: 'example.com' });
+  });
+  test('an account body: IMAP with its SMTP server, JMAP with its URL and sign-in and no password for OIDC', () => {
+    const imap = { ...newAccount(), display_name: 'Work', username: 'me@x', password: 'pw', host: 'imap.x', smtp_host: 'smtp.x' };
+    expect(accountBody(imap)).toEqual({
+      account_id: null, display_name: 'Work', sender_name: null, protocol: 'imap', jmap_url: null, auth: 'password', host: 'imap.x', port: 993,
+      username: 'me@x', password: 'pw', use_tls: true, smtp_host: 'smtp.x', smtp_port: 587,
+    });
+    const jmap = { ...imap, protocol: 'jmap' as const, jmap_url: 'mail.x', auth: 'oidc' as const };
+    expect(needsPassword(jmap)).toBe(false);
+    expect(accountBody(jmap)).toMatchObject({ protocol: 'jmap', jmap_url: 'mail.x', auth: 'oidc', password: '', host: '', port: 443, smtp_host: null, smtp_port: null });
+    expect(needsPassword({ ...jmap, auth: 'bearer' })).toBe(true);
+    expect(accountBody({ ...jmap, auth: 'bearer' }).password).toBe('pw');
+  });
+  test('editing an account keeps its protocol, URL and sign-in', () => {
+    const acc = { account_id: 'a', display_name: 'Stalwart', protocol: 'jmap', jmap_url: 'https://mail.x/.well-known/jmap', auth: 'oidc', host: 'mail.x',
+      port: 443, username: 'me@x', use_tls: true, smtp_host: null, smtp_port: null } as Account;
+    expect(editAccount(acc, [])).toMatchObject({ protocol: 'jmap', jmap_url: 'https://mail.x/.well-known/jmap', auth: 'oidc', password: '' });
   });
   test('the CalDAV account draft and body, the calendar toggle, the import summary and the PGP errors', () => {
     const account = { account_id: 'x', display_name: 'Work', caldav_base_url: 'https://dav', caldav_username: 'me', has_password: true, sort_order: 0, calendars: [

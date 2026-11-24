@@ -387,6 +387,94 @@ mod tests {
         );
     }
 
+    async fn jmap_account() -> (
+        crate::jmap::fake::FakeJmap,
+        AppState,
+        email_db::ImapAccountRow,
+    ) {
+        use crate::jmap::api_tests::{USER, app_state, save};
+        let fake = crate::jmap::fake::FakeJmap::start().await;
+        let state = app_state().await;
+        let (_, id) = save(
+            &state,
+            crate::email::AccountBody {
+                account_id: None,
+                display_name: "Fake".into(),
+                protocol: Some(crate::email::Protocol::Jmap),
+                jmap_url: Some(fake.url.clone()),
+                auth: Some(crate::email::AccountAuth::Password),
+                host: String::new(),
+                port: 0,
+                username: "user".into(),
+                password: Some("secret".into()),
+                use_tls: None,
+                smtp_host: None,
+                smtp_port: None,
+                sender_name: None,
+            },
+        )
+        .await;
+        state.email_sync_manager.stop_task_for(&id);
+        state.email_sync_manager.stop_idle_for(&id);
+        let (account, _) = state.email_sync_manager.load_account(&id).await.unwrap();
+        state
+            .email_sync_manager
+            .jmap_sync(&account, USER, None)
+            .await
+            .unwrap();
+        (fake, state, account)
+    }
+
+    #[tokio::test]
+    async fn a_jmap_account_sends_with_email_submission() {
+        let (fake, state, account) = jmap_account().await;
+        let raw = Bytes::from_static(
+            b"From: user@example.com\r\nTo: b@example.org\r\nSubject: s\r\n\r\nx\r\n",
+        );
+        let r = send_over_jmap(
+            &state,
+            crate::jmap::api_tests::USER,
+            &account,
+            "user@example.com",
+            &["b@example.org".to_owned()],
+            raw,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(fake.inner.lock().unwrap().submissions.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_jmap_send_without_an_identity_is_a_bad_request() {
+        let (_fake, state, account) = jmap_account().await;
+        let r = send_over_jmap(
+            &state,
+            crate::jmap::api_tests::USER,
+            &account,
+            "stranger@example.net",
+            &["b@example.org".to_owned()],
+            Bytes::from_static(b"x"),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn a_jmap_submission_the_server_refuses_is_a_bad_gateway() {
+        let (fake, state, account) = jmap_account().await;
+        fake.inner.lock().unwrap().refuse_submission = Some("forbiddenToSend".into());
+        let r = send_over_jmap(
+            &state,
+            crate::jmap::api_tests::USER,
+            &account,
+            "user@example.com",
+            &["b@example.org".to_owned()],
+            Bytes::from_static(b"x"),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::BAD_GATEWAY);
+    }
+
     #[test]
     fn reject_invalid_address() {
         assert_eq!(

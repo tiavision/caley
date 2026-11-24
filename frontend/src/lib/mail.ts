@@ -872,25 +872,36 @@ export function signs(draft: ComposeDraft, identities: Identity[], keys: Compose
 
 // ── Accounts, identities, virtual folders ────────────────────────────────────
 
+/** A mail account's protocol, and how a JMAP account signs in (`oidc`: the user's own OIDC sign-in). */
+export type Protocol = 'imap' | 'jmap';
+export type AccountAuth = 'password' | 'bearer' | 'oidc';
+
 export interface AccountForm {
-  account_id: string | null; display_name: string; sender_name: string; host: string; port: number | null;
-  username: string; password: string; use_tls: boolean; smtp_host: string; smtp_port: number | null;
+  account_id: string | null; display_name: string; sender_name: string; protocol: Protocol; jmap_url: string; auth: AccountAuth;
+  host: string; port: number | null; username: string; password: string; use_tls: boolean; smtp_host: string; smtp_port: number | null;
 }
 
-/** GET /api/email/autodiscover: `{ found: false }` alone, or `found: true` with the servers. */
+/**
+ * GET /api/email/autodiscover: `{ found: false }` alone, or `found: true` with the IMAP and SMTP servers; `jmap_url`
+ * when the domain has a JMAP server.
+ */
 export interface Autodiscovery {
-  found: boolean; provider_name?: string | null; imap_host?: string; imap_port?: number; imap_use_tls?: boolean;
+  found: boolean; jmap_url?: string; provider_name?: string | null; imap_host?: string; imap_port?: number; imap_use_tls?: boolean;
   imap_username?: string; smtp_host?: string; smtp_port?: number;
 }
 
 export function newAccount(): AccountForm {
-  return { account_id: null, display_name: '', sender_name: '', host: '', port: 993, username: '', password: '', use_tls: true, smtp_host: '', smtp_port: 587 };
+  return {
+    account_id: null, display_name: '', sender_name: '', protocol: 'imap', jmap_url: '', auth: 'password', host: '', port: 993,
+    username: '', password: '', use_tls: true, smtp_host: '', smtp_port: 587,
+  };
 }
 
 export function editAccount(acc: Account, identities: Identity[]): AccountForm {
   return {
     account_id: acc.account_id, display_name: acc.display_name,
     sender_name: identities.find((i) => i.account_id === acc.account_id && i.is_default)?.name ?? '',
+    protocol: acc.protocol, jmap_url: acc.jmap_url ?? '', auth: acc.auth,
     host: acc.host, port: acc.port, username: acc.username, password: '', use_tls: acc.use_tls,
     smtp_host: acc.smtp_host || '', smtp_port: acc.smtp_port || 587,
   };
@@ -906,11 +917,14 @@ export interface AccountUi {
  * with the advanced settings open unless autodiscovery found them.
  */
 export function accountUi(step: 'basic' | 'details', discovery: Autodiscovery | null = null): AccountUi {
-  return { step, discovery, advanced: step === 'details' && !discovery?.found, error: '', busy: false };
+  return { step, discovery, advanced: step === 'details' && !discovery?.found && !discovery?.jmap_url, error: '', busy: false };
 }
 
-/** The form after autodiscovery (`found` fills the servers); the display name defaults to the provider or domain. */
-export function discovered(form: AccountForm, d: Autodiscovery | null): AccountForm {
+/**
+ * The form after autodiscovery (`found` fills the servers; a JMAP server is taken over IMAP, signing in with the
+ * user's OIDC sign-in when there is one); the display name defaults to the provider or domain.
+ */
+export function discovered(form: AccountForm, d: Autodiscovery | null, oidc = false): AccountForm {
   const next = { ...form };
   if (d?.found) {
     next.host = d.imap_host ?? next.host;
@@ -920,15 +934,28 @@ export function discovered(form: AccountForm, d: Autodiscovery | null): AccountF
     next.smtp_host = d.smtp_host ?? next.smtp_host;
     next.smtp_port = d.smtp_port ?? next.smtp_port;
   }
+  if (d?.jmap_url) {
+    next.protocol = 'jmap';
+    next.jmap_url = d.jmap_url;
+    if (oidc) next.auth = 'oidc';
+  }
   if (!next.display_name) next.display_name = (d?.found && d.provider_name) || form.username.split('@')[1] || '';
   return next;
 }
 
+/** Whether the account dialog asks for a password (or token): not for a JMAP account that signs in with OIDC. */
+export function needsPassword(f: AccountForm): boolean {
+  return !(f.protocol === 'jmap' && f.auth === 'oidc');
+}
+
 /** The account form's body (POST /api/email/account); the port field is `required`, so it is set when the form submits. */
 export function accountBody(f: AccountForm) {
+  const jmap = f.protocol === 'jmap';
   return {
-    account_id: f.account_id, display_name: f.display_name, sender_name: f.sender_name || null, host: f.host, port: f.port ?? 0,
-    username: f.username, password: f.password, use_tls: f.use_tls, smtp_host: f.smtp_host || null, smtp_port: f.smtp_port || null,
+    account_id: f.account_id, display_name: f.display_name, sender_name: f.sender_name || null, protocol: f.protocol,
+    jmap_url: jmap ? f.jmap_url : null, auth: jmap ? f.auth : 'password' as const, host: jmap ? '' : f.host, port: jmap ? 443 : f.port ?? 0,
+    username: f.username, password: needsPassword(f) ? f.password : '', use_tls: f.use_tls,
+    smtp_host: jmap ? null : f.smtp_host || null, smtp_port: jmap ? null : f.smtp_port || null,
   };
 }
 

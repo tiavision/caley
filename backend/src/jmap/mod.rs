@@ -20,11 +20,13 @@ pub(crate) mod ops;
 pub(crate) mod sync;
 
 #[cfg(test)]
+pub(crate) mod api_tests;
+#[cfg(test)]
 pub(crate) mod fake;
 #[cfg(test)]
 mod stalwart_tests;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub const CORE: &str = "urn:ietf:params:jmap:core";
 pub const MAIL: &str = "urn:ietf:params:jmap:mail";

@@ -11,7 +11,7 @@ import { retryPolicies } from '../src/lib/retry-policies.ts';
 import type { Message } from '../src/lib/mail.ts';
 import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor
 
-const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
+const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '', oidc_signed_in: false };
 const msg = (uid: number, subject: string, extra: Partial<Message> = {}): Message => ({
   uid, account_id: 'work', mailbox: 'INBOX', rowid: uid, message_id: `<${uid}@x>`, thread_id: null, from: `Sender ${uid} <s${uid}@x>`,
   to: ['me@x'], cc: [], subject, sent_at: 1_700_000_000 + uid, flags: ['\\Seen'], has_attachments: false, body_cached: true,
@@ -28,10 +28,12 @@ let decrypted = false;
 let partsOverride: object[] | null = null;
 // while set, mail.body waits for it (a body that takes a while)
 let bodyGate: Promise<void> | null = null;
+// what the account dialog's autodiscovery finds
+let discovery: object = { found: false };
 const openedParts: string[] = [];
 
 // the app's retry policies: the flag toggles name one (data-sn-retry="flags")
-beforeEach(() => { bodyGate = null; htmlBody = ''; decrypted = false; partsOverride = null; openedParts.length = 0; localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'], retry: retryPolicies }); });
+beforeEach(() => { discovery = { found: false }; bodyGate = null; htmlBody = ''; decrypted = false; partsOverride = null; openedParts.length = 0; localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'], retry: retryPolicies }); });
 afterEach(() => configure({ confirm: null as never, urlSchemes: [], retry: null }));
 
 async function show(routes: Record<string, RouteResponse> = {}, pending: { subject: string; files: File[] } | null = null, storage = memoryStorage(),
@@ -83,7 +85,7 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
       verify: () => {},
       wipe: () => {},
       composeKeys: async () => ({ keys: [], vault: [], unlocked: [] }),
-      autodiscover: async () => ({ found: false }),
+      autodiscover: async () => discovery,
       send: async () => null,
       forwardFiles: async () => ({ files: [], html: '' }),
       popout: () => {}, unlock: async () => true, icsFile: async (_m: unknown, filename: string) => new File(['x'], filename),
@@ -798,4 +800,53 @@ test('the column widths set with the dividers are remembered for the next visit'
   const saved = JSON.parse(storage.getItem('sn:mail-widths')!);
   expect(saved.sidebarW).toBe(260);
   expect(saved.listW).toBeGreaterThan(400);
+});
+
+test('adding an account the address\'s domain has a JMAP server for: JMAP, signed in with the user\'s OIDC sign-in, no password', async () => {
+  discovery = { found: false, jmap_url: 'https://example.com/.well-known/jmap' };
+  const { root, settle, requests } = await show({
+    'GET /api/user': { ...user, oidc_enabled: true, oidc_signed_in: true },
+    'POST /api/email/account': { account_id: 'new' },
+  });
+  const field = (sel: string, value: string) => {
+    const el = root.querySelector<HTMLInputElement | HTMLSelectElement>(sel)!;
+    el.value = value;
+    el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+  };
+  [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === m.mail_addAccount())!.click();
+  await settle();
+  field('#email-account input[type="email"]', 'me@example.com');
+  field('#email-account input[required]:not([type])', 'Me');
+  root.querySelector<HTMLFormElement>('#email-account form')!.requestSubmit();
+  await settle();
+
+  const dialog = root.querySelector<HTMLDialogElement>('#email-account')!;
+  expect(dialog.querySelector<HTMLSelectElement>('select')!.value).toBe('jmap');
+  expect(dialog.querySelector('input[type="password"]')).toBeNull();
+  expect(dialog.textContent).toContain(m.mail_oidcSignInHint());
+  expect(dialog.textContent).not.toContain(m.mail_imapHost());
+  dialog.querySelector<HTMLFormElement>('form')!.requestSubmit();
+  await settle();
+  const saved = requests.calls.find((c) => c.method === 'POST' && c.path === '/api/email/account')!.body;
+  expect(saved).toMatchObject({ protocol: 'jmap', jmap_url: 'https://example.com/.well-known/jmap', auth: 'oidc', password: '', username: 'me@example.com', sender_name: 'Me' });
+  expect(dialog.open).toBe(false);
+});
+
+test('without an OIDC sign-in a JMAP account asks for a password or an API token', async () => {
+  discovery = { found: false, jmap_url: 'https://example.com/.well-known/jmap' };
+  const { root, settle } = await show();
+  [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === m.mail_addAccount())!.click();
+  await settle();
+  const email = root.querySelector<HTMLInputElement>('#email-account input[type="email"]')!;
+  email.value = 'me@example.com';
+  email.dispatchEvent(new Event('input', { bubbles: true }));
+  const name = root.querySelector<HTMLInputElement>('#email-account input[required]:not([type])')!;
+  name.value = 'Me';
+  name.dispatchEvent(new Event('input', { bubbles: true }));
+  root.querySelector<HTMLFormElement>('#email-account form')!.requestSubmit();
+  await settle();
+  const dialog = root.querySelector<HTMLDialogElement>('#email-account')!;
+  const auth = dialog.querySelectorAll<HTMLSelectElement>('select')[1]!;
+  expect([...auth.options].map((o) => o.value)).toEqual(['password', 'bearer']);
+  expect(dialog.querySelector('input[type="password"]')).not.toBeNull();
 });

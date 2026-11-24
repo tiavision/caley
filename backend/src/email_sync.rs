@@ -34,6 +34,9 @@ pub struct EmailSyncManager {
     pub(crate) http: reqwest::Client,
     /// the users' OIDC tokens, for JMAP accounts that sign in with them
     pub(crate) oidc_tokens: Arc<OidcTokens>,
+    /// one JMAP sync of an account at a time (a task restarted while its last sync runs would otherwise give an
+    /// email two UIDs in one mailbox)
+    pub(crate) jmap_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl EmailSyncManager {
@@ -50,6 +53,7 @@ impl EmailSyncManager {
         Arc::new(Self {
             http: crate::jmap::http_client().expect("the JMAP HTTP client"),
             oidc_tokens,
+            jmap_locks: Mutex::new(HashMap::new()),
             db,
             encryption_key,
             broadcaster,

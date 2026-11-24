@@ -16,7 +16,7 @@ use crate::sse::{SseBroadcaster, SseMessage};
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
-pub(super) fn mail(subject: &str, from: &str) -> Vec<u8> {
+pub(crate) fn mail(subject: &str, from: &str) -> Vec<u8> {
     format!(
         "From: {from}\r\nTo: user@example.com\r\nSubject: {subject}\r\nMessage-ID: <{}@example.com>\r\n\
          Date: Tue, 24 Nov 2026 10:00:00 +0000\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\

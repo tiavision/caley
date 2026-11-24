@@ -4,7 +4,9 @@
        - `identities-open` (an account id): the identities of that account.
      State: acct, acctUi (AccountUi: the step, the autodiscovery result, whether the advanced settings are open, the
      error, busy; set with accountUi()); idAccount (the account whose identities are shown), idForm (IdentityForm|null),
-     idError. Resources: accounts, identities, mailboxes. -->
+     idError. Resources: accounts, identities, mailboxes, user (`oidc_signed_in`: a JMAP account may sign in with the
+     user's own OIDC sign-in). An account is IMAP (with SMTP) or JMAP (its server, signed in with a password, an API
+     token or the OIDC sign-in); autodiscovery takes a JMAP server it finds over IMAP. -->
 <template data-sn-props="" data-sn-emits="{ 'account-edit': { acct: AccountForm; ui: AccountUi }; 'identities-open': string }">
   <div data-sn-state="{
          acct: newAccount(),
@@ -91,7 +93,7 @@
         <form data-layout="stack" data-gap="md"
               data-sn-call="mail.autodiscover(acct.username)"
               data-sn-on-submit="acctUi.busy = true"
-              data-sn-then="acct = discovered(acct, $result); acctUi = accountUi('details', $result)"
+              data-sn-then="acct = discovered(acct, $result, user.oidc_signed_in); acctUi = accountUi('details', $result)"
               data-sn-catch="acct = discovered(acct, null); acctUi = accountUi('details')">
           <label>
             <span data-sn-text="m.mail_yourName()"></span>
@@ -121,10 +123,38 @@
             <template data-sn-if="!acct.account_id"><p data-muted data-sn-text="m.mail_enterServerDetails()"></p></template>
           </template>
           <label>
-            <span data-sn-text="m.mail_password()"></span>
-            <input type="password" autocomplete="current-password" data-sn-model="acct.password"
-                   data-sn-attr="{placeholder: acct.account_id ? m.mail_passwordPlaceholderKeep() : ''}">
+            <span data-sn-text="m.mail_protocol()"></span>
+            <select data-sn-model="acct.protocol">
+              <option value="imap" data-sn-text="m.mail_protocolImap()"></option>
+              <option value="jmap" data-sn-text="m.mail_protocolJmap()"></option>
+            </select>
           </label>
+          <template data-sn-if="acct.protocol === 'jmap'">
+            <label>
+              <span data-sn-text="m.mail_jmapUrl()"></span>
+              <input required data-sn-model="acct.jmap_url" data-sn-attr="{placeholder: m.mail_jmapUrlPlaceholder()}">
+            </label>
+            <label>
+              <span data-sn-text="m.mail_signInWith()"></span>
+              <select data-sn-model="acct.auth">
+                <option value="password" data-sn-text="m.mail_authPassword()"></option>
+                <option value="bearer" data-sn-text="m.mail_authBearer()"></option>
+                <template data-sn-if="user.oidc_signed_in || acct.auth === 'oidc'">
+                  <option value="oidc" data-sn-text="m.mail_authOidc()"></option>
+                </template>
+              </select>
+            </label>
+          </template>
+          <template data-sn-if="needsPassword(acct)">
+            <label>
+              <span data-sn-text="acct.protocol === 'jmap' && acct.auth === 'bearer' ? m.mail_authBearer() : m.mail_password()"></span>
+              <input type="password" autocomplete="current-password" data-sn-model="acct.password"
+                     data-sn-attr="{placeholder: acct.account_id ? m.mail_passwordPlaceholderKeep() : ''}">
+            </label>
+          </template>
+          <template data-sn-else>
+            <p data-muted data-sn-text="m.mail_oidcSignInHint()"></p>
+          </template>
           <details data-sn-attr="{open: acctUi.advanced}" data-sn-on-toggle="acctUi.advanced = $el.open">
             <summary data-sn-text="m.mail_advancedSettings()"></summary>
             <div data-layout="stack" data-gap="md">
@@ -136,27 +166,29 @@
                 <span data-sn-text="m.mail_usernameEmail()"></span>
                 <input data-sn-model="acct.username" data-sn-attr="{placeholder: m.mail_emailPlaceholder()}">
               </label>
-              <div class="server-fields" data-layout="grid" data-gap="sm">
-                <label>
-                  <span data-sn-text="m.mail_imapHost()"></span>
-                  <input required data-sn-model="acct.host" data-sn-attr="{placeholder: m.mail_imapHostPlaceholder()}">
-                </label>
-                <label>
-                  <span data-sn-text="m.mail_imapPort()"></span>
-                  <input type="number" required data-sn-model="acct.port">
-                </label>
-              </div>
-              <label><input type="checkbox" data-sn-model="acct.use_tls"> <span data-sn-text="m.mail_useTls()"></span></label>
-              <div class="server-fields" data-layout="grid" data-gap="sm">
-                <label>
-                  <span data-sn-text="m.mail_smtpHost()"></span>
-                  <input data-sn-model="acct.smtp_host" data-sn-attr="{placeholder: m.mail_smtpHostPlaceholder()}">
-                </label>
-                <label>
-                  <span data-sn-text="m.mail_smtpPort()"></span>
-                  <input type="number" data-sn-model="acct.smtp_port">
-                </label>
-              </div>
+              <template data-sn-if="acct.protocol === 'imap'">
+                <div class="server-fields" data-layout="grid" data-gap="sm">
+                  <label>
+                    <span data-sn-text="m.mail_imapHost()"></span>
+                    <input required data-sn-model="acct.host" data-sn-attr="{placeholder: m.mail_imapHostPlaceholder()}">
+                  </label>
+                  <label>
+                    <span data-sn-text="m.mail_imapPort()"></span>
+                    <input type="number" required data-sn-model="acct.port">
+                  </label>
+                </div>
+                <label><input type="checkbox" data-sn-model="acct.use_tls"> <span data-sn-text="m.mail_useTls()"></span></label>
+                <div class="server-fields" data-layout="grid" data-gap="sm">
+                  <label>
+                    <span data-sn-text="m.mail_smtpHost()"></span>
+                    <input data-sn-model="acct.smtp_host" data-sn-attr="{placeholder: m.mail_smtpHostPlaceholder()}">
+                  </label>
+                  <label>
+                    <span data-sn-text="m.mail_smtpPort()"></span>
+                    <input type="number" data-sn-model="acct.smtp_port">
+                  </label>
+                </div>
+              </template>
             </div>
           </details>
           <template data-sn-if="acctUi.error"><p data-callout data-tone="danger" role="alert" data-sn-text="acctUi.error"></p></template>

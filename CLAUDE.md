@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Caley** is a personal groupware web app. It is no longer only a CalDAV calendar viewer: the app now includes calendar management, CardDAV contacts, IMAP/SMTP email, full-text search, email identities, image privacy controls, and WebAuthn-backed OpenPGP key management.
+**Caley** is a personal groupware web app. It is no longer only a CalDAV calendar viewer: the app now includes calendar management, CardDAV contacts, IMAP/SMTP and JMAP email, full-text search, email identities, image privacy controls, and WebAuthn-backed OpenPGP key management.
 
 The repository is a monorepo of independent packages (frontend, backend, and the app shell), each with its own tooling:
 
-- **`backend/`** — Rust 2024 Axum binary. Handles auth, CalDAV/CardDAV/IMAP/SMTP clients, SQLite persistence, encryption, sync tasks, SSE, and static frontend serving.
+- **`backend/`** — Rust 2024 Axum binary. Handles auth, CalDAV/CardDAV/IMAP/SMTP/JMAP clients, SQLite persistence, encryption, sync tasks, SSE, and static frontend serving.
 - **`frontend/`** — Vite static multi-page app: HTML pages compiled by sinter (`@tiaforge-ui/sinter`), temper CSS (`@tiaforge-ui/temper`, `data-*` attributes) + Sass for app-specific rules, sinter's messages (the inlang project, read by the content module `src/sinter.content.ts`) for i18n.
 - **`native/`** — Tauri 2 app shell (Android first, also desktop; iOS possible): a server picker that opens a Caley server's own pages in the app's webview. See Native App.
 
@@ -30,6 +30,7 @@ CalDAV-credential login is **always** available. OIDC login is **additive** and 
 - Login goes through `/auth/oidc`; the redirect URI (and the post-logout URL) is built from the request's origin (`public_origin.rs`: forwarding headers from a `TRUSTED_PROXIES` peer, else `http://` + `Host`, else `APP_BASE_URL`) and kept in the session for the token request, so the app works both behind a proxy and accessed directly; each origin's `{origin}/auth/oidc` must be registered at the IdP.
 - CalDAV, email, and encryption settings are configured inside the app after OIDC login.
 - User ID comes from `OIDC_USER_ID_CLAIM` (`sub` by default).
+- The callback keeps the sign-in's access and refresh tokens, encrypted (`oidc_tokens.rs`, table `oidc_tokens`), for JMAP accounts that sign in with the user's own OIDC login (`auth = 'oidc'`): the sync sends the access token as its bearer token and renews it at the provider's token endpoint when it expires (no refresh token, or a refused one: the user signs in again). `OIDC_SCOPES` adds scopes to the sign-in: `offline_access` for the refresh token, and what the mail server wants (Stalwart 1.x as the identity provider: `urn:ietf:params:oauth:scope:mail`, without which its session lists no mail account; an external IdP that Stalwart trusts: its audience/scope). `/api/user`'s `oidc_signed_in` says whether tokens are kept (the account dialog offers the OIDC sign-in then).
 
 `CurrentUser` in `oidc.rs` is the unified extractor for protected handlers. It tries OIDC claims first, then the server-side session. Do not use `OidcClaims` directly in handlers.
 
@@ -53,6 +54,8 @@ Sessions are stored in SQLite via `tower-sessions-sqlx-store` and expire after 7
 - `caldav.rs`, `calendar.rs`, `sync.rs`: CalDAV client, iCalendar parsing, calendar/event CRUD, imports, recurring event handling, background sync.
 - `carddav.rs`, `contacts.rs`: CardDAV addressbook/contact sync and contact CRUD.
 - `email.rs`, `email_db.rs`, `email_sync.rs`, `imap_client.rs`, `email_autodiscover.rs`: IMAP account setup, autodiscovery, mailbox/message cache, SMTP sending, virtual folders, identities, search, attachments, image privacy controls, background/IDLE sync.
+- `jmap/`: JMAP accounts (RFC 8620/8621), beside IMAP in the same `imap_accounts` table (`protocol`, `jmap_url`, `auth`: `password` Basic, `bearer` an API token, `oidc` the user's OIDC tokens). `mod.rs` the client (session from `/.well-known/jmap`, its URLs resolved against the session URL, method calls, blob download/upload, EventSource push); `sync.rs` fills the same cache an IMAP sync fills (rows, `.eml` files, server events), so the API and the pages do not tell them apart: each mailbox an email is in gives it a UID there (`jmap_messages`, UIDs from `jmap_mailboxes.next_uid`, never reused; a move is a removal and a new message, as in IMAP), mailbox names are paths with `/`, the inbox `INBOX`; the first sync lists the account (Email/query), later ones Email/changes since the kept state (`jmap_states`; `cannotCalculateChanges`/`invalidArguments` lists it again), a renamed mailbox is listed again under its new name; sources are downloaded by `blobId` and parsed by `imap_client`'s parsers (`header_from_bytes` from the email's raw `headers`, `parse_body_bytes`); push replaces IDLE. `ops.rs`: flags/moves/deletions as Email/set (a delete unlinks an email in another mailbox too), sending as upload + Email/import into the `sent`-role mailbox + EmailSubmission/set with the server's identity for the address. Emptying the trash by date answers `savedate_unsupported` (no SAVEDATE in JMAP). Saving a JMAP account fetches its session first; autodiscovery also tries `/.well-known/jmap` on the domain.
+- `oidc_tokens.rs`: the users' OIDC tokens (above), renewed with the refresh token.
 - `pgp.rs`: WebAuthn credential enrollment/authentication, synced OpenPGP vault endpoints, public key storage, raw message access for PGP processing.
 - `crypto.rs`: HKDF-SHA256 key derivation and AES-256-GCM encryption for stored secrets.
 - `search.rs`: `SEARCH_MODE` parsing and FTS query/index text normalization.
@@ -74,6 +77,7 @@ Optional variables:
 - `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` — all three enable OIDC.
 - `OIDC_LOGOUT` — default `true`.
 - `OIDC_USER_ID_CLAIM` — default `sub`.
+- `OIDC_SCOPES` — scopes asked for besides `openid profile`, space-separated (`offline_access urn:ietf:params:oauth:scope:mail` for Stalwart as the identity provider; see Authentication).
 - `DATABASE_PATH` — default `./data/caley.db`; parent directory is created automatically.
 - `STATIC_DIR` — default `../frontend/dist`.
 - `SYNC_INTERVAL_MINS` — calendar/email sync interval, default `5`.
@@ -91,11 +95,12 @@ Important persisted data:
 - Users and encrypted CalDAV accounts.
 - Cached calendars, events, recurrence-derived search data, and hidden calendars.
 - Cached CardDAV addressbooks and contacts, including contact photos/addresses.
-- Encrypted IMAP accounts, mailboxes, messages, addresses, attachments, identities, virtual folders, image allow/block lists, unread state, and local `.eml` files under the database data directory.
+- Encrypted IMAP and JMAP accounts (a JMAP account's mailbox ids, email ids and sync states besides), mailboxes, messages, addresses, attachments, identities, virtual folders, image allow/block lists, unread state, and local `.eml` files under the database data directory.
 - WebAuthn credentials.
 - OpenPGP public keys.
 - Synced encrypted OpenPGP private-key vault data, devices, and vault wraps.
 - SQLite-backed session data.
+- The users' OIDC access and refresh tokens (encrypted).
 
 Secrets such as CalDAV and IMAP passwords are encrypted at rest using AES-256-GCM with a key derived from `ENCRYPTION_KEY` via HKDF-SHA256. PGP private keys are handled by the frontend vault flow and stored as encrypted key records.
 
@@ -206,7 +211,7 @@ Contacts:
 
 Email:
 
-- IMAP account setup with autodiscovery and SMTP settings.
+- IMAP account setup with autodiscovery and SMTP settings; JMAP accounts (Stalwart, Fastmail, …) signed in with a password, an API token or the user's OIDC sign-in.
 - Multiple email accounts and identities.
 - Mailbox browsing, unread counts, message pagination, search filters, threads, flag/read state, move/delete, attachments, export, and new-mail notifications.
 - SMTP compose/send, raw MIME send, and protected MIME generation for PGP flows.
@@ -355,6 +360,7 @@ The image builds the frontend with Node, builds the Rust backend, and serves the
 - Preserve the independent package structure. Do not add root tooling unless explicitly requested.
 - Respect existing encrypted-at-rest patterns for new stored credentials or secrets.
 - Email sync and calendar/contact sync both use SSE to refresh live UI state.
+- JMAP tests: `src/jmap/fake.rs` is an in-memory JMAP server shaped like Stalwart's answers (the client, sync, operations, handlers and push run against it in `cargo test`); `src/jmap/stalwart_tests.rs` runs against a real Stalwart when `JMAP_TEST_URL` is set: `backend/scripts/stalwart-test.sh` starts `stalwartlabs/stalwart:v1.2.0` with podman or docker, finishes its bootstrap through the API, creates two users and an OAuth client, and writes `backend/.stalwart-test.env` (`set -a; . ./.stalwart-test.env; set +a; cargo test stalwart`; `scripts/stalwart-test.sh stop` removes it). Stalwart advertises `https://<hostname>/…` in its session, so the tests send that origin to the container (`JMAP_TEST_REWRITE`, read only under `cfg(test)`).
 - OpenPGP private-key material should remain client-side decrypted only. Backend PGP endpoints store encrypted vault records and public metadata.
 - Security headers in `main.rs` intentionally restrict script/image/frame behavior; update CSP carefully when adding frontend capabilities.
 - Static file caching relies on hashed asset names: never serve unhashed files from `/assets/`, and keep HTML `no-cache`. A tab left open across a deploy can still request an old hashed chunk (openpgp, loaded lazily) that the new build no longer has: sinter reports it as `$error.stale` (nothing old is kept on the server).

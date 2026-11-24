@@ -71,7 +71,15 @@ impl EmailSyncManager {
                 },
             );
         }
+        let lock = Arc::clone(
+            self.jmap_locks
+                .lock()
+                .unwrap()
+                .entry(account_id.to_owned())
+                .or_default(),
+        );
         let result = async {
+            let _one_at_a_time = lock.lock().await;
             let client = self.jmap_client(account, user_id).await?;
             self.jmap_sync_with(&client, account_id, user_id).await
         }
@@ -448,4 +456,61 @@ fn normalize(mut flags: Vec<String>) -> Vec<String> {
     flags.sort();
     flags.dedup();
     flags
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::jmap::fake::FakeJmap;
+
+    /// Two syncs of one account at once (a restarted task, a sync the page asked for) run one after the other.
+    #[tokio::test]
+    async fn concurrent_syncs_give_an_email_one_uid_per_mailbox() {
+        let fake = FakeJmap::start().await;
+        let inbox = fake.mailbox_id("inbox");
+        for i in 0..20 {
+            fake.deliver(
+                &[&inbox],
+                &crate::jmap::tests::mail(&format!("m{i}"), "a@example.org"),
+                &[],
+            );
+        }
+        let state = crate::jmap::api_tests::app_state().await;
+        let (_, id) = crate::jmap::api_tests::save(
+            &state,
+            crate::email::AccountBody {
+                account_id: None,
+                display_name: "Fake".into(),
+                protocol: Some(crate::email::Protocol::Jmap),
+                jmap_url: Some(fake.url.clone()),
+                auth: Some(crate::email::AccountAuth::Password),
+                host: String::new(),
+                port: 0,
+                username: "user".into(),
+                password: Some("secret".into()),
+                use_tls: None,
+                smtp_host: None,
+                smtp_port: None,
+                sender_name: None,
+            },
+        )
+        .await;
+        let mgr = &state.email_sync_manager;
+        let (account, user) = mgr.load_account(&id).await.unwrap();
+        let (a, b) = tokio::join!(
+            mgr.jmap_sync(&account, &user, None),
+            mgr.jmap_sync(&account, &user, None)
+        );
+        a.unwrap();
+        b.unwrap();
+        mgr.stop_task_for(&id);
+        mgr.stop_idle_for(&id);
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM cached_messages WHERE account_id = ? AND mailbox = 'INBOX'",
+        )
+        .bind(&id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+        assert_eq!(n, 20);
+    }
 }

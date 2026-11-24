@@ -1,6 +1,12 @@
 export interface Account {
   account_id: string;
   display_name: string;
+  /** `imap` or `jmap` */
+  protocol: 'imap' | 'jmap';
+  /** a JMAP account's session URL */
+  jmap_url: string | null;
+  /** how a JMAP account signs in (`password` for IMAP) */
+  auth: 'password' | 'bearer' | 'oidc';
   host: string;
   port: number;
   username: string;

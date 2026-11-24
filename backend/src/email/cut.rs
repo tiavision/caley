@@ -33,7 +33,11 @@ pub struct CutOptions {
 
 impl Default for CutOptions {
     fn default() -> Self {
-        Self { over: 64 * 1024, related_over: 512 * 1024, max: 32 }
+        Self {
+            over: 64 * 1024,
+            related_over: 512 * 1024,
+            max: 32,
+        }
     }
 }
 
@@ -41,25 +45,52 @@ impl Default for CutOptions {
 /// nothing to cut or the structure is anything but plain.
 pub fn cut(raw: &[u8], options: &CutOptions) -> (Vec<u8>, Vec<Hole>) {
     let mut leaves = Vec::new();
-    if scan(raw, 0, raw.len(), Context { parent: None, auto: true, ciphertext: false }, &mut Vec::new(), 0, &mut leaves).is_err() {
+    if scan(
+        raw,
+        0,
+        raw.len(),
+        Context {
+            parent: None,
+            auto: true,
+            ciphertext: false,
+        },
+        &mut Vec::new(),
+        0,
+        &mut leaves,
+    )
+    .is_err()
+    {
         return (raw.to_vec(), Vec::new());
     }
     let mut chosen: Vec<&Leaf> = leaves
         .iter()
         .filter(|l| {
-            let limit = if l.in_related { options.related_over } else { options.over };
+            let limit = if l.in_related {
+                options.related_over
+            } else {
+                options.over
+            };
             l.end - l.body_start > limit && cuttable(raw, l.body_start, l.end)
         })
         .collect();
-    chosen.sort_by(|a, b| (b.end - b.body_start).cmp(&(a.end - a.body_start)).then(a.body_start.cmp(&b.body_start)));
+    chosen.sort_by(|a, b| {
+        (b.end - b.body_start)
+            .cmp(&(a.end - a.body_start))
+            .then(a.body_start.cmp(&b.body_start))
+    });
     chosen.truncate(options.max);
     chosen.sort_by_key(|l| l.body_start);
-    let mut out = Vec::with_capacity(raw.len() - chosen.iter().map(|l| l.end - l.body_start).sum::<usize>());
+    let mut out =
+        Vec::with_capacity(raw.len() - chosen.iter().map(|l| l.end - l.body_start).sum::<usize>());
     let mut holes = Vec::with_capacity(chosen.len());
     let mut from = 0;
     for l in chosen {
         out.extend_from_slice(&raw[from..l.body_start]);
-        holes.push(Hole { start: l.body_start, end: l.end, size: decoded_size(&raw[l.body_start..l.end], l.encoding) });
+        holes.push(Hole {
+            start: l.body_start,
+            end: l.end,
+            size: decoded_size(&raw[l.body_start..l.end], l.encoding),
+        });
         from = l.end;
     }
     out.extend_from_slice(&raw[from..]);
@@ -112,10 +143,16 @@ fn scan(
     let head = headers(raw, start, end)?;
     let (kind, params) = match &head.content_type {
         Some(v) => content_type(v)?,
-        None if parent_type == Some("multipart/digest") => ("message/rfc822".to_owned(), Vec::new()),
+        None if parent_type == Some("multipart/digest") => {
+            ("message/rfc822".to_owned(), Vec::new())
+        }
         None => ("text/plain".to_owned(), Vec::new()),
     };
-    let encoding = match head.encoding.as_deref().map(|e| e.trim().to_ascii_lowercase()) {
+    let encoding = match head
+        .encoding
+        .as_deref()
+        .map(|e| e.trim().to_ascii_lowercase())
+    {
         None => Some(Encoding::Identity),
         Some(e) => match e.as_str() {
             "7bit" | "8bit" | "binary" => Some(Encoding::Identity),
@@ -136,23 +173,51 @@ fn scan(
             .map(|(_, v)| v.as_bytes().to_vec())
             .ok_or(Malformed)?;
         if !valid_boundary(&boundary)
-            || boundaries.iter().any(|b| b.starts_with(&boundary) || boundary.starts_with(b))
+            || boundaries
+                .iter()
+                .any(|b| b.starts_with(&boundary) || boundary.starts_with(b))
         {
             return Err(Malformed);
         }
         let parts = split_multipart(raw, body_start, end, &boundary)?;
-        let ciphertext = at.auto && (kind == "multipart/encrypted" || (kind == "multipart/mixed" && exchange_encrypted(raw, &parts)));
+        let ciphertext = at.auto
+            && (kind == "multipart/encrypted"
+                || (kind == "multipart/mixed" && exchange_encrypted(raw, &parts)));
         boundaries.push(boundary);
         for (i, (s, e)) in parts.into_iter().enumerate() {
             let auto = at.auto && kind == "multipart/signed" && i == 0;
-            scan(raw, s, e, Context { parent: Some(&kind), auto, ciphertext }, boundaries, depth + 1, leaves)?;
+            scan(
+                raw,
+                s,
+                e,
+                Context {
+                    parent: Some(&kind),
+                    auto,
+                    ciphertext,
+                },
+                boundaries,
+                depth + 1,
+                leaves,
+            )?;
         }
         boundaries.pop();
     } else if kind == "message/rfc822" || kind == "message/global" {
         if encoding != Some(Encoding::Identity) || !head.ended {
             return Err(Malformed);
         }
-        scan(raw, body_start, end, Context { parent: None, auto: false, ciphertext: false }, boundaries, depth + 1, leaves)?;
+        scan(
+            raw,
+            body_start,
+            end,
+            Context {
+                parent: None,
+                auto: false,
+                ciphertext: false,
+            },
+            boundaries,
+            depth + 1,
+            leaves,
+        )?;
     } else if let Some(encoding) = encoding
         && head.ended
         && !kind.starts_with("text/")
@@ -161,7 +226,12 @@ fn scan(
         && kind != "application/pgp-signature"
         && !(at.ciphertext && kind == "application/octet-stream")
     {
-        leaves.push(Leaf { body_start, end, encoding, in_related: parent_type == Some("multipart/related") });
+        leaves.push(Leaf {
+            body_start,
+            end,
+            encoding,
+            in_related: parent_type == Some("multipart/related"),
+        });
     }
     Ok(())
 }
@@ -176,8 +246,13 @@ fn exchange_encrypted(raw: &[u8], parts: &[(usize, usize)]) -> bool {
     };
     let kinds: Vec<_> = parts.iter().filter_map(|p| kind(*p)).collect();
     kinds.iter().any(|(k, b, e)| {
-        k == "application/pgp-encrypted" && String::from_utf8_lossy(&raw[*b..*e]).lines().any(|l| l.trim() == "Version: 1")
-    }) && kinds.iter().any(|(k, _, _)| k == "application/octet-stream")
+        k == "application/pgp-encrypted"
+            && String::from_utf8_lossy(&raw[*b..*e])
+                .lines()
+                .any(|l| l.trim() == "Version: 1")
+    }) && kinds
+        .iter()
+        .any(|(k, _, _)| k == "application/octet-stream")
 }
 
 struct Head {
@@ -191,7 +266,12 @@ struct Head {
 
 /// The entity's structural header fields (unfolded), and where its body starts.
 fn headers(raw: &[u8], start: usize, end: usize) -> Result<Head, Malformed> {
-    let mut head = Head { content_type: None, encoding: None, body_start: end, ended: false };
+    let mut head = Head {
+        content_type: None,
+        encoding: None,
+        body_start: end,
+        ended: false,
+    };
     let mut fields: Vec<(usize, usize)> = Vec::new(); // each field's [start, end) including continuations
     let mut at = start;
     while at < end {
@@ -325,26 +405,37 @@ fn split_params(value: &str) -> Result<Vec<&str>, Malformed> {
 }
 
 fn is_token(s: &str) -> bool {
-    !s.is_empty() && s.bytes().all(|c| c.is_ascii_graphic() && !b"()<>@,;:\\\"/[]?=".contains(&c))
+    !s.is_empty()
+        && s.bytes()
+            .all(|c| c.is_ascii_graphic() && !b"()<>@,;:\\\"/[]?=".contains(&c))
 }
 
 /// RFC 2046's boundary: 1 to 70 of its characters, not ending in a space.
 fn valid_boundary(b: &[u8]) -> bool {
     (1..=70).contains(&b.len())
         && b.last() != Some(&b' ')
-        && b.iter().all(|c| c.is_ascii_alphanumeric() || b"'()+_,-./:=? ".contains(c))
+        && b.iter()
+            .all(|c| c.is_ascii_alphanumeric() || b"'()+_,-./:=? ".contains(c))
 }
 
 /// The parts of a multipart body: each `[start, end)`, end just before the line break of the delimiter after it.
 /// Err without a close delimiter, without parts, or with a line that starts like a delimiter and is none.
-fn split_multipart(raw: &[u8], body_start: usize, end: usize, boundary: &[u8]) -> Result<Vec<(usize, usize)>, Malformed> {
+fn split_multipart(
+    raw: &[u8],
+    body_start: usize,
+    end: usize,
+    boundary: &[u8],
+) -> Result<Vec<(usize, usize)>, Malformed> {
     let mut parts = Vec::new();
     let mut open: Option<usize> = None; // where the current part starts
     let mut at = body_start;
     while at < end {
         let line_end = memchr(b'\n', &raw[at..end]).map_or(end, |i| at + i + 1);
         let line = strip_eol(&raw[at..line_end]);
-        if let Some(rest) = line.strip_prefix(b"--").and_then(|l| l.strip_prefix(boundary)) {
+        if let Some(rest) = line
+            .strip_prefix(b"--")
+            .and_then(|l| l.strip_prefix(boundary))
+        {
             let close = rest.starts_with(b"--");
             if !close && !rest.iter().all(|&c| c == b' ' || c == b'\t') {
                 return Err(Malformed);
@@ -360,7 +451,11 @@ fn split_multipart(raw: &[u8], body_start: usize, end: usize, boundary: &[u8]) -
                 parts.push((s, e.max(s)));
             }
             if close {
-                return if parts.is_empty() { Err(Malformed) } else { Ok(parts) };
+                return if parts.is_empty() {
+                    Err(Malformed)
+                } else {
+                    Ok(parts)
+                };
             }
             open = Some(line_end);
         }
@@ -373,7 +468,10 @@ fn split_multipart(raw: &[u8], body_start: usize, end: usize, boundary: &[u8]) -
 /// or make a delimiter.
 fn cuttable(raw: &[u8], start: usize, end: usize) -> bool {
     for k in start..end.saturating_sub(1) {
-        if raw[k] == b'-' && raw[k + 1] == b'-' && (k == start || raw[k - 1] == b'\n' || raw[k - 1] == b'\r') {
+        if raw[k] == b'-'
+            && raw[k + 1] == b'-'
+            && (k == start || raw[k - 1] == b'\n' || raw[k - 1] == b'\r')
+        {
             return false;
         }
     }
@@ -411,7 +509,10 @@ fn decoded_size(body: &[u8], encoding: Encoding) -> usize {
                         i += 2;
                         continue;
                     }
-                    if i + 2 < body.len() && body[i + 1].is_ascii_hexdigit() && body[i + 2].is_ascii_hexdigit() {
+                    if i + 2 < body.len()
+                        && body[i + 1].is_ascii_hexdigit()
+                        && body[i + 2].is_ascii_hexdigit()
+                    {
                         n += 1;
                         i += 3;
                         continue;
@@ -439,7 +540,11 @@ mod tests {
     use super::*;
 
     fn small() -> CutOptions {
-        CutOptions { over: 8, related_over: 8, max: 32 }
+        CutOptions {
+            over: 8,
+            related_over: 8,
+            max: 32,
+        }
     }
 
     fn mail(attachment: &str) -> String {
@@ -468,8 +573,10 @@ mod tests {
         assert!(cut(raw.as_bytes(), &CutOptions::default()).1.is_empty());
         let unclosed = mail("QUJDREVGR0hJSktMTU5PUA==").replace("--b--", "");
         assert!(cut(unclosed.as_bytes(), &small()).1.is_empty());
-        let twice = mail("QUJDREVGR0hJSktMTU5PUA==")
-            .replace("Content-Type: application/pdf", "Content-Type: application/pdf\r\nContent-Type: text/plain");
+        let twice = mail("QUJDREVGR0hJSktMTU5PUA==").replace(
+            "Content-Type: application/pdf",
+            "Content-Type: application/pdf\r\nContent-Type: text/plain",
+        );
         assert!(cut(twice.as_bytes(), &small()).1.is_empty());
     }
 
@@ -490,12 +597,22 @@ mod tests {
 
     #[test]
     fn never_cuts_a_ciphertext_the_reader_decrypts_at_once() {
-        assert!(cut(encrypted("multipart/encrypted").as_bytes(), &small()).1.is_empty());
-        assert!(cut(encrypted("multipart/mixed").as_bytes(), &small()).1.is_empty()); // Exchange's form
+        assert!(
+            cut(encrypted("multipart/encrypted").as_bytes(), &small())
+                .1
+                .is_empty()
+        );
+        assert!(
+            cut(encrypted("multipart/mixed").as_bytes(), &small())
+                .1
+                .is_empty()
+        ); // Exchange's form
         let sig = "-----BEGIN PGP SIGNATURE-----\r\nx\r\n-----END PGP SIGNATURE-----";
         let signed = format!(
             "From: a@example.com\r\nContent-Type: multipart/signed; boundary=\"s\"\r\n\r\n--s\r\n{}\r\n--s\r\nContent-Type: application/pgp-signature\r\n\r\n{sig}\r\n--s--\r\n",
-            encrypted("multipart/encrypted").trim_start_matches("From: a@example.com\r\nMIME-Version: 1.0\r\n").trim_end_matches("\r\n"),
+            encrypted("multipart/encrypted")
+                .trim_start_matches("From: a@example.com\r\nMIME-Version: 1.0\r\n")
+                .trim_end_matches("\r\n"),
         );
         assert!(cut(signed.as_bytes(), &small()).1.is_empty()); // sign over encrypt
     }
@@ -510,14 +627,24 @@ mod tests {
         );
         let (_, holes) = cut(raw.as_bytes(), &small());
         assert_eq!(holes.len(), 1);
-        assert_eq!(&raw[holes[0].start..holes[0].end], "QUJDREVGR0hJSktMTU5PUA==");
+        assert_eq!(
+            &raw[holes[0].start..holes[0].end],
+            "QUJDREVGR0hJSktMTU5PUA=="
+        );
     }
 
     #[test]
     fn the_largest_first_up_to_max() {
         let raw = "Content-Type: multipart/mixed; boundary=b\n\n--b\nContent-Type: application/octet-stream\n\n0123456789\n\
                    --b\nContent-Type: application/octet-stream\n\n0123456789abcdef\n--b--\n";
-        let (_, holes) = cut(raw.as_bytes(), &CutOptions { over: 4, related_over: 4, max: 1 });
+        let (_, holes) = cut(
+            raw.as_bytes(),
+            &CutOptions {
+                over: 4,
+                related_over: 4,
+                max: 1,
+            },
+        );
         assert_eq!(holes.len(), 1);
         assert_eq!(&raw[holes[0].start..holes[0].end], "0123456789abcdef");
     }
@@ -529,7 +656,9 @@ mod tests {
 #[cfg(test)]
 #[test]
 fn cut_corpus() {
-    let (Ok(dir), Ok(out)) = (std::env::var("CUT_CORPUS"), std::env::var("CUT_OUT")) else { return };
+    let (Ok(dir), Ok(out)) = (std::env::var("CUT_CORPUS"), std::env::var("CUT_OUT")) else {
+        return;
+    };
     let mut stack = vec![std::path::PathBuf::from(dir)];
     while let Some(d) = stack.pop() {
         for entry in std::fs::read_dir(&d).unwrap().flatten() {
@@ -542,11 +671,26 @@ fn cut_corpus() {
                 continue;
             }
             let raw = std::fs::read(&path).unwrap();
-            let (cut_raw, holes) = cut(&raw, &CutOptions { over: 16, related_over: 16, max: 32 });
+            let (cut_raw, holes) = cut(
+                &raw,
+                &CutOptions {
+                    over: 16,
+                    related_over: 16,
+                    max: 32,
+                },
+            );
             let name = path.to_string_lossy().replace('/', "_");
             std::fs::write(format!("{out}/{name}.cut"), cut_raw).unwrap();
-            std::fs::write(format!("{out}/{name}.holes.json"), serde_json::to_string(&holes).unwrap()).unwrap();
-            std::fs::write(format!("{out}/{name}.src"), path.to_string_lossy().as_bytes()).unwrap();
+            std::fs::write(
+                format!("{out}/{name}.holes.json"),
+                serde_json::to_string(&holes).unwrap(),
+            )
+            .unwrap();
+            std::fs::write(
+                format!("{out}/{name}.src"),
+                path.to_string_lossy().as_bytes(),
+            )
+            .unwrap();
         }
     }
 }
