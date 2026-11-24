@@ -75,9 +75,10 @@ for user in alice bob; do
   jmap "$ADMIN" '{"using":["urn:ietf:params:jmap:core","urn:stalwart:jmap"],"methodCalls":[["x:Account/set",{"create":{"n":{"@type":"User","name":"'$user'","domainId":"'$DOMAIN_ID'","credentials":{"0":{"@type":"Password","secret":"Test-Passw0rd-'$user'"}},"roles":{"@type":"User"},"permissions":{"@type":"Inherit"},"encryptionAtRest":{"@type":"Disabled"}}}},"c"]]}' >/dev/null
 done
 
-# an OAuth client, as Caley's OIDC client would be registered when Stalwart is the identity provider
+# an OAuth client: Caley's, as a JMAP account signing in at Stalwart uses it (/auth/jmap), and as Caley's own OIDC
+# client would be when Stalwart is the identity provider (/auth/oidc)
 CLIENT="$(curl -sf -u "$ADMIN" -X POST "$BASE/auth/register" -H 'content-type: application/json' \
-  -d '{"redirect_uris":["http://127.0.0.1:3000/auth/oidc"],"client_name":"caley-test","grant_types":["authorization_code","refresh_token"],"token_endpoint_auth_method":"client_secret_basic","scope":"openid offline_access urn:ietf:params:oauth:scope:mail"}')"
+  -d '{"redirect_uris":["http://127.0.0.1:3000/auth/oidc","http://127.0.0.1:3000/auth/jmap"],"client_name":"caley-test","grant_types":["authorization_code","refresh_token"],"token_endpoint_auth_method":"client_secret_basic","scope":"openid offline_access urn:ietf:params:oauth:scope:mail"}')"
 
 cat > "$OUT" <<EOF
 STALWART_ADMIN=$ADMIN

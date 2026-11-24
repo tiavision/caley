@@ -32,10 +32,13 @@ pub struct Account {
     /// a JMAP account's session URL; `null` for IMAP
     #[schema(required)]
     pub jmap_url: Option<String>,
-    /// how a JMAP account signs in: `password`, `bearer` (an API token) or `oidc` (the user's OIDC sign-in);
-    /// `password` for IMAP
+    /// how a JMAP account signs in: `password`, `bearer` (an API token), `oidc` (the user's OIDC sign-in) or
+    /// `oauth` (the server's own sign-in); `password` for IMAP
     #[schema(value_type = AccountAuth)]
     pub auth: String,
+    /// `oauth`: the OAuth client the server has for Caley (its secret is never sent)
+    #[schema(required)]
+    pub oauth_client_id: Option<String>,
     /// IMAP server (JMAP: the host of its URL)
     pub host: String,
     pub port: i64,
@@ -68,6 +71,9 @@ pub enum AccountAuth {
     Bearer,
     /// the user's own OIDC sign-in: its access token, renewed with its refresh token
     Oidc,
+    /// the server's own sign-in (OAuth authorization code with PKCE), with the OAuth client the server has for
+    /// Caley; its tokens belong to the account
+    Oauth,
 }
 
 impl AccountAuth {
@@ -76,6 +82,7 @@ impl AccountAuth {
             AccountAuth::Password => "password",
             AccountAuth::Bearer => "bearer",
             AccountAuth::Oidc => "oidc",
+            AccountAuth::Oauth => "oauth",
         }
     }
 }
@@ -88,6 +95,10 @@ pub struct AccountsResponse {
 #[derive(Serialize, ToSchema)]
 pub struct AccountSaved {
     pub account_id: String,
+    /// an account that signs in at the server (`oauth`) and is to be authorized there: not saved yet, the page goes
+    /// to this link (Caley's, which redirects to the server's sign-in; the account is saved when it comes back)
+    #[schema(required)]
+    pub authorize: Option<String>,
 }
 
 /// The IMAP accounts.
@@ -107,6 +118,7 @@ pub async fn list_accounts(State(state): State<AppState>, user: CurrentUser) -> 
                     protocol: a.protocol,
                     jmap_url: a.jmap_url,
                     auth: a.auth,
+                    oauth_client_id: a.oauth_client_id,
                     host: a.host,
                     port: a.port,
                     username: a.username,
@@ -148,10 +160,20 @@ pub struct AccountBody {
     pub smtp_port: Option<u16>,
     /// a new account's default identity gets this name (none without it)
     pub sender_name: Option<String>,
+    /// `oauth`: the OAuth client the server has for Caley
+    #[serde(default)]
+    pub oauth_client_id: Option<String>,
+    /// its secret; empty or missing: keep the stored one (none for a public client)
+    #[serde(default)]
+    pub oauth_client_secret: Option<String>,
+    /// `oauth`: sign in at the server again (a new account, or one on another server or client, always does)
+    #[serde(default)]
+    pub authorize: Option<bool>,
 }
 
 /// Adds (no `account_id`) or updates a mail account; PUT is the same. A JMAP account is saved only once its server
-/// has answered its session with the account's sign-in.
+/// has answered its session with the account's sign-in; one that signs in at the server (`oauth`) and is to be
+/// authorized is saved when the server's sign-in comes back (`authorize`).
 #[utoipa::path(
     method(post, put),
     path = "/email/account",
@@ -166,11 +188,14 @@ pub struct AccountBody {
 pub async fn save_account(
     State(state): State<AppState>,
     user: CurrentUser,
+    session: tower_sessions::Session,
+    crate::public_origin::RequestOrigin(origin): crate::public_origin::RequestOrigin,
     Json(body): Json<AccountBody>,
 ) -> impl IntoResponse {
     let is_new = body.account_id.is_none();
     let account_id = body
         .account_id
+        .clone()
         .unwrap_or_else(|| Uuid::new_v4().to_string());
     let mut use_tls = body.use_tls.unwrap_or(true);
     let protocol = body.protocol.unwrap_or(Protocol::Imap);
@@ -192,6 +217,18 @@ pub async fn save_account(
             }
         }
     };
+    if auth == AccountAuth::Oauth {
+        return save_oauth_account(
+            &state,
+            &user.user_id,
+            &session,
+            &origin,
+            account_id,
+            existing,
+            body,
+        )
+        .await;
+    }
     let password = match body.password.filter(|p| !p.is_empty()) {
         Some(p) => p,
         None if auth == AccountAuth::Oidc => String::new(),
@@ -230,7 +267,9 @@ pub async fn save_account(
     }
 
     // another protocol or JMAP server: what the cache holds is of the old one (an IMAP server's UIDVALIDITY tells
-    // the sync itself)
+    // the sync itself). A sync of the old server still running finishes first, and none starts until the new one is
+    // saved (it would read the old account again).
+    let mut _no_sync = None;
     if let Some(existing) = &existing {
         let protocol_name = if protocol == Protocol::Jmap {
             "jmap"
@@ -240,6 +279,7 @@ pub async fn save_account(
         let moved = existing.protocol != protocol_name
             || (protocol == Protocol::Jmap && existing.jmap_url != jmap_url);
         if moved {
+            _no_sync = Some(state.email_sync_manager.jmap_lock(&account_id).await);
             state.email_sync_manager.stop_idle_for(&account_id);
             let _ =
                 tokio::fs::remove_dir_all(state.data_dir.join("messages").join(&account_id)).await;
@@ -270,6 +310,8 @@ pub async fn save_account(
             },
             jmap_url: jmap_url.as_deref(),
             auth: auth.as_str(),
+            oauth_client_id: None,
+            oauth_client_secret: None,
         },
         &state.encryption_key,
     )
@@ -306,7 +348,150 @@ pub async fn save_account(
     state
         .sse_broadcaster
         .send(&user.user_id, SseMessage::AccountsChanged);
-    Json(AccountSaved { account_id }).into_response()
+    Json(AccountSaved {
+        account_id,
+        authorize: None,
+    })
+    .into_response()
+}
+
+/// Saves a JMAP account that signs in at the server (`oauth`). A new one, one on another server or client (or
+/// with another sign-in before), one without tokens, or one asked to (`authorize`) is to be authorized: kept in the
+/// session and answered with the link that starts it (jmap/oauth.rs). Otherwise its other fields are saved and its
+/// tokens kept.
+async fn save_oauth_account(
+    state: &AppState,
+    user_id: &str,
+    session: &tower_sessions::Session,
+    origin: &str,
+    account_id: String,
+    existing: Option<email_db::ImapAccountRow>,
+    body: AccountBody,
+) -> axum::response::Response {
+    use crate::jmap::oauth;
+    let url = match crate::jmap::session_url(body.jmap_url.as_deref().unwrap_or_default()) {
+        Ok(url) => url,
+        Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    };
+    let client_id = body
+        .oauth_client_id
+        .map(|c| c.trim().to_owned())
+        .filter(|c| !c.is_empty())
+        .or_else(|| existing.as_ref().and_then(|e| e.oauth_client_id.clone()));
+    let Some(client_id) = client_id else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "the server's OAuth client id is required",
+        )
+            .into_response();
+    };
+    let same_client = existing
+        .as_ref()
+        .is_some_and(|e| e.oauth_client_id.as_deref() == Some(client_id.as_str()));
+    let client_secret = body
+        .oauth_client_secret
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            existing
+                .as_ref()
+                .filter(|_| same_client)
+                .and_then(|e| e.oauth_client_secret.clone())
+        });
+    let username = if body.username.is_empty() {
+        existing
+            .as_ref()
+            .map(|e| e.username.clone())
+            .unwrap_or_default()
+    } else {
+        body.username
+    };
+
+    let authorize = match &existing {
+        None => true,
+        Some(e) => {
+            body.authorize == Some(true)
+                || e.auth != "oauth"
+                || e.jmap_url.as_deref() != Some(url.as_str())
+                || !same_client
+                || !oauth::has_tokens(&state.db, &account_id).await
+        }
+    };
+    if authorize && !state.demo_mode {
+        let endpoints = match oauth::discover(&state.email_sync_manager.http, &url).await {
+            Ok(e) => e,
+            Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+        };
+        let client_secret = match client_secret
+            .map(|s| crate::crypto::encrypt(&s, &state.encryption_key))
+            .transpose()
+        {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[email] save_account encrypt: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+            }
+        };
+        let pending = oauth::Pending {
+            account_id: account_id.clone(),
+            is_new: existing.is_none(),
+            display_name: body.display_name,
+            sender_name: body.sender_name,
+            jmap_url: url.to_string(),
+            username,
+            client_id,
+            client_secret,
+            endpoints,
+            redirect_uri: format!("{origin}/auth/jmap"),
+            verifier: String::new(),
+            created_at: 0,
+        };
+        return match oauth::begin(session, pending).await {
+            Ok(link) => Json(AccountSaved {
+                account_id,
+                authorize: Some(link),
+            })
+            .into_response(),
+            Err(e) => {
+                eprintln!("[email] save_account session: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "session error").into_response()
+            }
+        };
+    }
+
+    if let Err(e) = email_db::upsert_account(
+        &state.db,
+        user_id,
+        &account_id,
+        &body.display_name,
+        url.host_str().unwrap_or_default(),
+        url.port_or_known_default().unwrap_or(443),
+        &username,
+        "",
+        url.scheme() == "https",
+        None,
+        None,
+        &email_db::AccountProtocol {
+            protocol: "jmap",
+            jmap_url: Some(url.as_str()),
+            auth: "oauth",
+            oauth_client_id: Some(&client_id),
+            oauth_client_secret: client_secret.as_deref(),
+        },
+        &state.encryption_key,
+    )
+    .await
+    {
+        eprintln!("[email] save_account error: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+    }
+    state
+        .sse_broadcaster
+        .send(user_id, SseMessage::AccountsChanged);
+    Json(AccountSaved {
+        account_id,
+        authorize: None,
+    })
+    .into_response()
 }
 
 /// A JMAP server that answered its session.
@@ -342,6 +527,8 @@ async fn check_jmap(
             Ok(token) => crate::jmap::Auth::Bearer(token),
             Err(e) => return Err(e.to_string()),
         },
+        // checked when its sign-in at the server comes back (jmap/oauth.rs)
+        AccountAuth::Oauth => return Err("an OAuth account is saved through its sign-in".into()),
     };
     match crate::jmap::Client::connect(&state.email_sync_manager.http, url.as_str(), auth).await {
         Ok(client) => Ok(CheckedJmap {

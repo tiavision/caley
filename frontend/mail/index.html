@@ -47,6 +47,18 @@
     <sn-resource name="folders" src="/email/folders" cache order="sort_order"
                  then="view = currentView(cur, accounts, mailboxes, folders, { accounts: !!$meta.accounts.loadedAt, folders: true });
                        urlLags(view, urlView($url.folder, $url.account_id, $url.mailbox)) && navigate(viewHref(view), { replace: true })"></sn-resource>
+    <!-- An account that signed in at its mail server comes back with ?account_error= when that failed. The URL keeps
+         only the view, so the text is kept in state: its own, not <main>'s, which is remembered (data-sn-persist) and
+         would bring back an old value over the URL's. -->
+    <div class="account-error-slot" data-sn-state="{ accountError: $url.account_error ?? '' }">
+      <template data-sn-if="accountError">
+        <div class="account-error" data-callout data-tone="danger" role="alert" data-layout="row" data-gap="sm" data-wrap="none">
+          <span data-grow data-sn-text="m.mail_accountError({error: accountError})"></span>
+          <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
+                  data-sn-on-click="accountError = ''" data-sn-attr="{'aria-label': m.mail_close()}"></button>
+        </div>
+      </template>
+    </div>
     <!-- defaultCal: the calendar the import dialog preselects and remembers (shared with the calendar pages' event form). -->
     <div class="mail-contents" data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
          data-sn-on-ics-imported="$event.detail.errors === 0 && (defaultCal = $event.detail.calendar)">

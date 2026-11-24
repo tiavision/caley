@@ -165,6 +165,8 @@ async fn cache(s: &Server, auth: &str, refresher: Option<Refresher>) -> Cache {
             protocol: "jmap",
             jmap_url: Some(&s.url),
             auth,
+            oauth_client_id: None,
+            oauth_client_secret: None,
         },
         &KEY,
     )
@@ -690,4 +692,136 @@ async fn stalwart_wrong_password() {
     .err()
     .unwrap();
     assert!(is_unauthorized(&e), "{e}");
+}
+
+/// A JMAP account that signs in at Stalwart (auth = 'oauth'), through Caley's handlers: saving answers the link,
+/// which redirects to Stalwart's sign-in; its login page is played through its login API (the calls the page makes),
+/// and Stalwart's redirect back saves the account. Then the sync, and a renewal at Stalwart's token endpoint.
+#[tokio::test]
+async fn stalwart_an_account_signs_in_at_the_server() {
+    use super::api_tests::{USER as APP_USER, app_state, save_from, session};
+    use axum::extract::{Query, State};
+    let s = server_or_skip!();
+    let (Ok(client_id), Ok(client_secret)) = (
+        std::env::var("JMAP_TEST_OAUTH_CLIENT_ID"),
+        std::env::var("JMAP_TEST_OAUTH_CLIENT_SECRET"),
+    ) else {
+        eprintln!("skipped: JMAP_TEST_OAUTH_CLIENT_ID is not set");
+        return;
+    };
+    let app = app_state().await;
+    let sess = session(&app).await;
+    let callback = |query: String| {
+        let (app, sess) = (app.clone(), sess.clone());
+        async move {
+            let uri: axum::http::Uri = format!("/auth/jmap?{query}").parse().unwrap();
+            let r =
+                super::oauth::callback(State(app), sess, Query::try_from_uri(&uri).unwrap()).await;
+            r.headers()["location"].to_str().unwrap().to_owned()
+        }
+    };
+
+    let body = crate::email::AccountBody {
+        account_id: None,
+        display_name: "Stalwart".into(),
+        protocol: Some(crate::email::Protocol::Jmap),
+        jmap_url: Some(s.url.clone()),
+        auth: Some(crate::email::AccountAuth::Oauth),
+        host: String::new(),
+        port: 0,
+        username: s.user.clone(),
+        password: None,
+        use_tls: None,
+        smtp_host: None,
+        smtp_port: None,
+        sender_name: Some("Alice".into()),
+        oauth_client_id: Some(client_id),
+        oauth_client_secret: Some(client_secret),
+        authorize: None,
+    };
+    let r = save_from(&app, &sess, "http://127.0.0.1:3000", body).await;
+    let bytes = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+    let saved: Value = serde_json::from_slice(&bytes).unwrap();
+    let start = saved["authorize"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{saved}"))
+        .strip_prefix("/auth/jmap?")
+        .unwrap();
+
+    // Caley sends the browser to Stalwart's sign-in, whose page signs in through /api/auth with the request's query
+    let to_server = url::Url::parse(&callback(start.to_owned()).await).unwrap();
+    let query = to_server.query().unwrap().to_owned();
+    let http = http_client().unwrap();
+    let login = |body: Value| {
+        let (http, url) = (http.clone(), format!("{}/api/auth", s.url));
+        async move {
+            let r = http
+                .post(url)
+                .header("content-type", "application/json")
+                .body(body.to_string())
+                .send()
+                .await
+                .unwrap();
+            serde_json::from_slice::<Value>(&r.bytes().await.unwrap()).unwrap()
+        }
+    };
+    let mut r = login(json!({ "type": "authCode", "accountName": s.user, "accountSecret": s.password, "query": query })).await;
+    if r["type"] == "consentRequired" {
+        r = login(
+            json!({ "type": "authConsent", "token": r["token"], "query": query, "consent": true }),
+        )
+        .await;
+    }
+    let back = url::Url::parse(
+        r["location"]
+            .as_str()
+            .unwrap_or_else(|| panic!("login: {r}")),
+    )
+    .unwrap();
+    assert_eq!(back.path(), "/auth/jmap");
+    let to_mail = callback(back.query().unwrap().to_owned()).await;
+    assert!(to_mail.contains("account_id="), "{to_mail}");
+
+    let mut accounts = email_db::list_accounts(&app.db, APP_USER, &app.encryption_key)
+        .await
+        .unwrap();
+    let account = accounts.remove(0);
+    assert_eq!(account.auth, "oauth");
+    let mgr = &app.email_sync_manager;
+    mgr.stop_task_for(&account.account_id);
+    mgr.stop_idle_for(&account.account_id);
+
+    let client = mgr.jmap_client(&account, APP_USER).await.unwrap();
+    let t = tag();
+    let mbox = create_mailbox(&client, &t, None).await;
+    import(
+        &client,
+        &[&mbox],
+        &mail(&format!("{t} via oauth"), "o@example.org"),
+        &[],
+    )
+    .await;
+    mgr.jmap_sync(&account, APP_USER, None).await.unwrap();
+    let n: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM cached_messages WHERE account_id = ? AND mailbox = ?",
+    )
+    .bind(&account.account_id)
+    .bind(&t)
+    .fetch_one(&app.db)
+    .await
+    .unwrap();
+    assert_eq!(n, 1);
+
+    // expired: renewed at Stalwart's token endpoint with the refresh token
+    sqlx::query("UPDATE jmap_oauth_tokens SET expires_at = 0")
+        .execute(&app.db)
+        .await
+        .unwrap();
+    mgr.jmap_sync(&account, APP_USER, None).await.unwrap();
+    let expires: i64 = sqlx::query_scalar("SELECT expires_at FROM jmap_oauth_tokens")
+        .fetch_one(&app.db)
+        .await
+        .unwrap();
+    assert!(expires > crate::oidc_tokens::now(), "renewed");
+    destroy_mailboxes(&client, &[&mbox]).await;
 }

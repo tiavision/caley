@@ -51,13 +51,14 @@ impl std::fmt::Display for TokenError {
 
 impl std::error::Error for TokenError {}
 
+/// What a token endpoint answers (RFC 6749 §5.1).
 #[derive(Deserialize)]
-struct TokenResponse {
-    access_token: String,
+pub(crate) struct TokenResponse {
+    pub access_token: String,
     #[serde(default)]
-    refresh_token: Option<String>,
+    pub refresh_token: Option<String>,
     #[serde(default)]
-    expires_in: Option<i64>,
+    pub expires_in: Option<i64>,
 }
 
 impl OidcTokens {
@@ -172,7 +173,7 @@ impl OidcTokens {
     }
 }
 
-enum RenewError {
+pub(crate) enum RenewError {
     /// the provider answered with an error (`invalid_grant`: the refresh token is no longer valid)
     Rejected(String),
     /// the provider could not be reached, or answered nonsense: tried again later
@@ -181,42 +182,70 @@ enum RenewError {
 
 impl Refresher {
     async fn renew(&self, refresh_token: &str) -> Result<TokenResponse, RenewError> {
-        let body: String = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair("grant_type", "refresh_token")
-            .append_pair("refresh_token", refresh_token)
-            .finish();
-        let resp = self
-            .http
-            .post(&self.token_url)
-            .basic_auth(
-                form_encode(&self.client_id),
-                Some(form_encode(&self.client_secret)),
-            )
-            .header("content-type", "application/x-www-form-urlencoded")
-            .header("accept", "application/json")
-            .body(body)
-            .timeout(Duration::from_secs(30))
-            .send()
-            .await
-            .map_err(|e| RenewError::Failed(anyhow!("token endpoint: {e}")))?;
-        let status = resp.status();
-        let bytes = resp
-            .bytes()
-            .await
-            .map_err(|e| RenewError::Failed(e.into()))?;
-        if status.is_client_error() {
-            return Err(RenewError::Rejected(
-                String::from_utf8_lossy(&bytes).into_owned(),
-            ));
-        }
-        if !status.is_success() {
-            return Err(RenewError::Failed(anyhow!(
-                "token endpoint answered {status}"
-            )));
-        }
-        serde_json::from_slice(&bytes)
-            .map_err(|e| RenewError::Failed(anyhow!("token endpoint answered no token: {e}")))
+        token_request(
+            &self.http,
+            &self.token_url,
+            &self.client_id,
+            Some(&self.client_secret),
+            &[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh_token),
+            ],
+        )
+        .await
     }
+}
+
+/// A token request (RFC 6749 §4.1.3 a code, §6 a refresh token): a confidential client authenticates with
+/// client_secret_basic, a public one (no secret) names itself with `client_id` in the form.
+pub(crate) async fn token_request(
+    http: &reqwest::Client,
+    token_url: &str,
+    client_id: &str,
+    client_secret: Option<&str>,
+    form: &[(&str, &str)],
+) -> Result<TokenResponse, RenewError> {
+    let secret = client_secret.filter(|s| !s.is_empty());
+    // built before the request: the serializer is not Send
+    let body = {
+        let mut body = url::form_urlencoded::Serializer::new(String::new());
+        for (k, v) in form {
+            body.append_pair(k, v);
+        }
+        if secret.is_none() {
+            body.append_pair("client_id", client_id);
+        }
+        body.finish()
+    };
+    let mut req = http.post(token_url);
+    if let Some(secret) = secret {
+        req = req.basic_auth(form_encode(client_id), Some(form_encode(secret)));
+    }
+    let resp = req
+        .header("content-type", "application/x-www-form-urlencoded")
+        .header("accept", "application/json")
+        .body(body)
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| RenewError::Failed(anyhow!("token endpoint: {e}")))?;
+    let status = resp.status();
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| RenewError::Failed(e.into()))?;
+    if status.is_client_error() {
+        return Err(RenewError::Rejected(
+            String::from_utf8_lossy(&bytes).into_owned(),
+        ));
+    }
+    if !status.is_success() {
+        return Err(RenewError::Failed(anyhow!(
+            "token endpoint answered {status}"
+        )));
+    }
+    serde_json::from_slice(&bytes)
+        .map_err(|e| RenewError::Failed(anyhow!("token endpoint answered no token: {e}")))
 }
 
 /// client_secret_basic encodes the id and secret form-urlencoded first (RFC 6749 §2.3.1).
@@ -224,7 +253,7 @@ fn form_encode(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }
 
-fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 

@@ -42,8 +42,12 @@ pub struct ImapAccountRow {
     /// a JMAP account's session URL
     pub jmap_url: Option<String>,
     /// how a JMAP account signs in: `password` (Basic), `bearer` (the password is an API token), `oidc` (the
-    /// user's OIDC access token)
+    /// user's OIDC access token), `oauth` (the server's own sign-in, `jmap_oauth_tokens`)
     pub auth: String,
+    /// `oauth`: the OAuth client the server has for Caley
+    pub oauth_client_id: Option<String>,
+    /// its secret; `None` for a public client
+    pub oauth_client_secret: Option<String>,
 }
 
 impl ImapAccountRow {
@@ -53,7 +57,7 @@ impl ImapAccountRow {
 }
 
 const ACCOUNT_COLUMNS: &str = "account_id, display_name, host, port, username, password, use_tls, smtp_host, \
-    smtp_port, sort_order, protocol, jmap_url, auth";
+    smtp_port, sort_order, protocol, jmap_url, auth, oauth_client_id, oauth_client_secret";
 
 fn account_row(r: &sqlx::sqlite::SqliteRow, key: &[u8; 32]) -> Result<ImapAccountRow> {
     Ok(ImapAccountRow {
@@ -76,6 +80,11 @@ fn account_row(r: &sqlx::sqlite::SqliteRow, key: &[u8; 32]) -> Result<ImapAccoun
             .map(|s| crypto::decrypt(&s, key))
             .transpose()?,
         auth: r.get(12),
+        oauth_client_id: r.get(13),
+        oauth_client_secret: r
+            .get::<Option<String>, _>(14)
+            .map(|s| crypto::decrypt(&s, key))
+            .transpose()?,
     })
 }
 
@@ -84,6 +93,8 @@ pub struct AccountProtocol<'a> {
     pub protocol: &'a str,
     pub jmap_url: Option<&'a str>,
     pub auth: &'a str,
+    pub oauth_client_id: Option<&'a str>,
+    pub oauth_client_secret: Option<&'a str>,
 }
 
 pub async fn list_accounts(
@@ -137,12 +148,17 @@ pub async fn upsert_account(
     let enc_pass = crypto::encrypt(password, key)?;
     let enc_smtp = smtp_host.map(|h| crypto::encrypt(h, key)).transpose()?;
     let enc_jmap = kind.jmap_url.map(|u| crypto::encrypt(u, key)).transpose()?;
+    let enc_client_secret = kind
+        .oauth_client_secret
+        .filter(|s| !s.is_empty())
+        .map(|s| crypto::encrypt(s, key))
+        .transpose()?;
 
     sqlx::query(
         "INSERT INTO imap_accounts
             (account_id, user_id, display_name, host, port, username, password, use_tls, smtp_host, smtp_port,
-             protocol, jmap_url, auth)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             protocol, jmap_url, auth, oauth_client_id, oauth_client_secret)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(account_id) DO UPDATE SET
             display_name = excluded.display_name,
             host         = excluded.host,
@@ -154,7 +170,9 @@ pub async fn upsert_account(
             smtp_port    = excluded.smtp_port,
             protocol     = excluded.protocol,
             jmap_url     = excluded.jmap_url,
-            auth         = excluded.auth",
+            auth         = excluded.auth,
+            oauth_client_id     = excluded.oauth_client_id,
+            oauth_client_secret = excluded.oauth_client_secret",
     )
     .bind(account_id)
     .bind(user_id)
@@ -169,6 +187,8 @@ pub async fn upsert_account(
     .bind(kind.protocol)
     .bind(enc_jmap)
     .bind(kind.auth)
+    .bind(kind.oauth_client_id)
+    .bind(enc_client_secret)
     .execute(pool)
     .await?;
     Ok(())

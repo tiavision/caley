@@ -847,6 +847,49 @@ test('without an OIDC sign-in a JMAP account asks for a password or an API token
   await settle();
   const dialog = root.querySelector<HTMLDialogElement>('#email-account')!;
   const auth = dialog.querySelectorAll<HTMLSelectElement>('select')[1]!;
-  expect([...auth.options].map((o) => o.value)).toEqual(['password', 'bearer']);
+  expect([...auth.options].map((o) => o.value)).toEqual(['password', 'bearer', 'oauth']);
   expect(dialog.querySelector('input[type="password"]')).not.toBeNull();
+});
+
+test('an account that signs in at the server: its OAuth client, then saving goes to the server\'s sign-in', async () => {
+  discovery = { found: false, jmap_url: 'https://example.com/.well-known/jmap' };
+  const { root, settle, requests, navigations } = await show({
+    'POST /api/email/account': { account_id: 'new', authorize: '/auth/jmap?start=abc' },
+  });
+  const field = (el: HTMLInputElement | HTMLSelectElement, value: string) => {
+    el.value = value;
+    el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+  };
+  [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === m.mail_addAccount())!.click();
+  await settle();
+  field(root.querySelector<HTMLInputElement>('#email-account input[type="email"]')!, 'me@example.com');
+  field(root.querySelector<HTMLInputElement>('#email-account input[required]:not([type])')!, 'Me');
+  root.querySelector<HTMLFormElement>('#email-account form')!.requestSubmit();
+  await settle();
+
+  const dialog = root.querySelector<HTMLDialogElement>('#email-account')!;
+  field(dialog.querySelectorAll<HTMLSelectElement>('select')[1]!, 'oauth');
+  await settle();
+  expect(dialog.querySelector('input[type="password"][autocomplete="current-password"]')).toBeNull();
+  expect(dialog.textContent).toContain('/auth/jmap');
+  const [clientId, secret] = [...dialog.querySelectorAll<HTMLInputElement>('input[autocomplete="off"]')];
+  field(clientId!, 'caley-client');
+  field(secret!, 's3cret');
+  dialog.querySelector<HTMLFormElement>('form')!.requestSubmit();
+  await settle();
+  const saved = requests.calls.find((c) => c.method === 'POST' && c.path === '/api/email/account')!.body;
+  expect(saved).toMatchObject({ protocol: 'jmap', auth: 'oauth', oauth_client_id: 'caley-client', oauth_client_secret: 's3cret', password: '' });
+  expect(navigations.at(-1)).toContain('/auth/jmap?start=abc');
+});
+
+test('a failed sign-in at the mail server comes back as an error above the mail, until closed', async () => {
+  // a visit before: the page's remembered state must not hide the error
+  const storage = memoryStorage();
+  (await show({}, null, storage)).root.remove();
+  const { root, settle } = await show({}, null, storage, 'http://localhost/mail/?account_error=the%20server%20said%20no');
+  const alert = root.querySelector('.account-error')!;
+  expect(alert.textContent).toContain(m.mail_accountError({ error: 'the server said no' }));
+  alert.querySelector<HTMLButtonElement>('button')!.click();
+  await settle();
+  expect(root.querySelector('.account-error')).toBeNull();
 });

@@ -16,11 +16,14 @@ use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+pub(crate) mod oauth;
 pub(crate) mod ops;
 pub(crate) mod sync;
 
 #[cfg(test)]
 pub(crate) mod api_tests;
+#[cfg(test)]
+mod oauth_tests;
 #[cfg(test)]
 pub(crate) mod fake;
 #[cfg(test)]
@@ -710,6 +713,16 @@ fn test_rewrite(url: url::Url) -> url::Url {
         }
         None => url,
     }
+}
+
+/// A URL the server gave (an endpoint in its metadata), as requested: in the tests against Stalwart in a container,
+/// rewritten as the session's are (`test_rewrite`); as it is otherwise.
+pub(crate) fn rewrite(url: String) -> String {
+    #[cfg(test)]
+    if let Ok(parsed) = url::Url::parse(&url) {
+        return test_rewrite(parsed).to_string();
+    }
+    url
 }
 
 fn urlencode(s: &str) -> String {

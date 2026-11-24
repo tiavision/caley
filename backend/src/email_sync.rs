@@ -37,6 +37,8 @@ pub struct EmailSyncManager {
     /// one JMAP sync of an account at a time (a task restarted while its last sync runs would otherwise give an
     /// email two UIDs in one mailbox)
     pub(crate) jmap_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// one renewal of a JMAP account's own OAuth sign-in at a time
+    pub(crate) oauth_locks: crate::jmap::oauth::Locks,
 }
 
 impl EmailSyncManager {
@@ -54,6 +56,7 @@ impl EmailSyncManager {
             http: crate::jmap::http_client().expect("the JMAP HTTP client"),
             oidc_tokens,
             jmap_locks: Mutex::new(HashMap::new()),
+            oauth_locks: Default::default(),
             db,
             encryption_key,
             broadcaster,

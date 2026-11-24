@@ -64,6 +64,28 @@ pub struct Inner {
     pub max_objects: usize,
     /// what the server accepts: `Basic <b64>` or `Bearer <token>`
     pub authorization: String,
+    pub oauth: FakeOAuth,
+}
+
+/// The fake's OAuth server: one registered client, codes and tokens it gave.
+#[derive(Default)]
+pub struct FakeOAuth {
+    pub client_id: String,
+    /// `None`: a public client
+    pub client_secret: Option<String>,
+    pub redirect_uri: String,
+    /// code → (PKCE challenge, redirect URI, scope)
+    codes: HashMap<String, (String, String, String)>,
+    /// access tokens it accepts
+    pub access_tokens: HashSet<String>,
+    /// refresh tokens it accepts (each once: they rotate)
+    pub refresh_tokens: HashSet<String>,
+    /// the lifetime it gives access tokens
+    pub expires_in: i64,
+    /// the token requests (grant type, how the client authenticated: `basic` or `body`)
+    pub token_requests: Vec<(String, String)>,
+    /// the authorization requests' query parameters
+    pub authorizations: Vec<HashMap<String, String>>,
 }
 
 impl Inner {
@@ -142,6 +164,13 @@ impl FakeJmap {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let mut inner = Inner {
             max_objects: 500,
+            oauth: FakeOAuth {
+                client_id: "caley".into(),
+                client_secret: Some("client-secret".into()),
+                redirect_uri: "http://localhost:3000/auth/jmap".into(),
+                expires_in: 3600,
+                ..Default::default()
+            },
             authorization: format!("Basic {}", b64("user:secret")),
             ..Default::default()
         };
@@ -181,6 +210,12 @@ impl FakeJmap {
             .route("/jmap/download/{account}/{blob}/{name}", get(download))
             .route("/jmap/upload/{account}/", post(upload))
             .route("/jmap/eventsource/", get(eventsource))
+            .route(
+                "/.well-known/oauth-authorization-server",
+                get(oauth_metadata),
+            )
+            .route("/authorize", get(oauth_authorize))
+            .route("/token", post(oauth_token))
             .with_state(fake.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -355,11 +390,133 @@ fn b64(s: &str) -> String {
 }
 
 fn authorized(fake: &FakeJmap, headers: &HeaderMap) -> bool {
-    let want = fake.inner.lock().unwrap().authorization.clone();
-    headers
+    let inner = fake.inner.lock().unwrap();
+    let Some(got) = headers.get("authorization").and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    got == inner.authorization
+        || got
+            .strip_prefix("Bearer ")
+            .is_some_and(|t| inner.oauth.access_tokens.contains(t))
+}
+
+/// The server's OAuth metadata (RFC 8414), its endpoints on its own origin.
+async fn oauth_metadata(State(fake): State<FakeJmap>, headers: HeaderMap) -> Response {
+    let host = headers
+        .get("host")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or_default();
+    let base = format!("http://{host}");
+    let _ = fake;
+    axum::Json(json!({
+        "issuer": base,
+        "authorization_endpoint": format!("{base}/authorize"),
+        "token_endpoint": format!("{base}/token"),
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "code_challenge_methods_supported": ["S256"],
+    }))
+    .into_response()
+}
+
+/// The sign-in page, signed in at once: checks the request and redirects back with a code (or `error`).
+async fn oauth_authorize(
+    State(fake): State<FakeJmap>,
+    axum::extract::Query(q): axum::extract::Query<HashMap<String, String>>,
+) -> Response {
+    let mut inner = fake.inner.lock().unwrap();
+    inner.oauth.authorizations.push(q.clone());
+    let redirect = q.get("redirect_uri").cloned().unwrap_or_default();
+    let state = q.get("state").cloned().unwrap_or_default();
+    let back = |params: &[(&str, &str)]| {
+        let mut url = url::Url::parse(&redirect).unwrap();
+        url.query_pairs_mut()
+            .extend_pairs(params)
+            .append_pair("state", &state);
+        Redirect::to(url.as_str()).into_response()
+    };
+    if q.get("client_id") != Some(&inner.oauth.client_id) || redirect != inner.oauth.redirect_uri {
+        return (StatusCode::BAD_REQUEST, "unknown client or redirect URI").into_response();
+    }
+    if q.get("code_challenge_method").map(String::as_str) != Some("S256") {
+        return back(&[
+            ("error", "invalid_request"),
+            ("error_description", "PKCE S256 required"),
+        ]);
+    }
+    let code = inner.id("code");
+    let challenge = q.get("code_challenge").cloned().unwrap_or_default();
+    let scope = q.get("scope").cloned().unwrap_or_default();
+    inner
+        .oauth
+        .codes
+        .insert(code.clone(), (challenge, redirect.clone(), scope));
+    back(&[("code", &code)])
+}
+
+fn token_error(error: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        axum::Json(json!({ "error": error })),
+    )
+        .into_response()
+}
+
+/// The token endpoint: a code (its PKCE verifier checked) or a refresh token (rotated) for new tokens.
+async fn oauth_token(State(fake): State<FakeJmap>, headers: HeaderMap, body: String) -> Response {
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+    let form: HashMap<String, String> = url::form_urlencoded::parse(body.as_bytes())
+        .into_owned()
+        .collect();
+    let mut inner = fake.inner.lock().unwrap();
+    let basic = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v == want)
+        .and_then(|v| v.strip_prefix("Basic "))
+        .map(str::to_owned);
+    let grant = form.get("grant_type").cloned().unwrap_or_default();
+    // the client: Basic with its secret, or a public client naming itself
+    let how = match (&basic, &inner.oauth.client_secret) {
+        (Some(b), Some(secret)) if *b == b64(&format!("{}:{secret}", inner.oauth.client_id)) => {
+            "basic"
+        }
+        (None, None) if form.get("client_id") == Some(&inner.oauth.client_id) => "body",
+        _ => return token_error("invalid_client"),
+    };
+    inner
+        .oauth
+        .token_requests
+        .push((grant.clone(), how.to_owned()));
+    match grant.as_str() {
+        "authorization_code" => {
+            let code = form.get("code").cloned().unwrap_or_default();
+            let Some((challenge, redirect, _)) = inner.oauth.codes.remove(&code) else {
+                return token_error("invalid_grant");
+            };
+            let verifier = form.get("code_verifier").cloned().unwrap_or_default();
+            let hashed = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(Sha256::digest(verifier.as_bytes()));
+            if hashed != challenge || form.get("redirect_uri") != Some(&redirect) {
+                return token_error("invalid_grant");
+            }
+        }
+        "refresh_token" => {
+            let refresh = form.get("refresh_token").cloned().unwrap_or_default();
+            if !inner.oauth.refresh_tokens.remove(&refresh) {
+                return token_error("invalid_grant");
+            }
+        }
+        _ => return token_error("unsupported_grant_type"),
+    }
+    let access = inner.id("at");
+    let refresh = inner.id("rt");
+    inner.oauth.access_tokens.insert(access.clone());
+    inner.oauth.refresh_tokens.insert(refresh.clone());
+    axum::Json(json!({
+        "access_token": access, "token_type": "bearer", "refresh_token": refresh,
+        "expires_in": inner.oauth.expires_in,
+    }))
+    .into_response()
 }
 
 fn unauthorized() -> Response {

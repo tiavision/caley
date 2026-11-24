@@ -27,10 +27,33 @@ use crate::sse::SseMessage;
 const DOWNLOADS_AT_ONCE: usize = 4;
 
 impl EmailSyncManager {
+    /// Holds an account's JMAP cache: one sync at a time, and no sync while the account is moved to another server
+    /// (its cache reset).
+    pub(crate) async fn jmap_lock(&self, account_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = Arc::clone(
+            self.jmap_locks
+                .lock()
+                .unwrap()
+                .entry(account_id.to_owned())
+                .or_default(),
+        );
+        lock.lock_owned().await
+    }
+
     /// How a JMAP account signs in now: an OIDC account takes the user's current access token (renewed if needed).
     pub(crate) async fn jmap_auth(&self, account: &ImapAccountRow, user_id: &str) -> Result<Auth> {
         Ok(match account.auth.as_str() {
             "oidc" => Auth::Bearer(self.oidc_tokens.access_token(user_id).await?),
+            "oauth" => Auth::Bearer(
+                super::oauth::access_token(
+                    &self.http,
+                    &self.db,
+                    &self.encryption_key,
+                    &self.oauth_locks,
+                    account,
+                )
+                .await?,
+            ),
             "bearer" => Auth::Bearer(account.password.clone()),
             _ => Auth::Basic {
                 username: account.username.clone(),
@@ -71,16 +94,11 @@ impl EmailSyncManager {
                 },
             );
         }
-        let lock = Arc::clone(
-            self.jmap_locks
-                .lock()
-                .unwrap()
-                .entry(account_id.to_owned())
-                .or_default(),
-        );
         let result = async {
-            let _one_at_a_time = lock.lock().await;
-            let client = self.jmap_client(account, user_id).await?;
+            let _one_at_a_time = self.jmap_lock(account_id).await;
+            // as it is now: saved meanwhile (another server, new credentials), or gone
+            let (account, _) = self.load_account(account_id).await?;
+            let client = self.jmap_client(&account, user_id).await?;
             self.jmap_sync_with(&client, account_id, user_id).await
         }
         .await;
@@ -491,6 +509,9 @@ mod tests {
                 smtp_host: None,
                 smtp_port: None,
                 sender_name: None,
+                oauth_client_id: None,
+                oauth_client_secret: None,
+                authorize: None,
             },
         )
         .await;

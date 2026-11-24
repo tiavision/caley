@@ -5,7 +5,7 @@ import {
   accountUi, addableSender, afterBulk, bodyOf, canDrop, cleared, currentView, folderView, inMailbox, mailboxView, noView, listStatus, markedRead, noReader, noSearch,
   noSelection, openedAt, opensRow, pageKey, readerOn, rowClick, scrollTopFor, searchActive, senderAdded, sharedDraft,
   siblingRow, unmarked, urlRef, urlView, shownView, viewHref, urlLags, noSearchBox, mailSearch, newAccount, editAccount, discovered,
-  accountBody, needsPassword, type Account, type Mailbox, type Message, type VirtualFolder,
+  accountBody, needsPassword, signsInAtServer, type Account, type Mailbox, type Message, type VirtualFolder,
 } from './mail.ts';
 import { caldavBody, caldavDraft, enrollErrorText, keyImportError, withCalendarActive } from './settings.ts';
 import { loadErrorOr } from './errors.ts';
@@ -196,9 +196,17 @@ describe('dialogs', () => {
     expect(needsPassword({ ...jmap, auth: 'bearer' })).toBe(true);
     expect(accountBody({ ...jmap, auth: 'bearer' }).password).toBe('pw');
   });
+  test('an account that signs in at the server sends its OAuth client, and no password', () => {
+    const f = { ...newAccount(), protocol: 'jmap' as const, jmap_url: 'mail.x', auth: 'oauth' as const, username: 'me@x', password: 'stale',
+      oauth_client_id: 'caley', oauth_client_secret: '', authorize: false };
+    expect(signsInAtServer(f)).toBe(true);
+    expect(needsPassword(f)).toBe(false);
+    expect(accountBody(f)).toMatchObject({ auth: 'oauth', password: '', oauth_client_id: 'caley', oauth_client_secret: null, authorize: false });
+    expect(accountBody({ ...f, auth: 'password' })).not.toHaveProperty('oauth_client_id');
+  });
   test('editing an account keeps its protocol, URL and sign-in', () => {
     const acc = { account_id: 'a', display_name: 'Stalwart', protocol: 'jmap', jmap_url: 'https://mail.x/.well-known/jmap', auth: 'oidc', host: 'mail.x',
-      port: 443, username: 'me@x', use_tls: true, smtp_host: null, smtp_port: null } as Account;
+      port: 443, username: 'me@x', use_tls: true, smtp_host: null, smtp_port: null, oauth_client_id: null } as Account;
     expect(editAccount(acc, [])).toMatchObject({ protocol: 'jmap', jmap_url: 'https://mail.x/.well-known/jmap', auth: 'oidc', password: '' });
   });
   test('the CalDAV account draft and body, the calendar toggle, the import summary and the PGP errors', () => {

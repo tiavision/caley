@@ -96,6 +96,9 @@ fn body(fake: &FakeJmap, auth: AccountAuth, username: &str, password: &str) -> A
         smtp_host: Some("ignored.example".into()),
         smtp_port: Some(25),
         sender_name: Some("Me".into()),
+        oauth_client_id: None,
+        oauth_client_secret: None,
+        authorize: None,
     }
 }
 
@@ -105,11 +108,45 @@ async fn text(r: axum::response::Response) -> (StatusCode, String) {
     (status, String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// A signed-in session over the app's database, as the session layer gives handlers.
+pub(crate) async fn session(state: &AppState) -> tower_sessions::Session {
+    let store = crate::session_store::SqliteStore::new(state.db.clone());
+    let _ = store.migrate().await;
+    let session = tower_sessions::Session::new(None, Arc::new(store), None);
+    session.insert("user_id", USER).await.unwrap();
+    session
+}
+
+/// Saves an account with a session; the answer.
+pub(crate) async fn save_in(
+    state: &AppState,
+    session: &tower_sessions::Session,
+    body: AccountBody,
+) -> axum::response::Response {
+    save_from(state, session, "http://localhost:3000", body).await
+}
+
+/// Saves an account with a session, the page at `origin`; the answer.
+pub(crate) async fn save_from(
+    state: &AppState,
+    session: &tower_sessions::Session,
+    origin: &str,
+    body: AccountBody,
+) -> axum::response::Response {
+    crate::email::save_account(
+        State(state.clone()),
+        user(),
+        session.clone(),
+        crate::public_origin::RequestOrigin(origin.into()),
+        Json(body),
+    )
+    .await
+    .into_response()
+}
+
 /// Saves a JMAP account; its id.
 pub(crate) async fn save(state: &AppState, body: AccountBody) -> (StatusCode, String) {
-    let r = crate::email::save_account(State(state.clone()), user(), Json(body))
-        .await
-        .into_response();
+    let r = save_in(state, &session(state).await, body).await;
     let (status, text) = text(r).await;
     if status == StatusCode::OK {
         let v: serde_json::Value = serde_json::from_str(&text).unwrap();

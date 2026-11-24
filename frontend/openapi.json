@@ -536,7 +536,7 @@
     },
     "/email/account": {
       "put": {
-        "summary": "Adds (no `account_id`) or updates a mail account; PUT is the same. A JMAP account is saved only once its server\nhas answered its session with the account's sign-in.",
+        "summary": "Adds (no `account_id`) or updates a mail account; PUT is the same. A JMAP account is saved only once its server\nhas answered its session with the account's sign-in; one that signs in at the server (`oauth`) and is to be\nauthorized is saved when the server's sign-in comes back (`authorize`).",
         "operationId": "save_account",
         "requestBody": {
           "content": {
@@ -567,7 +567,7 @@
         }
       },
       "post": {
-        "summary": "Adds (no `account_id`) or updates a mail account; PUT is the same. A JMAP account is saved only once its server\nhas answered its session with the account's sign-in.",
+        "summary": "Adds (no `account_id`) or updates a mail account; PUT is the same. A JMAP account is saved only once its server\nhas answered its session with the account's sign-in; one that signs in at the server (`oauth`) and is to be\nauthorized is saved when the server's sign-in comes back (`authorize`).",
         "operationId": "save_account",
         "requestBody": {
           "content": {
@@ -3187,6 +3187,7 @@
           "protocol",
           "jmap_url",
           "auth",
+          "oauth_client_id",
           "host",
           "port",
           "username",
@@ -3215,7 +3216,14 @@
           },
           "auth": {
             "$ref": "#/components/schemas/AccountAuth",
-            "description": "how a JMAP account signs in: `password`, `bearer` (an API token) or `oidc` (the user's OIDC sign-in);\n`password` for IMAP"
+            "description": "how a JMAP account signs in: `password`, `bearer` (an API token), `oidc` (the user's OIDC sign-in) or\n`oauth` (the server's own sign-in); `password` for IMAP"
+          },
+          "oauth_client_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`oauth`: the OAuth client the server has for Caley (its secret is never sent)"
           },
           "host": {
             "type": "string",
@@ -3258,7 +3266,8 @@
         "enum": [
           "password",
           "bearer",
-          "oidc"
+          "oidc",
+          "oauth"
         ]
       },
       "AccountBody": {
@@ -3355,6 +3364,27 @@
               "null"
             ],
             "description": "a new account's default identity gets this name (none without it)"
+          },
+          "oauth_client_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`oauth`: the OAuth client the server has for Caley"
+          },
+          "oauth_client_secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "its secret; empty or missing: keep the stored one (none for a public client)"
+          },
+          "authorize": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`oauth`: sign in at the server again (a new account, or one on another server or client, always does)"
           }
         }
       },
@@ -3374,11 +3404,19 @@
       "AccountSaved": {
         "type": "object",
         "required": [
-          "account_id"
+          "account_id",
+          "authorize"
         ],
         "properties": {
           "account_id": {
             "type": "string"
+          },
+          "authorize": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "an account that signs in at the server (`oauth`) and is to be authorized there: not saved yet, the page goes\nto this link (Caley's, which redirects to the server's sign-in; the account is saved when it comes back)"
           }
         }
       },

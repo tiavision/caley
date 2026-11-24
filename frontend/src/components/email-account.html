@@ -6,7 +6,9 @@
      error, busy; set with accountUi()); idAccount (the account whose identities are shown), idForm (IdentityForm|null),
      idError. Resources: accounts, identities, mailboxes, user (`oidc_signed_in`: a JMAP account may sign in with the
      user's own OIDC sign-in). An account is IMAP (with SMTP) or JMAP (its server, signed in with a password, an API
-     token or the OIDC sign-in); autodiscovery takes a JMAP server it finds over IMAP. -->
+     token, the OIDC sign-in, or a sign-in at the server itself with the OAuth client the server has for Caley: saving
+     such an account goes to the server's sign-in page (the answer's `authorize` link), and the account is saved when
+     it comes back); autodiscovery takes a JMAP server it finds over IMAP. -->
 <template data-sn-props="" data-sn-emits="{ 'account-edit': { acct: AccountForm; ui: AccountUi }; 'identities-open': string }">
   <div data-sn-state="{
          acct: newAccount(),
@@ -114,7 +116,8 @@
         <form data-layout="stack" data-gap="md"
               data-sn-post="/email/account" data-sn-body="accountBody(acct)"
               data-sn-on-submit="acctUi.busy = true; acctUi.error = ''"
-              data-sn-then="closeDialog('email-account'); refresh(accounts, identities, mailboxes)"
+              data-sn-then="$result.authorize ? navigate($result.authorize) : closeDialog('email-account');
+                            $result.authorize || refresh(accounts, identities, mailboxes)"
               data-sn-catch="acctUi.busy = false; acctUi.error = $error.detail ?? m.mail_saveAccountError()">
           <template data-sn-if="acctUi.discovery?.provider_name">
             <p data-muted data-sn-text="m.mail_settingsDetected({provider: acctUi.discovery.provider_name})"></p>
@@ -139,11 +142,27 @@
               <select data-sn-model="acct.auth">
                 <option value="password" data-sn-text="m.mail_authPassword()"></option>
                 <option value="bearer" data-sn-text="m.mail_authBearer()"></option>
+                <option value="oauth" data-sn-text="m.mail_authOauth()"></option>
                 <template data-sn-if="user.oidc_signed_in || acct.auth === 'oidc'">
                   <option value="oidc" data-sn-text="m.mail_authOidc()"></option>
                 </template>
               </select>
             </label>
+          </template>
+          <template data-sn-if="signsInAtServer(acct)">
+            <label>
+              <span data-sn-text="m.mail_oauthClientId()"></span>
+              <input required autocomplete="off" data-sn-model="acct.oauth_client_id">
+            </label>
+            <label>
+              <span data-sn-text="m.mail_oauthClientSecret()"></span>
+              <input type="password" autocomplete="off" data-sn-model="acct.oauth_client_secret"
+                     data-sn-attr="{placeholder: acct.account_id ? m.mail_passwordPlaceholderKeep() : m.mail_oauthClientSecretPlaceholder()}">
+            </label>
+            <template data-sn-if="acct.account_id">
+              <label><input type="checkbox" data-sn-model="acct.authorize"> <span data-sn-text="m.mail_oauthSignInAgain()"></span></label>
+            </template>
+            <p data-muted data-sn-text="m.mail_oauthHint({uri: jmapRedirectUri()})"></p>
           </template>
           <template data-sn-if="needsPassword(acct)">
             <label>
@@ -153,7 +172,9 @@
             </label>
           </template>
           <template data-sn-else>
-            <p data-muted data-sn-text="m.mail_oidcSignInHint()"></p>
+            <template data-sn-if="acct.auth === 'oidc'">
+              <p data-muted data-sn-text="m.mail_oidcSignInHint()"></p>
+            </template>
           </template>
           <details data-sn-attr="{open: acctUi.advanced}" data-sn-on-toggle="acctUi.advanced = $el.open">
             <summary data-sn-text="m.mail_advancedSettings()"></summary>

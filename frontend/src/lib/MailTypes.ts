@@ -5,8 +5,10 @@ export interface Account {
   protocol: 'imap' | 'jmap';
   /** a JMAP account's session URL */
   jmap_url: string | null;
-  /** how a JMAP account signs in (`password` for IMAP) */
-  auth: 'password' | 'bearer' | 'oidc';
+  /** how a JMAP account signs in (`password` for IMAP; `oauth`: at the server itself) */
+  auth: 'password' | 'bearer' | 'oidc' | 'oauth';
+  /** `oauth`: the OAuth client the server has for Caley */
+  oauth_client_id: string | null;
   host: string;
   port: number;
   username: string;

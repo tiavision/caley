@@ -411,6 +411,9 @@ mod tests {
                 smtp_host: None,
                 smtp_port: None,
                 sender_name: None,
+                oauth_client_id: None,
+                oauth_client_secret: None,
+                authorize: None,
             },
         )
         .await;

@@ -312,6 +312,7 @@ async fn main() -> anyhow::Result<()> {
         .layer(session_layer.clone());
     let mut private = shared_private
         .route("/auth/oidc", get(oidc::oidc_handler))
+        .route("/auth/jmap", get(jmap::oauth::callback))
         .route("/auth/login", post(local_auth::handle_login))
         .route("/logout", get(oidc::logout_handler))
         .with_state(state.clone())

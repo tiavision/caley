@@ -874,11 +874,13 @@ export function signs(draft: ComposeDraft, identities: Identity[], keys: Compose
 
 /** A mail account's protocol, and how a JMAP account signs in (`oidc`: the user's own OIDC sign-in). */
 export type Protocol = 'imap' | 'jmap';
-export type AccountAuth = 'password' | 'bearer' | 'oidc';
+export type AccountAuth = 'password' | 'bearer' | 'oidc' | 'oauth';
 
 export interface AccountForm {
   account_id: string | null; display_name: string; sender_name: string; protocol: Protocol; jmap_url: string; auth: AccountAuth;
   host: string; port: number | null; username: string; password: string; use_tls: boolean; smtp_host: string; smtp_port: number | null;
+  /** `oauth`: the server's OAuth client for Caley, and whether an existing account signs in at the server again */
+  oauth_client_id: string; oauth_client_secret: string; authorize: boolean;
 }
 
 /**
@@ -893,7 +895,7 @@ export interface Autodiscovery {
 export function newAccount(): AccountForm {
   return {
     account_id: null, display_name: '', sender_name: '', protocol: 'imap', jmap_url: '', auth: 'password', host: '', port: 993,
-    username: '', password: '', use_tls: true, smtp_host: '', smtp_port: 587,
+    username: '', password: '', use_tls: true, smtp_host: '', smtp_port: 587, oauth_client_id: '', oauth_client_secret: '', authorize: false,
   };
 }
 
@@ -904,6 +906,7 @@ export function editAccount(acc: Account, identities: Identity[]): AccountForm {
     protocol: acc.protocol, jmap_url: acc.jmap_url ?? '', auth: acc.auth,
     host: acc.host, port: acc.port, username: acc.username, password: '', use_tls: acc.use_tls,
     smtp_host: acc.smtp_host || '', smtp_port: acc.smtp_port || 587,
+    oauth_client_id: acc.oauth_client_id ?? '', oauth_client_secret: '', authorize: false,
   };
 }
 
@@ -943,9 +946,19 @@ export function discovered(form: AccountForm, d: Autodiscovery | null, oidc = fa
   return next;
 }
 
-/** Whether the account dialog asks for a password (or token): not for a JMAP account that signs in with OIDC. */
+/** Whether the account dialog asks for a password (or token): not for a JMAP account that signs in with OIDC or at the server. */
 export function needsPassword(f: AccountForm): boolean {
-  return !(f.protocol === 'jmap' && f.auth === 'oidc');
+  return !(f.protocol === 'jmap' && (f.auth === 'oidc' || f.auth === 'oauth'));
+}
+
+/** Whether the account signs in at the mail server itself (saving it may go to the server's sign-in page). */
+export function signsInAtServer(f: AccountForm): boolean {
+  return f.protocol === 'jmap' && f.auth === 'oauth';
+}
+
+/** The redirect URI to register at the mail server for its OAuth client: this Caley's `/auth/jmap`. */
+export function jmapRedirectUri(): string {
+  return `${globalThis.location?.origin ?? ''}/auth/jmap`;
 }
 
 /** The account form's body (POST /api/email/account); the port field is `required`, so it is set when the form submits. */
@@ -956,6 +969,7 @@ export function accountBody(f: AccountForm) {
     jmap_url: jmap ? f.jmap_url : null, auth: jmap ? f.auth : 'password' as const, host: jmap ? '' : f.host, port: jmap ? 443 : f.port ?? 0,
     username: f.username, password: needsPassword(f) ? f.password : '', use_tls: f.use_tls,
     smtp_host: jmap ? null : f.smtp_host || null, smtp_port: jmap ? null : f.smtp_port || null,
+    ...(signsInAtServer(f) ? { oauth_client_id: f.oauth_client_id, oauth_client_secret: f.oauth_client_secret || null, authorize: f.authorize } : {}),
   };
 }
 
