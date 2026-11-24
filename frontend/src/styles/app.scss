@@ -54,8 +54,13 @@ a.mail-attachment-chip:hover {
 // The rail keeps its place and cross-fades (only aria-current changes); <main> cross-fades with a short lift. The two
 // fades run together: one after the other, both were near zero in the middle, and the page flashed empty.
 // temper turns the transitions on (`@view-transition`, not with reduced motion); these rules only shape them.
+// A view-transition-name makes the element a stacking context, the rail's and <main>'s alike, both at z-index auto, so
+// <main> (later in the page) painted over everything in the rail: the collapsed rail's tooltips (its links' ::after)
+// were hidden behind the content. The rail (sticky, so positioned) goes above it; on phones it is a popover drawer in
+// the top layer anyway.
 body[data-shell] > nav[data-rail] {
   view-transition-name: nav-rail;
+  z-index: 1;
 }
 
 body[data-shell] > main {

@@ -654,6 +654,13 @@ $phone: 639px;
     }
   }
 
+  // The overlay's z-index counts only inside <main>'s stacking context (its view-transition-name, app.scss), which
+  // is below the rail's (z-index: 1 there, for its tooltips): while the overlay is open, the rail goes back below
+  // <main>, so the overlay covers it as a whole-window reader.
+  body[data-shell]:has(.message-detail.is-open) > nav[data-rail] {
+    z-index: auto;
+  }
+
   // The whole reader scrolls, its body with it.
   .reader {
     flex: 1 0 auto;
