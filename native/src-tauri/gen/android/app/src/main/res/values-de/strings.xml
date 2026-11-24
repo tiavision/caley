@@ -1,0 +1,7 @@
+<resources>
+    <!-- ShellBridge.kt -->
+    <string name="shell_channel">Benachrichtigungen</string>
+    <string name="shell_saved">In Downloads gespeichert: %1$s</string>
+    <string name="shell_save_failed">%1$s konnte nicht gespeichert werden</string>
+    <string name="shell_downloading">%1$s wird heruntergeladen</string>
+</resources>

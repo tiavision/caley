@@ -1,0 +1,233 @@
+package app.caley
+
+import android.Manifest
+import android.app.DownloadManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.ClipData
+import android.content.ContentValues
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.util.Base64
+import android.webkit.CookieManager
+import android.webkit.URLUtil
+import android.webkit.WebView
+import android.widget.Toast
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.FileProvider
+import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.ScriptHandler
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import org.json.JSONObject
+import java.io.File
+
+/**
+ * What the server's pages get from the app (res/raw/shell_bridge.js, injected at document start): Android
+ * notifications behind `Notification`, the share sheet behind `navigator.share`, saving downloads of data the
+ * page made (blob:/data: links), and Android's download manager for downloads from the server, with the
+ * page's cookies. The page and the app talk over the `caleyShell` web message channel, top frames only; the
+ * picker (the app's own page) gets none of it.
+ */
+class ShellBridge(private val activity: MainActivity, private val webView: WebView) {
+  private val prefs = activity.getSharedPreferences("shell", Context.MODE_PRIVATE)
+  private val notifications = NotificationManagerCompat.from(activity)
+  private var script: ScriptHandler? = null
+  // the page that said hello last: notification clicks and permission changes go there
+  private var page: JavaScriptReplyProxy? = null
+  // a page's notification ("<page>:<id>") → the Android one (tag, id)
+  private val shown = mutableMapOf<String, Pair<String?, Int>>()
+  private var nextId = 1
+
+  fun install() {
+    if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) ||
+      !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
+    ) return
+    WebViewCompat.addWebMessageListener(webView, "caleyShell", setOf("*")) { _, message, origin, isMainFrame, reply ->
+      val data = message.data
+      if (isMainFrame && origin.host != "tauri.localhost" && data != null) handle(JSONObject(data), reply)
+    }
+    inject()
+    webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+      download(url, userAgent, contentDisposition, mimeType)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      activity.getSystemService(NotificationManager::class.java).createNotificationChannel(
+        NotificationChannel(CHANNEL, activity.getString(R.string.shell_channel), NotificationManager.IMPORTANCE_DEFAULT)
+      )
+    }
+  }
+
+  /** Back in front: the permission may have been changed in the system settings meanwhile. */
+  fun resumed() {
+    if (script == null) return
+    inject()
+    page?.postMessage(JSONObject().put("permission", permission()).toString())
+  }
+
+  /** A notification tapped (the intent that brought the app to front): its click, on the page that sent it. */
+  fun opened(intent: Intent) {
+    val click = intent.getStringExtra(EXTRA_CLICK) ?: return
+    val (pageId, id) = click.split(":", limit = 2).let { it[0] to it[1].toInt() }
+    page?.postMessage(JSONObject().put("click", id).put("page", pageId).toString())
+  }
+
+  // the script, with the permission as it is now written in (the page reads it at once)
+  private fun inject() {
+    script?.remove()
+    val source = activity.resources.openRawResource(R.raw.shell_bridge).bufferedReader().use { it.readText() }
+      .replace("__PERMISSION__", permission())
+    script = WebViewCompat.addDocumentStartJavaScript(webView, source, setOf("*"))
+  }
+
+  private fun handle(message: JSONObject, reply: JavaScriptReplyProxy) {
+    val id = message.optInt("id")
+    when (message.optString("type")) {
+      "hello" -> page = reply
+      "permission" -> requestPermission { answer(reply, id, it) }
+      "notify" -> notify(message)
+      "close" -> shown.remove("${message.optString("page")}:${message.optInt("id")}")?.let { (tag, n) -> notifications.cancel(tag, n) }
+      "share" -> {
+        share(message)
+        answer(reply, id, null)
+      }
+      "save" -> Thread {
+        val saved = runCatching { save(message.getString("name"), message.getString("mime"), message.getString("data")) }
+        activity.runOnUiThread {
+          if (saved.isSuccess) {
+            toast(R.string.shell_saved, message.getString("name"))
+            answer(reply, id, null)
+          } else {
+            toast(R.string.shell_save_failed, message.getString("name"))
+            answer(reply, id, null, error = saved.exceptionOrNull()?.message ?: "failed")
+          }
+        }
+      }.start()
+    }
+  }
+
+  private fun answer(reply: JavaScriptReplyProxy, id: Int, value: String?, error: String? = null) {
+    val message = JSONObject().put("reply", id).put("value", value ?: JSONObject.NULL)
+    if (error != null) message.put("error", error)
+    reply.postMessage(message.toString())
+  }
+
+  // `Notification.permission`: denied once asked and refused, until turned on in the system settings
+  private fun permission(): String = when {
+    notifications.areNotificationsEnabled() -> {
+      prefs.edit().remove("denied").apply()
+      "granted"
+    }
+    prefs.getBoolean("denied", false) || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU -> "denied"
+    else -> "default"
+  }
+
+  private fun requestPermission(done: (String) -> Unit) {
+    if (permission() != "default") return done(permission())
+    activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS)) { granted ->
+      if (granted != true) prefs.edit().putBoolean("denied", true).apply()
+      inject()
+      done(permission())
+    }
+  }
+
+  private fun notify(message: JSONObject) {
+    if (!notifications.areNotificationsEnabled()) return
+    val key = "${message.optString("page")}:${message.optInt("id")}"
+    // a tag replaces the notification with the same tag, as in a browser
+    val tag = message.optString("tag").ifEmpty { null }
+    val id = if (tag != null) 0 else nextId++
+    val requestCode = tag?.hashCode() ?: id
+    val open = PendingIntent.getActivity(
+      activity, requestCode,
+      Intent(activity, MainActivity::class.java).putExtra(EXTRA_CLICK, key).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+    val body = message.optString("body")
+    val notification = NotificationCompat.Builder(activity, CHANNEL)
+      .setSmallIcon(R.drawable.ic_stat_caley)
+      .setColor(activity.getColor(R.color.caley_accent))
+      .setContentTitle(message.optString("title"))
+      .setContentText(body)
+      .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+      .setContentIntent(open)
+      .setAutoCancel(true)
+      .build()
+    try {
+      notifications.notify(tag, id, notification)
+      shown[key] = tag to id
+    } catch (_: SecurityException) {
+      // the permission was taken back meanwhile
+    }
+  }
+
+  private fun share(message: JSONObject) {
+    val title = message.optString("title")
+    val intent = Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_SUBJECT, title).putExtra(Intent.EXTRA_TITLE, title)
+    val file = message.optJSONObject("file")
+    if (file != null) {
+      // a file in the cache the FileProvider serves (res/xml/file_paths.xml), for the app shared to
+      val dir = File(activity.cacheDir, "shared").apply { mkdirs() }
+      val shared = File(dir, safeName(file.getString("name")))
+      shared.writeBytes(bytes(file.getString("data")))
+      val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", shared)
+      intent.setType(file.getString("type")).putExtra(Intent.EXTRA_STREAM, uri)
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      intent.clipData = ClipData.newUri(activity.contentResolver, shared.name, uri)
+    } else {
+      intent.setType("text/plain").putExtra(Intent.EXTRA_TEXT, message.optString("text"))
+    }
+    activity.startActivity(Intent.createChooser(intent, title.ifEmpty { null }))
+  }
+
+  // into Downloads (MediaStore: no storage permission since Android 10; the app's own folder before)
+  private fun save(name: String, type: String, data: String) {
+    val content = bytes(data)
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+      File(activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), safeName(name)).writeBytes(content)
+      return
+    }
+    val resolver = activity.contentResolver
+    val values = ContentValues().apply {
+      put(MediaStore.Downloads.DISPLAY_NAME, safeName(name))
+      put(MediaStore.Downloads.MIME_TYPE, type)
+      put(MediaStore.Downloads.IS_PENDING, 1)
+    }
+    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: error("no Downloads")
+    resolver.openOutputStream(uri)!!.use { it.write(content) }
+    resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+  }
+
+  // a download from the server: Android's download manager, with the session cookie the page has
+  private fun download(url: String, userAgent: String, contentDisposition: String?, mimeType: String?) {
+    if (!url.startsWith("http")) return
+    val name = URLUtil.guessFileName(url, contentDisposition, mimeType)
+    val request = DownloadManager.Request(Uri.parse(url))
+      .addRequestHeader("User-Agent", userAgent)
+      .setTitle(name)
+      .setMimeType(mimeType)
+      .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+      .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+    CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
+    activity.getSystemService(DownloadManager::class.java).enqueue(request)
+    toast(R.string.shell_downloading, name)
+  }
+
+  private fun toast(text: Int, name: String) =
+    Toast.makeText(activity, activity.getString(text, name), Toast.LENGTH_SHORT).show()
+
+  private fun bytes(dataUrl: String): ByteArray = Base64.decode(dataUrl.substringAfter(","), Base64.DEFAULT)
+
+  private fun safeName(name: String) = name.replace(Regex("[/\\\\:*?\"<>|\\x00-\\x1f]"), "_").ifBlank { "download" }
+
+  companion object {
+    private const val CHANNEL = "caley"
+    private const val EXTRA_CLICK = "app.caley.notification"
+  }
+}

@@ -9,4 +9,6 @@
     <color name="white">#FFFFFFFF</color>
     <!-- Caley's page background (temper's tm-bg token), behind the system bars (MainActivity.kt) -->
     <color name="caley_background">#FFF8FAFF</color>
+    <!-- the notifications' accent (ShellBridge.kt), the picker's -->
+    <color name="caley_accent">#FF4F46E5</color>
 </resources>

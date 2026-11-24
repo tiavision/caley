@@ -1,5 +1,6 @@
 package app.caley
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.webkit.WebView
@@ -29,12 +30,26 @@ class MainActivity : TauriActivity() {
     }
     ViewCompat.requestApplyInsets(container)
 
+    bridge = ShellBridge(this, webView).also { it.install() }
+
     backCallback = object : OnBackPressedCallback(true) {
       override fun handleOnBackPressed() = back(webView)
     }
   }
 
   private var backCallback: OnBackPressedCallback? = null
+  private var bridge: ShellBridge? = null
+
+  override fun onResume() {
+    super.onResume()
+    bridge?.resumed()
+  }
+
+  // a notification tapped while the app runs (singleTask: this activity gets the intent)
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    bridge?.opened(intent)
+  }
 
   // Tauri's app plugin adds its own Back handler (only back in the webview, or leave) once the app is set up,
   // which is after onWebViewCreate; the last one added is asked first. So this one is added again whenever the
