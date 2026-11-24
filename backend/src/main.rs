@@ -13,9 +13,11 @@ mod email_sync;
 mod embed;
 mod etag;
 mod imap_client;
+mod jmap;
 mod landing;
 mod local_auth;
 mod oidc;
+mod oidc_tokens;
 mod pgp;
 mod public_origin;
 mod search;
@@ -65,6 +67,11 @@ struct Cli {
     static_dir: Option<String>,
     #[arg(long, env = "DATABASE_PATH", default_value = "./data/caley.db")]
     database_path: String,
+    /// Scopes asked for at the OIDC sign-in besides `openid profile`, space-separated: `offline_access` gives a
+    /// refresh token (JMAP accounts that sign in with OIDC use the access token between requests), and an identity
+    /// provider may want a scope (or audience) of its own before Stalwart takes the token.
+    #[arg(long, env = "OIDC_SCOPES", default_value = "")]
+    oidc_scopes: String,
     #[arg(long, env = "OIDC_USER_ID_CLAIM", default_value = "sub")]
     oidc_user_id_claim: UserIdClaim,
     #[arg(long, env = "ENCRYPTION_KEY")]
@@ -150,16 +157,6 @@ async fn main() -> anyhow::Result<()> {
         args.demo_mode,
     );
 
-    let email_sync_manager = email_sync::EmailSyncManager::new(
-        db.clone(),
-        encryption_key,
-        Arc::clone(&sse_broadcaster),
-        args.sync_interval_mins,
-        search_mode.clone(),
-        data_dir.clone(),
-        args.demo_mode,
-    );
-
     let session_store = SqliteStore::new(db.clone());
     session_store.migrate().await?;
 
@@ -186,6 +183,7 @@ async fn main() -> anyhow::Result<()> {
         )
     };
 
+    let mut token_url: Option<String> = None;
     let oidc_provider: Option<Arc<OidcProvider>> = if use_oidc {
         let http_client = oidc::OidcHttpClient(
             reqwest::Client::builder()
@@ -202,6 +200,7 @@ async fn main() -> anyhow::Result<()> {
             .additional_metadata()
             .end_session_endpoint
             .clone();
+        token_url = provider_meta.token_endpoint().map(|u| u.to_string());
         let client = CoreClient::from_provider_metadata(
             provider_meta,
             ClientId::new(args.oidc_client_id.clone().unwrap()),
@@ -220,7 +219,39 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    let refresher = match (use_oidc, token_url) {
+        (true, Some(token_url)) => Some(oidc_tokens::Refresher {
+            http: jmap::http_client()?,
+            token_url,
+            client_id: args.oidc_client_id.clone().unwrap_or_default(),
+            client_secret: args.oidc_client_secret.clone().unwrap_or_default(),
+        }),
+        _ => None,
+    };
+    let oidc_tokens = Arc::new(oidc_tokens::OidcTokens::new(
+        db.clone(),
+        encryption_key,
+        refresher,
+    ));
+
+    let email_sync_manager = email_sync::EmailSyncManager::new(
+        db.clone(),
+        encryption_key,
+        Arc::clone(&sse_broadcaster),
+        args.sync_interval_mins,
+        search_mode.clone(),
+        data_dir.clone(),
+        args.demo_mode,
+        Arc::clone(&oidc_tokens),
+    );
+
     let state = AppState {
+        oidc_tokens,
+        oidc_scopes: args
+            .oidc_scopes
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect(),
         db,
         do_oidc_logout: args.oidc_logout,
         oidc_user_id_claim: args.oidc_user_id_claim,

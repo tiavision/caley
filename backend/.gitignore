@@ -1,2 +1,3 @@
 target
 .env
+.stalwart-test.env

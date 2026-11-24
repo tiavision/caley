@@ -11,9 +11,10 @@ use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::api::ApiError;
-use crate::email_db;
+use crate::email_db::{self, jmap_db};
 use crate::email_sync::eml_path;
 use crate::imap_client;
+use crate::jmap;
 use crate::oidc::{AppState, CurrentUser};
 use crate::sse::SseMessage;
 
@@ -323,7 +324,6 @@ async fn load_raw_eml(
     Some(raw)
 }
 
-
 /// Which message's source, and whether its large attachments are left out.
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -387,15 +387,28 @@ pub async fn get_raw_message(
 fn raw_response(raw: Vec<u8>, omit: Option<usize>, request: &axum::http::HeaderMap) -> Response {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(&raw);
-    let etag = format!("\"{}\"", digest[..16].iter().map(|b| format!("{b:02x}")).collect::<String>());
+    let etag = format!(
+        "\"{}\"",
+        digest[..16]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    );
     let common = [
         (header::CACHE_CONTROL, "private, no-store".to_owned()),
-        (header::HeaderName::from_static("x-content-type-options"), "nosniff".to_owned()),
+        (
+            header::HeaderName::from_static("x-content-type-options"),
+            "nosniff".to_owned(),
+        ),
         (header::ETAG, etag.clone()),
     ];
 
     if let Some(over) = omit {
-        let options = super::cut::CutOptions { over, related_over: over.max(512 * 1024), ..Default::default() };
+        let options = super::cut::CutOptions {
+            over,
+            related_over: over.max(512 * 1024),
+            ..Default::default()
+        };
         let (cut, holes) = super::cut::cut(&raw, &options);
         let holes = serde_json::to_string(&holes).unwrap_or_else(|_| "[]".to_owned());
         return (
@@ -421,7 +434,10 @@ fn raw_response(raw: Vec<u8>, omit: Option<usize>, request: &axum::http::HeaderM
                 common,
                 [
                     (header::CONTENT_TYPE, "application/octet-stream".to_owned()),
-                    (header::CONTENT_RANGE, format!("bytes {from}-{to}/{}", raw.len())),
+                    (
+                        header::CONTENT_RANGE,
+                        format!("bytes {from}-{to}/{}", raw.len()),
+                    ),
                 ],
                 raw[from..=to].to_vec(),
             )
@@ -458,7 +474,11 @@ fn byte_range(value: &str, len: usize) -> Option<(usize, usize)> {
         (len.checked_sub(n.min(len)).filter(|_| n > 0)?, len - 1)
     } else {
         let from: usize = a.parse().ok()?;
-        let to = if b.is_empty() { len - 1 } else { b.parse::<usize>().ok()?.min(len - 1) };
+        let to = if b.is_empty() {
+            len - 1
+        } else {
+            b.parse::<usize>().ok()?.min(len - 1)
+        };
         (from, to)
     };
     (from <= to && from < len).then_some((from, to))
@@ -603,7 +623,19 @@ async fn apply(
     changes: Vec<(MessageRef, Change)>,
 ) {
     // A deletion outside the trash is a move to it.
-    let trash = if changes
+    let in_trash = |mailbox: &str, trash: &Option<String>| {
+        if account.is_jmap() {
+            trash.as_deref() == Some(mailbox)
+        } else {
+            is_trash_mailbox_name(mailbox)
+        }
+    };
+    let trash = if account.is_jmap() {
+        jmap_db::jmap_mailbox_by_role(&state.db, &account.account_id, "trash")
+            .await
+            .unwrap_or(None)
+            .map(|(_, name)| name)
+    } else if changes
         .iter()
         .any(|(m, c)| matches!(c, Change::Delete) && !is_trash_mailbox_name(&m.mailbox))
     {
@@ -616,14 +648,18 @@ async fn apply(
     let changes: Vec<(MessageRef, Change)> = changes
         .into_iter()
         .map(|(m, c)| match (c, &trash) {
-            (Change::Delete, Some(t)) if !is_trash_mailbox_name(&m.mailbox) => {
+            (Change::Delete, Some(t)) if !in_trash(&m.mailbox, &trash) => {
                 (m, Change::Move { dest: t.clone() })
             }
             (c, _) => (m, c),
         })
         .collect();
 
-    if !state.demo_mode {
+    if state.demo_mode {
+        // the cache alone
+    } else if account.is_jmap() {
+        apply_on_jmap(state, user_id, account, &changes).await;
+    } else {
         match imap_client::connect(
             &account.host,
             account.port as u16,
@@ -684,6 +720,52 @@ async fn apply(
                 account_id: account.account_id.clone(),
                 mailbox,
             },
+        );
+    }
+}
+
+/// Makes the changes on a JMAP server (Email/set); failures are logged, as IMAP's are. The server's push then syncs
+/// the account, which gives a moved message its UID in the destination.
+async fn apply_on_jmap(
+    state: &AppState,
+    user_id: &str,
+    account: &email_db::ImapAccountRow,
+    changes: &[(MessageRef, Change)],
+) {
+    let client = match state.email_sync_manager.jmap_client(account, user_id).await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[email] connect for a message change: {e}");
+            return;
+        }
+    };
+    let ops: Vec<(&str, u32, jmap::ops::Change)> = changes
+        .iter()
+        .map(|(m, c)| {
+            let op = match c {
+                Change::Flags { flags, set } => jmap::ops::Change::Flags { flags, set: *set },
+                Change::Move { dest } => jmap::ops::Change::Move { dest },
+                Change::Delete => jmap::ops::Change::Delete,
+            };
+            (m.mailbox.as_str(), m.uid, op)
+        })
+        .collect();
+    match jmap::ops::apply_changes(&client, &state.db, &account.account_id, &ops).await {
+        Ok(failed) => {
+            for ((mailbox, uid), reason) in failed {
+                eprintln!("[email] change of {mailbox} {uid}: {reason}");
+            }
+        }
+        Err(e) => eprintln!("[email] JMAP change: {e}"),
+    }
+    // the moved messages' UIDs in their destinations come with the account's next sync
+    if changes
+        .iter()
+        .any(|(_, c)| matches!(c, Change::Move { .. }))
+    {
+        state.email_sync_manager.trigger(
+            &account.account_id,
+            crate::email_sync::EmailSyncTrigger::Full,
         );
     }
 }
@@ -1047,6 +1129,16 @@ pub async fn empty_trash(
         }
     };
 
+    if account.is_jmap() && !state.demo_mode {
+        // JMAP has no date a message was put in a mailbox (IMAP's SAVEDATE); receivedAt would empty a trash of
+        // old mail trashed today
+        return (
+            StatusCode::PRECONDITION_FAILED,
+            Json(ApiError::new("savedate_unsupported")),
+        )
+            .into_response();
+    }
+
     let deleted_uids = if state.demo_mode {
         let cutoff_ts = Utc::now().timestamp() - body.days * 24 * 60 * 60;
         match email_db::get_cached_uids_sent_before(
@@ -1396,7 +1488,10 @@ pub(super) fn message_to_json_with_attachments(
             .map(|a| Attachment {
                 // The sync always stores the three (`untitled` for a part without a name); the columns allow NULL.
                 filename: a.filename.clone().unwrap_or_else(|| "untitled".to_owned()),
-                content_type: a.content_type.clone().unwrap_or_else(|| "application/octet-stream".to_owned()),
+                content_type: a
+                    .content_type
+                    .clone()
+                    .unwrap_or_else(|| "application/octet-stream".to_owned()),
                 size: a.size.unwrap_or(0),
                 content_id: a.content_id.clone(),
             })
@@ -1514,20 +1609,29 @@ mod raw_tests {
         let none = axum::http::HeaderMap::new();
         let cut = raw_response(raw.clone(), Some(8), &none);
         assert_eq!(cut.status(), StatusCode::OK);
-        let holes: serde_json::Value = serde_json::from_str(cut.headers()["mail-holes"].to_str().unwrap()).unwrap();
-        let (start, end) = (holes[0]["start"].as_u64().unwrap() as usize, holes[0]["end"].as_u64().unwrap() as usize);
+        let holes: serde_json::Value =
+            serde_json::from_str(cut.headers()["mail-holes"].to_str().unwrap()).unwrap();
+        let (start, end) = (
+            holes[0]["start"].as_u64().unwrap() as usize,
+            holes[0]["end"].as_u64().unwrap() as usize,
+        );
         assert_eq!(&raw[start..end], b"0123456789abcdef");
         let etag = cut.headers()[header::ETAG].clone();
 
         let mut ranged = axum::http::HeaderMap::new();
-        ranged.insert(header::RANGE, format!("bytes={start}-{}", end - 1).parse().unwrap());
+        ranged.insert(
+            header::RANGE,
+            format!("bytes={start}-{}", end - 1).parse().unwrap(),
+        );
         ranged.insert(header::IF_RANGE, etag);
         let part = raw_response(raw.clone(), None, &ranged);
         assert_eq!(part.status(), StatusCode::PARTIAL_CONTENT);
-        let body = axum::body::to_bytes(part.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(part.into_body(), usize::MAX)
+            .await
+            .unwrap();
         assert_eq!(&body[..], b"0123456789abcdef");
 
         ranged.insert(header::IF_RANGE, "\"other\"".parse().unwrap());
-        assert_eq!(raw_response(raw, None, &ranged).status(), StatusCode::OK);   // changed: the whole message
+        assert_eq!(raw_response(raw, None, &ranged).status(), StatusCode::OK); // changed: the whole message
     }
 }

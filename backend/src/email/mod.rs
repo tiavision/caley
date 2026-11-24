@@ -21,12 +21,22 @@ pub(crate) mod send;
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
 
-/// An IMAP account (its password is never sent).
+/// A mail account, IMAP or JMAP (its password is never sent).
 #[derive(Serialize, ToSchema)]
 pub struct Account {
     pub account_id: String,
     pub display_name: String,
-    /// IMAP server
+    /// `imap` or `jmap`
+    #[schema(value_type = Protocol)]
+    pub protocol: String,
+    /// a JMAP account's session URL; `null` for IMAP
+    #[schema(required)]
+    pub jmap_url: Option<String>,
+    /// how a JMAP account signs in: `password`, `bearer` (an API token) or `oidc` (the user's OIDC sign-in);
+    /// `password` for IMAP
+    #[schema(value_type = AccountAuth)]
+    pub auth: String,
+    /// IMAP server (JMAP: the host of its URL)
     pub host: String,
     pub port: i64,
     pub username: String,
@@ -38,6 +48,36 @@ pub struct Account {
     #[schema(required)]
     pub smtp_port: Option<i64>,
     pub sort_order: i64,
+}
+
+/// A mail account's protocol.
+#[derive(Serialize, Deserialize, ToSchema, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Protocol {
+    Imap,
+    Jmap,
+}
+
+/// How a JMAP account signs in.
+#[derive(Serialize, Deserialize, ToSchema, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum AccountAuth {
+    /// HTTP Basic with the username and password
+    Password,
+    /// the password is an API token, sent as a bearer token
+    Bearer,
+    /// the user's own OIDC sign-in: its access token, renewed with its refresh token
+    Oidc,
+}
+
+impl AccountAuth {
+    fn as_str(self) -> &'static str {
+        match self {
+            AccountAuth::Password => "password",
+            AccountAuth::Bearer => "bearer",
+            AccountAuth::Oidc => "oidc",
+        }
+    }
 }
 
 #[derive(Serialize, ToSchema)]
@@ -64,6 +104,9 @@ pub async fn list_accounts(State(state): State<AppState>, user: CurrentUser) -> 
                 .map(|a| Account {
                     account_id: a.account_id,
                     display_name: a.display_name,
+                    protocol: a.protocol,
+                    jmap_url: a.jmap_url,
+                    auth: a.auth,
                     host: a.host,
                     port: a.port,
                     username: a.username,
@@ -82,15 +125,22 @@ pub async fn list_accounts(State(state): State<AppState>, user: CurrentUser) -> 
     }
 }
 
-/// An IMAP account to add (no `account_id`) or update.
+/// A mail account to add (no `account_id`) or update.
 #[derive(Deserialize, ToSchema)]
 pub struct AccountBody {
     pub account_id: Option<String>,
     pub display_name: String,
+    /// default `imap`
+    pub protocol: Option<Protocol>,
+    /// JMAP: the session URL, or the server's host (`https://host/.well-known/jmap`)
+    pub jmap_url: Option<String>,
+    /// JMAP: how it signs in, default `password`
+    pub auth: Option<AccountAuth>,
+    /// IMAP server (ignored for JMAP: taken from its URL)
     pub host: String,
     pub port: u16,
     pub username: String,
-    /// empty or missing: keep the stored one (required for a new account)
+    /// empty or missing: keep the stored one (required for a new account, unless it signs in with OIDC)
     pub password: Option<String>,
     /// default true
     pub use_tls: Option<bool>,
@@ -100,14 +150,16 @@ pub struct AccountBody {
     pub sender_name: Option<String>,
 }
 
-/// Adds (no `account_id`) or updates an IMAP account; PUT is the same.
+/// Adds (no `account_id`) or updates a mail account; PUT is the same. A JMAP account is saved only once its server
+/// has answered its session with the account's sign-in.
 #[utoipa::path(
     method(post, put),
     path = "/email/account",
     request_body = AccountBody,
     responses(
         (status = 200, body = AccountSaved),
-        (status = 400, description = "password required for new account (plain text)"),
+        (status = 400, description = "password required for new account, or the JMAP server refused the sign-in or \
+            could not be reached (plain text)"),
         (status = 500, description = "database error")
     )
 )]
@@ -120,44 +172,105 @@ pub async fn save_account(
     let account_id = body
         .account_id
         .unwrap_or_else(|| Uuid::new_v4().to_string());
-    let use_tls = body.use_tls.unwrap_or(true);
+    let mut use_tls = body.use_tls.unwrap_or(true);
+    let protocol = body.protocol.unwrap_or(Protocol::Imap);
+    let auth = match protocol {
+        Protocol::Imap => AccountAuth::Password,
+        Protocol::Jmap => body.auth.unwrap_or(AccountAuth::Password),
+    };
 
-    let password = match body.password.filter(|p| !p.is_empty()) {
-        Some(p) => p,
-        None => {
-            match email_db::get_account(
-                &state.db,
-                &account_id,
-                &user.user_id,
-                &state.encryption_key,
-            )
+    let existing = if is_new {
+        None
+    } else {
+        match email_db::get_account(&state.db, &account_id, &user.user_id, &state.encryption_key)
             .await
-            {
-                Ok(Some(existing)) => existing.password,
-                Ok(None) => {
-                    return (StatusCode::BAD_REQUEST, "password required for new account")
-                        .into_response();
-                }
-                Err(e) => {
-                    eprintln!("[email] save_account lookup error: {e}");
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-                }
+        {
+            Ok(existing) => existing,
+            Err(e) => {
+                eprintln!("[email] save_account lookup error: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
             }
         }
     };
+    let password = match body.password.filter(|p| !p.is_empty()) {
+        Some(p) => p,
+        None if auth == AccountAuth::Oidc => String::new(),
+        None => match &existing {
+            Some(existing) => existing.password.clone(),
+            None => {
+                return (StatusCode::BAD_REQUEST, "password required for new account")
+                    .into_response();
+            }
+        },
+    };
+
+    let (mut host, mut port, mut username) = (body.host, body.port, body.username);
+    let mut jmap_url = None;
+    if protocol == Protocol::Jmap {
+        let checked = match check_jmap(
+            &state,
+            &user.user_id,
+            body.jmap_url.as_deref().unwrap_or_default(),
+            auth,
+            &username,
+            &password,
+        )
+        .await
+        {
+            Ok(checked) => checked,
+            Err(message) => return (StatusCode::BAD_REQUEST, message).into_response(),
+        };
+        host = checked.url.host_str().unwrap_or_default().to_owned();
+        port = checked.url.port_or_known_default().unwrap_or(443);
+        use_tls = checked.url.scheme() == "https";
+        if username.is_empty() {
+            username = checked.username.unwrap_or_default();
+        }
+        jmap_url = Some(checked.url.to_string());
+    }
+
+    // another protocol or JMAP server: what the cache holds is of the old one (an IMAP server's UIDVALIDITY tells
+    // the sync itself)
+    if let Some(existing) = &existing {
+        let protocol_name = if protocol == Protocol::Jmap {
+            "jmap"
+        } else {
+            "imap"
+        };
+        let moved = existing.protocol != protocol_name
+            || (protocol == Protocol::Jmap && existing.jmap_url != jmap_url);
+        if moved {
+            state.email_sync_manager.stop_idle_for(&account_id);
+            let _ =
+                tokio::fs::remove_dir_all(state.data_dir.join("messages").join(&account_id)).await;
+            if let Err(e) = email_db::reset_account_cache(&state.db, &account_id).await {
+                eprintln!("[email] save_account cache reset error: {e}");
+            }
+        }
+    }
 
     if let Err(e) = email_db::upsert_account(
         &state.db,
         &user.user_id,
         &account_id,
         &body.display_name,
-        &body.host,
-        body.port,
-        &body.username,
+        &host,
+        port,
+        &username,
         &password,
         use_tls,
-        body.smtp_host.as_deref(),
-        body.smtp_port,
+        body.smtp_host
+            .as_deref()
+            .filter(|_| protocol == Protocol::Imap),
+        body.smtp_port.filter(|_| protocol == Protocol::Imap),
+        &email_db::AccountProtocol {
+            protocol: match protocol {
+                Protocol::Imap => "imap",
+                Protocol::Jmap => "jmap",
+            },
+            jmap_url: jmap_url.as_deref(),
+            auth: auth.as_str(),
+        },
         &state.encryption_key,
     )
     .await
@@ -174,7 +287,7 @@ pub async fn save_account(
                 &account_id,
                 &user.user_id,
                 &name,
-                &body.username,
+                &username,
                 true,
             )
             .await
@@ -184,10 +297,60 @@ pub async fn save_account(
         }
     }
 
+    if !is_new {
+        // new credentials or a new server: the next sync connects with them
+        state.email_sync_manager.stop_idle_for(&account_id);
+    }
+    state.email_sync_manager.ensure_task_for(&account_id);
+
     state
         .sse_broadcaster
         .send(&user.user_id, SseMessage::AccountsChanged);
     Json(AccountSaved { account_id }).into_response()
+}
+
+/// A JMAP server that answered its session.
+struct CheckedJmap {
+    url: url::Url,
+    /// the session's username
+    username: Option<String>,
+}
+
+/// Fetches a JMAP account's session with its sign-in: the error text for the account dialog otherwise.
+async fn check_jmap(
+    state: &AppState,
+    user_id: &str,
+    input: &str,
+    auth: AccountAuth,
+    username: &str,
+    password: &str,
+) -> Result<CheckedJmap, String> {
+    let url = crate::jmap::session_url(input).map_err(|e| e.to_string())?;
+    if state.demo_mode {
+        return Ok(CheckedJmap {
+            url,
+            username: None,
+        });
+    }
+    let auth = match auth {
+        AccountAuth::Password => crate::jmap::Auth::Basic {
+            username: username.to_owned(),
+            password: password.to_owned(),
+        },
+        AccountAuth::Bearer => crate::jmap::Auth::Bearer(password.to_owned()),
+        AccountAuth::Oidc => match state.oidc_tokens.access_token(user_id).await {
+            Ok(token) => crate::jmap::Auth::Bearer(token),
+            Err(e) => return Err(e.to_string()),
+        },
+    };
+    match crate::jmap::Client::connect(&state.email_sync_manager.http, url.as_str(), auth).await {
+        Ok(client) => Ok(CheckedJmap {
+            url,
+            username: client.session.username.clone(),
+        }),
+        Err(e) if crate::jmap::is_unauthorized(&e) => Err(e.to_string()),
+        Err(e) => Err(format!("the JMAP server could not be used: {e}")),
+    }
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -196,7 +359,7 @@ pub struct AccountIdQuery {
     pub account_id: String,
 }
 
-/// Deletes an IMAP account with its cached mail.
+/// Deletes a mail account with its cached mail.
 #[utoipa::path(
     delete,
     path = "/email/account",

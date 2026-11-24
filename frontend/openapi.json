@@ -536,7 +536,7 @@
     },
     "/email/account": {
       "put": {
-        "summary": "Adds (no `account_id`) or updates an IMAP account; PUT is the same.",
+        "summary": "Adds (no `account_id`) or updates a mail account; PUT is the same. A JMAP account is saved only once its server\nhas answered its session with the account's sign-in.",
         "operationId": "save_account",
         "requestBody": {
           "content": {
@@ -559,7 +559,7 @@
             }
           },
           "400": {
-            "description": "password required for new account (plain text)"
+            "description": "password required for new account, or the JMAP server refused the sign-in or could not be reached (plain text)"
           },
           "500": {
             "description": "database error"
@@ -567,7 +567,7 @@
         }
       },
       "post": {
-        "summary": "Adds (no `account_id`) or updates an IMAP account; PUT is the same.",
+        "summary": "Adds (no `account_id`) or updates a mail account; PUT is the same. A JMAP account is saved only once its server\nhas answered its session with the account's sign-in.",
         "operationId": "save_account",
         "requestBody": {
           "content": {
@@ -590,7 +590,7 @@
             }
           },
           "400": {
-            "description": "password required for new account (plain text)"
+            "description": "password required for new account, or the JMAP server refused the sign-in or could not be reached (plain text)"
           },
           "500": {
             "description": "database error"
@@ -598,7 +598,7 @@
         }
       },
       "delete": {
-        "summary": "Deletes an IMAP account with its cached mail.",
+        "summary": "Deletes a mail account with its cached mail.",
         "operationId": "delete_account",
         "parameters": [
           {
@@ -716,7 +716,7 @@
     },
     "/email/autodiscover": {
       "get": {
-        "summary": "The IMAP and SMTP servers of an address (Thunderbird's ISPDB, then the domain's autoconfig).",
+        "summary": "The IMAP and SMTP servers of an address (Thunderbird's ISPDB, then the domain's autoconfig), and its\nJMAP server (`/.well-known/jmap`).",
         "operationId": "autodiscover_handler",
         "parameters": [
           {
@@ -1959,7 +1959,7 @@
     },
     "/email/send-raw": {
       "post": {
-        "summary": "Sends a MIME message the client built (signed, encrypted) through the identity's SMTP server to\nthe envelope's recipients (at most 100), then appends it to the Sent mailbox.",
+        "summary": "Sends a MIME message the client built (signed, encrypted) through the identity's SMTP server to\nthe envelope's recipients (at most 100), then appends it to the Sent mailbox. A JMAP account\nsends it with EmailSubmission, its copy imported into the Sent mailbox.",
         "operationId": "send_raw_email",
         "requestBody": {
           "content": {
@@ -1976,7 +1976,7 @@
             "description": "sent (empty body)"
           },
           "400": {
-            "description": "an invalid form, message or recipient (plain text)"
+            "description": "an invalid form, message or recipient, or a JMAP server with no identity for the address (plain text)"
           },
           "404": {
             "description": "identity or account not found (plain text)"
@@ -1985,7 +1985,7 @@
             "description": "database error"
           },
           "502": {
-            "description": "the SMTP server refused it (plain text)"
+            "description": "the SMTP (or JMAP) server refused it (plain text)"
           }
         }
       }
@@ -3087,10 +3087,13 @@
     "schemas": {
       "Account": {
         "type": "object",
-        "description": "An IMAP account (its password is never sent).",
+        "description": "A mail account, IMAP or JMAP (its password is never sent).",
         "required": [
           "account_id",
           "display_name",
+          "protocol",
+          "jmap_url",
+          "auth",
           "host",
           "port",
           "username",
@@ -3106,9 +3109,24 @@
           "display_name": {
             "type": "string"
           },
+          "protocol": {
+            "$ref": "#/components/schemas/Protocol",
+            "description": "`imap` or `jmap`"
+          },
+          "jmap_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "a JMAP account's session URL; `null` for IMAP"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/AccountAuth",
+            "description": "how a JMAP account signs in: `password`, `bearer` (an API token) or `oidc` (the user's OIDC sign-in);\n`password` for IMAP"
+          },
           "host": {
             "type": "string",
-            "description": "IMAP server"
+            "description": "IMAP server (JMAP: the host of its URL)"
           },
           "port": {
             "type": "integer",
@@ -3141,9 +3159,18 @@
           }
         }
       },
+      "AccountAuth": {
+        "type": "string",
+        "description": "How a JMAP account signs in.",
+        "enum": [
+          "password",
+          "bearer",
+          "oidc"
+        ]
+      },
       "AccountBody": {
         "type": "object",
-        "description": "An IMAP account to add (no `account_id`) or update.",
+        "description": "A mail account to add (no `account_id`) or update.",
         "required": [
           "display_name",
           "host",
@@ -3160,8 +3187,38 @@
           "display_name": {
             "type": "string"
           },
+          "protocol": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Protocol",
+                "description": "default `imap`"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "jmap_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "JMAP: the session URL, or the server's host (`https://host/.well-known/jmap`)"
+          },
+          "auth": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountAuth",
+                "description": "JMAP: how it signs in, default `password`"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "host": {
-            "type": "string"
+            "type": "string",
+            "description": "IMAP server (ignored for JMAP: taken from its URL)"
           },
           "port": {
             "type": "integer",
@@ -3176,7 +3233,7 @@
               "string",
               "null"
             ],
-            "description": "empty or missing: keep the stored one (required for a new account)"
+            "description": "empty or missing: keep the stored one (required for a new account, unless it signs in with OIDC)"
           },
           "use_tls": {
             "type": [
@@ -3451,13 +3508,16 @@
       },
       "Autodiscovery": {
         "type": "object",
-        "description": "What autodiscovery found for an address: `{\"found\": false}`, or `found` with all the servers'\nfields (`provider_name` may be `null`).",
+        "description": "What autodiscovery found for an address: `{\"found\": false}`, or `found` with all the IMAP and SMTP\nservers' fields (`provider_name` may be `null`); `jmap_url` when the domain has a JMAP server (found\nor not).",
         "required": [
           "found"
         ],
         "properties": {
           "found": {
             "type": "boolean"
+          },
+          "jmap_url": {
+            "type": "string"
           },
           "provider_name": {
             "type": [
@@ -4991,6 +5051,14 @@
           }
         }
       },
+      "Protocol": {
+        "type": "string",
+        "description": "A mail account's protocol.",
+        "enum": [
+          "imap",
+          "jmap"
+        ]
+      },
       "RecurrenceInfo": {
         "type": "object",
         "required": [
@@ -5593,7 +5661,8 @@
           "has_settings",
           "has_caldav",
           "oidc_enabled",
-          "map_url"
+          "map_url",
+          "oidc_signed_in"
         ],
         "properties": {
           "display_name": {
@@ -5614,6 +5683,10 @@
           "map_url": {
             "type": "string",
             "description": "the map URL template for locations, `{q}` the query (`MAP_URL`)"
+          },
+          "oidc_signed_in": {
+            "type": "boolean",
+            "description": "whether the user's OIDC sign-in is kept for mail accounts that sign in with it (JMAP)"
           }
         }
       },

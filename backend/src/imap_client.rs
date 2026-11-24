@@ -154,47 +154,60 @@ pub async fn fetch_headers(session: &mut ImapSession, uids: &[u32]) -> Result<Ve
         };
 
         let flags = fetch_flags(&fetch);
-        let flags_json = serde_json::to_string(&flags).unwrap_or_default();
-
-        let (
-            message_id,
-            thread_id,
-            from_addr,
-            to_addrs,
-            cc_addrs,
-            reply_to_addrs,
-            subject,
-            sent_at,
-            from_emails,
-            to_emails,
-            cc_emails,
-        ) = if let Some(header_bytes) = fetch.header() {
-            parse_header_bytes(header_bytes)
-        } else {
-            Default::default()
-        };
-
         let size = fetch.size.map(|s| s as i64);
-
-        headers.push(MessageHeader {
-            uid: uid as i64,
-            message_id,
-            thread_id,
-            from_addr,
-            to_addrs: to_addrs.map(|v| serde_json::to_string(&v).unwrap_or_default()),
-            cc_addrs: cc_addrs.map(|v| serde_json::to_string(&v).unwrap_or_default()),
-            reply_to_addrs: Some(serde_json::to_string(&reply_to_addrs).unwrap_or_default()),
-            subject,
-            sent_at,
-            flags: Some(flags_json),
-            has_attachments: false,
+        headers.push(header_from_bytes(
+            uid,
+            fetch.header().unwrap_or_default(),
+            &flags,
             size,
-            from_emails,
-            to_emails,
-            cc_emails,
-        });
+        ));
     }
     Ok(headers)
+}
+
+/// The cached header row of a message from its header section (an IMAP header fetch, or a JMAP email's raw header
+/// fields), its flags and size.
+pub(crate) fn header_from_bytes(
+    uid: u32,
+    header_bytes: &[u8],
+    flags: &[String],
+    size: Option<i64>,
+) -> MessageHeader {
+    let flags_json = serde_json::to_string(flags).unwrap_or_default();
+    let (
+        message_id,
+        thread_id,
+        from_addr,
+        to_addrs,
+        cc_addrs,
+        reply_to_addrs,
+        subject,
+        sent_at,
+        from_emails,
+        to_emails,
+        cc_emails,
+    ) = if header_bytes.is_empty() {
+        Default::default()
+    } else {
+        parse_header_bytes(header_bytes)
+    };
+    MessageHeader {
+        uid: uid as i64,
+        message_id,
+        thread_id,
+        from_addr,
+        to_addrs: to_addrs.map(|v| serde_json::to_string(&v).unwrap_or_default()),
+        cc_addrs: cc_addrs.map(|v| serde_json::to_string(&v).unwrap_or_default()),
+        reply_to_addrs: Some(serde_json::to_string(&reply_to_addrs).unwrap_or_default()),
+        subject,
+        sent_at,
+        flags: Some(flags_json),
+        has_attachments: false,
+        size,
+        from_emails,
+        to_emails,
+        cc_emails,
+    }
 }
 
 /// Parsed attachment extracted from a MIME message.
@@ -229,11 +242,11 @@ pub fn detect_pgp_signed(raw: &[u8]) -> bool {
             .any(|w| w == b"-----BEGIN PGP SIGNED MESSAGE-----")
 }
 
+/// A message's source as the sync caches it: (UID, raw bytes, render body, has attachments, attachments).
+pub type FetchedBody = (u32, Vec<u8>, MessageRenderBody, bool, Vec<AttachmentPart>);
+
 /// Returns raw bytes plus the small render body and attachment index for each UID.
-pub async fn fetch_bodies(
-    session: &mut ImapSession,
-    uids: &[u32],
-) -> Result<Vec<(u32, Vec<u8>, MessageRenderBody, bool, Vec<AttachmentPart>)>> {
+pub async fn fetch_bodies(session: &mut ImapSession, uids: &[u32]) -> Result<Vec<FetchedBody>> {
     if uids.is_empty() {
         return Ok(Vec::new());
     }
@@ -592,7 +605,9 @@ fn format_addr(a: mail_parser::Mailbox<'_>) -> String {
     }
 }
 
-fn parse_body_bytes(bytes: &[u8]) -> Result<(MessageRenderBody, bool, Vec<AttachmentPart>)> {
+pub(crate) fn parse_body_bytes(
+    bytes: &[u8],
+) -> Result<(MessageRenderBody, bool, Vec<AttachmentPart>)> {
     use mail_parser::MessageParser;
     let parser = MessageParser::default();
     let msg = match parser.parse(bytes) {
@@ -600,7 +615,10 @@ fn parse_body_bytes(bytes: &[u8]) -> Result<(MessageRenderBody, bool, Vec<Attach
         None => {
             let text = String::from_utf8_lossy(bytes).into_owned();
             return Ok((
-                MessageRenderBody { search_text: text, is_signed: detect_pgp_signed(bytes) },
+                MessageRenderBody {
+                    search_text: text,
+                    is_signed: detect_pgp_signed(bytes),
+                },
                 false,
                 Vec::new(),
             ));
@@ -610,13 +628,20 @@ fn parse_body_bytes(bytes: &[u8]) -> Result<(MessageRenderBody, bool, Vec<Attach
     let search_text = msg
         .body_text(0)
         .map(|text| text.as_ref().to_owned())
-        .unwrap_or_else(|| msg.body_html(0).map(|html| strip_tags(&html)).unwrap_or_default());
+        .unwrap_or_else(|| {
+            msg.body_html(0)
+                .map(|html| strip_tags(&html))
+                .unwrap_or_default()
+        });
 
     let attachments = extract_attachments(&msg);
     let has_attachments = !attachments.is_empty();
 
     Ok((
-        MessageRenderBody { search_text, is_signed: detect_pgp_signed(bytes) },
+        MessageRenderBody {
+            search_text,
+            is_signed: detect_pgp_signed(bytes),
+        },
         has_attachments,
         attachments,
     ))
@@ -899,7 +924,10 @@ pub(crate) mod tests {
     fn parses_reply_to_addresses() {
         let raw = b"From: Sender <sender@example.test>\r\nReply-To: List <list@example.test>, other@example.test\r\n\r\nbody";
         let (_, _, _, _, _, reply_to, ..) = parse_header_bytes(raw);
-        let expected = vec!["List <list@example.test>".to_owned(), "other@example.test".to_owned()];
+        let expected = vec![
+            "List <list@example.test>".to_owned(),
+            "other@example.test".to_owned(),
+        ];
         assert_eq!(reply_to, expected);
         assert_eq!(parse_reply_to(raw), expected);
         assert!(parse_reply_to(b"From: a@example.test\r\n\r\nbody").is_empty());

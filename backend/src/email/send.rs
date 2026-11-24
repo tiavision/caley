@@ -43,17 +43,18 @@ pub struct SendRawForm {
 }
 
 /// Sends a MIME message the client built (signed, encrypted) through the identity's SMTP server to
-/// the envelope's recipients (at most 100), then appends it to the Sent mailbox.
+/// the envelope's recipients (at most 100), then appends it to the Sent mailbox. A JMAP account
+/// sends it with EmailSubmission, its copy imported into the Sent mailbox.
 #[utoipa::path(
     post,
     path = "/email/send-raw",
     request_body(content = SendRawForm, content_type = "multipart/form-data"),
     responses(
         (status = 200, description = "sent (empty body)"),
-        (status = 400, description = "an invalid form, message or recipient (plain text)"),
+        (status = 400, description = "an invalid form, message or recipient, or a JMAP server with no identity for the address (plain text)"),
         (status = 404, description = "identity or account not found (plain text)"),
         (status = 500, description = "database error"),
-        (status = 502, description = "the SMTP server refused it (plain text)")
+        (status = 502, description = "the SMTP (or JMAP) server refused it (plain text)")
     )
 )]
 pub async fn send_raw_email(
@@ -195,6 +196,18 @@ pub async fn send_raw_email(
         return StatusCode::OK.into_response();
     }
 
+    if account.is_jmap() {
+        return send_over_jmap(
+            &state,
+            &user.user_id,
+            &account,
+            &smtp_from,
+            &recipients,
+            raw_mime,
+        )
+        .await;
+    }
+
     let smtp_host = account.smtp_host.as_deref().unwrap_or(&account.host);
     let smtp_port = account.smtp_port.unwrap_or(587) as u16;
     if let Err(e) = imap_client::send_raw_email(
@@ -234,6 +247,48 @@ pub async fn send_raw_email(
     }
 
     StatusCode::OK.into_response()
+}
+
+/// Sends through a JMAP account (EmailSubmission): the server keeps the copy in its Sent mailbox, which is synced.
+async fn send_over_jmap(
+    state: &AppState,
+    user_id: &str,
+    account: &email_db::ImapAccountRow,
+    from: &str,
+    recipients: &[String],
+    raw_mime: Bytes,
+) -> axum::response::Response {
+    let client = match state.email_sync_manager.jmap_client(account, user_id).await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[email] send_raw JMAP connect: {e}");
+            return (StatusCode::BAD_GATEWAY, format!("Failed to send: {e}")).into_response();
+        }
+    };
+    match crate::jmap::ops::send_raw(
+        &client,
+        &state.db,
+        &account.account_id,
+        from,
+        recipients,
+        raw_mime.to_vec(),
+    )
+    .await
+    {
+        Ok(sent) => {
+            state
+                .email_sync_manager
+                .trigger(&account.account_id, EmailSyncTrigger::Mailbox(sent));
+            StatusCode::OK.into_response()
+        }
+        Err(e) if e.downcast_ref::<crate::jmap::ops::SendError>().is_some() => {
+            (StatusCode::BAD_REQUEST, e.to_string()).into_response()
+        }
+        Err(e) => {
+            eprintln!("[email] send_raw JMAP: {e}");
+            (StatusCode::BAD_GATEWAY, format!("Failed to send: {e}")).into_response()
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -350,11 +405,15 @@ pub struct AutodiscoverQuery {
     pub email: String,
 }
 
-/// What autodiscovery found for an address: `{"found": false}`, or `found` with all the servers'
-/// fields (`provider_name` may be `null`).
+/// What autodiscovery found for an address: `{"found": false}`, or `found` with all the IMAP and SMTP
+/// servers' fields (`provider_name` may be `null`); `jmap_url` when the domain has a JMAP server (found
+/// or not).
 #[derive(Serialize, ToSchema)]
 pub struct Autodiscovery {
     pub found: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = String, required = false)]
+    pub jmap_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_name: Option<Option<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -380,6 +439,7 @@ pub struct Autodiscovery {
 impl Autodiscovery {
     const NOT_FOUND: Autodiscovery = Autodiscovery {
         found: false,
+        jmap_url: None,
         provider_name: None,
         imap_host: None,
         imap_port: None,
@@ -392,6 +452,7 @@ impl Autodiscovery {
     fn found(r: email_autodiscover::AutodiscoverResult) -> Self {
         Autodiscovery {
             found: true,
+            jmap_url: None,
             provider_name: Some(r.provider_name),
             imap_host: Some(r.imap_host),
             imap_port: Some(r.imap_port),
@@ -403,7 +464,8 @@ impl Autodiscovery {
     }
 }
 
-/// The IMAP and SMTP servers of an address (Thunderbird's ISPDB, then the domain's autoconfig).
+/// The IMAP and SMTP servers of an address (Thunderbird's ISPDB, then the domain's autoconfig), and its
+/// JMAP server (`/.well-known/jmap`).
 #[utoipa::path(
     get,
     path = "/email/autodiscover",
@@ -441,8 +503,14 @@ pub async fn autodiscover_handler(
         Err(_) => return Json(Autodiscovery::NOT_FOUND).into_response(),
     };
 
-    match email_autodiscover::autodiscover(&params.email, &client).await {
-        Some(r) => Json(Autodiscovery::found(r)).into_response(),
-        None => Json(Autodiscovery::NOT_FOUND).into_response(),
-    }
+    let (imap, jmap_url) = tokio::join!(
+        email_autodiscover::autodiscover(&params.email, &client),
+        email_autodiscover::discover_jmap(&params.email, &client),
+    );
+    let mut found = match imap {
+        Some(r) => Autodiscovery::found(r),
+        None => Autodiscovery::NOT_FOUND,
+    };
+    found.jmap_url = jmap_url;
+    Json(found).into_response()
 }

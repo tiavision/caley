@@ -14,8 +14,8 @@ use futures_util::future::BoxFuture;
 use openidconnect::core::{CoreAuthenticationFlow, CoreClient};
 use openidconnect::{
     AuthorizationCode, CsrfToken, EndSessionUrl, EndpointMaybeSet, EndpointNotSet, EndpointSet,
-    LogoutRequest, Nonce, PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl, RedirectUrl,
-    Scope, TokenResponse,
+    LogoutRequest, Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier,
+    PostLogoutRedirectUrl, RedirectUrl, Scope, TokenResponse,
 };
 use serde_json::json;
 use std::{
@@ -101,6 +101,10 @@ pub struct AppState {
     pub demo_mode: bool,
     pub oidc_provider: Option<Arc<OidcProvider>>,
     pub origin: Arc<crate::public_origin::OriginConfig>,
+    /// the tokens of the users' OIDC sign-ins (JMAP accounts that sign in with them)
+    pub oidc_tokens: Arc<crate::oidc_tokens::OidcTokens>,
+    /// scopes asked for besides `openid profile` (`OIDC_SCOPES`)
+    pub oidc_scopes: Vec<String>,
 }
 
 pub struct CurrentUser {
@@ -160,6 +164,8 @@ pub struct User {
     pub oidc_enabled: bool,
     /// the map URL template for locations, `{q}` the query (`MAP_URL`)
     pub map_url: String,
+    /// whether the user's OIDC sign-in is kept for mail accounts that sign in with it (JMAP)
+    pub oidc_signed_in: bool,
 }
 
 /// What the login page offers.
@@ -185,8 +191,10 @@ pub async fn user_info(State(state): State<AppState>, user: CurrentUser) -> impl
         .is_some();
 
     let _ = state.sync_manager.ensure_task_for(&user.user_id);
+    let oidc_signed_in = state.oidc_enabled && state.oidc_tokens.has(&user.user_id).await;
 
     Json(User {
+        oidc_signed_in,
         display_name,
         has_settings,
         has_caldav: has_settings,
@@ -351,6 +359,24 @@ pub async fn oidc_handler(
         session.insert("oidc_session", true).await.ok();
         session.insert("id_token_hint", &id_token_hint).await.ok();
 
+        // kept for the user's JMAP accounts that sign in with OIDC (oidc_tokens.rs)
+        if let Err(e) = state
+            .oidc_tokens
+            .store(
+                &user_id,
+                token_response.access_token().secret(),
+                token_response.refresh_token().map(|t| t.secret().as_str()),
+                token_response.expires_in(),
+            )
+            .await
+        {
+            eprintln!("storing the OIDC tokens of {user_id} failed: {e}");
+        }
+        state
+            .email_sync_manager
+            .ensure_tasks_for_user(&user_id)
+            .await;
+
         let _ = state.sync_manager.ensure_task_for(&user_id);
 
         // the page wanted before the sign-in, else the last one used (landing.rs)
@@ -376,6 +402,7 @@ pub async fn oidc_handler(
             Nonce::new_random,
         )
         .add_scope(Scope::new("profile".to_owned()))
+        .add_scopes(state.oidc_scopes.iter().cloned().map(Scope::new))
         .set_pkce_challenge(pkce_challenge)
         .set_redirect_uri(Cow::Borrowed(&redirect_uri));
 

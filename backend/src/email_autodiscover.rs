@@ -31,6 +31,53 @@ pub async fn autodiscover(email: &str, client: &reqwest::Client) -> Option<Autod
     None
 }
 
+/// The JMAP session URL of an address's domain, if it has one (RFC 8620 §2.2: `/.well-known/jmap` on the domain, then
+/// on `mail.` and `jmap.` of it). A server that answers it with a session, or asks to sign in, is taken.
+pub async fn discover_jmap(email: &str, client: &reqwest::Client) -> Option<String> {
+    let domain = email.split('@').nth(1)?.trim().to_ascii_lowercase();
+    if domain.is_empty() || domain.contains('/') {
+        return None;
+    }
+    for host in [
+        domain.clone(),
+        format!("mail.{domain}"),
+        format!("jmap.{domain}"),
+    ] {
+        let url = format!("https://{host}/.well-known/jmap");
+        if is_jmap_session(&url, client).await {
+            return Some(url);
+        }
+    }
+    None
+}
+
+async fn is_jmap_session(url: &str, client: &reqwest::Client) -> bool {
+    let Ok(resp) = client
+        .get(url)
+        .header("accept", "application/json")
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+    else {
+        return false;
+    };
+    let status = resp.status().as_u16();
+    let path = resp.url().path().to_owned();
+    looks_like_jmap(status, &path, &resp.bytes().await.unwrap_or_default())
+}
+
+/// Whether an answer to `/.well-known/jmap` (after redirects) is a JMAP server's: a session resource, or a 401 from
+/// a path that still names JMAP (a 401 anywhere else is a server asking to sign in for everything).
+fn looks_like_jmap(status: u16, final_path: &str, body: &[u8]) -> bool {
+    match status {
+        200 => serde_json::from_slice::<serde_json::Value>(body)
+            .ok()
+            .is_some_and(|v| v.get("apiUrl").is_some()),
+        401 => final_path.contains("jmap"),
+        _ => false,
+    }
+}
+
 async fn try_url(url: &str, email: &str, client: &reqwest::Client) -> Option<AutodiscoverResult> {
     let resp = client
         .get(url)
@@ -169,4 +216,23 @@ fn parse_autoconfig_xml(xml: &str, email: &str) -> Option<AutodiscoverResult> {
         smtp_host,
         smtp_port,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_jmap_session_or_its_sign_in_is_jmap() {
+        assert!(looks_like_jmap(
+            200,
+            "/jmap/session",
+            br#"{"apiUrl":"/jmap/"}"#
+        ));
+        assert!(looks_like_jmap(401, "/jmap/session", b""));
+        assert!(looks_like_jmap(401, "/.well-known/jmap", b""));
+        assert!(!looks_like_jmap(401, "/login", b""));
+        assert!(!looks_like_jmap(200, "/.well-known/jmap", b"<html>"));
+        assert!(!looks_like_jmap(404, "/.well-known/jmap", b""));
+    }
 }

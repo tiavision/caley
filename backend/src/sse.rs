@@ -99,7 +99,7 @@ impl SseBroadcaster {
         }
     }
 
-    fn subscribe(&self, user_id: &str) -> broadcast::Receiver<SseMessage> {
+    pub(crate) fn subscribe(&self, user_id: &str) -> broadcast::Receiver<SseMessage> {
         let mut channels = self.channels.lock().unwrap();
         let tx = channels
             .entry(user_id.to_string())

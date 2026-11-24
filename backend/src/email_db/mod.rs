@@ -4,6 +4,7 @@ use sqlx::{Row, SqlitePool};
 use crate::crypto;
 
 pub(crate) mod folders_db;
+pub(crate) mod jmap_db;
 pub(crate) mod messages_db;
 
 pub use folders_db::{
@@ -13,15 +14,14 @@ pub use folders_db::{
 };
 pub use messages_db::{
     AttachmentRow, MessageBodyRow, MessageHeader, MessageRow, PageCursor, PageDirection,
-    SearchFilters, delete_attachments_by_uids, delete_attachments_for_mailbox,
+    SearchFilters, SearchScope, delete_attachments_by_uids, delete_attachments_for_mailbox,
     delete_attachments_for_message, delete_message, delete_messages_by_uids, find_trash_mailbox,
     get_attachment_by_cid, get_attachment_by_filename, get_cached_message_flags, get_cached_uids,
     get_cached_uids_missing_body, get_cached_uids_sent_before, get_message,
     get_message_render_body, insert_attachment, list_attachments, list_messages,
-    set_message_reply_to,
     list_messages_virtual, list_thread_messages, replace_message_addresses, search_messages,
-    SearchScope, suggest_addrs, update_message_body,
-    update_message_flags, upsert_message_header, upsert_message_render_body,
+    set_message_reply_to, suggest_addrs, update_message_body, update_message_flags,
+    upsert_message_header, upsert_message_render_body,
 };
 
 // ── Account ──────────────────────────────────────────────────────────────────
@@ -37,6 +37,53 @@ pub struct ImapAccountRow {
     pub smtp_host: Option<String>,
     pub smtp_port: Option<i64>,
     pub sort_order: i64,
+    /// `imap` or `jmap`
+    pub protocol: String,
+    /// a JMAP account's session URL
+    pub jmap_url: Option<String>,
+    /// how a JMAP account signs in: `password` (Basic), `bearer` (the password is an API token), `oidc` (the
+    /// user's OIDC access token)
+    pub auth: String,
+}
+
+impl ImapAccountRow {
+    pub fn is_jmap(&self) -> bool {
+        self.protocol == "jmap"
+    }
+}
+
+const ACCOUNT_COLUMNS: &str = "account_id, display_name, host, port, username, password, use_tls, smtp_host, \
+    smtp_port, sort_order, protocol, jmap_url, auth";
+
+fn account_row(r: &sqlx::sqlite::SqliteRow, key: &[u8; 32]) -> Result<ImapAccountRow> {
+    Ok(ImapAccountRow {
+        account_id: r.get(0),
+        display_name: r.get(1),
+        host: crypto::decrypt(r.get::<String, _>(2).as_str(), key)?,
+        port: r.get(3),
+        username: crypto::decrypt(r.get::<String, _>(4).as_str(), key)?,
+        password: crypto::decrypt(r.get::<String, _>(5).as_str(), key)?,
+        use_tls: r.get::<i64, _>(6) != 0,
+        smtp_host: r
+            .get::<Option<String>, _>(7)
+            .map(|s| crypto::decrypt(&s, key))
+            .transpose()?,
+        smtp_port: r.get(8),
+        sort_order: r.get(9),
+        protocol: r.get(10),
+        jmap_url: r
+            .get::<Option<String>, _>(11)
+            .map(|s| crypto::decrypt(&s, key))
+            .transpose()?,
+        auth: r.get(12),
+    })
+}
+
+/// The protocol-specific part of an account to save.
+pub struct AccountProtocol<'a> {
+    pub protocol: &'a str,
+    pub jmap_url: Option<&'a str>,
+    pub auth: &'a str,
 }
 
 pub async fn list_accounts(
@@ -44,33 +91,14 @@ pub async fn list_accounts(
     user_id: &str,
     key: &[u8; 32],
 ) -> Result<Vec<ImapAccountRow>> {
-    let rows = sqlx::query(
-        "SELECT account_id, display_name, host, port, username, password, use_tls, smtp_host, smtp_port, sort_order
-         FROM imap_accounts WHERE user_id = ? ORDER BY sort_order, display_name",
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
-
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(ImapAccountRow {
-            account_id: r.get(0),
-            display_name: r.get(1),
-            host: crypto::decrypt(r.get::<String, _>(2).as_str(), key)?,
-            port: r.get(3),
-            username: crypto::decrypt(r.get::<String, _>(4).as_str(), key)?,
-            password: crypto::decrypt(r.get::<String, _>(5).as_str(), key)?,
-            use_tls: r.get::<i64, _>(6) != 0,
-            smtp_host: r
-                .get::<Option<String>, _>(7)
-                .map(|s| crypto::decrypt(&s, key))
-                .transpose()?,
-            smtp_port: r.get(8),
-            sort_order: r.get(9),
-        });
-    }
-    Ok(out)
+    let sql = format!(
+        "SELECT {ACCOUNT_COLUMNS} FROM imap_accounts WHERE user_id = ? ORDER BY sort_order, display_name"
+    );
+    let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(user_id)
+        .fetch_all(pool)
+        .await?;
+    rows.iter().map(|r| account_row(r, key)).collect()
 }
 
 pub async fn get_account(
@@ -79,33 +107,14 @@ pub async fn get_account(
     user_id: &str,
     key: &[u8; 32],
 ) -> Result<Option<ImapAccountRow>> {
-    let r = sqlx::query(
-        "SELECT account_id, display_name, host, port, username, password, use_tls, smtp_host, smtp_port, sort_order
-         FROM imap_accounts WHERE account_id = ? AND user_id = ?",
-    )
-    .bind(account_id)
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await?;
-
-    match r {
-        None => Ok(None),
-        Some(r) => Ok(Some(ImapAccountRow {
-            account_id: r.get(0),
-            display_name: r.get(1),
-            host: crypto::decrypt(r.get::<String, _>(2).as_str(), key)?,
-            port: r.get(3),
-            username: crypto::decrypt(r.get::<String, _>(4).as_str(), key)?,
-            password: crypto::decrypt(r.get::<String, _>(5).as_str(), key)?,
-            use_tls: r.get::<i64, _>(6) != 0,
-            smtp_host: r
-                .get::<Option<String>, _>(7)
-                .map(|s| crypto::decrypt(&s, key))
-                .transpose()?,
-            smtp_port: r.get(8),
-            sort_order: r.get(9),
-        })),
-    }
+    let sql =
+        format!("SELECT {ACCOUNT_COLUMNS} FROM imap_accounts WHERE account_id = ? AND user_id = ?");
+    let r = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(account_id)
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?;
+    r.map(|r| account_row(&r, key)).transpose()
 }
 
 pub async fn upsert_account(
@@ -120,17 +129,20 @@ pub async fn upsert_account(
     use_tls: bool,
     smtp_host: Option<&str>,
     smtp_port: Option<u16>,
+    kind: &AccountProtocol<'_>,
     key: &[u8; 32],
 ) -> Result<()> {
     let enc_host = crypto::encrypt(host, key)?;
     let enc_user = crypto::encrypt(username, key)?;
     let enc_pass = crypto::encrypt(password, key)?;
     let enc_smtp = smtp_host.map(|h| crypto::encrypt(h, key)).transpose()?;
+    let enc_jmap = kind.jmap_url.map(|u| crypto::encrypt(u, key)).transpose()?;
 
     sqlx::query(
         "INSERT INTO imap_accounts
-            (account_id, user_id, display_name, host, port, username, password, use_tls, smtp_host, smtp_port)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (account_id, user_id, display_name, host, port, username, password, use_tls, smtp_host, smtp_port,
+             protocol, jmap_url, auth)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(account_id) DO UPDATE SET
             display_name = excluded.display_name,
             host         = excluded.host,
@@ -139,7 +151,10 @@ pub async fn upsert_account(
             password     = excluded.password,
             use_tls      = excluded.use_tls,
             smtp_host    = excluded.smtp_host,
-            smtp_port    = excluded.smtp_port",
+            smtp_port    = excluded.smtp_port,
+            protocol     = excluded.protocol,
+            jmap_url     = excluded.jmap_url,
+            auth         = excluded.auth",
     )
     .bind(account_id)
     .bind(user_id)
@@ -151,6 +166,9 @@ pub async fn upsert_account(
     .bind(use_tls as i64)
     .bind(enc_smtp)
     .bind(smtp_port.map(|p| p as i64))
+    .bind(kind.protocol)
+    .bind(enc_jmap)
+    .bind(kind.auth)
     .execute(pool)
     .await?;
     Ok(())
@@ -179,6 +197,22 @@ pub async fn delete_account(pool: &SqlitePool, account_id: &str, user_id: &str) 
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Drops an account's cached mail (not its files: the caller removes them), for an account now on another server.
+pub async fn reset_account_cache(pool: &SqlitePool, account_id: &str) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    for sql in [
+        "DELETE FROM cached_attachments WHERE account_id = ?",
+        "DELETE FROM cached_messages WHERE account_id = ?",
+        "DELETE FROM cached_mailboxes WHERE account_id = ?",
+        "DELETE FROM jmap_mailboxes WHERE account_id = ?",
+        "DELETE FROM jmap_states WHERE account_id = ?",
+    ] {
+        sqlx::query(sql).bind(account_id).execute(&mut *tx).await?;
+    }
     tx.commit().await?;
     Ok(())
 }

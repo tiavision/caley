@@ -9,27 +9,31 @@ use tokio::time::{Duration, sleep};
 
 use crate::email_db;
 use crate::imap_client;
+use crate::oidc_tokens::OidcTokens;
 use crate::search::SearchMode;
 use crate::sse::{SseBroadcaster, SseMessage};
 
 pub enum EmailSyncTrigger {
-    #[allow(dead_code)]
     Full,
     Mailbox(String),
 }
 
 pub struct EmailSyncManager {
-    db: sqlx::SqlitePool,
-    encryption_key: [u8; 32],
-    broadcaster: Arc<SseBroadcaster>,
+    pub(crate) db: sqlx::SqlitePool,
+    pub(crate) encryption_key: [u8; 32],
+    pub(crate) broadcaster: Arc<SseBroadcaster>,
     sync_interval: Duration,
-    search_mode: SearchMode,
-    data_dir: PathBuf,
+    pub(crate) search_mode: SearchMode,
+    pub(crate) data_dir: PathBuf,
     /// keyed by account_id
     tasks: Mutex<HashMap<String, mpsc::UnboundedSender<EmailSyncTrigger>>>,
-    /// persistent IDLE connections, one per account — keyed by account_id
+    /// persistent IDLE connections (JMAP: push streams), one per account — keyed by account_id
     idle_tasks: Mutex<HashMap<String, JoinHandle<()>>>,
     demo_mode: bool,
+    /// the HTTP client of JMAP accounts
+    pub(crate) http: reqwest::Client,
+    /// the users' OIDC tokens, for JMAP accounts that sign in with them
+    pub(crate) oidc_tokens: Arc<OidcTokens>,
 }
 
 impl EmailSyncManager {
@@ -41,8 +45,11 @@ impl EmailSyncManager {
         search_mode: SearchMode,
         data_dir: PathBuf,
         demo_mode: bool,
+        oidc_tokens: Arc<OidcTokens>,
     ) -> Arc<Self> {
         Arc::new(Self {
+            http: crate::jmap::http_client().expect("the JMAP HTTP client"),
+            oidc_tokens,
             db,
             encryption_key,
             broadcaster,
@@ -159,8 +166,20 @@ impl EmailSyncManager {
                 msg = rx.recv() => {
                     match msg {
                         Some(EmailSyncTrigger::Full) => {
+                            // a burst of triggers (pushed changes) is one sync
+                            let mut mailboxes = Vec::new();
+                            while let Ok(next) = rx.try_recv() {
+                                if let EmailSyncTrigger::Mailbox(mb) = next {
+                                    mailboxes.push(mb);
+                                }
+                            }
                             if let Err(e) = self.sync_account(&account_id).await {
                                 eprintln!("[email_sync] full sync failed for account {account_id}: {e}");
+                            }
+                            for mb in mailboxes {
+                                if let Err(e) = self.sync_mailbox(&account_id, &mb).await {
+                                    eprintln!("[email_sync] mailbox sync failed for {mb}: {e}");
+                                }
                             }
                         }
                         Some(EmailSyncTrigger::Mailbox(mb)) => {
@@ -178,10 +197,11 @@ impl EmailSyncManager {
         tasks.remove(&account_id);
     }
 
-    async fn load_session(
+    /// An account and its user.
+    pub(crate) async fn load_account(
         &self,
         account_id: &str,
-    ) -> anyhow::Result<(imap_client::ImapSession, String)> {
+    ) -> anyhow::Result<(email_db::ImapAccountRow, String)> {
         // We need user_id to look up the account; get it from DB
         let row = sqlx::query("SELECT user_id FROM imap_accounts WHERE account_id = ?")
             .bind(account_id)
@@ -195,7 +215,14 @@ impl EmailSyncManager {
         let account = email_db::get_account(&self.db, account_id, &user_id, &self.encryption_key)
             .await?
             .ok_or_else(|| anyhow::anyhow!("account {account_id} not found for user"))?;
+        Ok((account, user_id))
+    }
 
+    async fn load_session(
+        &self,
+        account_id: &str,
+    ) -> anyhow::Result<(imap_client::ImapSession, String)> {
+        let (account, user_id) = self.load_account(account_id).await?;
         let session = imap_client::connect(
             &account.host,
             account.port as u16,
@@ -209,6 +236,10 @@ impl EmailSyncManager {
     async fn sync_account(&self, account_id: &str) -> anyhow::Result<()> {
         if self.demo_mode {
             return Ok(());
+        }
+        let (account, user_id) = self.load_account(account_id).await?;
+        if account.is_jmap() {
+            return self.jmap_sync(&account, &user_id, None).await;
         }
         let (mut session, user_id) = self.load_session(account_id).await?;
 
@@ -273,6 +304,11 @@ impl EmailSyncManager {
         if self.demo_mode {
             return Ok(());
         }
+        let (account, user_id) = self.load_account(account_id).await?;
+        if account.is_jmap() {
+            // a JMAP sync asks for the account's changes, which cost no more than one mailbox's
+            return self.jmap_sync(&account, &user_id, Some(mailbox)).await;
+        }
         let (mut session, user_id) = self.load_session(account_id).await?;
         self.broadcaster.send(
             &user_id,
@@ -303,6 +339,19 @@ impl EmailSyncManager {
         }
         let mut backoff = Duration::from_secs(5);
         const MAX_BACKOFF: Duration = Duration::from_secs(300);
+        let is_jmap = match self.load_account(&account_id).await {
+            Ok((account, _)) => account.is_jmap(),
+            Err(e) => {
+                eprintln!("[idle] {account_id}: {e}");
+                self.idle_tasks.lock().unwrap().remove(&account_id);
+                return;
+            }
+        };
+        if is_jmap {
+            self.run_push_loop(&account_id).await;
+            self.idle_tasks.lock().unwrap().remove(&account_id);
+            return;
+        }
         loop {
             match self.idle_once(&account_id).await {
                 Ok(true) => {
@@ -411,12 +460,8 @@ impl EmailSyncManager {
             email_db::delete_attachments_for_mailbox(&self.db, account_id, mailbox).await?;
             email_db::delete_messages_for_mailbox(&self.db, account_id, mailbox).await?;
             // Delete the mailbox's entire .eml directory
-            let mailbox_dir = self
-                .data_dir
-                .join("messages")
-                .join(account_id)
-                .join(sha2_hex(mailbox.to_owned()));
-            let _ = tokio::fs::remove_dir_all(&mailbox_dir).await;
+            let _ =
+                tokio::fs::remove_dir_all(mailbox_dir(&self.data_dir, account_id, mailbox)).await;
             self.broadcaster.send(
                 user_id,
                 SseMessage::EmailsRefetch {
@@ -494,53 +539,8 @@ impl EmailSyncManager {
         if !new_uids.is_empty() {
             let headers = imap_client::fetch_headers(session, &new_uids).await?;
             for h in &headers {
-                let subject_idx = h
-                    .subject
-                    .as_deref()
-                    .map(|s| self.search_mode.normalize_text(s));
-                let from_idx = h
-                    .from_addr
-                    .as_deref()
-                    .map(|s| self.search_mode.normalize_text(s));
-                let to_idx = h
-                    .to_addrs
-                    .as_deref()
-                    .and_then(|json| serde_json::from_str::<Vec<String>>(json).ok())
-                    .map(|addrs| self.search_mode.normalize_text(&addrs.join(" ")));
-                email_db::upsert_message_header(
-                    &self.db,
-                    account_id,
-                    mailbox,
-                    h,
-                    subject_idx.as_deref(),
-                    from_idx.as_deref(),
-                    to_idx.as_deref(),
-                )
-                .await?;
-                email_db::replace_message_addresses(
-                    &self.db,
-                    account_id,
-                    mailbox,
-                    h.uid,
-                    &h.from_emails,
-                    &h.to_emails,
-                    &h.cc_emails,
-                )
-                .await?;
-                if notify_new_inbox_mail
-                    && !h.flags.as_deref().unwrap_or_default().contains("\\Seen")
-                {
-                    self.broadcaster.send(
-                        user_id,
-                        SseMessage::NewEmail {
-                            account_id: account_id.to_owned(),
-                            uid: h.uid as u32,
-                            mailbox: mailbox.to_owned(),
-                            from_addr: h.from_addr.clone(),
-                            subject: h.subject.clone(),
-                        },
-                    );
-                }
+                self.store_header(account_id, user_id, mailbox, h, notify_new_inbox_mail)
+                    .await?;
             }
             if !headers.is_empty() {
                 self.broadcaster.send(
@@ -563,99 +563,158 @@ impl EmailSyncManager {
             .into_iter()
             .collect();
 
-        if !uids_to_fetch.is_empty() {
-            for chunk in uids_to_fetch.chunks(50) {
-                let bodies = match imap_client::fetch_bodies(session, chunk).await {
-                    Ok(b) => b,
-                    Err(e) => {
-                        eprintln!("[email_sync] fetch_bodies error for {mailbox}: {e}");
-                        continue;
-                    }
-                };
-
-                // Write .eml files to disk first (outside the DB transaction) so the
-                // SQLite write lock is held only for the fast DB writes, not file I/O.
-                let mut prepared: Vec<PreparedMessage> = Vec::with_capacity(bodies.len());
-                for (uid, raw_bytes, render_body, has_attach, attachments) in bodies {
-                    let is_encrypted = imap_client::detect_pgp_encrypted(&raw_bytes);
-                    // For encrypted messages, exclude body from FTS index.
-                    let body_idx = if is_encrypted {
-                        String::new()
-                    } else {
-                        self.search_mode.normalize_text(&render_body.search_text)
-                    };
-
-                    let path = eml_path(&self.data_dir, account_id, mailbox, uid);
-                    if let Some(dir) = path.parent() {
-                        tokio::fs::create_dir_all(dir).await?;
-                    }
-                    let compressed = zstd::encode_all(raw_bytes.as_slice(), 6)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-                    tokio::fs::write(&path, compressed).await?;
-
-                    let att_params = attachments
-                        .into_iter()
-                        .map(|att| PreparedAttachment {
-                            filename: att.filename.unwrap_or_else(|| "untitled".to_owned()),
-                            content_type: att.content_type,
-                            size: att.size,
-                            part_index: att.part_index,
-                            content_id: att.content_id,
-                        })
-                        .collect();
-
-                    prepared.push(PreparedMessage {
-                        uid,
-                        has_attach,
-                        body_idx,
-                        is_encrypted,
-                        is_signed: render_body.is_signed,
-                        attachments: att_params,
-                    });
+        for chunk in uids_to_fetch.chunks(50) {
+            let bodies = match imap_client::fetch_bodies(session, chunk).await {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("[email_sync] fetch_bodies error for {mailbox}: {e}");
+                    continue;
                 }
-
-                // Commit all DB writes for the chunk in a single transaction (one fsync
-                // instead of dozens), then yield so concurrent calendar syncs can write.
-                let mut tx = self.db.begin().await?;
-                for m in &prepared {
-                    email_db::update_message_body(
-                        &mut *tx,
-                        account_id,
-                        mailbox,
-                        m.uid,
-                        &m.body_idx,
-                        m.has_attach,
-                        m.is_encrypted,
-                    )
-                    .await?;
-                    email_db::upsert_message_render_body(
-                        &mut *tx,
-                        account_id,
-                        mailbox,
-                        m.uid,
-                        m.is_signed,
-                    )
-                    .await?;
-                    for att in &m.attachments {
-                        email_db::insert_attachment(
-                            &mut *tx,
-                            account_id,
-                            mailbox,
-                            m.uid,
-                            &att.filename,
-                            &att.content_type,
-                            att.size,
-                            att.part_index as i64,
-                            att.content_id.as_deref(),
-                        )
-                        .await?;
-                    }
-                }
-                tx.commit().await?;
-                tokio::task::yield_now().await;
-            }
+            };
+            self.store_bodies(account_id, mailbox, bodies).await?;
         }
 
+        Ok(())
+    }
+
+    /// Caches a message's header row and addresses; `new_email` reports it when `notify` and it is unread.
+    pub(crate) async fn store_header(
+        &self,
+        account_id: &str,
+        user_id: &str,
+        mailbox: &str,
+        h: &email_db::MessageHeader,
+        notify: bool,
+    ) -> anyhow::Result<()> {
+        let subject_idx = h
+            .subject
+            .as_deref()
+            .map(|s| self.search_mode.normalize_text(s));
+        let from_idx = h
+            .from_addr
+            .as_deref()
+            .map(|s| self.search_mode.normalize_text(s));
+        let to_idx = h
+            .to_addrs
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<Vec<String>>(json).ok())
+            .map(|addrs| self.search_mode.normalize_text(&addrs.join(" ")));
+        email_db::upsert_message_header(
+            &self.db,
+            account_id,
+            mailbox,
+            h,
+            subject_idx.as_deref(),
+            from_idx.as_deref(),
+            to_idx.as_deref(),
+        )
+        .await?;
+        email_db::replace_message_addresses(
+            &self.db,
+            account_id,
+            mailbox,
+            h.uid,
+            &h.from_emails,
+            &h.to_emails,
+            &h.cc_emails,
+        )
+        .await?;
+        if notify && !h.flags.as_deref().unwrap_or_default().contains("\\Seen") {
+            self.broadcaster.send(
+                user_id,
+                SseMessage::NewEmail {
+                    account_id: account_id.to_owned(),
+                    uid: h.uid as u32,
+                    mailbox: mailbox.to_owned(),
+                    from_addr: h.from_addr.clone(),
+                    subject: h.subject.clone(),
+                },
+            );
+        }
+        Ok(())
+    }
+
+    /// Caches the sources of messages (their `.eml` files), their search text and attachments.
+    pub(crate) async fn store_bodies(
+        &self,
+        account_id: &str,
+        mailbox: &str,
+        bodies: Vec<imap_client::FetchedBody>,
+    ) -> anyhow::Result<()> {
+        // Write .eml files to disk first (outside the DB transaction) so the
+        // SQLite write lock is held only for the fast DB writes, not file I/O.
+        let mut prepared: Vec<PreparedMessage> = Vec::with_capacity(bodies.len());
+        for (uid, raw_bytes, render_body, has_attach, attachments) in bodies {
+            let is_encrypted = imap_client::detect_pgp_encrypted(&raw_bytes);
+            // For encrypted messages, exclude body from FTS index.
+            let body_idx = if is_encrypted {
+                String::new()
+            } else {
+                self.search_mode.normalize_text(&render_body.search_text)
+            };
+
+            let path = eml_path(&self.data_dir, account_id, mailbox, uid);
+            if let Some(dir) = path.parent() {
+                tokio::fs::create_dir_all(dir).await?;
+            }
+            let compressed = zstd::encode_all(raw_bytes.as_slice(), 6)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            tokio::fs::write(&path, compressed).await?;
+
+            let att_params = attachments
+                .into_iter()
+                .map(|att| PreparedAttachment {
+                    filename: att.filename.unwrap_or_else(|| "untitled".to_owned()),
+                    content_type: att.content_type,
+                    size: att.size,
+                    part_index: att.part_index,
+                    content_id: att.content_id,
+                })
+                .collect();
+
+            prepared.push(PreparedMessage {
+                uid,
+                has_attach,
+                body_idx,
+                is_encrypted,
+                is_signed: render_body.is_signed,
+                attachments: att_params,
+            });
+        }
+
+        // Commit all DB writes for the chunk in a single transaction (one fsync
+        // instead of dozens), then yield so concurrent calendar syncs can write.
+        let mut tx = self.db.begin().await?;
+        for m in &prepared {
+            email_db::update_message_body(
+                &mut *tx,
+                account_id,
+                mailbox,
+                m.uid,
+                &m.body_idx,
+                m.has_attach,
+                m.is_encrypted,
+            )
+            .await?;
+            email_db::upsert_message_render_body(&mut *tx, account_id, mailbox, m.uid, m.is_signed)
+                .await?;
+            for att in &m.attachments {
+                email_db::insert_attachment(
+                    &mut *tx,
+                    account_id,
+                    mailbox,
+                    m.uid,
+                    &att.filename,
+                    &att.content_type,
+                    att.size,
+                    att.part_index as i64,
+                    att.content_id.as_deref(),
+                )
+                .await?;
+            }
+        }
+        tx.commit().await?;
+        tokio::task::yield_now().await;
         Ok(())
     }
 }
@@ -696,7 +755,23 @@ fn sha2_hex(input: String) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(input.as_bytes());
-    hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// The directory of a mailbox's `.eml.zst` files.
+pub fn mailbox_dir(
+    data_dir: &std::path::Path,
+    account_id: &str,
+    mailbox: &str,
+) -> std::path::PathBuf {
+    data_dir
+        .join("messages")
+        .join(account_id)
+        .join(sha2_hex(mailbox.to_owned()))
 }
 
 /// Deterministic path to the compressed `.eml.zst` file for a given message.
@@ -706,11 +781,7 @@ pub fn eml_path(
     mailbox: &str,
     uid: u32,
 ) -> std::path::PathBuf {
-    data_dir
-        .join("messages")
-        .join(account_id)
-        .join(sha2_hex(mailbox.to_owned()))
-        .join(format!("{uid}.eml.zst"))
+    mailbox_dir(data_dir, account_id, mailbox).join(format!("{uid}.eml.zst"))
 }
 
 #[cfg(test)]
