@@ -14,8 +14,27 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// The release signing key: keystore.properties beside this project (storeFile, password, keyAlias; never in
+// git, .gitignore), the key itself outside the repository. Without it a release build is unsigned.
+val keystoreProperties = Properties().apply {
+    val propFile = rootProject.file("keystore.properties")
+    if (propFile.exists()) {
+        propFile.inputStream().use { load(it) }
+    }
+}
+
 android {
     compileSdk = 37
+    signingConfigs {
+        if (keystoreProperties.containsKey("storeFile")) {
+            create("release") {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("password")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("password")
+            }
+        }
+    }
     namespace = "app.caley"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
@@ -39,6 +58,7 @@ android {
             }
         }
         getByName("release") {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             optimization {
                enable = true
             }
