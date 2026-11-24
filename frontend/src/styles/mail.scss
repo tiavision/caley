@@ -480,6 +480,14 @@ $phone: 639px;
   padding: var(--tm-space-sm) var(--tm-space-md);
 }
 
+// Until a sinter-mail release drops mail.css 0.22.0's `.mail :where(img) { max-inline-size: 100% }` (its branch
+// fix/mail-css-image-width): in a table cell sized by its content, beside a cell of long text, Chromium shrinks the
+// image's cell and the image with it, its height kept (a 60×60 product picture at 19×62). A mail's own inline
+// max-width still applies. Remove this with that release.
+.mail img {
+  max-inline-size: none;
+}
+
 .detail-status {
   padding: var(--tm-space-xl) var(--tm-space-md);
   text-align: center;
