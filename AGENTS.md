@@ -23,8 +23,7 @@ Caley is a personal groupware app, not just a calendar viewer:
 - Run: `cargo run` from `backend/` -> `localhost:3000`.
 - Check/test: `cargo check`, `cargo test` from `backend/`.
 - Configuration is via CLI/env vars; `backend/.env` is loaded automatically by `dotenvy`.
-- Required: `APP_BASE_URL`, `ENCRYPTION_KEY`.
-- OIDC is additive when all three are set: `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`.
+- Required: `APP_BASE_URL`, `ENCRYPTION_KEY`, and the OIDC variables `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` (OIDC is the only sign-in; without them the backend refuses to start unless `DEMO_MODE=true`).
 - Optional: `CALDAV_PORT` (default `3000`), `OIDC_LOGOUT` (default `true`), `OIDC_USER_ID_CLAIM` (default `sub`), `DATABASE_PATH` (default `./data/caley.db`), `STATIC_DIR` (default `../frontend/dist`), `SYNC_INTERVAL_MINS` (default `5`), `SEARCH_MODE` (`default`, `trigram`, or Snowball algorithm name such as `German`), `MAP_URL` (URL template with `{q}` placeholder), `WEBAUTHN_EXTRA_ORIGINS`.
 - SQLite via `sqlx` with bundled SQLite; migrations live in `backend/migrations/`.
 - Database parent directory is created automatically.
@@ -34,13 +33,13 @@ Caley is a personal groupware app, not just a calendar viewer:
 
 ## Authentication
 
-CalDAV-credential login is always available; OIDC login is shown alongside it when configured.
+OIDC is the only sign-in. There is no sign-in with CalDAV credentials (it would let anyone create an account with a CalDAV server of their own); CalDAV accounts are added in Settings after signing in.
 
-- Unified login page: `/`.
-- `POST /auth/login`: validates CalDAV credentials and starts a session.
+- Login page: `/`.
+- `POST /auth/login`: the demo's sign-in, registered only with `DEMO_MODE=true` (no credentials, the fixed demo user).
 - `/auth/oidc`: OIDC login trigger/callback. Register `{APP_BASE_URL}/auth/oidc` at the provider.
 - `GET /logout`: unified logout.
-- `GET /api/auth/config`: public endpoint reporting OIDC availability.
+- `GET /api/auth/config`: public endpoint reporting what the login page offers (`oidc_enabled`, `demo_mode`).
 - Protected handlers should use `CurrentUser` from `oidc.rs`, which reads OIDC claims first and then the server-side session.
 - Do not use `OidcClaims` directly in route handlers.
 - `RequireAuthLayer` allows public routes/static assets and otherwise requires OIDC claims or a session user.
@@ -71,7 +70,7 @@ CalDAV-credential login is always available; OIDC login is shown alongside it wh
 
 ## Account Deletion
 
-`DELETE /api/account` deletes all user data from the database. In local login mode it also clears the session and redirects to `/`.
+`DELETE /api/account` deletes all user data from the database. It also clears the session and redirects to `/`.
 
 ## Demo Mode
 
@@ -83,7 +82,7 @@ DEMO_MODE=true APP_BASE_URL=http://localhost:3000 ENCRYPTION_KEY=demo-key cargo 
 ```
 
 - Uses an isolated `./data/demo.db` (never touches the configured `DATABASE_PATH`).
-- Accepts any credentials on the login page — always binds to the fixed demo user `demo@demo.example`.
+- The login page's "Enter the demo" button signs in without credentials as the fixed demo user `demo@demo.example` (`POST /auth/login`, only registered in demo mode). The OIDC variables are not needed.
 - Seed data is inserted with `INSERT OR IGNORE` on startup, so the DB survives restarts and the user can make edits that persist. Account rows (IMAP/CalDAV credentials) use `ON CONFLICT DO UPDATE` so re-keying with a different `ENCRYPTION_KEY` is corrected automatically.
 - Pre-seeded: 3 calendars, ~16 events (including recurring), 1 addressbook, 31 contacts, 2 IMAP accounts (Work + Personal), 6 mailboxes each, 22+ messages with styled HTML bodies.
 - All outbound network calls are suppressed: CalDAV PUT/DELETE, IMAP connect (sync, IDLE, flag updates, delete, move), SMTP send, email autodiscovery.

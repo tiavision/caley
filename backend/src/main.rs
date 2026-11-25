@@ -118,6 +118,17 @@ async fn main() -> anyhow::Result<()> {
         .unwrap();
     let args = Cli::parse();
 
+    // OIDC is the only sign-in (the demo has its own): without it nobody could sign in.
+    let use_oidc = args.oidc_issuer.is_some()
+        && args.oidc_client_id.is_some()
+        && args.oidc_client_secret.is_some();
+    if !use_oidc && !args.demo_mode {
+        anyhow::bail!(
+            "No way to sign in: set OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET (OIDC is the only \
+             sign-in), or DEMO_MODE=true for the demo"
+        );
+    }
+
     // In demo mode use an isolated database so the dev/prod DB is never touched.
     let database_path = if args.demo_mode {
         let data_dir = std::path::Path::new(&args.database_path)
@@ -148,10 +159,6 @@ async fn main() -> anyhow::Result<()> {
         println!("Demo mode: seeding demo database");
         demo::seed(&db, &encryption_key, &data_dir).await?;
     }
-
-    let use_oidc = args.oidc_issuer.is_some()
-        && args.oidc_client_id.is_some()
-        && args.oidc_client_secret.is_some();
 
     let sse_broadcaster = Arc::new(sse::SseBroadcaster::new());
     let notifier = Arc::new(notifications::Notifier::new(
@@ -311,7 +318,7 @@ async fn main() -> anyhow::Result<()> {
     let shared_private: Router<oidc::AppState> =
         Router::new().nest("/api", api::private().split_for_parts().0);
 
-    // Protected routes: OIDC handler + CalDAV login + unified logout + everything else.
+    // Protected routes: OIDC handler + the demo's sign-in + unified logout + everything else.
     // RequireAuthLayer allows public paths and requires a session user_id for all others.
     // When OIDC is enabled, unauthenticated page requests are redirected to /auth/oidc?auto=1
     // for silent re-authentication; API requests always get 401.
@@ -326,8 +333,12 @@ async fn main() -> anyhow::Result<()> {
     let mut private = shared_private
         .route("/auth/oidc", get(oidc::oidc_handler))
         .route("/auth/jmap", get(jmap::oauth::callback))
-        .route("/auth/login", post(local_auth::handle_login))
-        .route("/logout", get(oidc::logout_handler))
+        .route("/logout", get(oidc::logout_handler));
+    // the demo's sign-in, without credentials (local_auth.rs); a real instance signs in only with OIDC
+    if args.demo_mode {
+        private = private.route("/auth/login", post(local_auth::demo_login));
+    }
+    let mut private = private
         .with_state(state.clone())
         .fallback_service(static_files::service(&static_dir));
     if let Some(embed) = embed::layer(&static_dir, embed_api)? {
@@ -337,10 +348,10 @@ async fn main() -> anyhow::Result<()> {
         oidc_enabled: use_oidc,
     });
 
-    if use_oidc {
-        println!("Auth: CalDAV login + OIDC enabled");
-    } else {
-        println!("Auth: CalDAV login (OIDC not configured)");
+    match (args.demo_mode, use_oidc) {
+        (true, true) => println!("Auth: demo sign-in + OIDC"),
+        (true, false) => println!("Auth: demo sign-in"),
+        _ => println!("Auth: OIDC"),
     }
 
     let app = Router::new()

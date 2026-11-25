@@ -33,7 +33,7 @@ export function apis<T>(openapi: T) {
         'GET /pgp/keys': { key: 'fingerprint' },
       },
     },
-    // the sign-in, outside /api (backend/src/local_auth.rs)
+    // the demo's sign-in (DEMO_MODE only), outside /api (backend/src/local_auth.rs)
     site: { operations: { 'POST /auth/login': {} } },
   };
 }

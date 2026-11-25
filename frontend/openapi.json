@@ -42,7 +42,7 @@
     },
     "/auth/config": {
       "get": {
-        "summary": "Public endpoint so the login page can decide whether to offer OIDC.",
+        "summary": "Public endpoint so the login page can decide what to offer: OIDC, the demo's sign-in.",
         "operationId": "auth_config",
         "responses": {
           "200": {
@@ -3619,12 +3619,17 @@
         "type": "object",
         "description": "What the login page offers.",
         "required": [
-          "oidc_enabled"
+          "oidc_enabled",
+          "demo_mode"
         ],
         "properties": {
           "oidc_enabled": {
             "type": "boolean",
             "description": "whether OIDC sign-in is configured"
+          },
+          "demo_mode": {
+            "type": "boolean",
+            "description": "whether this is the demo (`DEMO_MODE`): it signs in without credentials, `POST /auth/login`"
           }
         }
       },
@@ -5850,7 +5855,7 @@
       },
       "User": {
         "type": "object",
-        "description": "The signed-in user (an OIDC or a CalDAV-login session alike).",
+        "description": "The signed-in user (an OIDC or a demo session alike).",
         "required": [
           "display_name",
           "has_settings",
