@@ -68,15 +68,36 @@ export function readerParts(msg: MimeMessage, signedAll = msg.summary.signed ===
 }
 
 /**
- * The message-level badges: "encrypted" and "verified" only when the summary says the whole message is (a part that
- * is gets its own mark instead), and a warning when the sender shown is not the one the cryptography proves.
+ * The sender the signature was checked for, when the message is verified ("verified": summary.signed 'all') or its
+ * From proven (summary.from 'matches'): sinter-mail's shown From (the protected one when a signature binds it), which
+ * is not always the From the server reported. Null otherwise.
  */
-export function messageBadges(msg: MimeMessage): string[] {
+export function checkedSender(msg: MimeMessage): Address | null {
+  const s = msg.summary;
+  if (s.signed !== 'all' && s.from !== 'matches') return null;
+  return msg.headers.from.length === 1 && msg.headers.from[0]!.address ? msg.headers.from[0]! : null;
+}
+
+const bare = (address: string | null) => (/<([^<>]+)>/.exec(address ?? '')?.[1] ?? address ?? '').trim().toLowerCase();
+
+/** Whether the sender the signature was checked for is not the From the server reported (`serverFrom`, Message.from). */
+export function senderDiffers(msg: MimeMessage, serverFrom: string | null): boolean {
+  const checked = checkedSender(msg);
+  return !!checked && bare(checked.address) !== bare(serverFrom);
+}
+
+/**
+ * The message-level badges: "encrypted" and "verified" only when the summary says the whole message is (a part that
+ * is gets its own mark instead), and a warning when the sender shown is not the one the cryptography proves: sinter-mail's
+ * (`summary.from`), or a verified sender other than the From the server reported (`serverFrom`): the reader then shows
+ * the checked sender, never a bare "verified" beside another From.
+ */
+export function messageBadges(msg: MimeMessage, serverFrom: string | null = null): string[] {
   const s = msg.summary;
   const badges: string[] = [];
   if (s.encrypted === 'all') badges.push('encrypted');
   if (s.signed === 'all') badges.push('verified');
-  if (s.from === 'differs') badges.push('from_differs');
+  if (s.from === 'differs' || (serverFrom !== null && senderDiffers(msg, serverFrom))) badges.push('from_differs');
   else if (s.from === 'unknown' && msg.steps.every((x) => x.state !== 'pending')) badges.push('from_unknown');
   if (msg.steps.some((x) => x.kind === 'decrypt' && x.state === 'failed')) badges.push('decrypt_failed');
   return badges;

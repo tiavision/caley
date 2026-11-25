@@ -6,7 +6,9 @@ import { describe, expect, it } from 'vitest';
 import * as openpgp from 'openpgp';
 import { buildProtectedMime, type ProtectedComposeMessage } from './compose';
 import { settle } from './steps';
-import { messageBadges, protectedReply, protectedSubject, quotable, readerParts, replyAddresses, replyAllAddresses } from '../mail-reader';
+import {
+  checkedSender, messageBadges, protectedReply, protectedSubject, quotable, readerParts, replyAddresses, replyAllAddresses, senderDiffers,
+} from '../mail-reader';
 
 async function keys(email: string) {
   return openpgp.generateKey({ userIDs: [{ name: email.split('@')[0], email }], format: 'object' });
@@ -126,5 +128,39 @@ describe('whom a reply to decrypted mail goes to: only the protected message, ne
     const msg = await settle(raw, empty(), [], async () => []);
     expect(replyAddresses(msg)).toBeNull();
     expect(replyAllAddresses(msg)).toBeNull();
+  });
+});
+
+describe('"verified" is shown beside the sender the signature was checked for', () => {
+  /** A signed message (PGP/MIME) whose payload names `innerFrom` in protected headers, sent under `outerFrom`. */
+  async function signedAs(signer: openpgp.PrivateKey, outerFrom: string, innerFrom: string): Promise<Uint8Array> {
+    const inner = [`Content-Type: text/plain; charset=utf-8; protected-headers="v1"`, `From: ${innerFrom}`, 'Subject: Hi', '', 'Pay the invoice.'].join('\r\n');
+    const signature = await openpgp.sign({ message: await openpgp.createMessage({ binary: new TextEncoder().encode(inner) }), signingKeys: signer, detached: true });
+    return new TextEncoder().encode([
+      `From: ${outerFrom}`, 'To: bob@example.com', 'Subject: Hi', 'MIME-Version: 1.0',
+      'Content-Type: multipart/signed; micalg=pgp-sha512; protocol="application/pgp-signature"; boundary="s"', '',
+      '--s', inner, '--s', 'Content-Type: application/pgp-signature', '', String(signature).replace(/\r?\n/g, '\r\n'), '--s--', '',
+    ].join('\r\n'));
+  }
+
+  it('a protected From the signature binds, under another outer From: the checked sender is the protected one, with the warning', async () => {
+    const alice = await keys('alice@example.com');
+    const raw = await signedAs(alice.privateKey, 'Mallory <mallory@evil.example>', 'Alice <alice@example.com>');
+    const msg = await settle(raw, empty(), [], async () => [{ key: alice.publicKey, addresses: ['alice@example.com'] }]);
+    expect(msg.summary.signed).toBe('all');
+    expect(msg.sources.from).toBe('protected');
+    expect(checkedSender(msg)!.address).toBe('alice@example.com');
+    // the server reports the outer From: "verified" never stands alone beside it
+    expect(senderDiffers(msg, 'Mallory <mallory@evil.example>')).toBe(true);
+    expect(messageBadges(msg, 'Mallory <mallory@evil.example>')).toEqual(['verified', 'from_differs']);
+    expect(messageBadges(msg, 'Alice <alice@example.com>')).toEqual(['verified']);
+  });
+
+  it('the same From outside and in: verified, no warning', async () => {
+    const alice = await keys('alice@example.com');
+    const raw = await signedAs(alice.privateKey, 'Alice <alice@example.com>', 'Alice <alice@example.com>');
+    const msg = await settle(raw, empty(), [], async () => [{ key: alice.publicKey, addresses: ['alice@example.com'] }]);
+    expect(messageBadges(msg, 'alice@example.com')).toEqual(['verified']);
+    expect(senderDiffers(msg, 'ALICE@example.com')).toBe(false);
   });
 });

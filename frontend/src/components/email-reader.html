@@ -143,8 +143,10 @@
                 <strong data-sn-text="`${sent ? m.mail_metaTo() : m.mail_metaFrom()}:`"></strong>
                 <!-- The date follows the address only while both fit on the line: otherwise it wraps onto a second line
                      that .meta-line cuts off, and the address keeps the room (src/styles/mail.scss). -->
+                <!-- A verified message whose signature was checked for another sender than the server's From shows
+                     that sender (b.sender), with the from_differs warning: never "verified" beside another From. -->
                 <span class="meta-line" data-grow>
-                  <span data-truncate data-sn-text="sent ? msg.to.join(', ') : (msg.from || '')"></span>
+                  <span data-truncate data-sn-text="sent ? msg.to.join(', ') : (b?.sender || msg.from || '')"></span>
                   <span class="meta-date" data-sn-attr="{title: messageDateTime(msg.sent_at)}" data-sn-text="formatDate(msg.sent_at)"></span>
                 </span>
                 <span class="caret" data-icon="chevron-down" aria-hidden="true"></span>
@@ -167,7 +169,10 @@
             <template data-sn-if="meta">
               <dl class="meta-details" data-pairs>
                 <template data-sn-if="sent"><dt data-sn-text="m.mail_metaFrom()"></dt><dd data-sn-text="msg.from || ''"></dd></template>
-                <template data-sn-else><dt data-sn-text="m.mail_metaTo()"></dt><dd data-sn-text="msg.to.join(', ')"></dd></template>
+                <template data-sn-else>
+                  <template data-sn-if="b?.sender"><dt data-sn-text="m.mail_metaFromHeader()"></dt><dd data-sn-text="msg.from || ''"></dd></template>
+                  <dt data-sn-text="m.mail_metaTo()"></dt><dd data-sn-text="msg.to.join(', ')"></dd>
+                </template>
                 <template data-sn-if="msg.cc.length > 0"><dt data-sn-text="m.mail_metaCc()"></dt><dd data-sn-text="msg.cc.join(', ')"></dd></template>
                 <dt data-sn-text="m.mail_metaDate()"></dt><dd data-sn-text="messageDateTime(msg.sent_at)"></dd>
               </dl>
