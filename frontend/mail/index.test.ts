@@ -121,7 +121,7 @@ test('shows the first inbox with its unread count, then opens a message in the r
   expect(rows(root)[0].getAttribute('aria-current')).toBe('true');
   expect(marks()).toEqual([{ account_id: 'work', mailbox: 'INBOX', uid: 3, flags: ['\\Seen'], set: true }]);
 
-  expect(root.querySelector('[id^="mail-actions-"] button[data-icon="mail"] > span')!.textContent).toBe(m.mail_markUnread());   // the reader shows it read
+  expect(root.querySelector('[id^="message-actions-"] button[data-icon="mail"] > span')!.textContent).toBe(m.mail_markUnread());   // the reader shows it read
   rows(root)[1].click();                                          // a read message is not marked
   await settle();
   expect(marks()).toHaveLength(1);
@@ -258,10 +258,10 @@ test('the reader\'s star and read toggles stay on success; the list follows the 
   await settle();
   expect(rows(root)[1].querySelector('.flag-star')).not.toBeNull();
 
-  root.querySelector<HTMLButtonElement>('[id^="mail-actions-"] button[data-icon="mail"]')!.click();
+  root.querySelector<HTMLButtonElement>('[id^="message-actions-"] button[data-icon="mail"]')!.click();
   await settle();
   expect(patched()).toEqual({ account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Seen'], set: false });
-  expect(root.querySelector('[id^="mail-actions-"] button[data-icon="mail"] > span')!.textContent).toBe(m.mail_markRead());
+  expect(root.querySelector('[id^="message-actions-"] button[data-icon="mail"] > span')!.textContent).toBe(m.mail_markRead());
   stream.emit('email_updated', { account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Flagged'] });
   await settle();
   expect(rows(root)[1].classList.contains('unread')).toBe(true);

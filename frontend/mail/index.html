@@ -302,14 +302,14 @@
                             data-sn-attr="{'aria-label': m.mail_select()}"></button>
                   </template>
                   <template data-sn-if="cur.account_id && cur.mailbox && !cur.folder_id && folderKind(cur.mailbox) === 'trash'">
-                    <button type="button" data-variant="ghost" data-tone="danger" data-icon="trash-2" data-tooltip commandfor="mail-empty-trash" command="show-modal"
+                    <button type="button" data-variant="ghost" data-tone="danger" data-icon="trash-2" data-tooltip commandfor="email-empty-trash" command="show-modal"
                             data-sn-on-click="trash = {account_id: cur.account_id, mailbox: cur.mailbox, choice: '30', custom: 30, error: '', busy: false}"
                             data-sn-attr="{'aria-label': m.mail_emptyTrash()}"></button>
                   </template>
-                  <button type="button" data-variant="ghost" data-icon="user" data-tooltip popovertarget="mail-filter-addr"
+                  <button type="button" data-variant="ghost" data-icon="user" data-tooltip popovertarget="email-filter-addr"
                           data-sn-on-click="needContacts = true"
                           data-sn-attr="{'aria-label': m.mail_filterBySender(), 'aria-pressed': search.filter.addrs.length > 0 ? 'true' : 'false'}"></button>
-                  <div popover id="mail-filter-addr" class="filter-popover" data-menu role="dialog"
+                  <div popover id="email-filter-addr" class="filter-popover" data-menu role="dialog"
                        data-sn-attr="{'aria-label': m.mail_filterBySender()}"
                        data-sn-let="{ hits: senderHits(search.addrInput, addressBook, seenAddrs ?? [], search.filter.addrs) }">
                     <input type="search" data-sn-model="searchBox.addrInput" data-sn-on-input="searchBox.addrQ = searchBox.addrInput" data-sn-debounce-input="300"
@@ -355,9 +355,9 @@
                       </button>
                     </template>
                   </div>
-                  <button type="button" data-variant="ghost" data-icon="calendar" data-tooltip popovertarget="mail-filter-date"
+                  <button type="button" data-variant="ghost" data-icon="calendar" data-tooltip popovertarget="email-filter-date"
                           data-sn-attr="{'aria-label': m.mail_filterByDate(), 'aria-pressed': search.filter.from || search.filter.to ? 'true' : 'false'}"></button>
-                  <div popover id="mail-filter-date" class="filter-popover filter-popover-date" data-menu role="dialog"
+                  <div popover id="email-filter-date" class="filter-popover filter-popover-date" data-menu role="dialog"
                        data-sn-attr="{'aria-label': m.mail_filterByDate()}">
                     <div data-layout="stack" data-gap="sm" data-pad="xs">
                       <label>
@@ -504,11 +504,11 @@
                         data-sn-attr="{disabled: !$meta.messages.hasPrev, 'aria-label': m.mail_firstPageAria()}"></button>
                 <button type="button" data-variant="ghost" data-size="sm" data-icon="chevron-left" data-tooltip data-sn-on-click="page(messages, 'prev'); sel = unmarked(sel)"
                         data-sn-attr="{disabled: !$meta.messages.hasPrev, 'aria-label': m.mail_prevPageAria()}"></button>
-                <button type="button" class="page-status" data-variant="ghost" data-size="sm" popovertarget="mail-page-jump"
+                <button type="button" class="page-status" data-variant="ghost" data-size="sm" popovertarget="email-page-jump"
                         data-sn-on-click="pageValue = $meta.messages.page ?? null"
                         data-sn-attr="{title: m.mail_jumpToPageAria()}"
                         data-sn-text="m.mail_pageStatus({start: $meta.messages.from ?? 0, end: $meta.messages.to ?? 0, total: $meta.messages.total ?? 0})"></button>
-                <form popover id="mail-page-jump" class="page-jump" data-layout="row" data-gap="xs" data-wrap="none" data-pad="xs"
+                <form popover id="email-page-jump" class="page-jump" data-layout="row" data-gap="xs" data-wrap="none" data-pad="xs"
                       data-sn-on-submit="$event.preventDefault(); pageValue && page(messages, pageValue); sel = pageValue ? unmarked(sel) : sel; $el.hidePopover()">
                   <input class="page-input" data-size="sm" type="number" min="1" autofocus data-sn-model="pageValue"
                          data-sn-attr="{max: $meta.messages.pages, 'aria-label': m.mail_jumpToPageAria()}">
@@ -621,7 +621,7 @@
       </div>
 
       <!-- ── Empty trash ───────────────────────────────────────────────────────── -->
-      <dialog id="mail-empty-trash" closedby="any" data-sn-on-cancel="trash.busy && $event.preventDefault()"
+      <dialog id="email-empty-trash" closedby="any" data-sn-on-cancel="trash.busy && $event.preventDefault()"
               data-sn-let="{ days: emptyTrashDays(trash.choice, trash.custom) }">
         <form data-sn-post="/email/trash/empty"
               data-sn-body="{account_id: trash.account_id, mailbox: trash.mailbox, days}"
@@ -630,7 +630,7 @@
               data-sn-catch="trash.busy = false; trash.error = $error.body?.error === 'savedate_unsupported' ? m.mail_emptyTrashUnsupported() : m.mail_emptyTrashError()">
           <header>
             <h2 data-sn-text="m.mail_emptyTrash()"></h2>
-            <button type="button" commandfor="mail-empty-trash" command="close" data-sn-attr="{'aria-label': m.mail_close(), disabled: trash.busy}"></button>
+            <button type="button" commandfor="email-empty-trash" command="close" data-sn-attr="{'aria-label': m.mail_close(), disabled: trash.busy}"></button>
           </header>
           <p data-muted data-sn-text="m.mail_emptyTrashPrompt()"></p>
           <div data-list role="radiogroup" data-sn-attr="{'aria-label': m.mail_emptyTrashOlderThan()}">
@@ -651,7 +651,7 @@
             <template data-sn-if="trash.error"><p data-tone="danger" role="alert" data-sn-text="trash.error"></p></template>
           </template>
           <footer>
-            <button type="button" data-variant="ghost" commandfor="mail-empty-trash" command="close" data-sn-attr="{disabled: trash.busy}" data-sn-text="m.mail_cancel()"></button>
+            <button type="button" data-variant="ghost" commandfor="email-empty-trash" command="close" data-sn-attr="{disabled: trash.busy}" data-sn-text="m.mail_cancel()"></button>
             <button type="submit" data-tone="danger" data-icon="trash-2" data-sn-attr="{disabled: trash.busy || !validTrashDays(days)}"
                     data-sn-text="trash.busy ? m.mail_emptyTrashDeleting() : m.mail_emptyTrashConfirm()"></button>
           </footer>
