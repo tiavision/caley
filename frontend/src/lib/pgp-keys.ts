@@ -10,10 +10,18 @@ export interface KeyFacts { fingerprint: string; userIds: string[]; emails: stri
 
 /**
  * A key about to be stored as trusted (the settings' import, the reader's import button): the body of POST /pgp/key,
- * what the key says of itself, and whether it claims the address it is offered for (`email` set to it) or the user
- * has to choose one of `facts.emails`.
+ * what the key says of itself, the address it is offered for (`sender`: the message's sender; '' in Settings) and
+ * whether the key names it (`claimsAddress`: then `body.email` is that address; else the user chooses one of
+ * `facts.emails`, `body.email` empty until then).
  */
-export interface KeyCandidate { body: PublicKeyBody; facts: KeyFacts; claimsAddress: boolean }
+export interface KeyCandidate { body: PublicKeyBody; facts: KeyFacts; sender: string; claimsAddress: boolean }
+
+/** A key attached to a message from `sender`, to import: for the sender's address only when the key names it. */
+export function attachedKey(body: PublicKeyBody, facts: KeyFacts, sender: string): KeyCandidate {
+  const address = sender.trim().toLowerCase();
+  const claimsAddress = !!address && facts.emails.includes(address);
+  return { body: { ...body, email: claimsAddress ? address : '' }, facts, sender: address, claimsAddress };
+}
 
 /** A key found in mail that waits to be accepted; `change`: another key is trusted for its address. */
 export interface PendingKey { fingerprint: string; email: string; userIds: string[]; change: boolean }

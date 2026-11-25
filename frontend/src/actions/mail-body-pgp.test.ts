@@ -48,12 +48,14 @@ let calls: string[] = [];
 let uid = 100;
 let cutOptions: { rootCiphertext?: boolean } = {};   // the stand-in server's mail.cut options
 let serverFrom = 'Alice <alice@example.com>';        // the From the stand-in server reports (Message.from)
+let attachments: { filename: string; content_type: string; size: number; content_id: null; bytes: string }[] = [];   // the server's list
 
 beforeEach(() => {
   calls = [];
   trusted = [];
   cutOptions = {};
   serverFrom = 'Alice <alice@example.com>';
+  attachments = [];
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     const range = new Headers(init?.headers).get('Range');
     calls.push(range ? `${url} ${range}` : url);
@@ -61,10 +63,12 @@ beforeEach(() => {
       return Response.json({
         uid: Number(new URL(url, 'http://x').searchParams.get('uid')), account_id: 'work', mailbox: 'INBOX', rowid: 1,
         message_id: null, thread_id: null, from: serverFrom, to: ['bob@example.com'], cc: [], subject: '...',
-        sent_at: 1, flags: [], has_attachments: true, body_cached: true, is_read: true, is_flagged: false, attachments: [], ...flags,
+        sent_at: 1, flags: [], has_attachments: true, body_cached: true, is_read: true, is_flagged: false,
+        attachments: attachments.map(({ bytes: _, ...a }) => a), ...flags,
       });
     }
     if (url === '/api/pgp/keys') return Response.json(trusted);
+    if (url.startsWith('/api/email/attachment?')) return new Response(attachments.find((a) => url.endsWith(`filename=${encodeURIComponent(a.filename)}`))?.bytes ?? '', { status: 200 });
     if (!url.startsWith('/api/email/message/raw?')) return new Response('', { status: 404 });
     if (range) {
       const [, a, b] = /bytes=(\d+)-(\d+)/.exec(range)!;
@@ -214,4 +218,25 @@ test('verified for another sender than the server reports: the reader gets the c
   const same = await read();
   expect(same.badges).toEqual(['verified']);
   expect(same.sender).toBe('');
+});
+
+test('an attached public key is offered with its fingerprint and user IDs, for the sender only when it names the sender', async () => {
+  const alice = await keys('alice@example.com');
+  const other = await keys('someone@elsewhere.example');
+  whole = new TextEncoder().encode(['From: Alice <alice@example.com>', 'To: bob@example.com', 'Subject: keys', 'Content-Type: text/plain', '', 'My keys.', ''].join('\r\n'));
+  flags = { is_encrypted: false, is_signed: false };
+  const attach = (filename: string, key: openpgp.PublicKey) => ({ filename, content_type: 'application/pgp-keys', size: 1, content_id: null, bytes: key.armor() });
+  attachments = [attach('alice.asc', alice.publicKey), attach('other.asc', other.publicKey)];
+  const b = await read();
+  expect(b.importable['alice.asc']).toMatchObject({ claimsAddress: true, sender: 'alice@example.com', body: { email: 'alice@example.com', source: 'message_attachment' } });
+  expect(b.importable['alice.asc']!.facts).toEqual({ fingerprint: alice.publicKey.getFingerprint().toUpperCase(), userIds: ['alice <alice@example.com>'], emails: ['alice@example.com'] });
+  expect(b.importable['other.asc']).toMatchObject({ claimsAddress: false, body: { email: '' }, facts: { emails: ['someone@elsewhere.example'] } });
+
+  // a key found in mail (not accepted) still gets the button; a trusted one does not
+  trusted = [
+    { fingerprint: alice.publicKey.getFingerprint(), email: 'alice@example.com', armored: alice.publicKey.armor(), is_own: false, source: 'harvested_autocrypt', trust: 'unverified' },
+    { fingerprint: other.publicKey.getFingerprint(), email: 'someone@elsewhere.example', armored: other.publicKey.armor(), is_own: false, source: 'imported', trust: 'trusted' },
+  ];
+  const again = await read();
+  expect(Object.keys(again.importable)).toEqual(['alice.asc']);
 });

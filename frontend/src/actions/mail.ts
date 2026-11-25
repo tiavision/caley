@@ -19,9 +19,9 @@ import type { ImageType, Message as MimeMessage, MimeOptions, Ref } from '@tiavi
 import { getKeys, isUnlocked, onLock, openVault } from '../lib/pgp/session.ts';
 import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
 import {
-  keyFacts, listPublicKeys, parsePublicKey, publicKeyBody, savePublicKey, trustedKeys, type PublicKeyBody, type StoredPublicKey,
+  keyFacts, listPublicKeys, parsePublicKey, publicKeyBody, savePublicKey, trustedKeys, type StoredPublicKey,
 } from '../lib/pgp/public-keys.ts';
-import { keyChanges, type PendingKey } from '../lib/pgp-keys.ts';
+import { attachedKey, keyChanges, type KeyCandidate, type PendingKey } from '../lib/pgp-keys.ts';
 import { knownKeys, settle, type Results } from '../lib/pgp/steps.ts';
 import { decryptPrivateKeys, eraseBytes, localActiveDevice, readVault, rememberLocalDevice, unwrapVaultKey, validateVault } from '../lib/pgp/vault.ts';
 import { unlock as webauthnUnlock } from '../lib/pgp/webauthn.ts';
@@ -101,8 +101,9 @@ export interface ReaderBody {
   error: string;
   /** decrypted attachments, as blob: URLs */
   files: DecryptedFile[];
-  /** the public keys not stored yet, by the name of the attachment that holds them: the bodies of POST /pgp/key */
-  importable: Record<string, PublicKeyBody>;
+  /** the attached public keys not trusted yet, by the name of the attachment that holds them: shown (fingerprint,
+   * user IDs) and stored only from the reader's import dialog */
+  importable: Record<string, KeyCandidate>;
   /** inline images of a message read here (part id → content id → blob: URL); null: the server serves them */
   cids: Record<string, Record<string, string>> | null;
   /** a decrypted message's inline images as data: URLs by content id, written into a forward; null for other messages */
@@ -144,17 +145,24 @@ async function harvestAutocrypt(headers: readonly string[], msg: Message) {
   }
 }
 
-async function importableKeys(msg: Message, files: { filename: string; content_type: string }[]): Promise<Record<string, PublicKeyBody>> {
+/**
+ * The public keys attached to the message that the user does not trust yet, by attachment name: each with its
+ * fingerprint and user IDs for the reader's import dialog, offered for the sender's address only when the key names it.
+ */
+async function importableKeys(msg: Message, files: { filename: string; content_type: string }[]): Promise<Record<string, KeyCandidate>> {
   const candidates = files.filter((f) => isPgpPublicKeyAttachment({ ...f, size: 0, content_id: null }));
   if (candidates.length === 0) return {};
-  const stored = new Set((await listPublicKeys()).map((r) => r.fingerprint.toUpperCase()));
-  const out: Record<string, PublicKeyBody> = {};
+  const trusted = new Set(trustedKeys(await listPublicKeys()).map((r) => r.fingerprint.toUpperCase()));
+  const out: Record<string, KeyCandidate> = {};
   for (const c of candidates) {
     try {
       const data = decryptedData.get(c.filename) ?? await bytes(attachmentUrl(msg, c.filename));
       const key = await parsePublicKey(new TextDecoder().decode(data));
-      if (!stored.has(key.getFingerprint().toUpperCase())) out[c.filename] = publicKeyBody(key, 'message_attachment');
-    } catch { /* only parsed public keys get an import button */ }
+      if (!trusted.has(key.getFingerprint().toUpperCase())) out[c.filename] = attachedKey(publicKeyBody(key, 'message_attachment'), keyFacts(key), bareMailbox(msg.from));
+    } catch (e) {
+      if (e instanceof SinterError) throw e;
+      /* only parsed public keys get an import button */
+    }
   }
   return out;
 }

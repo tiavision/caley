@@ -16,14 +16,17 @@
      Shift+I / Shift+U mark read / unread (on the read toggle, whichever it does). -->
 <template data-sn-props="{ open: MessageRef | null; defaultCal: string }"
           data-sn-emits="{ compose: ComposeDraft; 'origins-open': string[] | null; 'ics-import': ImportDraft; 'thread-open': ThreadRef; 'mail-removed': MessageRef; decrypt: void }">
-  <div data-sn-import="openpgp, @tiavision/sinter-mail" data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null) }" data-sn-on-media="media = $event.detail">
+  <!-- keyImport: the attached public key the import dialog shows; keyImported: the message whose key was just stored -->
+  <div data-sn-import="openpgp, @tiavision/sinter-mail"
+       data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null), keyImport: /** @type {KeyCandidate|null} */ (null), keyImportError: '', keyImported: '' }"
+       data-sn-on-media="media = $event.detail">
     <!-- One switch per message: the reader keeps the last message read in full (busy) until the open one's body is in
          (shownMessages), instead of emptying for the message and again for its body. -->
     <template data-sn-if="shownMessages(message, body, open).length > 0">
       <template data-sn-for="msg in shownMessages(message, body, open)" data-sn-key="messageKey(msg)">
         <div class="reader" data-layout="stack" data-gap="none" data-grow
              data-sn-attr="{'aria-busy': open && !isRef(msg, open) ? 'true' : null}"
-             data-sn-state="{ meta: false, attsOpen: false, notice: true, mode: '', moveOpen: false, keyNote: '', keyError: '', unlockError: '', imageVersion: 0, consent: false }"
+             data-sn-state="{ meta: false, attsOpen: false, notice: true, mode: '', moveOpen: false, keyError: '', unlockError: '', imageVersion: 0, consent: false }"
              data-sn-let="{
                b: bodyOf(body, msg),
                sent: isSentMailbox(msg.mailbox),
@@ -200,18 +203,19 @@
                         <span class="mail-attachment-name" data-truncate data-sn-attr="{title: att.filename}" data-sn-text="att.filename"></span>
                         <span data-muted data-sn-text="humanSize(att.size)"></span>
                       </a>
-                      <template data-sn-if="b && b.importable[att.filename]">
-                        <button type="button" data-variant="ghost" data-size="sm" data-icon="import" data-tooltip
-                                data-sn-post="/pgp/key" data-sn-body="b.importable[att.filename]"
-                                data-sn-then="keyNote = m.pgp_publicKeyImported(); keyError = ''; refresh(body)"
-                                data-sn-catch="keyError = m.pgp_publicKeyImportError(); keyNote = ''"
-                                data-sn-attr="{'aria-label': m.pgp_importPublicKeyButton()}"></button>
+                      <template data-sn-if="b && b.importable[att.filename]" data-sn-let="{ cand: b?.importable[att.filename] ?? null }">
+                        <template data-sn-if="cand">
+                          <button type="button" data-variant="ghost" data-size="sm" data-icon="import" data-tooltip
+                                  commandfor="email-key-import" command="show-modal"
+                                  data-sn-on-click="keyImport = { ...cand, body: { ...cand.body } }; keyImportError = ''"
+                                  data-sn-attr="{'aria-label': m.pgp_importPublicKeyButton()}"></button>
+                        </template>
                       </template>
                       <template data-sn-if="isIcsAttachment(att)">
                         <button type="button" data-variant="ghost" data-size="sm" data-icon="calendar-plus" data-tooltip
                                 data-sn-call="mail.icsFile(msg, att.filename, att.content_type)"
                                 data-sn-then="keyError = ''; emit('ics-import', importDraft(caldavAccounts, defaultCal, $result, refOf(msg)))"
-                                data-sn-catch="keyError = $error.detail ?? m.cal_importError(); keyNote = ''"
+                                data-sn-catch="keyError = $error.detail ?? m.cal_importError()"
                                 data-sn-attr="{'aria-label': m.cal_import()}"></button>
                       </template>
                     </span>
@@ -232,7 +236,7 @@
                         data-sn-attr="{'aria-busy': $meta.body.loading ? 'true' : null}" data-sn-text="m.pgp_verifyButton()"></button>
               </div>
             </template>
-            <template data-sn-if="(b && b.badges.some(x => !isIconBadge(x))) || keyNote || keyError">
+            <template data-sn-if="(b && b.badges.some(x => !isIconBadge(x))) || keyError || keyImported === messageKey(msg)">
               <div data-layout="stack" data-gap="xs" data-pad="sm">
                 <template data-sn-if="b && b.badges.some(x => !isIconBadge(x))">
                   <div data-layout="row" data-gap="xs">
@@ -242,7 +246,7 @@
                   </div>
                 </template>
                 <template data-sn-if="keyError"><p data-tone="danger" role="alert" data-sn-text="keyError"></p></template>
-                <div class="live-region" role="status"><template data-sn-if="keyNote"><p data-tone="success" data-sn-text="keyNote"></p></template></div>
+                <div class="live-region" role="status"><template data-sn-if="keyImported === messageKey(msg)"><p data-tone="success" data-sn-text="m.pgp_publicKeyImported()"></p></template></div>
               </div>
             </template>
             <template data-sn-if="b">
@@ -359,6 +363,49 @@
         <slot name="idle"><p class="detail-status" data-muted data-sn-text="m.mail_selectMessage()"></p></slot>
       </template>
     </template>
+    <!-- Importing an attached public key: its full fingerprint and user IDs are shown first; it is stored
+         (trusted) for the sender's address only when the key names it, else for the address the user picks
+         among the key's own. -->
+    <dialog id="email-key-import" closedby="any" aria-labelledby="email-key-import-title">
+      <header>
+        <h2 id="email-key-import-title" data-sn-text="m.pgp_importPublicKeyButton()"></h2>
+        <button type="button" commandfor="email-key-import" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
+      </header>
+      <template data-sn-if="keyImport">
+        <div data-layout="stack" data-gap="md">
+          <p data-muted data-sn-text="m.pgp_importConfirmHint()"></p>
+          <pgp-key-facts data-sn-with="{ fingerprint: keyImport.facts.fingerprint, userIds: keyImport.facts.userIds }"></pgp-key-facts>
+          <template data-sn-if="keyImport.claimsAddress">
+            <p data-sn-text="m.pgp_importForSender({ email: keyImport.body.email })"></p>
+          </template>
+          <template data-sn-else data-sn-if="keyImport.facts.emails.length > 0">
+            <p data-callout data-tone="warning"
+               data-sn-text="m.pgp_keyNotSender({ sender: keyImport.sender, emails: keyImport.facts.emails.join(', ') })"></p>
+            <label>
+              <span data-sn-text="m.pgp_importForAddress()"></span>
+              <select data-sn-model="keyImport.body.email">
+                <option value="" data-sn-text="m.pgp_chooseAddress()"></option>
+                <template data-sn-for="addr in keyImport.facts.emails" data-sn-key="addr">
+                  <option data-sn-attr="{value: addr}" data-sn-text="addr"></option>
+                </template>
+              </select>
+            </label>
+          </template>
+          <template data-sn-else>
+            <p data-callout data-tone="warning" data-sn-text="m.pgp_keyNoAddress()"></p>
+          </template>
+          <template data-sn-if="keyImportError"><p data-tone="danger" role="alert" data-sn-text="keyImportError"></p></template>
+          <footer>
+            <button type="button" data-variant="ghost" commandfor="email-key-import" command="close" data-sn-text="m.event_cancel()"></button>
+            <button type="button" data-icon="shield-check" data-sn-attr="{disabled: !keyImport.body.email}"
+                    data-sn-post="/pgp/key" data-sn-body="keyImport.body"
+                    data-sn-then="keyImported = body ? body.key : ''; keyImport = null; closeDialog('email-key-import'); refresh(body)"
+                    data-sn-catch="keyImportError = m.pgp_publicKeyImportError()"
+                    data-sn-text="m.pgp_trustImportButton()"></button>
+          </footer>
+        </div>
+      </template>
+    </dialog>
   </div>
 </template>
 

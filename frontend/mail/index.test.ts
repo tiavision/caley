@@ -651,6 +651,63 @@ test('a message verified for another sender than the server\'s From shows the ch
   expect(meta.querySelector('.meta-details')!.textContent).toContain('Sender 1 <s1@x>');
 });
 
+test('importing an attached public key shows its fingerprint and user IDs first; a key that does not name the sender is stored for the address the user picks', async () => {
+  const withKey = [msg(1, 'Key', { attachments: [{ filename: 'key.asc', content_type: 'application/pgp-keys', size: 900, content_id: null }], has_attachments: true })];
+  let trusted = false;
+  bodyExtra = { importable: { 'key.asc': {
+    body: { fingerprint: 'ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234', email: '', armored: 'K', is_own: false, source: 'message_attachment' },
+    facts: { fingerprint: 'ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234', userIds: ['Someone <other@x>', 'Someone <third@x>'], emails: ['other@x', 'third@x'] },
+    sender: 's1@x', claimsAddress: false,
+  } } };
+  const { root, settle, requests } = await show({
+    'GET /api/email/messages': { messages: withKey, total: 1 },
+    'POST /api/pgp/key': (call) => { trusted = true; bodyExtra = {}; return { ...(call.body as object), trust: 'trusted' }; },
+  });
+  rows(root)[0].click();
+  await settle();
+  root.querySelector<HTMLButtonElement>('.attachments button[aria-expanded]')!.click();
+  await settle();
+  root.querySelector<HTMLButtonElement>(`.attachments button[aria-label="${m.pgp_importPublicKeyButton()}"]`)!.click();
+  await settle();
+  const dialog = root.querySelector<HTMLDialogElement>('#email-key-import')!;
+  expect(dialog.open).toBe(true);
+  expect(dialog.querySelector('.key-fingerprint')!.textContent).toBe('ABCD 1234 ABCD 1234 ABCD 1234 ABCD 1234 ABCD 1234');
+  expect(dialog.querySelector('.key-facts')!.textContent).toContain('Someone <third@x>');
+  expect(dialog.textContent).toContain(m.pgp_keyNotSender({ sender: 's1@x', emails: 'other@x, third@x' }));
+  const store = () => [...dialog.querySelectorAll('button')].find((b) => b.textContent === m.pgp_trustImportButton())!;
+  expect(store().disabled).toBe(true);                                 // no address chosen yet
+  expect(requests.calls.some((c) => c.method === 'POST' && c.path === '/api/pgp/key')).toBe(false);
+  const select = dialog.querySelector('select')!;
+  select.value = 'third@x';
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  store().click();
+  await settle();
+  expect(trusted).toBe(true);
+  expect(requests.calls.find((c) => c.method === 'POST' && c.path === '/api/pgp/key')!.body).toMatchObject({ email: 'third@x', source: 'message_attachment' });
+  expect(dialog.open).toBe(false);
+  expect(root.querySelector('.detail-body [role=status]')!.textContent).toContain(m.pgp_publicKeyImported());
+  expect(root.querySelector(`.attachments button[aria-label="${m.pgp_importPublicKeyButton()}"]`)).toBeNull();   // trusted now
+});
+
+test('an attached key that names the sender is offered for the sender\'s address', async () => {
+  const withKey = [msg(1, 'Key', { attachments: [{ filename: 'key.asc', content_type: 'application/pgp-keys', size: 900, content_id: null }], has_attachments: true })];
+  bodyExtra = { importable: { 'key.asc': {
+    body: { fingerprint: 'AB12', email: 's1@x', armored: 'K', is_own: false, source: 'message_attachment' },
+    facts: { fingerprint: 'AB12', userIds: ['Sender 1 <s1@x>'], emails: ['s1@x'] }, sender: 's1@x', claimsAddress: true,
+  } } };
+  const { root, settle } = await show({ 'GET /api/email/messages': { messages: withKey, total: 1 } });
+  rows(root)[0].click();
+  await settle();
+  root.querySelector<HTMLButtonElement>('.attachments button[aria-expanded]')!.click();
+  await settle();
+  root.querySelector<HTMLButtonElement>(`.attachments button[aria-label="${m.pgp_importPublicKeyButton()}"]`)!.click();
+  await settle();
+  const dialog = root.querySelector<HTMLDialogElement>('#email-key-import')!;
+  expect(dialog.textContent).toContain(m.pgp_importForSender({ email: 's1@x' }));
+  expect(dialog.querySelector('select')).toBeNull();
+});
+
 test('compose shows a recipient\'s key found in mail with its full fingerprint and user IDs, and accepts it only on request', async () => {
   composeKeysResult = {
     keys: [], vault: [], unlocked: [],
