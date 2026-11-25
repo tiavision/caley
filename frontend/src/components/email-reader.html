@@ -55,7 +55,7 @@
                         data-sn-patch="/email/message/flags" data-sn-retry="flags" data-sn-body="flagBody(msg, '\\Flagged', !msg.is_flagged)"
                         data-sn-optimistic="merge(message, star)"></button>
                 <button type="button" data-variant="ghost" data-icon="reply" data-tooltip data-shortcut="r"
-                        data-sn-on-click="emit('compose', composeDraft('reply', replyOf(msg, b), identities, b?.quotable ? b.text : '', null))"
+                        data-sn-on-click="emit('compose', replyDraft('reply', msg, b, identities))"
                         data-sn-attr="{'aria-label': m.mail_reply()}"></button>
                 <button type="button" class="overlay-only" data-variant="ghost" data-icon="ellipsis-vertical"
                         data-sn-attr="{popovertarget: 'message-actions-' + msg.uid, 'aria-label': m.mail_messageActions()}"></button>
@@ -63,13 +63,13 @@
                         data-sn-attr="{popovertarget: 'message-actions-' + msg.uid, 'aria-label': m.mail_messageActions()}" data-sn-text="m.mail_actions()"></button>
                 <div popover data-sn-attr="{id: 'message-actions-' + msg.uid}" data-menu role="menu" data-sn-on-toggle="$event.newState === 'closed' && (moveOpen = false)">
                   <button type="button" role="menuitem" data-icon="reply-all" data-shortcut="a" aria-keyshortcuts="A"
-                          data-sn-on-click="ancestor($el, '[popover]')?.hidePopover(); emit('compose', composeDraft('replyAll', replyOf(msg, b), identities, b?.quotable ? b.text : '', null))">
+                          data-sn-on-click="ancestor($el, '[popover]')?.hidePopover(); emit('compose', replyDraft('replyAll', msg, b, identities))">
                     <span data-sn-text="m.mail_replyAll()"></span><kbd aria-hidden="true">A</kbd>
                   </button>
                   <button type="button" role="menuitem" data-icon="forward" data-shortcut="f" aria-keyshortcuts="F"
                           data-sn-on-click="ancestor($el, '[popover]')?.hidePopover()"
                           data-sn-call="mail.forwardFiles(msg, b?.html ?? '', b?.forwardCids ?? null)"
-                          data-sn-then="emit('compose', composeDraft('forward', replyOf(msg, b), identities, b?.text ?? '', $result.html, $result.files))">
+                          data-sn-then="emit('compose', forwardDraft(msg, b, identities, $result.html, $result.files))">
                     <span data-sn-text="m.mail_forward()"></span><kbd aria-hidden="true">F</kbd>
                   </button>
                   <hr>

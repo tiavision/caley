@@ -528,6 +528,8 @@
   "pgp_composeUnlockSigningKey": "Entsperre den Tresor mit dem Signaturschlüssel für diese Identität.",
   "pgp_composeNoSigningKey": "Kein PGP-Schlüssel für diese Identität's E-Mail-Adresse gefunden. Füge diese Adresse als Identität in deinem Schlüssel in den Einstellungen hinzu.",
   "pgp_composeMissingKeys": "Fehlende Verschlüsselungsschlüssel für: {emails}",
+  "pgp_composeEncryptBlocked": "Die Verschlüsselung ist an, aber es gibt keinen vertrauten Schlüssel für: {emails}. Importiere ihre Schlüssel oder nimm sie an, oder schalte die Verschlüsselung aus, um die Nachricht unverschlüsselt zu senden.",
+  "pgp_composeDecryptedInClear": "Die Verschlüsselung ist aus: Der entschlüsselte Text, den diese Nachricht zitiert oder weiterleitet, wird unverschlüsselt gesendet.",
   "pgp_sourceAutocrypt": "In einem Autocrypt-Header gefunden",
   "pgp_sourceSignedAttachment": "In einem Anhang gefunden",
   "pgp_keyUserIds": "Benutzer-IDs",

@@ -92,7 +92,7 @@ export {
   withFlag, flagBody, moveBody, bulkFlagsBody, bulkMoveBody, bulkBody, inTrash, emptyTrashDays, validTrashDays, clampWidth,
   keyWidth, isSentMailbox, messageDateTime, shownAttachments, attachmentUrl, attachmentCount, pgpBadgeLabel, isIconBadge,
   bodyOrigins, bodyImages, partOptions, viewOrigins, replyOf, shownMessages, matching, isThreadCurrent, composeDraft, composeTitle, recipientToken, withRecipient, contactAddresses,
-  recipientHits, senderHits, senderLabel, canSign, canEncrypt, signs, waitingKeys, newAccount, editAccount, discovered, accountBody, accountUi, needsPassword, signsInAtServer, jmapRedirectUri,
+  recipientHits, senderHits, senderLabel, canSign, canEncrypt, signs, waitingKeys, missingKeys, replyDraft, forwardDraft, newAccount, editAccount, discovered, accountBody, accountUi, needsPassword, signsInAtServer, jmapRedirectUri,
   identityBody, folderDraft, folderBody, subscribed, canPreviewAttachment, folderKind, htmlAddsValue,
   isIcsAttachment, formatDate, humanSize, textSegments, messageKey, senderName,
   // page state (src/lib/mail.ts "Page state") and the keys without a control of their own

@@ -1,5 +1,6 @@
 <!-- Compose dialog #email-compose (/mail/ and /mail/view/). It wraps the part of the page that opens it; an opener
-     emits `compose` with the draft: emit('compose', composeDraft(mode, msg, identities, text, html, files)).
+     emits `compose` with the draft: emit('compose', composeDraft('new', null, identities)), the reader's
+     replyDraft(mode, msg, body, identities) / forwardDraft(…) (encrypted from the start for decrypted mail).
      With `pending`, it also opens a draft another page left (share menu → send by email).
      Leaving the page while the open draft has been edited (Back or Forward: the modal dialog keeps the page's links
      out of reach) is refused, with a note in the dialog: send it or discard it first. An event runs only the
@@ -34,6 +35,7 @@
                canEnc: canEncrypt(compose, identities, composeKeys),
                signing: signs(compose, identities, composeKeys),
                waiting: waitingKeys(compose, composeKeys),
+               missing: compose.encrypt ? missingKeys(compose, identities, composeKeys) : [],
                hits: recipientHits(rcpt.token, contactAddresses(composeContacts ?? []), recipientAddrs ?? []),
              }">
           <header class="compose-header" data-pad="sm">
@@ -42,7 +44,7 @@
           </header>
           <form class="compose-form" data-layout="stack" data-gap="none" data-grow
                 data-sn-on-submit="sending = true; composeError = ''"
-                data-sn-call="mail.send({...compose, encrypt: compose.encrypt && canEnc}, identities, signing)"
+                data-sn-call="mail.send(compose, identities, signing)"
                 data-sn-then="sending = false; closeDialog('email-compose')"
                 data-sn-catch="sending = false; composeError = loadErrorOr($error, $error.detail ?? m.mail_sendError())">
             <template data-sn-if="identities.length > 1">
@@ -69,7 +71,7 @@
                 </div>
               </div>
               <button type="button" data-variant="ghost" data-size="sm" data-icon="lock" data-tooltip
-                      data-sn-attr="{disabled: !canEnc || sending, 'aria-pressed': compose.encrypt && canEnc ? 'true' : 'false', 'aria-label': m.pgp_composeEncrypt()}"
+                      data-sn-attr="{disabled: (!canEnc && !compose.encrypt) || sending, 'aria-pressed': compose.encrypt ? 'true' : 'false', 'aria-label': m.pgp_composeEncrypt()}"
                       data-sn-on-click="compose.encrypt = !compose.encrypt"></button>
               <button type="button" data-variant="ghost" data-size="sm" data-icon="signature" data-tooltip
                       data-sn-attr="{disabled: !canSign(compose, identities, composeKeys) || sending, 'aria-pressed': signing ? 'true' : 'false', 'aria-label': m.pgp_composeSign()}"
@@ -148,6 +150,17 @@
                 </template>
               </ul>
             </template>
+            <!-- Encryption is never dropped silently: while it is on and a recipient has no trusted key, the message
+                 is not sent (mail.send refuses it); sending it unencrypted is turning the lock off, and a draft that
+                 quotes or forwards decrypted text says what that means. -->
+            <div class="live-region" role="status">
+              <template data-sn-if="missing.length > 0">
+                <p class="compose-error" data-callout data-tone="danger" data-sn-text="m.pgp_composeEncryptBlocked({ emails: missing.join(', ') })"></p>
+              </template>
+              <template data-sn-if="compose.decrypted && !compose.encrypt">
+                <p class="compose-error" data-callout data-tone="warning" data-sn-text="m.pgp_composeDecryptedInClear()"></p>
+              </template>
+            </div>
             <template data-sn-if="composeError">
               <p class="compose-error" data-tone="danger" role="alert" data-sn-text="composeError"></p>
             </template>

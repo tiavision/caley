@@ -34,9 +34,11 @@ const openedParts: string[] = [];
 // what mail.composeKeys answers, and how often it was asked
 let composeKeysResult: object = { keys: [], pending: [], vault: [], unlocked: [] };
 let composeKeysCalls = 0;
+// the drafts mail.send was given
+const sent: { encrypt: boolean }[] = [];
 
 // the app's retry policies: the flag toggles name one (data-sn-retry="flags")
-beforeEach(() => { composeKeysResult = { keys: [], pending: [], vault: [], unlocked: [] }; composeKeysCalls = 0; discovery = { found: false }; bodyGate = null; htmlBody = ''; decrypted = false; partsOverride = null; openedParts.length = 0; localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'], retry: retryPolicies }); });
+beforeEach(() => { composeKeysResult = { keys: [], pending: [], vault: [], unlocked: [] }; composeKeysCalls = 0; sent.length = 0; discovery = { found: false }; bodyGate = null; htmlBody = ''; decrypted = false; partsOverride = null; openedParts.length = 0; localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'], retry: retryPolicies }); });
 afterEach(() => configure({ confirm: null as never, urlSchemes: [], retry: null }));
 
 async function show(routes: Record<string, RouteResponse> = {}, pending: { subject: string; files: File[] } | null = null, storage = memoryStorage(),
@@ -80,7 +82,7 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
         const textParts = [{ ...part, kind: 'text', text: `body ${ref.uid}` }];
         return {
           key: `${ref.account_id} ${ref.mailbox} ${ref.uid}`, message: current.find((msg) => msg.uid === ref.uid) ?? inbox[0], parts: partsOverride ?? (htmlBody ? [{ ...part, kind: 'html', html: htmlBody }] : textParts), textParts: partsOverride ?? textParts,
-          html: htmlBody, text: `body ${ref.uid}`, quotable: !decrypted, mode: htmlBody ? 'html' : 'text', encrypted: decrypted, signed: false,
+          html: htmlBody, text: `body ${ref.uid}`, quotable: !decrypted, mode: htmlBody ? 'html' : 'text', encrypted: decrypted, decrypted, signed: false,
           locked: false, badges: [], subject: '', reply: null, error: '', files: [], importable: {}, cids: null, forwardCids: null,
         };
       },
@@ -89,7 +91,7 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
       wipe: () => {},
       composeKeys: async () => { composeKeysCalls++; return composeKeysResult; },
       autodiscover: async () => discovery,
-      send: async () => null,
+      send: async (draft: { encrypt: boolean }) => { sent.push(draft); return null; },
       forwardFiles: async () => ({ files: [], html: '' }),
       popout: () => {}, unlock: async () => true, icsFile: async (_m: unknown, filename: string) => new File(['x'], filename),
       pendingCompose: () => { pendingCalls++; const p = pending; pending = null; return p; },
@@ -602,6 +604,35 @@ test('reply opens the compose dialog with the quoted message, and sends it', asy
   root.querySelector<HTMLFormElement>('.compose-form')!.requestSubmit();
   await settle();
   expect(root.querySelector<HTMLDialogElement>('#email-compose')!.open).toBe(false);
+});
+
+test('a reply to decrypted mail starts encrypted; without a key for a recipient it is not sent in clear: the lock is the user\'s choice, with a warning', async () => {
+  decrypted = true;
+  const { root, settle } = await show();
+  rows(root)[2].click();
+  await settle();
+  rows(root)[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));
+  await settle();
+  const dialog = root.querySelector<HTMLDialogElement>('#email-compose')!;
+  const lock = () => dialog.querySelector<HTMLButtonElement>(`button[aria-label="${m.pgp_composeEncrypt()}"]`)!;
+  expect(lock().getAttribute('aria-pressed')).toBe('true');
+  expect(lock().disabled).toBe(false);                                 // on without keys: the user can turn it off
+  expect(dialog.textContent).toContain(m.pgp_composeEncryptBlocked({ emails: 's1@x, me@x' }));
+  expect(dialog.textContent).not.toContain(m.pgp_composeDecryptedInClear());
+  dialog.querySelector<HTMLFormElement>('.compose-form')!.requestSubmit();
+  await settle();
+  expect(sent.map((d) => d.encrypt)).toEqual([true]);                 // as it was: mail.send refuses what it cannot encrypt
+
+  rows(root)[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));
+  await settle();
+  lock().click();
+  await settle();
+  expect(lock().getAttribute('aria-pressed')).toBe('false');
+  expect(dialog.textContent).toContain(m.pgp_composeDecryptedInClear());
+  expect(dialog.textContent).not.toContain(m.pgp_composeEncryptBlocked({ emails: 's1@x, me@x' }));
+  dialog.querySelector<HTMLFormElement>('.compose-form')!.requestSubmit();
+  await settle();
+  expect(sent.map((d) => d.encrypt)).toEqual([true, false]);
 });
 
 test('compose shows a recipient\'s key found in mail with its full fingerprint and user IDs, and accepts it only on request', async () => {
