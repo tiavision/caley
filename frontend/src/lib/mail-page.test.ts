@@ -11,6 +11,7 @@ import { caldavBody, caldavDraft, enrollErrorText, keyImportError, withCalendarA
 import { loadErrorOr } from './errors.ts';
 import { m } from '@tiaforge-ui/sinter/messages';
 import { importSummary } from './import.ts';
+import { attachedKey, fingerprintText, keyState } from './pgp-keys.ts';
 
 const msg = (uid: number, extra: Partial<Message> = {}) => ({ uid, account_id: 'a', mailbox: 'INBOX', flags: [], ...extra }) as unknown as Message;
 const list = [msg(1), msg(2), msg(3)];
@@ -301,5 +302,22 @@ describe('reply recipients of decrypted mail', () => {
   test('a message without decrypted content: the server\'s headers, as before', () => {
     const b = { subject: '', reply: null, replyCc: null, text: 'hi', quotable: true, decrypted: false };
     expect(replyDraft('replyAll', resent, b, ids)).toMatchObject({ to: 'm@evil', cc: 'm2@evil' });
+  });
+});
+
+describe('public keys before they are trusted', () => {
+  const body = { fingerprint: 'AB', email: 'x', armored: 'K', is_own: false as const, source: 'message_attachment' as const };
+  test('an attached key is offered for the sender\'s address only when it names it', () => {
+    const facts = { fingerprint: 'AB', userIds: ['Alice <alice@x>', 'Alice <a@work>'], emails: ['alice@x', 'a@work'] };
+    expect(attachedKey(body, facts, 'Alice@X')).toMatchObject({ claimsAddress: true, sender: 'alice@x', body: { email: 'alice@x' } });
+    expect(attachedKey(body, facts, 'mallory@evil')).toMatchObject({ claimsAddress: false, sender: 'mallory@evil', body: { email: '' } });
+  });
+  test('fingerprints in groups of four; a key\'s state among the stored ones', () => {
+    expect(fingerprintText('abcd1234ef')).toBe('ABCD 1234 EF');
+    const k = (fingerprint: string, trust: string, email = 'bob@x') => ({ fingerprint, email, armored: '', is_own: false, source: 'imported', trust });
+    expect(keyState(k('A', 'trusted'), [k('A', 'trusted')])).toBe('trusted');
+    expect(keyState(k('B', 'unverified'), [k('B', 'unverified')])).toBe('waiting');
+    expect(keyState(k('B', 'unverified'), [k('A', 'trusted'), k('B', 'unverified')])).toBe('change');
+    expect(keyState(k('B', 'unverified'), [k('A', 'trusted', 'carol@x'), k('B', 'unverified')])).toBe('waiting');
   });
 });
