@@ -368,6 +368,13 @@ docker run -p 3000:3000 \
 
 The image builds the frontend with Node, builds the Rust backend, and serves the static frontend from the backend. Persist `/data` or the configured database path so SQLite data, cached mail files, sessions, credentials, and vault metadata survive restarts.
 
+## CI and Releases (GitHub)
+
+- `.github/workflows/ci.yml`: on every push and pull request: backend `cargo fmt --check` and `cargo test --locked`, frontend `npm test` and `npm run build`.
+- `.github/workflows/image.yml`: the image on GitHub's registry, `ghcr.io/tiavision/caley`: `:main` on every push to main; the release's tags when the Release workflow calls it.
+- `.github/workflows/release.yml`, run from GitHub's UI (Actions → Release → Run workflow on main, a version such as `1.3.0`; `1.3.0-rc.1` is a pre-release): writes the version everywhere (`.github/scripts/set-version.sh`: both crates, both packages, their lockfiles; Tauri reads the app's version from `native/src-tauri/Cargo.toml`), commits "Release <version>" on `release/v<version>`, runs CI there and builds the Android APK (arm64, signed with the `ANDROID_KEYSTORE`/`ANDROID_KEYSTORE_PASSWORD`/`ANDROID_KEY_ALIAS` secrets; without them no APK) and the Windows `.exe` and NSIS installer; then tags, pushes `:v<version>` (and `:latest` unless a pre-release), makes the GitHub release with those files, and moves main to the release commit. Pull main from GitHub afterwards.
+- `.forgejo/workflows/main.yml` still builds `:main` on Forgejo; its presence also keeps Forgejo from running the `.github` workflows.
+
 ## Implementation Notes
 
 - Keep handlers using `CurrentUser`; do not split auth behavior by handler unless a route is intentionally public.

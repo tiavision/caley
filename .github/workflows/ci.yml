@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  # the Release workflow runs all of it on the release commit before anything is published
+  workflow_call:
+    inputs:
+      ref:
+        description: the commit to check out (the pushed or pulled one when empty)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+      - run: cargo fmt --check
+      # openapi_spec_is_current among them: frontend/openapi.json is the routes' spec
+      - run: cargo test --locked
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      # sinter check (strict) and temper check run in the build
+      - run: npm run build

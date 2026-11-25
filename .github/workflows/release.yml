@@ -1,0 +1,281 @@
+name: Release
+
+# From GitHub's UI: Actions → Release → Run workflow (on main) → the version, such as 1.3.0 (1.3.0-rc.1 for a
+# pre-release). The workflow
+#
+# 1. writes the version everywhere (.github/scripts/set-version.sh), commits "Release <version>" and pushes it to
+#    a branch of its own, release/v<version>;
+# 2. runs CI on it and builds the app shell for Android (a signed APK, when the signing secrets are set) and
+#    Windows (the .exe and an installer);
+# 3. only then tags it v<version>, pushes the image ghcr.io/<owner>/caley:v<version> (and :latest unless it is a
+#    pre-release), makes the GitHub release with the app files and generated notes, moves main to the release
+#    commit and deletes the branch.
+#
+# A run that fails before the tag leaves nothing behind: run it again with the same version. After the tag,
+# "Re-run failed jobs" picks up where it stopped.
+#
+# Android signing (repository secrets; without them the release has no APK):
+#   ANDROID_KEYSTORE           the keystore, base64 (`base64 -w0 caley.jks`)
+#   ANDROID_KEYSTORE_PASSWORD  its password (also the key's)
+#   ANDROID_KEY_ALIAS          the key's alias
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'The version to release, such as 1.3.0 (1.3.0-rc.1 for a pre-release)'
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  BOT_NAME: github-actions[bot]
+  BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.push.outputs.version }}
+      tag: ${{ steps.push.outputs.tag }}
+      ref: ${{ steps.push.outputs.ref }}
+      prerelease: ${{ steps.push.outputs.prerelease }}
+    steps:
+      - if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Run the Release workflow on main, not ${GITHUB_REF#refs/heads/}"
+          exit 1
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - id: push
+        env:
+          INPUT: ${{ inputs.version }}
+        run: |
+          version="${INPUT#v}"
+          tag="v$version"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "Tag $tag already exists"
+            exit 1
+          fi
+          .github/scripts/set-version.sh "$version"
+          git config user.name "$BOT_NAME"
+          git config user.email "$BOT_EMAIL"
+          git commit -am "Release $version"
+          # --force: the branch of an earlier run of this version that stopped before the tag
+          git push --force origin "HEAD:refs/heads/release/$tag"
+          case "$version" in *-*) prerelease=true ;; *) prerelease=false ;; esac
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "ref=release/$tag"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: prepare
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.ref }}
+
+  android:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+      - id: signing
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo "::warning::No ANDROID_KEYSTORE secret: the release has no APK"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/caley.jks"
+          # read by gen/android/app/build.gradle.kts (a .properties file: no backslashes in the password)
+          printf 'storeFile=%s\npassword=%s\nkeyAlias=%s\n' "$RUNNER_TEMP/caley.jks" "$PASSWORD" "$ALIAS" \
+            > src-tauri/gen/android/keystore.properties
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+      - if: steps.signing.outputs.signed == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - if: steps.signing.outputs.signed == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - if: steps.signing.outputs.signed == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/src-tauri
+      - if: steps.signing.outputs.signed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - if: steps.signing.outputs.signed == 'true'
+        run: npm ci
+      # arm64 only: the phones Caley runs on (the runner has the Android SDK and NDK)
+      - if: steps.signing.outputs.signed == 'true'
+        run: NDK_HOME="$ANDROID_NDK_LATEST_HOME" npx tauri android build --apk --target aarch64
+      - if: steps.signing.outputs.signed == 'true'
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release.apk' | head -n1)
+          test -n "$apk" || { echo "no signed release APK was built"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/out"
+          cp "$apk" "$RUNNER_TEMP/out/caley-$VERSION-android-arm64.apk"
+      - if: steps.signing.outputs.signed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: ${{ runner.temp }}/out/*
+          if-no-files-found: error
+
+  windows:
+    needs: prepare
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - run: npm ci
+      - run: npx tauri build --bundles nsis
+      - env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          mkdir -p ../out
+          cp src-tauri/target/release/caley-native.exe "../out/caley-$VERSION-windows-x64.exe"
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe "../out/caley-$VERSION-windows-x64-setup.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: out/*
+          if-no-files-found: error
+
+  # the release commit is tagged once CI passed and the apps built, before anything is published
+  tag:
+    needs: [prepare, ci, android, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+      - env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          git config user.name "$BOT_NAME"
+          git config user.email "$BOT_EMAIL"
+          git tag -a "$TAG" -m "Caley $VERSION"
+          git push origin "refs/tags/$TAG"
+
+  image:
+    needs: [prepare, tag]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/image.yml
+    with:
+      ref: ${{ needs.prepare.outputs.tag }}
+      tags: ${{ needs.prepare.outputs.tag }}${{ needs.prepare.outputs.prerelease == 'false' && ' latest' || '' }}
+
+  release:
+    needs: [prepare, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/out
+          merge-multiple: true
+      - name: main to the release commit
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
+          if git merge-base --is-ancestor HEAD "$TAG"; then
+            git push origin "$TAG^{commit}:refs/heads/main"
+          else
+            # main moved on while the release ran: merge the release commit into it
+            git config user.name "$BOT_NAME"
+            git config user.email "$BOT_EMAIL"
+            git merge --no-ff -m "Merge release $TAG" "$TAG"
+            git push origin HEAD:refs/heads/main
+          fi
+      - name: the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          OWNER: ${{ github.repository_owner }}
+          NAME: ${{ github.event.repository.name }}
+        run: |
+          image="ghcr.io/${OWNER,,}/${NAME,,}:$TAG"
+          printf '**Container image**: `%s`\n\n```sh\ndocker pull %s\n```\n' "$image" "$image" > "$RUNNER_TEMP/notes.md"
+          flags=()
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+          shopt -s nullglob
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes \
+            "${flags[@]}" "$RUNNER_TEMP"/out/*
+
+  # whatever happened: the release branch goes. The tag, once made, holds the commit
+  cleanup:
+    needs: [prepare, release]
+    if: ${{ always() && needs.prepare.outputs.ref != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          REF: ${{ needs.prepare.outputs.ref }}
+        run: |
+          if git ls-remote --exit-code --heads origin "$REF" >/dev/null; then git push origin --delete "$REF"; else echo "$REF is gone already"; fi
