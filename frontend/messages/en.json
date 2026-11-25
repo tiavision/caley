@@ -528,6 +528,8 @@
   "pgp_composeUnlockSigningKey": "Unlock the vault containing the signing key for this identity.",
   "pgp_composeNoSigningKey": "No PGP key found for this identity's email address. Add this address as an identity on your key in Settings.",
   "pgp_composeMissingKeys": "Missing encryption keys for: {emails}",
+  "pgp_composeEncryptBlocked": "Encryption is on, but there is no trusted key for: {emails}. Import or accept their keys, or turn encryption off to send this message unencrypted.",
+  "pgp_composeDecryptedInClear": "Encryption is off: the decrypted text this message quotes or forwards will be sent unencrypted.",
   "pgp_sourceAutocrypt": "Found in an Autocrypt header",
   "pgp_sourceSignedAttachment": "Found in an attachment",
   "pgp_keyUserIds": "User IDs",

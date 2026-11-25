@@ -5,7 +5,7 @@ import {
   accountUi, addableSender, afterBulk, bodyOf, canDrop, cleared, currentView, folderView, inMailbox, mailboxView, noView, listStatus, markedRead, noReader, noSearch,
   noSelection, openedAt, opensRow, pageKey, readerOn, rowClick, scrollTopFor, searchActive, senderAdded, sharedDraft,
   siblingRow, unmarked, urlRef, urlView, shownView, viewHref, urlLags, noSearchBox, mailSearch, newAccount, editAccount, discovered,
-  accountBody, needsPassword, signsInAtServer, type Account, type Mailbox, type Message, type VirtualFolder,
+  accountBody, needsPassword, signsInAtServer, replyDraft, forwardDraft, missingKeys, type Account, type Mailbox, type Message, type VirtualFolder,
 } from './mail.ts';
 import { caldavBody, caldavDraft, enrollErrorText, keyImportError, withCalendarActive } from './settings.ts';
 import { loadErrorOr } from './errors.ts';
@@ -257,5 +257,26 @@ describe('the mail page URL', () => {
     const s = mailSearch({ addrInput: 'ad', addrQ: 'ad' }, 'invoice', ['ada@x', 'bob@y'], '2026-01-01', undefined, true);
     expect(s).toEqual({ input: 'invoice', q: 'invoice', filter: { addrs: ['ada@x', 'bob@y'], from: '2026-01-01', to: '', unread: true }, addrInput: 'ad', addrQ: 'ad' });
     expect(searchActive(mailSearch(noSearchBox(), undefined, [], undefined, undefined, false))).toBe(false);
+  });
+});
+
+describe('replies and forwards of encrypted mail', () => {
+  const ids = [{ identity_id: 'i1', account_id: 'a', name: 'Me', email: 'me@x', is_default: true, sort_order: 0 }] as never;
+  const plain = { subject: '', reply: null, text: 'hello', quotable: true, decrypted: false };
+  const secret = { subject: 'Secret plan', reply: ['Alice <alice@x>'], text: 'the plan', quotable: true, decrypted: true };
+  const from = msg(1, { from: 'Alice <alice@x>', to: ['me@x'], cc: [], subject: '...', message_id: '<1@x>', attachments: [] });
+  test('a reply or forward of decrypted content starts encrypted, and says it quotes decrypted text', () => {
+    expect(replyDraft('reply', from, secret, ids)).toMatchObject({ encrypt: true, decrypted: true });
+    expect(replyDraft('replyAll', from, secret, ids)).toMatchObject({ encrypt: true, decrypted: true });
+    expect(forwardDraft(from, secret, ids, null, [])).toMatchObject({ encrypt: true, decrypted: true });
+    expect(replyDraft('reply', from, plain, ids)).toMatchObject({ encrypt: false, decrypted: false });
+    expect(forwardDraft(from, null, ids, null, [])).toMatchObject({ encrypt: false, decrypted: false });
+  });
+  test('missingKeys: the recipients and the identity an encrypted draft has no trusted key for', () => {
+    const keys = { keys: [{ fingerprint: 'A', emails: ['alice@x'], is_own: false }, { fingerprint: 'M', emails: ['me@x'], is_own: true }], pending: [], vault: [], unlocked: [] };
+    const draft = { ...replyDraft('reply', from, secret, ids), cc: 'Bob <bob@x>' };
+    expect(missingKeys(draft, ids, keys)).toEqual(['bob@x']);
+    expect(missingKeys(draft, ids, { ...keys, keys: keys.keys.slice(0, 1) })).toEqual(['bob@x', 'me@x']);
+    expect(missingKeys({ ...draft, cc: '' }, ids, keys)).toEqual([]);
   });
 });

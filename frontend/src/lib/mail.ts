@@ -690,7 +690,11 @@ export interface ComposeDraft {
   forwardText: string | null;
   forwardRef: MessageRef | null;
   files: File[];
+  /** encrypt the message: on from the start for a reply or forward of decrypted content; never dropped silently, only
+   * by the user turning it off (mail.send refuses an encrypted draft it cannot encrypt for every recipient) */
   encrypt: boolean;
+  /** the draft replies to or forwards a message with decrypted content: sending it unencrypted shows a warning */
+  decrypted: boolean;
   sign: boolean;
   signOptOut: boolean;
 }
@@ -757,7 +761,7 @@ export function composeDraft(mode: ComposeMode, msg: Message | null, identities:
   const draft: ComposeDraft = {
     mode: 'new', identity_id: (identities.find((i) => i.is_default) ?? identities[0])?.identity_id ?? '',
     to: '', cc: '', bcc: '', subject, body: '', ccOpen: false, in_reply_to: null, references: null,
-    forwardHtml: null, forwardText: null, forwardRef: null, files, encrypt: false, sign: false, signOptOut: false,
+    forwardHtml: null, forwardText: null, forwardRef: null, files, encrypt: false, decrypted: false, sign: false, signOptOut: false,
   };
   if (!msg || mode === 'new') return draft;
   draft.mode = mode;
@@ -784,6 +788,43 @@ export function composeDraft(mode: ComposeMode, msg: Message | null, identities:
     draft.ccOpen = draft.cc.length > 0;
   }
   return draft;
+}
+
+/** What a reply or forward takes from the reader's body (actions/mail.ts ReaderBody). */
+export interface DraftBody {
+  subject: string;
+  reply: string[] | null;
+  text: string;
+  quotable: boolean;
+  /** anything in the message was decrypted (sinter-mail's summary.encrypted is not 'none') */
+  decrypted: boolean;
+}
+
+/** The draft starts encrypted when the message it comes from had decrypted content (and says so, for the warning). */
+function fromDecrypted(draft: ComposeDraft, b: DraftBody | null): ComposeDraft {
+  return b?.decrypted ? { ...draft, encrypt: true, decrypted: true } : draft;
+}
+
+/** A reply (or reply all) to the message the reader shows, `b` its body. */
+export function replyDraft(mode: 'reply' | 'replyAll', msg: Message, b: DraftBody | null, identities: Identity[]): ComposeDraft {
+  return fromDecrypted(composeDraft(mode, replyOf(msg, b), identities, b?.quotable ? b.text : '', null), b);
+}
+
+/** A forward of the message the reader shows, `b` its body, with the HTML and attachments mail.forwardFiles gave. */
+export function forwardDraft(msg: Message, b: DraftBody | null, identities: Identity[], html: string | null, files: File[]): ComposeDraft {
+  return fromDecrypted(composeDraft('forward', replyOf(msg, b), identities, b?.text ?? '', html, files), b);
+}
+
+/**
+ * The recipients (and the sender's identity) an encrypted draft has no trusted key for: while encryption is on and
+ * this is not empty, the draft is not sent (mail.send refuses it); turning encryption off is the user's choice.
+ */
+export function missingKeys(draft: ComposeDraft, identities: Identity[], keys: ComposeKeys | null): string[] {
+  const identity = identities.find((i) => i.identity_id === draft.identity_id);
+  if (!keys) return [];
+  const missing = draftRecipients(draft).filter((r) => !keys.keys.some((k) => hasEmail(k, r)));
+  if (identity && !keys.keys.some((k) => k.is_own && hasEmail(k, identity.email))) missing.push(identity.email.toLowerCase());
+  return [...new Set(missing)];
 }
 
 export function composeTitle(mode: ComposeMode): string {

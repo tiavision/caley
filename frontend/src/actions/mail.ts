@@ -5,7 +5,7 @@
 import type { CallContext } from '@tiaforge-ui/sinter';
 import { apiFetch } from '../lib/api.ts';
 import {
-  attachmentUrl, canEncrypt, messageKey, type Autodiscovery, type ComposeDraft, type ComposeKeys, type Identity, type Message, type MessageRef,
+  attachmentUrl, canEncrypt, messageKey, missingKeys, type Autodiscovery, type ComposeDraft, type ComposeKeys, type Identity, type Message, type MessageRef,
 } from '../lib/mail.ts';
 import { cidReferencesFromHtml, htmlToPlainText, withInlineImages } from '../lib/mail-html.ts';
 import { htmlAddsValue, isPgpPublicKeyAttachment, bareMailbox, keyHasEmail } from '../lib/mailUtils.ts';
@@ -80,6 +80,8 @@ export interface ReaderBody {
   quotable: boolean;
   mode: 'html' | 'text';
   encrypted: boolean;
+  /** anything in it was decrypted (sinter-mail's summary.encrypted is not 'none'): a reply or forward starts encrypted */
+  decrypted: boolean;
   signed: boolean;
   /** encrypted and no key is unlocked yet: the reader offers to unlock the vault */
   locked: boolean;
@@ -234,6 +236,7 @@ async function fromRaw(msg: Message, src: Source, out: ReaderBody): Promise<Read
   const text = await mail.mime(raw, { ...r, prefer: 'text' });
   const decrypts = mime.steps.filter((s) => s.kind === 'decrypt');
   out.encrypted ||= decrypts.length > 0 || mime.parts.some((p) => p.type === 'encrypted');
+  out.decrypted = mime.summary.encrypted !== 'none';
   out.signed ||= mime.steps.some((s) => s.kind !== 'decrypt');
   out.badges = messageBadges(mime);
   for (const s of decrypts) {
@@ -297,7 +300,7 @@ async function fromRaw(msg: Message, src: Source, out: ReaderBody): Promise<Read
 function blank(msg: Message): ReaderBody {
   return {
     key: messageKey(msg), message: msg, parts: [], textParts: [], html: '', text: '', quotable: true, mode: 'text',
-    encrypted: msg.is_encrypted, signed: msg.is_signed, locked: false, badges: [], subject: '', reply: null, error: '',
+    encrypted: msg.is_encrypted, decrypted: false, signed: msg.is_signed, locked: false, badges: [], subject: '', reply: null, error: '',
     files: [], importable: {}, cids: null, forwardCids: null, pending: false, wholeSize: 0,
   };
 }
@@ -500,10 +503,7 @@ export async function send(draft: ComposeDraft, identities: Identity[], sign: bo
   if (draft.encrypt) {
     if (to.length + cc.length + bcc.length === 0) throw new Error(m.pgp_composeNoRecipients());
     const keys = await composeKeys();
-    if (!canEncrypt(draft, identities, keys)) {
-      const missing = [...to, ...cc, ...bcc, identity.email].filter((e) => !keys.keys.some((k) => k.emails.includes(e.toLowerCase())));
-      throw new Error(m.pgp_composeMissingKeys({ emails: [...new Set(missing)].join(', ') }));
-    }
+    if (!canEncrypt(draft, identities, keys)) throw new Error(m.pgp_composeMissingKeys({ emails: missingKeys(draft, identities, keys).join(', ') }));
     const records = await listPublicKeys();
     const parsed = new Map<string, openpgp.PublicKey>();
     for (const r of trustedKeys(records)) {
