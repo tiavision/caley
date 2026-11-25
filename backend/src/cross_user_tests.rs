@@ -554,6 +554,11 @@ fn cases() -> Vec<Case> {
             "/api/pgp/key",
             Payload::Json(json!({ "fingerprint": "ALICEFPR" })),
         ),
+        case(
+            "POST",
+            "/api/pgp/key/accept",
+            Payload::Json(json!({ "fingerprint": "ALICEHARVESTED" })),
+        ),
         case("GET", "/api/pgp/vault", Payload::None),
         case(
             "POST",
@@ -837,6 +842,16 @@ async fn seed(state: &AppState) {
         "{}",
         Some(&format!("{SECRET} device")),
         true,
+    )
+    .await
+    .unwrap();
+    db::store_harvested_public_key(
+        pool,
+        ALICE,
+        "ALICEHARVESTED",
+        "bob@example.com",
+        SECRET,
+        "harvested_autocrypt",
     )
     .await
     .unwrap();

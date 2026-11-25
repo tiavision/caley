@@ -16,7 +16,10 @@ import type { ImageType, Message as MimeMessage, MimeOptions, Ref } from '@tiavi
 // on the first call, and a failed load is a SinterError (stale when a deploy removed it).
 import { getKeys, isUnlocked, onLock, openVault } from '../lib/pgp/session.ts';
 import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
-import { listPublicKeys, parsePublicKey, publicKeyBody, savePublicKey, type PublicKeyBody } from '../lib/pgp/public-keys.ts';
+import {
+  keyFacts, listPublicKeys, parsePublicKey, publicKeyBody, savePublicKey, trustedKeys, type PublicKeyBody, type StoredPublicKey,
+} from '../lib/pgp/public-keys.ts';
+import { keyChanges, type PendingKey } from '../lib/pgp-keys.ts';
 import { knownKeys, settle, type Results } from '../lib/pgp/steps.ts';
 import { decryptPrivateKeys, eraseBytes, localActiveDevice, readVault, rememberLocalDevice, unwrapVaultKey, validateVault } from '../lib/pgp/vault.ts';
 import { unlock as webauthnUnlock } from '../lib/pgp/webauthn.ts';
@@ -415,23 +418,45 @@ export function popout(msg: MessageRef | null): void {
 
 // ── Compose ───────────────────────────────────────────────────────────────────
 
-/** The trusted public keys (emails per key), the vault's key fingerprints and the unlocked keys' emails. */
+/**
+ * The keys compose may encrypt to: each trusted key with the address it was stored for (an own key with the
+ * addresses its user IDs name, matched to the identity), the keys found in mail that wait to be accepted (`pending`,
+ * with their user IDs, for compose to offer accepting them), the vault's key fingerprints and the unlocked keys' emails.
+ */
 export async function composeKeys(): Promise<ComposeKeys> {
   const [records, vault] = await Promise.all([listPublicKeys().catch(() => []), readVault().catch(() => null)]);
   const keys = [];
-  for (const record of records.filter((r) => r.trust === 'trusted')) {
+  const pending: PendingKey[] = [];
+  for (const record of records) {
     try {
       const key = await parsePublicKey(record.armored);
-      const emails = key.users.map((u) => u.userID?.email?.trim().toLowerCase()).filter((e): e is string => !!e);
-      keys.push({ fingerprint: record.fingerprint, emails, is_own: record.is_own });
-    } catch { /* skip unreadable keys */ }
+      if (record.trust === 'trusted') {
+        const emails = record.is_own ? keyFacts(key).emails : [record.email.trim().toLowerCase()].filter(Boolean);
+        keys.push({ fingerprint: record.fingerprint, emails, is_own: record.is_own });
+      } else if (!record.is_own && record.email) {
+        pending.push({ fingerprint: record.fingerprint, email: record.email.trim().toLowerCase(), userIds: keyFacts(key).userIds, change: keyChanges(record, records) });
+      }
+    } catch (e) {
+      if (e instanceof SinterError) throw e;
+      /* skip unreadable keys */
+    }
   }
   const unlockedEmails = getKeys().flatMap((k) => k.users.map((u) => u.userID?.email?.trim().toLowerCase() ?? '')).filter(Boolean);
   return {
     keys,
+    pending,
     vault: vault && localActiveDevice(vault) ? vault.keys.map((r) => r.fingerprint.toUpperCase()) : [],
     unlocked: unlockedEmails,
   };
+}
+
+/**
+ * The keys a message is encrypted to: for each recipient the trusted keys stored for exactly that address (never a
+ * key that merely names it in a user ID), and the sender's own trusted keys that `ownKey` matches to the identity.
+ */
+export function encryptionRecords(records: StoredPublicKey[], recipients: string[], ownKey: (r: StoredPublicKey) => boolean): StoredPublicKey[] {
+  const wanted = new Set(recipients.map((e) => e.trim().toLowerCase()));
+  return trustedKeys(records).filter((r) => (r.is_own ? ownKey(r) : wanted.has(r.email.trim().toLowerCase())));
 }
 
 /**
@@ -479,12 +504,14 @@ export async function send(draft: ComposeDraft, identities: Identity[], sign: bo
       const missing = [...to, ...cc, ...bcc, identity.email].filter((e) => !keys.keys.some((k) => k.emails.includes(e.toLowerCase())));
       throw new Error(m.pgp_composeMissingKeys({ emails: [...new Set(missing)].join(', ') }));
     }
-    const wanted = new Set([...to, ...cc, ...bcc].map((e) => e.toLowerCase()));
-    for (const record of (await listPublicKeys()).filter((r) => r.trust === 'trusted')) {
-      const key = await parsePublicKey(record.armored).catch(() => null);
-      if (!key) continue;
-      if ([...wanted].some((e) => keyHasEmail(key, e)) || (record.is_own && keyHasEmail(key, identity.email))) encryptionKeys.push(key);
+    const records = await listPublicKeys();
+    const parsed = new Map<string, openpgp.PublicKey>();
+    for (const r of trustedKeys(records)) {
+      const key = await parsePublicKey(r.armored).catch(() => null);
+      if (key) parsed.set(r.fingerprint, key);
     }
+    const ownMatches = (r: StoredPublicKey) => { const key = parsed.get(r.fingerprint); return !!key && keyHasEmail(key, identity.email); };
+    encryptionKeys = encryptionRecords(records, [...to, ...cc, ...bcc], ownMatches).flatMap((r) => parsed.get(r.fingerprint) ?? []);
   }
 
   const inlineImages: { cid: string; contentType: string; bytes: Uint8Array }[] = [];

@@ -1032,20 +1032,35 @@ pub struct PublicKeysQuery {
     pub email: Option<String>,
 }
 
-/// A stored OpenPGP public key: the user's own or a trusted sender's.
+/// A stored OpenPGP public key: the user's own, a sender's the user trusts, or one found in mail that waits to be
+/// accepted.
 #[derive(Serialize, ToSchema)]
 pub struct StoredPublicKey {
     /// the key's fingerprint (hex)
     pub fingerprint: String,
+    /// the address it was stored for: the only one it is trusted for (signatures, encryption)
     pub email: String,
     /// the ASCII-armored public key
     pub armored: String,
     /// whether it is the public half of one of the user's own keys
     pub is_own: bool,
-    /// where it came from, e.g. `imported` or `autocrypt`
+    /// where it came from: `imported`, `message_attachment`, `harvested_autocrypt`, `harvested_attachment`
     pub source: String,
-    /// e.g. `trusted`
+    /// `trusted` (the user imported or accepted it) or `unverified` (found in mail: counts for nothing until accepted)
     pub trust: String,
+}
+
+impl From<db::pgp_db::PgpPublicKeyRow> for StoredPublicKey {
+    fn from(row: db::pgp_db::PgpPublicKeyRow) -> Self {
+        StoredPublicKey {
+            fingerprint: row.fingerprint,
+            email: row.email,
+            armored: row.armored,
+            is_own: row.is_own,
+            source: row.source,
+            trust: row.trust,
+        }
+    }
 }
 
 /// The stored public keys, optionally of one address.
@@ -1065,17 +1080,7 @@ pub async fn list_public_keys(
 ) -> impl IntoResponse {
     match db::get_pgp_public_keys(&state.db, &user.user_id, q.email.as_deref()).await {
         Ok(rows) => {
-            let list: Vec<StoredPublicKey> = rows
-                .into_iter()
-                .map(|row| StoredPublicKey {
-                    fingerprint: row.fingerprint,
-                    email: row.email,
-                    armored: row.armored,
-                    is_own: row.is_own,
-                    source: row.source,
-                    trust: row.trust,
-                })
-                .collect();
+            let list: Vec<StoredPublicKey> = rows.into_iter().map(StoredPublicKey::from).collect();
             Json(list).into_response()
         }
         Err(e) => {
@@ -1093,18 +1098,31 @@ pub struct SavePublicKeyBody {
     pub armored: String,
     /// default false
     pub is_own: Option<bool>,
-    /// default `imported`
+    /// default `imported`; `harvested_autocrypt` and `harvested_attachment` (found in mail, not chosen by the user)
+    /// store the key `unverified`
     pub source: Option<String>,
 }
 
-/// Adds or replaces a public key (stored as trusted); answers the stored key.
+/// Where a posted key came from, and the trust that gives it: a key the user chose to store (imported, an
+/// attachment they imported) is trusted; one found in the background waits to be accepted.
+fn trust_of_source(source: &str) -> Option<&'static str> {
+    match source {
+        "imported" | "message_attachment" => Some("trusted"),
+        "harvested_autocrypt" | "harvested_attachment" => Some("unverified"),
+        _ => None,
+    }
+}
+
+/// Adds or replaces a public key; answers the key as stored. Its trust follows its `source`: a key the user
+/// imported is trusted, one found in mail (`harvested_…`) is stored `unverified`, and never changes a stored key
+/// the user trusts or owns (the answer is then that key, unchanged).
 #[utoipa::path(
     post,
     path = "/pgp/key",
     request_body = SavePublicKeyBody,
     responses(
-        (status = 200, body = StoredPublicKey, description = "saved"),
-        (status = 400, description = "plain text: invalid public key"),
+        (status = 200, body = StoredPublicKey, description = "the key as stored"),
+        (status = 400, description = "plain text: invalid public key, an unknown source, or an own key with a `harvested_…` source"),
         (status = 500, description = "plain text: database error")
     )
 )]
@@ -1122,32 +1140,98 @@ pub async fn save_public_key(
     }
 
     let source = body.source.unwrap_or_else(|| "imported".to_string());
+    let Some(trust) = trust_of_source(&source) else {
+        return (StatusCode::BAD_REQUEST, "unknown source").into_response();
+    };
     let is_own = body.is_own.unwrap_or(false);
-    if let Err(e) = db::upsert_pgp_public_key(
+    if is_own && trust != "trusted" {
+        return (StatusCode::BAD_REQUEST, "an own key is not found in mail").into_response();
+    }
+    let stored = if trust == "trusted" {
+        db::upsert_pgp_public_key(
+            &state.db,
+            &user.user_id,
+            &body.fingerprint,
+            &body.email,
+            &body.armored,
+            is_own,
+            &source,
+            trust,
+        )
+        .await
+    } else {
+        db::store_harvested_public_key(
+            &state.db,
+            &user.user_id,
+            &body.fingerprint,
+            &body.email,
+            &body.armored,
+            &source,
+        )
+        .await
+    };
+    let row = match stored {
+        Ok(()) => db::get_pgp_public_key(&state.db, &user.user_id, &body.fingerprint).await,
+        Err(e) => Err(e),
+    };
+    match row {
+        Ok(Some(row)) => Json(StoredPublicKey::from(row)).into_response(),
+        Ok(None) => {
+            eprintln!("[pgp] save public key: not stored");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+        Err(e) => {
+            eprintln!("[pgp] save public key: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct AcceptPublicKeyBody {
+    pub fingerprint: String,
+    /// a key change the user accepted: the other senders' keys stored for the same address are removed (default false)
+    pub replace: Option<bool>,
+}
+
+/// The user accepted a stored key (one found in mail, after seeing its fingerprint and user IDs): it is trusted for
+/// the address it was stored for; with `replace` (a key change) it takes the place of the other senders' keys stored
+/// for that address. Answers the key.
+#[utoipa::path(
+    post,
+    path = "/pgp/key/accept",
+    request_body = AcceptPublicKeyBody,
+    responses(
+        (status = 200, body = StoredPublicKey, description = "the key, now trusted"),
+        (status = 404, description = "plain text: no such key"),
+        (status = 500, description = "plain text: database error")
+    )
+)]
+pub async fn accept_public_key(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<AcceptPublicKeyBody>,
+) -> impl IntoResponse {
+    let row = match db::trust_pgp_public_key(
         &state.db,
         &user.user_id,
         &body.fingerprint,
-        &body.email,
-        &body.armored,
-        is_own,
-        &source,
-        "trusted",
+        body.replace.unwrap_or(false),
     )
     .await
     {
-        eprintln!("[pgp] save public key: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        Ok(false) => return (StatusCode::NOT_FOUND, "no such key").into_response(),
+        Ok(true) => db::get_pgp_public_key(&state.db, &user.user_id, &body.fingerprint).await,
+        Err(e) => Err(e),
+    };
+    match row {
+        Ok(Some(row)) => Json(StoredPublicKey::from(row)).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "no such key").into_response(),
+        Err(e) => {
+            eprintln!("[pgp] accept public key: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
     }
-
-    Json(StoredPublicKey {
-        fingerprint: body.fingerprint,
-        email: body.email,
-        armored: body.armored,
-        is_own,
-        source,
-        trust: "trusted".to_string(),
-    })
-    .into_response()
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1262,5 +1346,256 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(create_pending_device))
         .routes(routes!(list_public_keys))
         .routes(routes!(save_public_key, delete_public_key))
+        .routes(routes!(accept_public_key))
         .routes(routes!(raw_email))
+}
+
+#[cfg(test)]
+mod key_trust_tests {
+    use super::*;
+    use crate::jmap::api_tests::{USER, app_state};
+
+    const ARMOR: &str =
+        "-----BEGIN PGP PUBLIC KEY BLOCK-----\nA\n-----END PGP PUBLIC KEY BLOCK-----";
+    const OTHER: &str =
+        "-----BEGIN PGP PUBLIC KEY BLOCK-----\nB\n-----END PGP PUBLIC KEY BLOCK-----";
+
+    fn user() -> CurrentUser {
+        CurrentUser {
+            user_id: USER.to_string(),
+            display_name: None,
+        }
+    }
+
+    async fn save(
+        state: &AppState,
+        fpr: &str,
+        armored: &str,
+        source: Option<&str>,
+    ) -> (StatusCode, String) {
+        let body = SavePublicKeyBody {
+            fingerprint: fpr.into(),
+            email: "bob@example.com".into(),
+            armored: armored.into(),
+            is_own: None,
+            source: source.map(str::to_string),
+        };
+        let response = save_public_key(State(state.clone()), user(), Json(body))
+            .await
+            .into_response();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    async fn stored(state: &AppState, fpr: &str) -> db::pgp_db::PgpPublicKeyRow {
+        db::get_pgp_public_key(&state.db, USER, fpr)
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_key_found_in_mail_waits_to_be_accepted() {
+        let state = app_state().await;
+        for source in ["harvested_autocrypt", "harvested_attachment"] {
+            let fpr = format!("FPR-{source}");
+            let (status, body) = save(&state, &fpr, ARMOR, Some(source)).await;
+            assert_eq!(status, StatusCode::OK);
+            assert!(body.contains(r#""trust":"unverified""#), "{body}");
+            assert_eq!(stored(&state, &fpr).await.trust, "unverified");
+        }
+        // what the user imports is trusted
+        for source in [None, Some("imported"), Some("message_attachment")] {
+            let fpr = format!("FPR-{source:?}");
+            save(&state, &fpr, ARMOR, source).await;
+            assert_eq!(stored(&state, &fpr).await.trust, "trusted");
+        }
+        // a source the server does not know is refused, not trusted
+        let (status, _) = save(&state, "FPR-x", ARMOR, Some("manual")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            db::get_pgp_public_key(&state.db, USER, "FPR-x")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_harvested_key_never_changes_a_trusted_or_own_key() {
+        let state = app_state().await;
+        save(&state, "FPR", ARMOR, Some("imported")).await;
+        let (status, body) = save(&state, "FPR", OTHER, Some("harvested_autocrypt")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains(r#""trust":"trusted""#), "{body}");
+        let row = stored(&state, "FPR").await;
+        assert_eq!(
+            (
+                row.trust.as_str(),
+                row.armored.as_str(),
+                row.source.as_str()
+            ),
+            ("trusted", ARMOR, "imported")
+        );
+
+        db::upsert_pgp_public_key(
+            &state.db,
+            USER,
+            "OWN",
+            "me@example.com",
+            ARMOR,
+            true,
+            "imported",
+            "trusted",
+        )
+        .await
+        .unwrap();
+        save(&state, "OWN", OTHER, Some("harvested_autocrypt")).await;
+        let row = stored(&state, "OWN").await;
+        assert_eq!(
+            (row.trust.as_str(), row.armored.as_str(), row.is_own),
+            ("trusted", ARMOR, true)
+        );
+
+        // one still waiting is refreshed, and stays waiting
+        save(&state, "NEW", ARMOR, Some("harvested_autocrypt")).await;
+        save(&state, "NEW", OTHER, Some("harvested_autocrypt")).await;
+        let row = stored(&state, "NEW").await;
+        assert_eq!(
+            (row.trust.as_str(), row.armored.as_str()),
+            ("unverified", OTHER)
+        );
+    }
+
+    #[tokio::test]
+    async fn accepting_a_key_trusts_it() {
+        let state = app_state().await;
+        save(&state, "FPR", ARMOR, Some("harvested_autocrypt")).await;
+        let response = accept_public_key(
+            State(state.clone()),
+            user(),
+            Json(AcceptPublicKeyBody {
+                fingerprint: "FPR".into(),
+                replace: None,
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let row = stored(&state, "FPR").await;
+        assert_eq!(
+            (row.trust.as_str(), row.email.as_str(), row.armored.as_str()),
+            ("trusted", "bob@example.com", ARMOR)
+        );
+
+        let missing = accept_public_key(
+            State(state.clone()),
+            user(),
+            Json(AcceptPublicKeyBody {
+                fingerprint: "NONE".into(),
+                replace: None,
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn accepting_a_key_change_replaces_the_old_key_of_that_address() {
+        let state = app_state().await;
+        save(&state, "OLD", ARMOR, Some("imported")).await;
+        save(&state, "KEEP", ARMOR, Some("imported")).await;
+        db::upsert_pgp_public_key(
+            &state.db,
+            USER,
+            "KEEP",
+            "carol@example.com",
+            ARMOR,
+            false,
+            "imported",
+            "trusted",
+        )
+        .await
+        .unwrap();
+        save(&state, "NEW", OTHER, Some("harvested_autocrypt")).await;
+        let accept = |fingerprint: &str, replace| {
+            accept_public_key(
+                State(state.clone()),
+                user(),
+                Json(AcceptPublicKeyBody {
+                    fingerprint: fingerprint.into(),
+                    replace: Some(replace),
+                }),
+            )
+        };
+        assert_eq!(
+            accept("NEW", true).await.into_response().status(),
+            StatusCode::OK
+        );
+        let left: Vec<(String, String)> = db::get_pgp_public_keys(&state.db, USER, None)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.fingerprint, r.trust))
+            .collect();
+        assert_eq!(
+            left,
+            [
+                ("NEW".to_string(), "trusted".to_string()),
+                ("KEEP".to_string(), "trusted".to_string())
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn keys_harvested_before_wait_to_be_accepted_after_the_migration() {
+        let state = app_state().await;
+        for (fpr, source, own) in [
+            ("H1", "harvested_autocrypt", false),
+            ("H2", "harvested_attachment", false),
+            ("I", "imported", false),
+            ("O", "harvested_autocrypt", true),
+        ] {
+            db::upsert_pgp_public_key(
+                &state.db,
+                USER,
+                fpr,
+                "bob@example.com",
+                ARMOR,
+                own,
+                source,
+                "trusted",
+            )
+            .await
+            .unwrap();
+        }
+        sqlx::raw_sql(include_str!(
+            "../migrations/0033_pgp_harvested_unverified.sql"
+        ))
+        .execute(&state.db)
+        .await
+        .unwrap();
+        let trust: Vec<(String, String)> = db::get_pgp_public_keys(&state.db, USER, None)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.fingerprint, r.trust))
+            .collect();
+        assert_eq!(trust.len(), 4, "no row is deleted");
+        for (fpr, want) in [
+            ("H1", "unverified"),
+            ("H2", "unverified"),
+            ("I", "trusted"),
+            ("O", "trusted"),
+        ] {
+            assert!(
+                trust.contains(&(fpr.to_string(), want.to_string())),
+                "{fpr}: {trust:?}"
+            );
+        }
+    }
 }

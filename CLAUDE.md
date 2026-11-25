@@ -191,6 +191,7 @@ WebAuthn/OpenPGP:
 - `POST /api/pgp/devices/pending`
 - `GET /api/pgp/keys`
 - `POST|DELETE /api/pgp/key`
+- `POST /api/pgp/key/accept`
 - `GET /api/email/raw`
 
 ## Frontend
@@ -232,7 +233,7 @@ Encryption/settings:
 - Synced encrypted OpenPGP private-key vault.
 - Device approval/pending-device flow.
 - Private key import, own public key management, identity management on keys.
-- Trusted sender public key import/delete.
+- Sender public keys: import (shown with the full fingerprint and user IDs first), delete; keys found in mail (Autocrypt) are stored `unverified` and count for nothing (signatures, encryption) until the user accepts them (Settings, or compose for a recipient); a key differing from the trusted one for its address is a key change, which accepting replaces. A key is trusted only for the address it was stored for (`pgp_public_keys.email`): compose encrypts to a recipient's trusted keys stored for exactly that address.
 - Unlock/lock session state for local PGP operations.
 
 ### Frontend Notes

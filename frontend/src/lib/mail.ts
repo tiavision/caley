@@ -13,6 +13,7 @@ import type { Account, Attachment, Identity, Mailbox, Message, ThreadNode, Virtu
 import { parseEnvelopeAddresses } from './addresses.ts';
 import type { Body, ParseOptions } from '@tiavision/sinter-mail';
 import type { ReaderPart } from './mail-reader.ts';
+import type { PendingKey } from './pgp-keys.ts';
 
 export type { Account, Attachment, Identity, Mailbox, Message, ThreadNode, VirtualFolder };
 export {
@@ -841,9 +842,12 @@ export function senderLabel(addr: string, contacts: AddressSuggestion[]): string
   return contacts.find((c) => c.email === addr)?.name || addr;
 }
 
-/** Public keys the compose dialog may encrypt to (compose.keys action): emails per trusted key. */
+/**
+ * Public keys the compose dialog may encrypt to (mail.composeKeys): per trusted key the address it was stored for (an
+ * own key: the addresses its user IDs name); `pending`: keys found in mail that wait to be accepted.
+ */
 export interface ComposeKey { fingerprint: string; emails: string[]; is_own: boolean }
-export interface ComposeKeys { keys: ComposeKey[]; vault: string[]; unlocked: string[] }
+export interface ComposeKeys { keys: ComposeKey[]; pending: PendingKey[]; vault: string[]; unlocked: string[] }
 
 const hasEmail = (k: ComposeKey, email: string) => k.emails.includes(email.trim().toLowerCase());
 
@@ -863,6 +867,22 @@ export function canEncrypt(draft: ComposeDraft, identities: Identity[], keys: Co
   return recipients.length > 0 &&
     recipients.every((r) => keys.keys.some((k) => hasEmail(k, r))) &&
     keys.keys.some((k) => k.is_own && hasEmail(k, identity.email));
+}
+
+/** The draft's recipients (To, Cc, Bcc), lowercase, each once. */
+export function draftRecipients(draft: ComposeDraft): string[] {
+  return [...new Set([...parseEnvelopeAddresses(draft.to), ...parseEnvelopeAddresses(draft.cc), ...parseEnvelopeAddresses(draft.bcc)]
+    .map((r) => r.trim().toLowerCase()))];
+}
+
+/**
+ * The keys found in mail for the draft's recipients that wait to be accepted: a recipient with only such a key cannot
+ * be encrypted to until the user accepts it; one whose key changed (`change`) is still encrypted to the trusted key.
+ */
+export function waitingKeys(draft: ComposeDraft, keys: ComposeKeys | null): PendingKey[] {
+  if (!keys) return [];
+  const recipients = new Set(draftRecipients(draft));
+  return keys.pending.filter((k) => recipients.has(k.email));
 }
 
 /** Signing is on by default when possible, unless the user turned it off. */

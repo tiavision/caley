@@ -25,7 +25,10 @@ pub use contact_db::{
     remove_stale_addressbooks, replace_addressbook_contacts, upsert_cached_addressbook,
     upsert_contact, upsert_contact_push_subscription,
 };
-pub use pgp_db::{delete_pgp_public_key, get_pgp_public_keys, upsert_pgp_public_key};
+pub use pgp_db::{
+    delete_pgp_public_key, get_pgp_public_key, get_pgp_public_keys, store_harvested_public_key,
+    trust_pgp_public_key, upsert_pgp_public_key,
+};
 pub use webauthn_db::{
     delete_webauthn_credential, get_webauthn_cred_ids, get_webauthn_credentials,
     store_webauthn_credential, update_webauthn_credential,

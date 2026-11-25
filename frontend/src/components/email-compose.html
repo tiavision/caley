@@ -33,6 +33,7 @@
              data-sn-let="{
                canEnc: canEncrypt(compose, identities, composeKeys),
                signing: signs(compose, identities, composeKeys),
+               waiting: waitingKeys(compose, composeKeys),
                hits: recipientHits(rcpt.token, contactAddresses(composeContacts ?? []), recipientAddrs ?? []),
              }">
           <header class="compose-header" data-pad="sm">
@@ -111,6 +112,23 @@
               <label class="compose-label" for="compose-subject" data-sn-text="m.mail_composeSubject()"></label>
               <input id="compose-subject" class="compose-input" data-grow data-sn-model="compose.subject">
             </div>
+            <!-- Recipients with a key found in mail that waits to be accepted (a key that is not trusted is never
+                 encrypted to): shown with its full fingerprint and user IDs, accepted only here or in Settings. A key
+                 change replaces the key trusted for that address. -->
+            <template data-sn-if="waiting.length > 0">
+              <div class="compose-keys" data-layout="stack" data-gap="sm" data-pad="sm">
+                <template data-sn-for="k in waiting" data-sn-key="k.fingerprint">
+                  <div data-callout data-tone="warning" data-layout="stack" data-gap="xs">
+                    <p data-sn-text="k.change ? m.pgp_composeKeyChanged({ email: k.email }) : m.pgp_composeKeyWaiting({ email: k.email })"></p>
+                    <pgp-key-facts data-sn-with="{ fingerprint: k.fingerprint, userIds: k.userIds }"></pgp-key-facts>
+                    <button type="button" data-variant="outline" data-size="sm" data-self="start" data-icon="shield-check"
+                            data-sn-post="/pgp/key/accept" data-sn-body="{ fingerprint: k.fingerprint, replace: k.change }"
+                            data-sn-then="refresh(composeKeys)" data-sn-catch="composeError = m.pgp_keyAcceptError()"
+                            data-sn-text="k.change ? m.pgp_acceptNewKey() : m.pgp_acceptKey()"></button>
+                  </div>
+                </template>
+              </div>
+            </template>
             <textarea class="compose-body" data-grow data-sn-model="compose.body"
                       data-sn-attr="{rows: compose.forwardHtml ? 4 : 10, 'aria-label': m.mail_newMessage()}"></textarea>
             <template data-sn-if="compose.forwardHtml && compose.forwardRef">

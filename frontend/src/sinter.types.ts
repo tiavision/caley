@@ -35,6 +35,7 @@ export type { ThreadRef, ThreadResponse } from './lib/thread.ts';
 export type { ImportDraft, ImportResult } from './lib/import.ts';
 export type { VaultView } from './lib/pgp/vault-steps.ts';
 export type { StoredPublicKey, PublicKeyBody } from './lib/pgp/public-keys.ts';
+export type { KeyFacts, KeyCandidate, PendingKey } from './lib/pgp-keys.ts';
 
 export type { AccountDraft } from './lib/settings.ts';
 

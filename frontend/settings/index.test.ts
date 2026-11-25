@@ -5,6 +5,7 @@ import { render, mockRequests, mockStream, memoryStorage, type RouteResponse } f
 import { calendarValue, importEventDate, importDraft, importSummary } from '../src/lib/import.ts';
 import { caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText } from '../src/lib/settings.ts';
 import { loadErrorOr } from '../src/lib/errors.ts';
+import { fingerprintText, keyChanges, keyState, keyStateLabel } from '../src/lib/pgp-keys.ts';
 import { localeUrl, pagePath } from '../src/lib/locale-path.ts';
 import { SinterError } from '@tiaforge-ui/sinter';
 import { newCalendarDraft, newCalendarBody } from '../src/lib/events.ts';
@@ -17,7 +18,8 @@ import type { VaultView } from '../src/actions/pgp-vault.ts';
 import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor, Blob.stream
 
 // The helpers the page and its components use (not the whole helpers module: other pages' helpers load more).
-const helpers = { calendarValue, importEventDate, importDraft, importSummary, newCalendarDraft, newCalendarBody, caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText, loadErrorOr, localeUrl, pagePath };
+const helpers = { calendarValue, importEventDate, importDraft, importSummary, newCalendarDraft, newCalendarBody, caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText, loadErrorOr, localeUrl, pagePath,
+  fingerprintText, keyChanges, keyState, keyStateLabel };
 
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
 const cal = (href: string, name: string, extra: object = {}) => ({ account_id: 'acc', href, name, color: '#ff0000', is_active: true, ...extra });
@@ -86,7 +88,13 @@ function fakeVault(initial: VaultView | null, failUnlock = false) {
 }
 
 type ReadPublicKey = (armored: string) => Promise<unknown>;
-const readKey: ReadPublicKey = async (armored) => ({ fingerprint: 'FFFF', email: armored, armored, is_own: false, source: 'imported' });
+const readKey: ReadPublicKey = async (armored) => ({
+  body: { fingerprint: 'FFFF0000', email: armored, armored, is_own: false, source: 'imported' },
+  facts: { fingerprint: 'FFFF0000', userIds: [`Carol <${armored}>`, 'Carol <carol@work.example>'], emails: [armored, 'carol@work.example'] },
+  claimsAddress: true,
+});
+// what pgpKeys.storedKeyFacts reads of a stored key (the accept dialog)
+const storedKeyFacts = async (key: { fingerprint: string; email: string }) => ({ fingerprint: key.fingerprint, userIds: [`Bob <${key.email}>`], emails: [key.email] });
 
 async function show(routes: Record<string, RouteResponse> = {}, vault: VaultView | null = lockedVault, failUnlock = false, publicKey = readKey) {
   const requests = mockRequests({
@@ -94,7 +102,7 @@ async function show(routes: Record<string, RouteResponse> = {}, vault: VaultView
     'GET /api/caldav/accounts': { accounts: [account()] },
     'GET /api/pgp/keys': [
       { fingerprint: 'AAAA1111', email: 'ada@example.com', armored: '', is_own: true, source: 'imported', trust: 'trusted' },
-      { fingerprint: 'CCCC3333DDDD4444EEEE', email: 'bob@example.com', armored: '', is_own: false, source: 'harvested_autocrypt', trust: 'trusted' },
+      { fingerprint: 'CCCC3333DDDD4444EEEE', email: 'bob@example.com', armored: '', is_own: false, source: 'harvested_autocrypt', trust: 'unverified' },
     ],
     ...routes,
   });
@@ -104,7 +112,7 @@ async function show(routes: Record<string, RouteResponse> = {}, vault: VaultView
     notify: { status: () => ({ supported: false, permission: 'default', enabled: false }), toggle: async (s: unknown) => s },
     ics,
     pgpVault: pgp.ns,
-    pgpKeys: { keyFile, publicKey },
+    pgpKeys: { keyFile, publicKey, storedKeyFacts },
   };
   const r = await render(page, { ...app, scripts: { 'close-after': scripts['close-after'] }, messages, requests, actions, helpers, storage, streams: { '/api/events/stream': stream } });
   await r.settle();
@@ -516,34 +524,91 @@ test('encryption tab: a key file fills the import dialog; a file without a key s
   expect(dialog.querySelector('textarea')!.value).toBe(armored);           // the key read before stays
 });
 
-test('encryption tab: trusted sender keys, import and remove', async () => {
+test('encryption tab: sender keys with their full fingerprint and state; an import shows the key before it is stored', async () => {
   const { root, settle, requests } = await encryptionTab(lockedVault, {
     'DELETE /api/pgp/key': null,
     'POST /api/pgp/key': (call) => ({ ...(call.body as object), trust: 'trusted' }),
   });
-  const trusted = () => [...root.querySelectorAll('#settings-panel-encryption li span[data-truncate]')].map((s) => s.textContent);
+  const panel = root.querySelector('#settings-panel-encryption')!;
+  const trusted = () => [...panel.querySelectorAll('.sender-keys li span[data-truncate]')].map((s) => s.textContent);
   expect(trusted()).toEqual(['bob@example.com']);           // own keys are not listed here
-  expect(root.querySelector('#settings-panel-encryption small code')!.textContent).toBe('CCCC3333DDDD4444…');
+  expect(panel.querySelector('.sender-keys li code')!.textContent).toBe('CCCC 3333 DDDD 4444 EEEE');   // the whole fingerprint
+  expect(panel.querySelector('.sender-keys li [data-badge]')!.textContent).toBe(m.pgp_keyWaiting());
 
   button(root, m.pgp_importPublicKeyButton()).click();
   await settle();
   const dialog = root.querySelector<HTMLDialogElement>('#pgp-public-key-dialog')!;
   type(dialog.querySelector('textarea')!, 'carol@example.com');
   await settle();
+  const posts = () => requests.calls.filter((c) => c.method === 'POST').length;
   dialog.querySelector('form')!.requestSubmit();
   await settle();
+  // read, not stored: the dialog shows what the key says of itself first
+  expect(posts()).toBe(0);
+  expect(dialog.open).toBe(true);
+  expect(dialog.querySelector('.key-fingerprint')!.textContent).toBe('FFFF 0000');
+  expect(dialog.querySelector('.key-facts')!.textContent).toContain('Carol <carol@work.example>');
+  const address = dialog.querySelector<HTMLSelectElement>('select')!;   // the key names two addresses: the user picks one
+  address.value = 'carol@work.example';
+  address.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  button(dialog, m.pgp_trustImportButton()).click();
+  await settle();
   expect(dialog.open).toBe(false);
-  // read by pgpKeys.publicKey, stored by the markup's POST
   expect(requests.calls.at(-1)).toMatchObject({ method: 'POST', path: '/api/pgp/key' });
-  expect(requests.calls.at(-1)!.body).toEqual({ fingerprint: 'FFFF', email: 'carol@example.com', armored: 'carol@example.com', is_own: false, source: 'imported' });
-  expect(trusted()).toEqual(['bob@example.com', 'carol@example.com']);
-  expect(root.querySelector('#settings-panel-encryption [role=status] [data-tone=success]')!.textContent).toBe(m.pgp_publicKeyImported());
+  expect(requests.calls.at(-1)!.body).toEqual({ fingerprint: 'FFFF0000', email: 'carol@work.example', armored: 'carol@example.com', is_own: false, source: 'imported' });
+  expect(trusted()).toEqual(['bob@example.com', 'carol@work.example']);
+  expect(panel.querySelector('[role=status] [data-tone=success]')!.textContent).toBe(m.pgp_publicKeyImported());
 
-  const remove = root.querySelectorAll<HTMLButtonElement>('#settings-panel-encryption li button[data-tone=danger]');
+  const remove = panel.querySelectorAll<HTMLButtonElement>('li button[data-tone=danger]');
   remove[remove.length - 2]!.click();
   await settle();
   expect(requests.calls.at(-1)!.body).toEqual({ fingerprint: 'CCCC3333DDDD4444EEEE' });
-  expect(trusted()).toEqual(['carol@example.com']);
+  expect(trusted()).toEqual(['carol@work.example']);
+});
+
+test('encryption tab: a key found in mail is trusted only once accepted in a dialog that shows its fingerprint and user IDs', async () => {
+  let accepted = false;
+  const keys = () => [
+    { fingerprint: 'CCCC3333DDDD4444EEEE', email: 'bob@example.com', armored: '', is_own: false, source: 'harvested_autocrypt', trust: accepted ? 'trusted' : 'unverified' },
+  ];
+  const { root, settle, requests } = await encryptionTab(lockedVault, {
+    'GET /api/pgp/keys': () => keys(),
+    'POST /api/pgp/key/accept': () => { accepted = true; return keys()[0]; },
+  });
+  const panel = root.querySelector('#settings-panel-encryption')!;
+  button(root, m.pgp_reviewKey()).click();
+  await settle();
+  const dialog = root.querySelector<HTMLDialogElement>('#pgp-accept-dialog')!;
+  expect(dialog.open).toBe(true);
+  expect(dialog.querySelector('.key-fingerprint')!.textContent).toBe('CCCC 3333 DDDD 4444 EEEE');
+  expect(dialog.querySelector('.key-facts')!.textContent).toContain('Bob <bob@example.com>');
+  expect(requests.calls.some((c) => c.path === '/api/pgp/key/accept')).toBe(false);
+  button(dialog, m.pgp_acceptKey()).click();
+  await settle();
+  expect(requests.calls.find((c) => c.path === '/api/pgp/key/accept')!.body).toEqual({ fingerprint: 'CCCC3333DDDD4444EEEE', replace: false });
+  expect(dialog.open).toBe(false);
+  expect(panel.querySelector('.sender-keys li [data-badge]')!.textContent).toBe(m.pgp_keyTrusted());
+  expect(button(root, m.pgp_reviewKey())).toBeUndefined();
+});
+
+test('encryption tab: a key found in mail for an address with a trusted key is a key change, which accepting replaces', async () => {
+  const { root, settle, requests } = await encryptionTab(lockedVault, {
+    'GET /api/pgp/keys': [
+      { fingerprint: 'AAAA', email: 'bob@example.com', armored: '', is_own: false, source: 'imported', trust: 'trusted' },
+      { fingerprint: 'BBBB', email: 'Bob@example.com', armored: '', is_own: false, source: 'harvested_autocrypt', trust: 'unverified' },
+    ],
+    'POST /api/pgp/key/accept': (call) => ({ fingerprint: 'BBBB', email: 'bob@example.com', armored: '', is_own: false, source: 'harvested_autocrypt', trust: 'trusted', ...(call.body as object) }),
+  });
+  const panel = root.querySelector('#settings-panel-encryption')!;
+  expect([...panel.querySelectorAll('.sender-keys li [data-badge]')].map((b) => b.textContent)).toEqual([m.pgp_keyTrusted(), m.pgp_keyChanged()]);
+  button(root, m.pgp_reviewKey()).click();
+  await settle();
+  const dialog = root.querySelector<HTMLDialogElement>('#pgp-accept-dialog')!;
+  expect(dialog.textContent).toContain(m.pgp_acceptChangeHint({ email: 'Bob@example.com' }));
+  button(dialog, m.pgp_acceptNewKey()).click();
+  await settle();
+  expect(requests.calls.find((c) => c.path === '/api/pgp/key/accept')!.body).toEqual({ fingerprint: 'BBBB', replace: true });
 });
 
 test('encryption tab: a failed key removal brings the key back with the error', async () => {
