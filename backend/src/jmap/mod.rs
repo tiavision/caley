@@ -23,9 +23,9 @@ pub(crate) mod sync;
 #[cfg(test)]
 pub(crate) mod api_tests;
 #[cfg(test)]
-mod oauth_tests;
-#[cfg(test)]
 pub(crate) mod fake;
+#[cfg(test)]
+mod oauth_tests;
 #[cfg(test)]
 mod stalwart_tests;
 #[cfg(test)]

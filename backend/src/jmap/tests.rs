@@ -85,7 +85,9 @@ async fn env_with(fake: FakeJmap, auth: &str) -> Env {
         &email_db::AccountProtocol {
             protocol: "jmap",
             jmap_url: Some(&fake.url),
-            auth, oauth_client_id: None, oauth_client_secret: None,
+            auth,
+            oauth_client_id: None,
+            oauth_client_secret: None,
         },
         &KEY,
     )

@@ -297,7 +297,9 @@ pub async fn get_message_render_body(
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|r| MessageBodyRow { is_signed: r.get::<i64, _>(0) != 0 }))
+    Ok(row.map(|r| MessageBodyRow {
+        is_signed: r.get::<i64, _>(0) != 0,
+    }))
 }
 
 pub async fn delete_message(
@@ -970,8 +972,13 @@ fn push_filter_clauses(qb: &mut QueryBuilder<Sqlite>, filters: &SearchFilters) {
 /// Where a search looks: every account of the user, one mailbox, or a virtual folder's rules.
 pub enum SearchScope<'a> {
     All,
-    Mailbox { account: MailAccountId<'a>, mailbox: &'a str },
-    Virtual { folder_id: &'a str },
+    Mailbox {
+        account: MailAccountId<'a>,
+        mailbox: &'a str,
+    },
+    Virtual {
+        folder_id: &'a str,
+    },
 }
 
 /// The search's `FROM … WHERE …`: the user's messages in `scope` matching `fts_query` (all of them when empty)
@@ -998,9 +1005,11 @@ fn push_search_body(
                   JOIN virtual_folders vf ON vf.folder_id = r.folder_id AND vf.user_id = a.user_id",
             );
     }
-    qb.push(" WHERE a.user_id = ").push_bind(user_id.to_string());
+    qb.push(" WHERE a.user_id = ")
+        .push_bind(user_id.to_string());
     if !fts_query.is_empty() {
-        qb.push(" AND messages_fts MATCH ").push_bind(fts_query.to_string());
+        qb.push(" AND messages_fts MATCH ")
+            .push_bind(fts_query.to_string());
     }
     match scope {
         SearchScope::All => {}
@@ -1034,7 +1043,11 @@ pub async fn search_messages(
 ) -> Result<Vec<MessageRow>> {
     // a message can match several rules of a virtual folder: listed once
     let distinct = matches!(scope, SearchScope::Virtual { .. });
-    let mut qb = QueryBuilder::<Sqlite>::new(if distinct { "SELECT DISTINCT" } else { "SELECT" });
+    let mut qb = QueryBuilder::<Sqlite>::new(if distinct {
+        "SELECT DISTINCT"
+    } else {
+        "SELECT"
+    });
     qb.push(
         " m.uid, m.account_id, m.mailbox, m.message_id, m.thread_id, m.from_addr,
           m.to_addrs, m.cc_addrs, m.subject, m.sent_at, m.flags, m.has_attachments,
@@ -1126,8 +1139,8 @@ mod tests {
         let pool = thread_pool().await;
         insert_thread_message(&pool, "account", "INBOX", 1, "message", None, 1).await;
         upsert_message_render_body(&pool, "account", "INBOX", 1, true)
-        .await
-        .unwrap();
+            .await
+            .unwrap();
 
         let body = get_message_render_body(&pool, MailAccountId::internal("account"), "INBOX", 1)
             .await

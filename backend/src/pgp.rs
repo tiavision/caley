@@ -473,7 +473,9 @@ pub async fn delete_credential(
     match db::delete_webauthn_credential(&state.db, &body.cred_id, &user.user_id).await {
         Ok(_) => {
             // a device of the vault goes with its credential
-            state.sse_broadcaster.send(&user.user_id, crate::sse::SseMessage::VaultChanged);
+            state
+                .sse_broadcaster
+                .send(&user.user_id, crate::sse::SseMessage::VaultChanged);
             StatusCode::NO_CONTENT.into_response()
         }
         Err(e) => {
@@ -523,7 +525,9 @@ pub async fn reset_vault(State(state): State<AppState>, user: CurrentUser) -> im
     .await;
     match result {
         Ok(_) => {
-            state.sse_broadcaster.send(&user.user_id, crate::sse::SseMessage::VaultChanged);
+            state
+                .sse_broadcaster
+                .send(&user.user_id, crate::sse::SseMessage::VaultChanged);
             StatusCode::NO_CONTENT.into_response()
         }
         Err(e) => {
@@ -836,7 +840,9 @@ pub async fn initialize_vault(
     .await;
     match result {
         Ok(_) => {
-            state.sse_broadcaster.send(&user.user_id, crate::sse::SseMessage::VaultChanged);
+            state
+                .sse_broadcaster
+                .send(&user.user_id, crate::sse::SseMessage::VaultChanged);
             StatusCode::CREATED.into_response()
         }
         Err(e) => {
@@ -910,7 +916,9 @@ pub async fn create_pending_device(
             .bind(&user.user_id)
             .execute(&state.db)
             .await;
-            state.sse_broadcaster.send(&user.user_id, crate::sse::SseMessage::VaultChanged);
+            state
+                .sse_broadcaster
+                .send(&user.user_id, crate::sse::SseMessage::VaultChanged);
             StatusCode::CREATED.into_response()
         }
         Err(e) => {
@@ -1000,7 +1008,9 @@ pub async fn update_vault(
     .await;
     match result {
         Ok(_) => {
-            state.sse_broadcaster.send(&user.user_id, crate::sse::SseMessage::VaultChanged);
+            state
+                .sse_broadcaster
+                .send(&user.user_id, crate::sse::SseMessage::VaultChanged);
             Json(VaultRevision {
                 revision: body.expected_revision + 1,
             })

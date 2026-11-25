@@ -14,8 +14,8 @@ use crate::email_sync::EmailSyncTrigger;
 use crate::oidc::{AppState, CurrentUser};
 use crate::sse::SseMessage;
 
-pub(crate) mod cut;
 pub(crate) mod attachments;
+pub(crate) mod cut;
 pub(crate) mod messages;
 pub(crate) mod send;
 

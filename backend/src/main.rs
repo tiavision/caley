@@ -17,8 +17,8 @@ mod etag;
 mod imap_client;
 mod jmap;
 mod landing;
-mod notifications;
 mod local_auth;
+mod notifications;
 mod oidc;
 mod oidc_tokens;
 mod pgp;
@@ -154,7 +154,12 @@ async fn main() -> anyhow::Result<()> {
         && args.oidc_client_secret.is_some();
 
     let sse_broadcaster = Arc::new(sse::SseBroadcaster::new());
-    let notifier = Arc::new(notifications::Notifier::new(db.clone(), encryption_key, &args.app_base_url, args.notifications_allow_private)?);
+    let notifier = Arc::new(notifications::Notifier::new(
+        db.clone(),
+        encryption_key,
+        &args.app_base_url,
+        args.notifications_allow_private,
+    )?);
     sse_broadcaster.set_notifier(Arc::clone(&notifier));
     reminders::spawn(db.clone(), encryption_key, Arc::clone(&notifier));
 

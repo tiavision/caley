@@ -85,7 +85,12 @@ pub(crate) enum Payload {
 }
 
 impl Notifier {
-    pub fn new(db: Db, key: [u8; 32], app_base_url: &str, allow_private: bool) -> anyhow::Result<Self> {
+    pub fn new(
+        db: Db,
+        key: [u8; 32],
+        app_base_url: &str,
+        allow_private: bool,
+    ) -> anyhow::Result<Self> {
         let mut http = reqwest::Client::builder()
             .use_preconfigured_tls(crate::imap_client::tls_config())
             .timeout(Duration::from_secs(15))
@@ -97,12 +102,26 @@ impl Notifier {
         let contact = app_base_url
             .starts_with("https://")
             .then(|| app_base_url.trim_end_matches('/').to_owned());
-        Ok(Self { db, key, contact, http, vapid: OnceCell::new(), allow_private })
+        Ok(Self {
+            db,
+            key,
+            contact,
+            http,
+            vapid: OnceCell::new(),
+            allow_private,
+        })
     }
 
     /// A message the SSE broadcaster sends: new mail goes to the user's devices too.
     pub fn broadcast(self: &Arc<Self>, user_id: &str, message: &SseMessage) {
-        if let SseMessage::NewEmail { account_id, uid, mailbox, from_addr, subject } = message {
+        if let SseMessage::NewEmail {
+            account_id,
+            uid,
+            mailbox,
+            from_addr,
+            subject,
+        } = message
+        {
             let query = url::form_urlencoded::Serializer::new(String::new())
                 .append_pair("account_id", account_id)
                 .append_pair("mailbox", mailbox)
@@ -127,7 +146,12 @@ impl Notifier {
 
     /// Sends `payload` to each of the user's devices (those in `timezone`, if given; a device that gave
     /// none counts as UTC); returns to how many it went.
-    pub(crate) async fn send(&self, user_id: &str, timezone: Option<&str>, payload: &Payload) -> usize {
+    pub(crate) async fn send(
+        &self,
+        user_id: &str,
+        timezone: Option<&str>,
+        payload: &Payload,
+    ) -> usize {
         let subscriptions = match sqlx::query(
             "SELECT endpoint, p256dh, auth FROM notification_subscriptions
              WHERE user_id = ? AND (?2 IS NULL OR COALESCE(timezone, 'UTC') = ?2)",
@@ -165,10 +189,11 @@ impl Notifier {
             match self.post(&endpoint, &p256dh, &auth, &json, vapid).await {
                 Ok(()) => sent += 1,
                 Err(Delivery::Gone) => {
-                    let _ = sqlx::query("DELETE FROM notification_subscriptions WHERE endpoint = ?")
-                        .bind(&endpoint)
-                        .execute(&self.db)
-                        .await;
+                    let _ =
+                        sqlx::query("DELETE FROM notification_subscriptions WHERE endpoint = ?")
+                            .bind(&endpoint)
+                            .execute(&self.db)
+                            .await;
                 }
                 Err(Delivery::Failed(e)) => eprintln!("[notifications] {}: {e}", host(&endpoint)),
             }
@@ -176,11 +201,23 @@ impl Notifier {
         sent
     }
 
-    async fn post(&self, endpoint: &str, p256dh: &str, auth: &str, json: &[u8], vapid: &SigningKey) -> Result<(), Delivery> {
+    async fn post(
+        &self,
+        endpoint: &str,
+        p256dh: &str,
+        auth: &str,
+        json: &[u8],
+        vapid: &SigningKey,
+    ) -> Result<(), Delivery> {
         let failed = |e: String| Delivery::Failed(e);
-        let ua_public = URL_SAFE_NO_PAD.decode(p256dh).map_err(|e| failed(e.to_string()))?;
-        let auth = URL_SAFE_NO_PAD.decode(auth).map_err(|e| failed(e.to_string()))?;
-        let body = encrypt(json, &ua_public, &auth, &random_secret(), rand::random()).map_err(|e| failed(e.to_string()))?;
+        let ua_public = URL_SAFE_NO_PAD
+            .decode(p256dh)
+            .map_err(|e| failed(e.to_string()))?;
+        let auth = URL_SAFE_NO_PAD
+            .decode(auth)
+            .map_err(|e| failed(e.to_string()))?;
+        let body = encrypt(json, &ua_public, &auth, &random_secret(), rand::random())
+            .map_err(|e| failed(e.to_string()))?;
         let url = url::Url::parse(endpoint).map_err(|e| failed(e.to_string()))?;
         // an address in the URL is not resolved (PublicOnly): checked here
         if let Some(url::Host::Ipv4(_) | url::Host::Ipv6(_)) = url.host() {
@@ -188,8 +225,12 @@ impl Notifier {
                 return Err(failed("not a public address".into()));
             }
         }
-        let authorization = vapid_authorization(vapid, &url.origin().ascii_serialization(), self.contact.as_deref())
-            .map_err(|e| failed(e.to_string()))?;
+        let authorization = vapid_authorization(
+            vapid,
+            &url.origin().ascii_serialization(),
+            self.contact.as_deref(),
+        )
+        .map_err(|e| failed(e.to_string()))?;
         let response = self
             .http
             .post(url)
@@ -214,20 +255,27 @@ impl Notifier {
         self.vapid
             .get_or_try_init(|| async {
                 let stored = |db: Db| async move {
-                    sqlx::query_scalar::<_, String>("SELECT value FROM server_secrets WHERE name = 'vapid'")
-                        .fetch_optional(&db)
-                        .await
+                    sqlx::query_scalar::<_, String>(
+                        "SELECT value FROM server_secrets WHERE name = 'vapid'",
+                    )
+                    .fetch_optional(&db)
+                    .await
                 };
                 if stored(self.db.clone()).await?.is_none() {
                     let secret = URL_SAFE_NO_PAD.encode(random_secret().to_bytes());
                     // a second server task making one at the same moment keeps the first
-                    sqlx::query("INSERT OR IGNORE INTO server_secrets(name, value) VALUES('vapid', ?)")
-                        .bind(crate::crypto::encrypt(&secret, &self.key)?)
-                        .execute(&self.db)
-                        .await?;
+                    sqlx::query(
+                        "INSERT OR IGNORE INTO server_secrets(name, value) VALUES('vapid', ?)",
+                    )
+                    .bind(crate::crypto::encrypt(&secret, &self.key)?)
+                    .execute(&self.db)
+                    .await?;
                 }
-                let encrypted = stored(self.db.clone()).await?.ok_or_else(|| anyhow::anyhow!("no VAPID key"))?;
-                let bytes = URL_SAFE_NO_PAD.decode(crate::crypto::decrypt(&encrypted, &self.key)?)?;
+                let encrypted = stored(self.db.clone())
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("no VAPID key"))?;
+                let bytes =
+                    URL_SAFE_NO_PAD.decode(crate::crypto::decrypt(&encrypted, &self.key)?)?;
                 Ok(SigningKey::from(SecretKey::from_slice(&bytes)?))
             })
             .await
@@ -260,7 +308,10 @@ impl reqwest::dns::Resolve for PublicOnly {
 
 /// `host` as an address, if it is one (an IPv6 one in brackets, as URLs write it).
 fn literal_ip(host: &str) -> Option<IpAddr> {
-    host.trim_start_matches('[').trim_end_matches(']').parse().ok()
+    host.trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse()
+        .ok()
 }
 
 /// Whether `ip` is on the public internet: not loopback, private (RFC 1918, IPv6 unique local), link-local,
@@ -298,7 +349,9 @@ fn is_public(ip: IpAddr) -> bool {
 
 /// Whether the server may post to `endpoint`'s host: a public address, or a name with one.
 async fn reachable_publicly(url: &url::Url) -> bool {
-    let Some(host) = url.host_str() else { return false };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
     if let Some(ip) = literal_ip(host) {
         return is_public(ip);
     }
@@ -309,7 +362,10 @@ async fn reachable_publicly(url: &url::Url) -> bool {
 }
 
 fn host(endpoint: &str) -> String {
-    url::Url::parse(endpoint).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_default()
+    url::Url::parse(endpoint)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_default()
 }
 
 fn truncate(s: &str, max_chars: usize) -> String {
@@ -328,7 +384,13 @@ fn random_secret() -> SecretKey {
 /// RFC 8291: `plaintext` for the device with public key `ua_public` (65 bytes, uncompressed) and auth secret
 /// `auth` (16 bytes), from the server's one-time key `as_secret` with `salt`: the aes128gcm body (RFC 8188),
 /// one record (rs 4096): salt ‖ rs ‖ idlen ‖ the server's public key ‖ the ciphertext.
-fn encrypt(plaintext: &[u8], ua_public: &[u8], auth: &[u8], as_secret: &SecretKey, salt: [u8; 16]) -> anyhow::Result<Vec<u8>> {
+fn encrypt(
+    plaintext: &[u8],
+    ua_public: &[u8],
+    auth: &[u8],
+    as_secret: &SecretKey,
+    salt: [u8; 16],
+) -> anyhow::Result<Vec<u8>> {
     let ua_key = PublicKey::from_sec1_bytes(ua_public)?;
     let as_public = as_secret.public_key().to_sec1_point(false);
     let shared = p256::ecdh::diffie_hellman(as_secret.to_nonzero_scalar(), ua_key.as_affine());
@@ -346,8 +408,10 @@ fn encrypt(plaintext: &[u8], ua_public: &[u8], auth: &[u8], as_secret: &SecretKe
     let prk = Hkdf::<Sha256>::new(Some(&salt), &ikm);
     let mut cek = [0u8; 16];
     let mut nonce = [0u8; 12];
-    prk.expand(b"Content-Encoding: aes128gcm\0", &mut cek).map_err(|e| anyhow::anyhow!("{e}"))?;
-    prk.expand(b"Content-Encoding: nonce\0", &mut nonce).map_err(|e| anyhow::anyhow!("{e}"))?;
+    prk.expand(b"Content-Encoding: aes128gcm\0", &mut cek)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    prk.expand(b"Content-Encoding: nonce\0", &mut nonce)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     // the one (last) record: the plaintext and its delimiter 0x02, no padding
     let mut record = plaintext.to_vec();
@@ -366,14 +430,21 @@ fn encrypt(plaintext: &[u8], ua_public: &[u8], auth: &[u8], as_secret: &SecretKe
 }
 
 /// RFC 8292: `vapid t=<JWT for the push service's origin, 12 hours>, k=<the server's public key>`.
-fn vapid_authorization(key: &SigningKey, audience: &str, contact: Option<&str>) -> anyhow::Result<String> {
+fn vapid_authorization(
+    key: &SigningKey,
+    audience: &str,
+    contact: Option<&str>,
+) -> anyhow::Result<String> {
     let exp = chrono::Utc::now().timestamp() + 12 * 60 * 60;
     let mut claims = serde_json::json!({ "aud": audience, "exp": exp });
     if let Some(contact) = contact {
         claims["sub"] = serde_json::Value::String(contact.to_owned());
     }
     let header = URL_SAFE_NO_PAD.encode(br#"{"typ":"JWT","alg":"ES256"}"#);
-    let unsigned = format!("{header}.{}", URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims)?));
+    let unsigned = format!(
+        "{header}.{}",
+        URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims)?)
+    );
     let signature: Signature = key.sign(unsigned.as_bytes());
     Ok(format!(
         "vapid t={unsigned}.{}, k={}",
@@ -432,7 +503,10 @@ pub struct TestSent {
 )]
 pub async fn vapid(State(state): State<AppState>, _user: CurrentUser) -> impl IntoResponse {
     match state.notifier.vapid_key().await {
-        Ok(key) => Json(VapidKey { public_key: vapid_public(key) }).into_response(),
+        Ok(key) => Json(VapidKey {
+            public_key: vapid_public(key),
+        })
+        .into_response(),
         Err(e) => {
             eprintln!("[notifications] VAPID key: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "no key").into_response()
@@ -452,17 +526,38 @@ pub async fn vapid(State(state): State<AppState>, _user: CurrentUser) -> impl In
         (status = 500, description = "plain text: database error")
     )
 )]
-pub async fn subscribe(State(state): State<AppState>, user: CurrentUser, Json(body): Json<Subscription>) -> impl IntoResponse {
-    let url = url::Url::parse(&body.endpoint).ok().filter(|u| u.scheme() == "https" && u.host_str().is_some());
+pub async fn subscribe(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<Subscription>,
+) -> impl IntoResponse {
+    let url = url::Url::parse(&body.endpoint)
+        .ok()
+        .filter(|u| u.scheme() == "https" && u.host_str().is_some());
     let https = url.is_some();
-    let key_ok = URL_SAFE_NO_PAD.decode(&body.p256dh).is_ok_and(|k| k.len() == 65 && PublicKey::from_sec1_bytes(&k).is_ok());
-    let auth_ok = URL_SAFE_NO_PAD.decode(&body.auth).is_ok_and(|a| a.len() == 16);
-    let timezone_ok = body.timezone.as_deref().is_none_or(|tz| tz.parse::<chrono_tz::Tz>().is_ok());
+    let key_ok = URL_SAFE_NO_PAD
+        .decode(&body.p256dh)
+        .is_ok_and(|k| k.len() == 65 && PublicKey::from_sec1_bytes(&k).is_ok());
+    let auth_ok = URL_SAFE_NO_PAD
+        .decode(&body.auth)
+        .is_ok_and(|a| a.len() == 16);
+    let timezone_ok = body
+        .timezone
+        .as_deref()
+        .is_none_or(|tz| tz.parse::<chrono_tz::Tz>().is_ok());
     if !https || body.endpoint.len() > 1000 || !key_ok || !auth_ok || !timezone_ok {
-        return (StatusCode::BAD_REQUEST, Json(ApiError::new("invalid subscription"))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new("invalid subscription")),
+        )
+            .into_response();
     }
     if !state.notifier.allow_private && !reachable_publicly(url.as_ref().unwrap()).await {
-        return (StatusCode::BAD_REQUEST, Json(ApiError::new("endpoint not on a public address"))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new("endpoint not on a public address")),
+        )
+            .into_response();
     }
     // An endpoint of another user's moves to this one only with the same keys (the same device's subscription,
     // signed in to another account): knowing the endpoint alone takes nothing over.
@@ -505,7 +600,11 @@ pub async fn subscribe(State(state): State<AppState>, user: CurrentUser, Json(bo
         (status = 500, description = "plain text: database error")
     )
 )]
-pub async fn unsubscribe(State(state): State<AppState>, user: CurrentUser, Json(body): Json<SubscriptionEndpoint>) -> impl IntoResponse {
+pub async fn unsubscribe(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<SubscriptionEndpoint>,
+) -> impl IntoResponse {
     match sqlx::query("DELETE FROM notification_subscriptions WHERE endpoint = ? AND user_id = ?")
         .bind(&body.endpoint)
         .bind(&user.user_id)
@@ -527,7 +626,12 @@ pub async fn unsubscribe(State(state): State<AppState>, user: CurrentUser, Json(
     responses((status = 200, body = TestSent))
 )]
 pub async fn test(State(state): State<AppState>, user: CurrentUser) -> impl IntoResponse {
-    Json(TestSent { sent: state.notifier.send(&user.user_id, None, &Payload::Test).await })
+    Json(TestSent {
+        sent: state
+            .notifier
+            .send(&user.user_id, None, &Payload::Test)
+            .await,
+    })
 }
 
 pub fn routes() -> OpenApiRouter<AppState> {
@@ -548,11 +652,21 @@ mod tests {
     /// RFC 8291 §5: the worked example (its keys, salt and message) gives its body.
     #[test]
     fn encrypts_as_rfc_8291_example() {
-        let ua_public = b64("BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4");
+        let ua_public = b64(
+            "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4",
+        );
         let auth = b64("BTBZMqHH6r4Tts7J_aSIgg");
-        let as_secret = SecretKey::from_slice(&b64("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw")).unwrap();
+        let as_secret =
+            SecretKey::from_slice(&b64("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw")).unwrap();
         let salt: [u8; 16] = b64("DGv6ra1nlYgDCS1FRnbzlw").try_into().unwrap();
-        let body = encrypt(b"When I grow up, I want to be a watermelon", &ua_public, &auth, &as_secret, salt).unwrap();
+        let body = encrypt(
+            b"When I grow up, I want to be a watermelon",
+            &ua_public,
+            &auth,
+            &as_secret,
+            salt,
+        )
+        .unwrap();
         assert_eq!(
             URL_SAFE_NO_PAD.encode(body),
             "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN"
@@ -573,12 +687,19 @@ mod tests {
         key_info.extend_from_slice(ua_public.as_bytes());
         key_info.extend_from_slice(as_public);
         let mut ikm = [0u8; 32];
-        Hkdf::<Sha256>::new(Some(auth), shared.raw_secret_bytes()).expand(&key_info, &mut ikm).unwrap();
+        Hkdf::<Sha256>::new(Some(auth), shared.raw_secret_bytes())
+            .expand(&key_info, &mut ikm)
+            .unwrap();
         let prk = Hkdf::<Sha256>::new(Some(salt), &ikm);
         let (mut cek, mut nonce) = ([0u8; 16], [0u8; 12]);
-        prk.expand(b"Content-Encoding: aes128gcm\0", &mut cek).unwrap();
-        prk.expand(b"Content-Encoding: nonce\0", &mut nonce).unwrap();
-        let mut plain = Aes128Gcm::new_from_slice(&cek).unwrap().decrypt(&Nonce::from(nonce), ciphertext).unwrap();
+        prk.expand(b"Content-Encoding: aes128gcm\0", &mut cek)
+            .unwrap();
+        prk.expand(b"Content-Encoding: nonce\0", &mut nonce)
+            .unwrap();
+        let mut plain = Aes128Gcm::new_from_slice(&cek)
+            .unwrap()
+            .decrypt(&Nonce::from(nonce), ciphertext)
+            .unwrap();
         assert_eq!(plain.pop(), Some(2), "the last record's delimiter");
         plain
     }
@@ -590,20 +711,26 @@ mod tests {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let dir = std::env::temp_dir().join(format!("caley-notify-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        let db = crate::db::init_db(dir.join("t.db").to_str().unwrap()).await.unwrap();
-        crate::db::ensure_user(&db, "u@example", None).await.unwrap();
+        let db = crate::db::init_db(dir.join("t.db").to_str().unwrap())
+            .await
+            .unwrap();
+        crate::db::ensure_user(&db, "u@example", None)
+            .await
+            .unwrap();
 
         // the device's push service: records what is posted to it
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(axum::http::HeaderMap, Vec<u8>)>(1);
         let service = axum::Router::new().route(
             "/push/device",
-            axum::routing::post(move |headers: axum::http::HeaderMap, body: axum::body::Bytes| {
-                let tx = tx.clone();
-                async move {
-                    tx.send((headers, body.to_vec())).await.unwrap();
-                    StatusCode::CREATED
-                }
-            }),
+            axum::routing::post(
+                move |headers: axum::http::HeaderMap, body: axum::body::Bytes| {
+                    let tx = tx.clone();
+                    async move {
+                        tx.send((headers, body.to_vec())).await.unwrap();
+                        StatusCode::CREATED
+                    }
+                },
+            ),
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}/push/device", listener.local_addr().unwrap());
@@ -621,7 +748,9 @@ mod tests {
             .unwrap();
 
         let broadcaster = crate::sse::SseBroadcaster::new();
-        broadcaster.set_notifier(Arc::new(Notifier::new(db, [7; 32], "https://caley.example", true).unwrap()));
+        broadcaster.set_notifier(Arc::new(
+            Notifier::new(db, [7; 32], "https://caley.example", true).unwrap(),
+        ));
         broadcaster.send(
             "u@example",
             SseMessage::NewEmail {
@@ -633,11 +762,20 @@ mod tests {
             },
         );
 
-        let (headers, body) = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
+        let (headers, body) = tokio::time::timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(headers["content-encoding"], "aes128gcm");
         assert_eq!(headers["ttl"], TTL_SECONDS.to_string());
-        assert!(headers["authorization"].to_str().unwrap().starts_with("vapid t="));
-        let payload: serde_json::Value = serde_json::from_slice(&decrypt(&body, &ua_secret, &auth)).unwrap();
+        assert!(
+            headers["authorization"]
+                .to_str()
+                .unwrap()
+                .starts_with("vapid t=")
+        );
+        let payload: serde_json::Value =
+            serde_json::from_slice(&decrypt(&body, &ua_secret, &auth)).unwrap();
         assert_eq!(
             payload,
             serde_json::json!({
@@ -658,8 +796,22 @@ mod tests {
             assert!(is_public(ip.parse().unwrap()), "{ip}");
         }
         for ip in [
-            "127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.178.20", "169.254.169.254", "100.64.0.1", "0.0.0.0",
-            "255.255.255.255", "224.0.0.1", "198.18.0.1", "::1", "::", "fd00::1", "fe80::1", "::ffff:127.0.0.1", "2001:db8::1",
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.1",
+            "192.168.178.20",
+            "169.254.169.254",
+            "100.64.0.1",
+            "0.0.0.0",
+            "255.255.255.255",
+            "224.0.0.1",
+            "198.18.0.1",
+            "::1",
+            "::",
+            "fd00::1",
+            "fe80::1",
+            "::ffff:127.0.0.1",
+            "2001:db8::1",
         ] {
             assert!(!is_public(ip.parse().unwrap()), "{ip}");
         }
@@ -672,7 +824,9 @@ mod tests {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let dir = std::env::temp_dir().join(format!("caley-private-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        let db = crate::db::init_db(dir.join("t.db").to_str().unwrap()).await.unwrap();
+        let db = crate::db::init_db(dir.join("t.db").to_str().unwrap())
+            .await
+            .unwrap();
         let notifier = Notifier::new(db, [7; 32], "https://caley.example", false).unwrap();
         let key = SigningKey::from(random_secret());
         let device = random_secret().public_key().to_sec1_point(false);
@@ -690,17 +844,36 @@ mod tests {
             }
         });
 
-        for endpoint in [format!("http://localhost:{port}/push"), format!("http://127.0.0.1:{port}/push")] {
+        for endpoint in [
+            format!("http://localhost:{port}/push"),
+            format!("http://127.0.0.1:{port}/push"),
+        ] {
             assert!(
-                matches!(notifier.post(&endpoint, &p256dh, &auth, b"{}", &key).await, Err(Delivery::Failed(_))),
+                matches!(
+                    notifier.post(&endpoint, &p256dh, &auth, b"{}", &key).await,
+                    Err(Delivery::Failed(_))
+                ),
                 "{endpoint}"
             );
         }
-        assert_eq!(connections.load(std::sync::atomic::Ordering::SeqCst), 0, "no connection to a private address");
+        assert_eq!(
+            connections.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "no connection to a private address"
+        );
 
         // allowed, the same service is reached
-        let allowing = Notifier::new(notifier.db.clone(), [7; 32], "https://caley.example", true).unwrap();
-        let _ = allowing.post(&format!("http://localhost:{port}/push"), &p256dh, &auth, b"{}", &key).await;
+        let allowing =
+            Notifier::new(notifier.db.clone(), [7; 32], "https://caley.example", true).unwrap();
+        let _ = allowing
+            .post(
+                &format!("http://localhost:{port}/push"),
+                &p256dh,
+                &auth,
+                b"{}",
+                &key,
+            )
+            .await;
         assert_eq!(connections.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
@@ -709,13 +882,20 @@ mod tests {
     fn vapid_jwt_verifies() {
         use p256::ecdsa::{VerifyingKey, signature::Verifier};
         let key = SigningKey::from(random_secret());
-        let header = vapid_authorization(&key, "https://push.example", Some("https://caley.example")).unwrap();
-        let (t, k) = header.strip_prefix("vapid t=").unwrap().split_once(", k=").unwrap();
+        let header =
+            vapid_authorization(&key, "https://push.example", Some("https://caley.example"))
+                .unwrap();
+        let (t, k) = header
+            .strip_prefix("vapid t=")
+            .unwrap()
+            .split_once(", k=")
+            .unwrap();
         let (unsigned, signature) = t.rsplit_once('.').unwrap();
         let verifying = VerifyingKey::from_sec1_bytes(&b64(k)).unwrap();
         let signature = Signature::from_slice(&b64(signature)).unwrap();
         verifying.verify(unsigned.as_bytes(), &signature).unwrap();
-        let claims: serde_json::Value = serde_json::from_slice(&b64(unsigned.split('.').nth(1).unwrap())).unwrap();
+        let claims: serde_json::Value =
+            serde_json::from_slice(&b64(unsigned.split('.').nth(1).unwrap())).unwrap();
         assert_eq!(claims["aud"], "https://push.example");
         assert_eq!(claims["sub"], "https://caley.example");
     }
