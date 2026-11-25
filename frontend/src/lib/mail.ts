@@ -8,6 +8,7 @@ import {
   linkifySegments,
   isPgpSignatureAttachment,
   isPgpTransportAttachment,
+  bareMailbox,
 } from './mailUtils.ts';
 import type { Account, Attachment, Identity, Mailbox, Message, ThreadNode, VirtualFolder } from './MailTypes.ts';
 import { parseEnvelopeAddresses } from './addresses.ts';
@@ -793,7 +794,10 @@ export function composeDraft(mode: ComposeMode, msg: Message | null, identities:
 /** What a reply or forward takes from the reader's body (actions/mail.ts ReaderBody). */
 export interface DraftBody {
   subject: string;
+  /** whom a reply goes to (ReaderBody.reply: for decrypted content only the protected message's, maybe none) */
   reply: string[] | null;
+  /** the others a reply all adds, for decrypted content (the protected To and Cc); null: the server's To and Cc */
+  replyCc: string[] | null;
   text: string;
   quotable: boolean;
   /** anything in the message was decrypted (sinter-mail's summary.encrypted is not 'none') */
@@ -805,10 +809,24 @@ function fromDecrypted(draft: ComposeDraft, b: DraftBody | null): ComposeDraft {
   return b?.decrypted ? { ...draft, encrypt: true, decrypted: true } : draft;
 }
 
-/** A reply (or reply all) to the message the reader shows, `b` its body. */
+/**
+ * A reply (or reply all) to the message the reader shows, `b` its body. For decrypted content the recipients come
+ * only from the protected message (b.reply, b.replyCc), never from the server's outer headers, which whoever re-sent
+ * the ciphertext chose: none there leaves the field empty for the user; and decrypted text is quoted only when a
+ * good signature binds the sender (b.quotable).
+ */
 export function replyDraft(mode: 'reply' | 'replyAll', msg: Message, b: DraftBody | null, identities: Identity[]): ComposeDraft {
-  return fromDecrypted(composeDraft(mode, replyOf(msg, b), identities, b?.quotable ? b.text : '', null), b);
+  const draft = composeDraft(mode, replyOf(msg, b), identities, b?.quotable ? b.text : '', null);
+  if (!b?.decrypted) return draft;
+  const to = b.reply ?? [];
+  const mine = identities.find((i) => i.identity_id === draft.identity_id)?.email.toLowerCase() ?? '';
+  const taken = new Set(to.map((a) => bareMailbox(a)));
+  const cc = mode === 'replyAll'
+    ? (b.replyCc ?? []).filter((a) => { const bare = bareMailbox(a); const keep = bare !== mine && !taken.has(bare); taken.add(bare); return keep; })
+    : [];
+  return fromDecrypted({ ...draft, to: to.join(', '), cc: cc.join(', '), ccOpen: cc.length > 0 }, b);
 }
+
 
 /** A forward of the message the reader shows, `b` its body, with the HTML and attachments mail.forwardFiles gave. */
 export function forwardDraft(msg: Message, b: DraftBody | null, identities: Identity[], html: string | null, files: File[]): ComposeDraft {

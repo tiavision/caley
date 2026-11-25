@@ -9,7 +9,7 @@ import {
 } from '../lib/mail.ts';
 import { cidReferencesFromHtml, htmlToPlainText, withInlineImages } from '../lib/mail-html.ts';
 import { htmlAddsValue, isPgpPublicKeyAttachment, bareMailbox, keyHasEmail } from '../lib/mailUtils.ts';
-import { messageBadges, protectedReply, protectedSubject, quotable, readerParts, type ReaderPart } from '../lib/mail-reader.ts';
+import { messageBadges, protectedSubject, quotable, readerParts, replyAddresses, replyAllAddresses, type ReaderPart } from '../lib/mail-reader.ts';
 import * as mail from '@tiavision/sinter-mail';
 import type { ImageType, Message as MimeMessage, MimeOptions, Ref } from '@tiavision/sinter-mail';
 // openpgp is a lazy package (sinter({ lazy }) in vite.config.ts): these modules import it as usual, sinter loads it
@@ -88,8 +88,11 @@ export interface ReaderBody {
   badges: string[];
   /** the protected subject of a decrypted message */
   subject: string;
-  /** whom a reply goes to when protected headers say so (else null: the message's From and Reply-To) */
+  /** whom a reply goes to: for decrypted content only whom the protected message names (maybe none), else protected
+   * headers when they say so; null: the server's From and Reply-To */
   reply: string[] | null;
+  /** for decrypted content, the others a reply all adds: the protected To and Cc only; null: the server's To and Cc */
+  replyCc: string[] | null;
   error: string;
   /** decrypted attachments, as blob: URLs */
   files: DecryptedFile[];
@@ -251,7 +254,8 @@ async function fromRaw(msg: Message, src: Source, out: ReaderBody): Promise<Read
   out.badges = [...new Set(out.badges)].filter((x) => !out.locked || (x !== 'decrypt_failed' && x !== 'from_unknown'));
   if (out.pending) out.badges.push('signed');
   out.subject = protectedSubject(mime);
-  out.reply = protectedReply(mime);
+  out.reply = replyAddresses(mime);
+  out.replyCc = replyAllAddresses(mime);
   out.quotable = quotable(mime);
   out.parts = readerParts(mime);
   out.textParts = readerParts(text).map((p) => (p.kind === 'html' ? { ...p, kind: 'text', text: htmlToPlainText(p.html), html: '' } : p));
@@ -300,7 +304,7 @@ async function fromRaw(msg: Message, src: Source, out: ReaderBody): Promise<Read
 function blank(msg: Message): ReaderBody {
   return {
     key: messageKey(msg), message: msg, parts: [], textParts: [], html: '', text: '', quotable: true, mode: 'text',
-    encrypted: msg.is_encrypted, decrypted: false, signed: msg.is_signed, locked: false, badges: [], subject: '', reply: null, error: '',
+    encrypted: msg.is_encrypted, decrypted: false, signed: msg.is_signed, locked: false, badges: [], subject: '', reply: null, replyCc: null, error: '',
     files: [], importable: {}, cids: null, forwardCids: null, pending: false, wholeSize: 0,
   };
 }

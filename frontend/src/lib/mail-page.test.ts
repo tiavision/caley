@@ -262,8 +262,8 @@ describe('the mail page URL', () => {
 
 describe('replies and forwards of encrypted mail', () => {
   const ids = [{ identity_id: 'i1', account_id: 'a', name: 'Me', email: 'me@x', is_default: true, sort_order: 0 }] as never;
-  const plain = { subject: '', reply: null, text: 'hello', quotable: true, decrypted: false };
-  const secret = { subject: 'Secret plan', reply: ['Alice <alice@x>'], text: 'the plan', quotable: true, decrypted: true };
+  const plain = { subject: '', reply: null, replyCc: null, text: 'hello', quotable: true, decrypted: false };
+  const secret = { subject: 'Secret plan', reply: ['Alice <alice@x>'], replyCc: [], text: 'the plan', quotable: true, decrypted: true };
   const from = msg(1, { from: 'Alice <alice@x>', to: ['me@x'], cc: [], subject: '...', message_id: '<1@x>', attachments: [] });
   test('a reply or forward of decrypted content starts encrypted, and says it quotes decrypted text', () => {
     expect(replyDraft('reply', from, secret, ids)).toMatchObject({ encrypt: true, decrypted: true });
@@ -278,5 +278,28 @@ describe('replies and forwards of encrypted mail', () => {
     expect(missingKeys(draft, ids, keys)).toEqual(['bob@x']);
     expect(missingKeys(draft, ids, { ...keys, keys: keys.keys.slice(0, 1) })).toEqual(['bob@x', 'me@x']);
     expect(missingKeys({ ...draft, cc: '' }, ids, keys)).toEqual([]);
+  });
+});
+
+describe('reply recipients of decrypted mail', () => {
+  const ids = [{ identity_id: 'i1', account_id: 'a', name: 'Bob', email: 'bob@x', is_default: true, sort_order: 0 }] as never;
+  // re-sent by Mallory: the server's outer headers are his
+  const resent = msg(1, { from: 'Mallory <m@evil>', reply_to: ['m@evil'], to: ['bob@x'], cc: ['m2@evil'], subject: '...', message_id: '<1@x>', attachments: [] });
+  const body = (over: object) => ({ subject: 'Plan', reply: [], replyCc: [], text: 'Secret plan', quotable: false, decrypted: true, ...over });
+  test('the protected message names nobody: the fields stay empty for the user, nothing decrypted is quoted', () => {
+    for (const mode of ['reply', 'replyAll'] as const) {
+      const d = replyDraft(mode, resent, body({}), ids);
+      expect([d.to, d.cc]).toEqual(['', '']);
+      expect(d.body).not.toContain('Secret plan');
+    }
+  });
+  test('the protected From and, for reply all, the protected To and Cc (without the user and the To), never the outer ones', () => {
+    const b = body({ reply: ['Alice <alice@x>'], replyCc: ['bob@x', 'Alice <alice@x>', 'Carol <carol@x>'] });
+    expect(replyDraft('reply', resent, b, ids)).toMatchObject({ to: 'Alice <alice@x>', cc: '' });
+    expect(replyDraft('replyAll', resent, b, ids)).toMatchObject({ to: 'Alice <alice@x>', cc: 'Carol <carol@x>', ccOpen: true });
+  });
+  test('a message without decrypted content: the server\'s headers, as before', () => {
+    const b = { subject: '', reply: null, replyCc: null, text: 'hi', quotable: true, decrypted: false };
+    expect(replyDraft('replyAll', resent, b, ids)).toMatchObject({ to: 'm@evil', cc: 'm2@evil' });
   });
 });

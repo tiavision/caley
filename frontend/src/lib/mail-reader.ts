@@ -96,3 +96,24 @@ export function protectedSubject(msg: MimeMessage): string {
 export function protectedReply(msg: MimeMessage): string[] | null {
   return msg.sources.from === 'protected' || msg.sources.replyTo === 'protected' ? msg.reply.map(addressText) : null;
 }
+
+const usable = (list: readonly Address[]) => list.filter((a) => a.address).map(addressText);
+
+/**
+ * Whom a reply goes to. A message with decrypted content (summary.encrypted not 'none'): only whom sinter-mail's
+ * `reply` names for the protected message (the protected Reply-To or From, or the outer From a signature inside the
+ * ciphertext binds), never the outer headers, which whoever re-sent a ciphertext chose; empty when it names none (the
+ * user fills it in). Any other message: protectedReply().
+ */
+export function replyAddresses(msg: MimeMessage): string[] | null {
+  return msg.summary.encrypted !== 'none' ? usable(msg.reply) : protectedReply(msg);
+}
+
+/**
+ * The other recipients a reply all adds, for a message with decrypted content: the protected To and Cc only (none when
+ * the payload has no protected headers); null for any other message (the server's To and Cc, as before).
+ */
+export function replyAllAddresses(msg: MimeMessage): string[] | null {
+  if (msg.summary.encrypted === 'none') return null;
+  return [...(msg.sources.to === 'protected' ? usable(msg.headers.to) : []), ...(msg.sources.cc === 'protected' ? usable(msg.headers.cc) : [])];
+}

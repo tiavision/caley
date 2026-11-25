@@ -83,7 +83,7 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
         return {
           key: `${ref.account_id} ${ref.mailbox} ${ref.uid}`, message: current.find((msg) => msg.uid === ref.uid) ?? inbox[0], parts: partsOverride ?? (htmlBody ? [{ ...part, kind: 'html', html: htmlBody }] : textParts), textParts: partsOverride ?? textParts,
           html: htmlBody, text: `body ${ref.uid}`, quotable: !decrypted, mode: htmlBody ? 'html' : 'text', encrypted: decrypted, decrypted, signed: false,
-          locked: false, badges: [], subject: '', reply: null, error: '', files: [], importable: {}, cids: null, forwardCids: null,
+          locked: false, badges: [], subject: '', reply: decrypted ? [`Sender ${ref.uid} <s${ref.uid}@x>`] : null, replyCc: decrypted ? [] : null, error: '', files: [], importable: {}, cids: null, forwardCids: null,
         };
       },
       openPart: (_ref: unknown, step: string) => { openedParts.push(step); },
