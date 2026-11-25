@@ -1,6 +1,6 @@
 [package]
 name = "caley-native"
-version = "0.1.0"
+version = "2.0.0"
 description = "Caley's app shell: picks a Caley server and opens it"
 edition = "2024"
 
