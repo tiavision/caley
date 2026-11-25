@@ -1,4 +1,4 @@
-<!-- Mail account and identity dialogs #email-account, #mail-identities (/mail/). They wrap the part of the page that
+<!-- Mail account and identity dialogs #email-account, #email-identities (/mail/). They wrap the part of the page that
      opens them; an opener emits
        - `account-edit` {acct: AccountForm, ui: AccountUi}: emit('account-edit', {acct: newAccount(), ui: accountUi('basic')});
        - `identities-open` (an account id): the identities of that account.
@@ -18,12 +18,12 @@
          idError: '',
        }"
        data-sn-on-account-edit="acct = $event.detail.acct; acctUi = $event.detail.ui; openDialog('email-account')"
-       data-sn-on-identities-open="idAccount = $event.detail; idForm = null; idError = ''; openDialog('mail-identities')">
+       data-sn-on-identities-open="idAccount = $event.detail; idForm = null; idError = ''; openDialog('email-identities')">
     <slot></slot>
-    <dialog id="mail-identities" closedby="any">
+    <dialog id="email-identities" closedby="any">
       <header>
         <h2 data-sn-text="m.mail_identities()"></h2>
-        <button type="button" commandfor="mail-identities" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
+        <button type="button" commandfor="email-identities" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
       </header>
       <template data-sn-if="identities.some(i => i.account_id === idAccount)">
         <ul data-list>

@@ -58,10 +58,10 @@
                         data-sn-on-click="emit('compose', composeDraft('reply', replyOf(msg, b), identities, b?.quotable ? b.text : '', null))"
                         data-sn-attr="{'aria-label': m.mail_reply()}"></button>
                 <button type="button" class="overlay-only" data-variant="ghost" data-icon="ellipsis-vertical"
-                        data-sn-attr="{popovertarget: 'mail-actions-' + msg.uid, 'aria-label': m.mail_messageActions()}"></button>
+                        data-sn-attr="{popovertarget: 'message-actions-' + msg.uid, 'aria-label': m.mail_messageActions()}"></button>
                 <button type="button" class="wide-only" data-variant="outline" data-size="sm"
-                        data-sn-attr="{popovertarget: 'mail-actions-' + msg.uid, 'aria-label': m.mail_messageActions()}" data-sn-text="m.mail_actions()"></button>
-                <div popover data-sn-attr="{id: 'mail-actions-' + msg.uid}" data-menu role="menu" data-sn-on-toggle="$event.newState === 'closed' && (moveOpen = false)">
+                        data-sn-attr="{popovertarget: 'message-actions-' + msg.uid, 'aria-label': m.mail_messageActions()}" data-sn-text="m.mail_actions()"></button>
+                <div popover data-sn-attr="{id: 'message-actions-' + msg.uid}" data-menu role="menu" data-sn-on-toggle="$event.newState === 'closed' && (moveOpen = false)">
                   <button type="button" role="menuitem" data-icon="reply-all" data-shortcut="a" aria-keyshortcuts="A"
                           data-sn-on-click="ancestor($el, '[popover]')?.hidePopover(); emit('compose', composeDraft('replyAll', replyOf(msg, b), identities, b?.quotable ? b.text : '', null))">
                     <span data-sn-text="m.mail_replyAll()"></span><kbd aria-hidden="true">A</kbd>
