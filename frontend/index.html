@@ -3,7 +3,7 @@
   <head>
     <app-head></app-head>
   </head>
-  <body data-sn-state="{ baseUrl: '', error: '', saving: false }">
+  <body data-sn-state="{ error: '', saving: false }">
     <!-- Signed out, /api/user answers 401, which src/sinter.config.ts turns into `null` on this page. Signed in, the
          server redirects `/` before this page is sent; on the Vite dev server, which cannot, `then` goes to the calendar. -->
     <sn-resource name="user" src="/user"
@@ -31,43 +31,22 @@
 
         <article data-layout="stack" data-gap="lg" data-pad="lg">
           <template data-sn-if="ready">
-            <p data-muted data-sn-text="m.login_subtitle()"></p>
-            <form data-layout="stack" data-gap="md"
-                  data-sn-post="site:/auth/login" data-sn-encoding="form"
-                  data-sn-on-submit="saving = true; error = ''"
-                  data-sn-then="navigate(pagePath($result.redirect || '/calendar/'), { replace: true })"
-                  data-sn-catch="saving = false; error = $error.detail ?? m.login_error()">
-              <label>
-                <span data-sn-text="m.settings_baseUrl()"></span>
-                <input type="url" name="caldav_base_url" required data-sn-attr="{placeholder: m.settings_baseUrlPlaceholder()}"
-                       data-sn-model="baseUrl" data-sn-persist="caldav_base_url">
-              </label>
-              <label>
-                <span data-sn-text="m.settings_username()"></span>
-                <input type="text" name="caldav_username" autocomplete="username" required data-sn-attr="{placeholder: m.settings_usernamePlaceholder()}">
-              </label>
-              <!-- The field with its show/hide button (temper's data-field): <label for>, so the button's name is not part of
-                   the field's. -->
-              <div data-layout="stack" data-gap="xs" data-sn-state="{ shown: false }">
-                <label for="login-password" data-sn-text="m.settings_password()"></label>
-                <div data-field>
-                  <input id="login-password" type="password" name="caldav_password" autocomplete="current-password" required
-                         data-sn-attr="{type: shown ? 'text' : 'password', placeholder: m.settings_passwordPlaceholder()}">
-                  <button type="button" data-variant="ghost" data-sn-on-click="shown = !shown"
-                          data-sn-attr="{'data-icon': shown ? 'eye-off' : 'eye', 'aria-pressed': shown ? 'true' : 'false', 'aria-label': m.login_showPassword()}"></button>
-                </div>
-              </div>
-
-              <template data-sn-if="error">
-                <p data-callout data-tone="danger" role="alert" data-sn-text="error"></p>
-              </template>
-
-              <button type="submit" data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.login_submit()"></button>
-            </form>
+            <!-- The demo (DEMO_MODE) signs in without credentials, as its fixed user (backend/src/local_auth.rs). -->
+            <template data-sn-if="authConfig.demo_mode">
+              <form data-layout="stack" data-gap="md"
+                    data-sn-post="site:/auth/login" data-sn-encoding="form"
+                    data-sn-on-submit="saving = true; error = ''"
+                    data-sn-then="navigate(pagePath($result.redirect || '/calendar/'), { replace: true })"
+                    data-sn-catch="saving = false; error = $error.detail ?? m.login_error()">
+                <template data-sn-if="error">
+                  <p data-callout data-tone="danger" role="alert" data-sn-text="error"></p>
+                </template>
+                <button type="submit" data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.login_demo()"></button>
+              </form>
+            </template>
 
             <template data-sn-if="authConfig.oidc_enabled">
-              <p data-divider data-sn-text="m.login_or()"></p>
-              <a href="/auth/oidc" role="button" data-variant="outline" data-sn-text="m.login_oidc_button()"></a>
+              <a href="/auth/oidc" role="button" data-sn-text="m.login_oidc_button()"></a>
             </template>
           </template>
           <template data-sn-else>

@@ -83,8 +83,8 @@ pub async fn ensure_user(
     Ok(())
 }
 
-/// Return the user's first CalDAV account for compatibility with local login and
-/// legacy code paths. New calendar/contact code should use account-specific APIs.
+/// Return the user's first CalDAV account for legacy code paths (the single-account
+/// settings form, `/api/user`'s `has_settings`). New calendar/contact code should use account-specific APIs.
 pub async fn get_settings(
     pool: &SqlitePool,
     user_id: &str,

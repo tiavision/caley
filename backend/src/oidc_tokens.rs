@@ -34,7 +34,7 @@ pub struct OidcTokens {
 /// Why there is no access token for a user.
 #[derive(Debug, PartialEq)]
 pub enum TokenError {
-    /// no OIDC sign-in kept (a CalDAV-login user, or tokens dropped after a failed renewal)
+    /// no OIDC sign-in kept (the demo user, or tokens dropped after a failed renewal)
     NoToken,
     /// expired, and it could not be renewed: the user signs in again
     Expired,

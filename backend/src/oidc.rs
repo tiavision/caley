@@ -154,7 +154,7 @@ pub fn extract_user_id(
     }
 }
 
-/// The signed-in user (an OIDC or a CalDAV-login session alike).
+/// The signed-in user (an OIDC or a demo session alike).
 #[derive(serde::Serialize, ToSchema)]
 pub struct User {
     /// the name to show; the user ID when there is none
@@ -175,6 +175,8 @@ pub struct User {
 pub struct AuthConfig {
     /// whether OIDC sign-in is configured
     pub oidc_enabled: bool,
+    /// whether this is the demo (`DEMO_MODE`): it signs in without credentials, `POST /auth/login`
+    pub demo_mode: bool,
 }
 
 /// The signed-in user; starts the user's sync task.
@@ -205,16 +207,17 @@ pub async fn user_info(State(state): State<AppState>, user: CurrentUser) -> impl
     })
 }
 
-/// Public endpoint so the login page can decide whether to offer OIDC.
+/// Public endpoint so the login page can decide what to offer: OIDC, the demo's sign-in.
 #[utoipa::path(get, path = "/auth/config", responses((status = 200, body = AuthConfig)))]
 pub async fn auth_config(State(state): State<AppState>) -> impl IntoResponse {
     Json(AuthConfig {
         oidc_enabled: state.oidc_enabled,
+        demo_mode: state.demo_mode,
     })
 }
 
 /// Unified logout. For OIDC sessions, performs RP-initiated logout using the
-/// end_session_endpoint from discovery. CalDAV sessions just get a flush.
+/// end_session_endpoint from discovery. Other sessions (the demo's) just get a flush.
 pub async fn logout_handler(
     State(state): State<AppState>,
     RequestOrigin(origin): RequestOrigin,

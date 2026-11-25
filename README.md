@@ -11,7 +11,7 @@ It connects to existing CalDAV, CardDAV, IMAP, and SMTP servers, stores local ca
 - Email: IMAP accounts with autodiscovery, SMTP sending, multiple accounts and identities, mailbox browsing, unread counts, message threads, flags/read state, move/delete, attachments, export, virtual folders, full-text search, new-mail notifications.
 - Privacy: remote email image allow/block controls and same-origin image proxying.
 - OpenPGP: public key storage, trusted sender keys, private key import, encrypted synced private-key vault, WebAuthn/passkey unlock, device approval flow, encrypted/signed message display, signature verification, Autocrypt key discovery, and protected MIME compose paths.
-- Authentication: direct CalDAV login is always available; OIDC login can be added with Pocket ID, Keycloak, Authelia, Authentik, or another OIDC provider.
+- Authentication: OIDC sign-in with Pocket ID, Keycloak, Authelia, Authentik, or another OIDC provider.
 - Storage: SQLite database plus cached mail files under the configured data directory. Stored CalDAV and IMAP passwords are encrypted at rest.
 
 ## Architecture
@@ -25,9 +25,9 @@ There is no root-level package manager or workspace. Run backend and frontend co
 
 - Rust toolchain with edition 2024 support.
 - Node.js and npm for frontend development/builds.
-- A CalDAV server for local login and calendar/contact setup.
+- An OIDC provider for sign-in (not needed for the demo).
+- A CalDAV server for calendars and contacts.
 - Optional: IMAP/SMTP account for email.
-- Optional: OIDC provider for external authentication.
 - Optional but recommended for PGP vault use: a PRF-capable passkey/WebAuthn authenticator and HTTPS origin.
 
 ## Configuration
@@ -38,9 +38,9 @@ All backend configuration is via environment variables. `backend/.env` is loaded
 |---|---|---|
 | `APP_BASE_URL` | Public URL of this app, for example `https://calendar.example.com` or `http://localhost:3000` locally. Also used for OIDC and WebAuthn origin setup. | Yes |
 | `ENCRYPTION_KEY` | Passphrase used to derive the AES-256-GCM key for encrypted stored credentials. | Yes |
-| `OIDC_ISSUER` | OIDC provider issuer URL. | Only for OIDC |
-| `OIDC_CLIENT_ID` | OIDC client ID. | Only for OIDC |
-| `OIDC_CLIENT_SECRET` | OIDC client secret. | Only for OIDC |
+| `OIDC_ISSUER` | OIDC provider issuer URL. | Yes, except in demo mode |
+| `OIDC_CLIENT_ID` | OIDC client ID. | Yes, except in demo mode |
+| `OIDC_CLIENT_SECRET` | OIDC client secret. | Yes, except in demo mode |
 | `CALDAV_PORT` | Backend listen port. Default: `3000`. | No |
 | `OIDC_LOGOUT` | Set to `false` to skip OIDC RP-initiated logout. Default: `true`. | No |
 | `OIDC_USER_ID_CLAIM` | OIDC claim used as user ID: `sub`, `preferred-username`, `email`, or `name`. Default: `sub`. | No |
@@ -52,7 +52,7 @@ All backend configuration is via environment variables. `backend/.env` is loaded
 | `WEBAUTHN_EXTRA_ORIGINS` | Additional allowed WebAuthn origins. | No |
 | `TRUSTED_PROXIES` | Reverse proxies (IPs or CIDRs, comma-separated, e.g. `10.0.0.1,172.16.0.0/12`) whose `Forwarded` / `X-Forwarded-Proto` / `X-Forwarded-Host` headers are trusted. Default: none. | No |
 
-OIDC is enabled only when all three OIDC variables are set. The OIDC redirect and post-logout URLs are built from the URL the app was opened at, so one instance can be used both through a reverse proxy and directly. A request from a `TRUSTED_PROXIES` peer takes its scheme and host from the forwarding headers; any other request is `http://` plus its `Host` header (the app does not terminate TLS); `APP_BASE_URL` is the fallback. Register the redirect URI of every URL you use with the provider:
+OIDC is the only way to sign in: the backend refuses to start without all three OIDC variables, unless `DEMO_MODE=true`. The OIDC redirect and post-logout URLs are built from the URL the app was opened at, so one instance can be used both through a reverse proxy and directly. A request from a `TRUSTED_PROXIES` peer takes its scheme and host from the forwarding headers; any other request is `http://` plus its `Host` header (the app does not terminate TLS); `APP_BASE_URL` is the fallback. Register the redirect URI of every URL you use with the provider:
 
 ```text
 https://calendar.example.com/auth/oidc
@@ -115,7 +115,7 @@ docker run --rm -p 3000:3000 \
   caley
 ```
 
-Open `http://localhost:3000` and log in with any CalDAV URL and any username/password.
+Open `http://localhost:3000` and choose "Enter the demo": no credentials are needed.
 
 ### Run locally
 
@@ -138,11 +138,12 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 ## Local Development
 
-Start the backend:
+Start the backend, with your OIDC provider (or `DEMO_MODE=true` instead of the three OIDC variables, see Try It — Demo Mode):
 
 ```bash
 cd backend
-APP_BASE_URL=http://localhost:3000 ENCRYPTION_KEY=dev-secret cargo run
+APP_BASE_URL=http://localhost:3000 ENCRYPTION_KEY=dev-secret \
+  OIDC_ISSUER=https://auth.example.com OIDC_CLIENT_ID=caley OIDC_CLIENT_SECRET=secret cargo run
 ```
 
 Start the frontend dev server in another terminal:
@@ -185,7 +186,8 @@ Run the backend and serve the built frontend:
 
 ```bash
 cd backend
-APP_BASE_URL=http://localhost:3000 ENCRYPTION_KEY=change-me cargo run
+APP_BASE_URL=http://localhost:3000 ENCRYPTION_KEY=change-me \
+  OIDC_ISSUER=https://auth.example.com OIDC_CLIENT_ID=caley OIDC_CLIENT_SECRET=secret cargo run
 ```
 
 The backend serves `frontend/dist` by default. Use `STATIC_DIR` if the built frontend lives somewhere else.
@@ -198,17 +200,7 @@ Build:
 docker build -t caley .
 ```
 
-Run with local CalDAV login only:
-
-```bash
-docker run -p 3000:3000 \
-  -v caley-data:/data \
-  -e APP_BASE_URL=https://calendar.example.com \
-  -e ENCRYPTION_KEY=your-passphrase \
-  caley
-```
-
-Run with OIDC also enabled:
+Run (OIDC is required):
 
 ```bash
 docker run -p 3000:3000 \
@@ -234,7 +226,7 @@ services:
     environment:
       APP_BASE_URL: https://calendar.example.com
       ENCRYPTION_KEY: your-passphrase
-      # Omit all three OIDC variables to use only CalDAV login.
+      # Required: OIDC is the only sign-in.
       OIDC_ISSUER: https://auth.example.com
       OIDC_CLIENT_ID: caley
       OIDC_CLIENT_SECRET: secret
@@ -249,9 +241,9 @@ Podman works with the same build/run flags.
 
 ## Authentication Modes
 
-CalDAV login is always available. Users log in with a CalDAV server URL, username, and password. Caley validates the credentials, derives a local user ID as `username@hostname`, stores the credentials encrypted, and starts a server-side session.
+OIDC is the only sign-in: the login page offers the OIDC provider, and the backend does not start without the three OIDC variables. Users configure CalDAV, email, and encryption settings after signing in.
 
-OIDC login is additive. When configured, the login page also shows the OIDC provider option. OIDC users configure CalDAV, email, and encryption settings after login.
+There is no sign-in with CalDAV credentials: it would let anyone create an account by pointing it at a CalDAV server of their own. The demo (`DEMO_MODE=true`) is the exception: its login page has an "Enter the demo" button that signs in as the fixed demo user, without credentials.
 
 ## Data And Security Notes
 
