@@ -80,29 +80,29 @@ Messages have styled HTML bodies. Unread/read state, flags, delete, and move all
 #### Light theme
 
 <p>
-  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-calendar.png"><img src="docs/screenshots/caley-calendar.png" alt="Caley demo calendar month view in light theme" width="49%"></a>
-  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-mail.png"><img src="docs/screenshots/caley-mail.png" alt="Caley demo mail inbox and message view" width="49%"></a>
+  <a href="https://github.com/tiavision/caley/raw/main/docs/screenshots/caley-calendar.png"><img src="docs/screenshots/caley-calendar.png" alt="Caley demo calendar month view in light theme" width="49%"></a>
+  <a href="https://github.com/tiavision/caley/raw/main/docs/screenshots/caley-mail.png"><img src="docs/screenshots/caley-mail.png" alt="Caley demo mail inbox and message view" width="49%"></a>
 </p>
 <p>
-  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-compose.png"><img src="docs/screenshots/caley-compose.png" alt="Caley demo email compose dialog in light theme" width="49%"></a>
-  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-contacts.png"><img src="docs/screenshots/caley-contacts.png" alt="Caley demo contacts grid" width="49%"></a>
+  <a href="https://github.com/tiavision/caley/raw/main/docs/screenshots/caley-compose.png"><img src="docs/screenshots/caley-compose.png" alt="Caley demo email compose dialog in light theme" width="49%"></a>
+  <a href="https://github.com/tiavision/caley/raw/main/docs/screenshots/caley-contacts.png"><img src="docs/screenshots/caley-contacts.png" alt="Caley demo contacts grid" width="49%"></a>
 </p>
 <p>
-  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-search.png"><img src="docs/screenshots/caley-search.png" alt="Caley demo calendar search results" width="49%"></a>
+  <a href="https://github.com/tiavision/caley/raw/main/docs/screenshots/caley-search.png"><img src="docs/screenshots/caley-search.png" alt="Caley demo calendar search results" width="49%"></a>
 </p>
 
 #### Dark theme
 
 <p>
-  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-calendar-dark.png"><img src="docs/screenshots/caley-calendar-dark.png" alt="Caley demo calendar month view in dark theme" width="49%"></a>
-  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-mail-dark.png"><img src="docs/screenshots/caley-mail-dark.png" alt="Caley demo mail inbox and message view in dark theme" width="49%"></a>
+  <a href="https://github.com/tiavision/caley/raw/main/docs/screenshots/caley-calendar-dark.png"><img src="docs/screenshots/caley-calendar-dark.png" alt="Caley demo calendar month view in dark theme" width="49%"></a>
+  <a href="https://github.com/tiavision/caley/raw/main/docs/screenshots/caley-mail-dark.png"><img src="docs/screenshots/caley-mail-dark.png" alt="Caley demo mail inbox and message view in dark theme" width="49%"></a>
 </p>
 <p>
-  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-compose-dark.png"><img src="docs/screenshots/caley-compose-dark.png" alt="Caley demo email compose dialog in dark theme" width="49%"></a>
-  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-contacts-dark.png"><img src="docs/screenshots/caley-contacts-dark.png" alt="Caley demo contacts grid in dark theme" width="49%"></a>
+  <a href="https://github.com/tiavision/caley/raw/main/docs/screenshots/caley-compose-dark.png"><img src="docs/screenshots/caley-compose-dark.png" alt="Caley demo email compose dialog in dark theme" width="49%"></a>
+  <a href="https://github.com/tiavision/caley/raw/main/docs/screenshots/caley-contacts-dark.png"><img src="docs/screenshots/caley-contacts-dark.png" alt="Caley demo contacts grid in dark theme" width="49%"></a>
 </p>
 <p>
-  <a href="https://git.tia.sh/tia/caley/raw/branch/main/docs/screenshots/caley-search-dark.png"><img src="docs/screenshots/caley-search-dark.png" alt="Caley demo calendar search results in dark theme" width="49%"></a>
+  <a href="https://github.com/tiavision/caley/raw/main/docs/screenshots/caley-search-dark.png"><img src="docs/screenshots/caley-search-dark.png" alt="Caley demo calendar search results in dark theme" width="49%"></a>
 </p>
 
 ### Run with Docker
@@ -112,7 +112,7 @@ docker run --rm -p 3000:3000 \
   -e DEMO_MODE=true \
   -e APP_BASE_URL=http://localhost:3000 \
   -e ENCRYPTION_KEY=demo-key \
-  caley
+  ghcr.io/tiavision/caley:main
 ```
 
 Open `http://localhost:3000` and choose "Enter the demo": no credentials are needed.
@@ -194,7 +194,9 @@ The backend serves `frontend/dist` by default. Use `STATIC_DIR` if the built fro
 
 ## Docker
 
-Build:
+Images are published on GitHub's container registry: `ghcr.io/tiavision/caley:main` follows the main branch; releases are tagged `:v<version>` and `:latest`.
+
+To build the image yourself instead:
 
 ```bash
 docker build -t caley .
@@ -210,7 +212,7 @@ docker run -p 3000:3000 \
   -e OIDC_CLIENT_SECRET=secret \
   -e APP_BASE_URL=https://calendar.example.com \
   -e ENCRYPTION_KEY=your-passphrase \
-  caley
+  ghcr.io/tiavision/caley:main
 ```
 
 Docker Compose example:
@@ -218,7 +220,7 @@ Docker Compose example:
 ```yaml
 services:
   caley:
-    image: caley
+    image: ghcr.io/tiavision/caley:main
     ports:
       - "3000:3000"
     volumes:
