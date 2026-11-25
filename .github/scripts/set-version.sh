@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Writes one version into every place Caley keeps one: the backend crate, the frontend package and the app
-# shell (its crate, which Tauri reads the app's version from, and its package), lockfiles included.
+# shell (its crate, which Tauri reads the app's version from, and its package), lockfiles included, and the
+# API spec the frontend is checked against (frontend/openapi.json).
 # Run by the Release workflow; locally: .github/scripts/set-version.sh 1.3.0
 set -euo pipefail
 
@@ -23,6 +24,11 @@ crate() {
 
 crate "$root/backend" caley
 crate "$root/native/src-tauri" caley-native
+
+# The API spec's info.version is the backend crate's (the test openapi_spec_is_current compares them)
+spec="$root/frontend/openapi.json"
+perl -0pi -e "s/(\n  \"info\": \{\n(?:    [^\n]*\n)*?    \"version\": )\"[^\"]*\"/\${1}\"$version\"/" "$spec"
+grep -Pzq "\n  \"info\": \{\n(?:    [^\n]*\n)*?    \"version\": \"\Q$version\E\"" "$spec" || { echo "no version written to $spec" >&2; exit 1; }
 
 for dir in frontend native; do
   (cd "$root/$dir" && npm version "$version" --no-git-tag-version --allow-same-version >/dev/null)
