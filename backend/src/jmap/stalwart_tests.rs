@@ -232,7 +232,13 @@ impl Cache {
     }
 
     fn eml(&self, mailbox: &str, uid: u32) -> Option<Vec<u8>> {
-        let bytes = std::fs::read(eml_path(&self.dir, ACC, mailbox, uid)).ok()?;
+        let bytes = std::fs::read(eml_path(
+            &self.dir,
+            crate::email_db::MailAccountId::internal(ACC),
+            mailbox,
+            uid,
+        ))
+        .ok()?;
         Some(zstd::decode_all(bytes.as_slice()).unwrap())
     }
 }
@@ -327,9 +333,14 @@ async fn stalwart_sync_and_changes() {
         plain,
         "the source as imported"
     );
-    let atts = email_db::list_attachments(&cache.db, ACC, &t, b_row.0)
-        .await
-        .unwrap();
+    let atts = email_db::list_attachments(
+        &cache.db,
+        crate::email_db::MailAccountId::internal(ACC),
+        &t,
+        b_row.0,
+    )
+    .await
+    .unwrap();
     assert_eq!(atts.len(), 1);
     assert!(
         jmap_db::jmap_state(&cache.db, ACC, "Email")

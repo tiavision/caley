@@ -277,7 +277,7 @@ async fn another_jmap_server_drops_the_cache_of_the_old_one() {
         .await
         .unwrap();
     assert_eq!(
-        email_db::list_mailboxes(&state.db, &id)
+        email_db::list_mailboxes(&state.db, crate::email_db::MailAccountId::internal(&id))
             .await
             .unwrap()
             .len(),

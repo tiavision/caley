@@ -31,6 +31,34 @@ pub struct CalDavAccount {
     pub caldav_username: String,
     pub caldav_password: String,
     pub sort_order: i64,
+    /// private: a row is only made here, from a query for its user, so holding one proves the user owns it
+    sealed: (),
+}
+
+impl CalDavAccount {
+    /// The account's id as proof of ownership, for the functions that read or change the account's cached data.
+    pub fn id(&self) -> CalDavAccountId<'_> {
+        let () = self.sealed;
+        CalDavAccountId(&self.account_id)
+    }
+}
+
+/// The id of a CalDAV/CardDAV account checked to be its user's: a handler gets one only from a [`CalDavAccount`]
+/// (`get_caldav_account` / `list_caldav_accounts`, both filtered by the user), so the functions that read or change
+/// an account's cached calendars and contacts by a client-named id take this instead of a `&str`. Background tasks
+/// (sync) use [`CalDavAccountId::internal`]; handler modules must not (`cross_user_tests` checks).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CalDavAccountId<'a>(&'a str);
+
+impl<'a> CalDavAccountId<'a> {
+    pub fn as_str(self) -> &'a str {
+        self.0
+    }
+
+    /// An id not checked against a user: only for background tasks (sync) and tests.
+    pub(crate) fn internal(account_id: &'a str) -> Self {
+        CalDavAccountId(account_id)
+    }
 }
 
 // ── Calendar deactivation ─────────────────────────────────────────────────────
@@ -54,10 +82,11 @@ pub async fn get_deactivated_calendars(
 
 pub async fn deactivate_calendar(
     pool: &SqlitePool,
-    account_id: &str,
+    account: CalDavAccountId<'_>,
     calendar_href: &str,
     key: &[u8; 32],
 ) -> anyhow::Result<()> {
+    let account_id = account.as_str();
     let enc_href = encrypt_field(calendar_href, key)?;
     sqlx::query(
         "INSERT INTO deactivated_calendars (account_id, calendar_href) VALUES (?, ?)
@@ -72,10 +101,11 @@ pub async fn deactivate_calendar(
 
 pub async fn activate_calendar(
     pool: &SqlitePool,
-    account_id: &str,
+    account: CalDavAccountId<'_>,
     calendar_href: &str,
     key: &[u8; 32],
 ) -> anyhow::Result<()> {
+    let account_id = account.as_str();
     let rows =
         sqlx::query("SELECT rowid, calendar_href FROM deactivated_calendars WHERE account_id = ?")
             .bind(account_id)
@@ -121,6 +151,7 @@ pub async fn list_caldav_accounts(
                 caldav_username: decrypt_field(&r.get::<String, _>(3), key)?,
                 caldav_password: decrypt_field(&r.get::<String, _>(4), key)?,
                 sort_order: r.get(5),
+                sealed: (),
             })
         })
         .collect()
@@ -150,6 +181,7 @@ pub async fn get_caldav_account(
             caldav_username: decrypt_field(&r.get::<String, _>(3), key)?,
             caldav_password: decrypt_field(&r.get::<String, _>(4), key)?,
             sort_order: r.get(5),
+            sealed: (),
         })
     })
     .transpose()
@@ -176,7 +208,8 @@ pub async fn upsert_caldav_account(
     let enc_url = encrypt_field(&settings.caldav_base_url, key)?;
     let enc_user = encrypt_field(&settings.caldav_username, key)?;
     let enc_pass = encrypt_field(&settings.caldav_password, key)?;
-    sqlx::query(
+    // Another user's account_id changes nothing (the WHERE of the update): never a takeover.
+    let result = sqlx::query(
         "INSERT INTO caldav_accounts
             (account_id, user_id, display_name, caldav_base_url, caldav_username, caldav_password, sort_order)
          VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -184,7 +217,8 @@ pub async fn upsert_caldav_account(
             display_name = excluded.display_name,
             caldav_base_url = excluded.caldav_base_url,
             caldav_username = excluded.caldav_username,
-            caldav_password = excluded.caldav_password",
+            caldav_password = excluded.caldav_password
+         WHERE caldav_accounts.user_id = excluded.user_id",
     )
     .bind(&account_id)
     .bind(user_id)
@@ -195,6 +229,9 @@ pub async fn upsert_caldav_account(
     .bind(sort_order)
     .execute(pool)
     .await?;
+    if result.rows_affected() == 0 {
+        return Err(crate::email_db::NotOwned.into());
+    }
     Ok(account_id)
 }
 
@@ -209,39 +246,6 @@ pub async fn delete_caldav_account(
         .execute(pool)
         .await?;
     Ok(result.rows_affected() > 0)
-}
-
-pub async fn get_user_id_for_caldav_account(
-    pool: &SqlitePool,
-    account_id: &str,
-) -> anyhow::Result<Option<String>> {
-    sqlx::query_scalar("SELECT user_id FROM caldav_accounts WHERE account_id = ?")
-        .bind(account_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(Into::into)
-}
-
-pub async fn get_caldav_account_password(
-    pool: &SqlitePool,
-    user_id: &str,
-    account_id: &str,
-    key: &[u8; 32],
-) -> anyhow::Result<Option<String>> {
-    let row = sqlx::query(
-        "SELECT caldav_password FROM caldav_accounts WHERE user_id = ? AND account_id = ?",
-    )
-    .bind(user_id)
-    .bind(account_id)
-    .fetch_optional(pool)
-    .await?;
-    match row {
-        Some(r) => {
-            let enc: String = r.get(0);
-            Ok(Some(decrypt_field(&enc, key)?))
-        }
-        None => Ok(None),
-    }
 }
 
 // ── Push subscriptions ────────────────────────────────────────────────────────
@@ -609,13 +613,14 @@ fn extract_ical_metadata(
 
 pub async fn upsert_cached_event_raw(
     pool: &SqlitePool,
-    account_id: &str,
+    account: CalDavAccountId<'_>,
     calendar_href: &str,
     event_href: &str,
     etag: &str,
     raw_ical: &str,
     mode: &SearchMode,
 ) -> anyhow::Result<()> {
+    let account_id = account.as_str();
     let (uid, summary, dtstart, dtend, description, location, is_all_day, is_recurring) =
         extract_ical_metadata(raw_ical);
     if uid.is_empty() {
@@ -686,10 +691,11 @@ pub async fn delete_event_by_href(
 
 pub async fn delete_cached_event(
     pool: &SqlitePool,
-    account_id: &str,
+    account: CalDavAccountId<'_>,
     calendar_href: &str,
     uid: &str,
 ) -> anyhow::Result<()> {
+    let account_id = account.as_str();
     sqlx::query("DELETE FROM cached_events WHERE account_id = ? AND calendar_href = ? AND uid = ?")
         .bind(account_id)
         .bind(calendar_href)

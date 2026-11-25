@@ -48,13 +48,52 @@ pub struct ImapAccountRow {
     pub oauth_client_id: Option<String>,
     /// its secret; `None` for a public client
     pub oauth_client_secret: Option<String>,
+    /// private: a row is only made here, from a query for its user, so holding one proves the user owns it
+    sealed: (),
 }
 
 impl ImapAccountRow {
     pub fn is_jmap(&self) -> bool {
         self.protocol == "jmap"
     }
+
+    /// The account's id as proof of ownership, for the functions that read or change the account's data.
+    pub fn id(&self) -> MailAccountId<'_> {
+        let () = self.sealed;
+        MailAccountId(&self.account_id)
+    }
 }
+
+/// The id of a mail account checked to be its user's. A handler gets one only from an [`ImapAccountRow`]
+/// (`get_account` / `list_accounts`, both filtered by the user), so the functions that read or change an account's
+/// cached mail take this instead of a `&str`, and an id from a request cannot reach them unchecked. Background tasks
+/// that work on the accounts the database lists (not on ids from a request) use [`MailAccountId::internal`]; handler
+/// modules must not (`cross_user_tests` checks).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MailAccountId<'a>(&'a str);
+
+impl<'a> MailAccountId<'a> {
+    pub fn as_str(self) -> &'a str {
+        self.0
+    }
+
+    /// An id not checked against a user: only for background tasks (sync) and tests.
+    pub(crate) fn internal(account_id: &'a str) -> Self {
+        MailAccountId(account_id)
+    }
+}
+
+/// An upsert of a row with a client-named id found the id taken by another user and changed nothing.
+#[derive(Debug)]
+pub struct NotOwned;
+
+impl std::fmt::Display for NotOwned {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the id belongs to another user")
+    }
+}
+
+impl std::error::Error for NotOwned {}
 
 const ACCOUNT_COLUMNS: &str = "account_id, display_name, host, port, username, password, use_tls, smtp_host, \
     smtp_port, sort_order, protocol, jmap_url, auth, oauth_client_id, oauth_client_secret";
@@ -85,6 +124,7 @@ fn account_row(r: &sqlx::sqlite::SqliteRow, key: &[u8; 32]) -> Result<ImapAccoun
             .get::<Option<String>, _>(14)
             .map(|s| crypto::decrypt(&s, key))
             .transpose()?,
+        sealed: (),
     })
 }
 
@@ -154,7 +194,8 @@ pub async fn upsert_account(
         .map(|s| crypto::encrypt(s, key))
         .transpose()?;
 
-    sqlx::query(
+    // Another user's account_id changes nothing (the WHERE of the update): never a takeover.
+    let result = sqlx::query(
         "INSERT INTO imap_accounts
             (account_id, user_id, display_name, host, port, username, password, use_tls, smtp_host, smtp_port,
              protocol, jmap_url, auth, oauth_client_id, oauth_client_secret)
@@ -172,7 +213,8 @@ pub async fn upsert_account(
             jmap_url     = excluded.jmap_url,
             auth         = excluded.auth,
             oauth_client_id     = excluded.oauth_client_id,
-            oauth_client_secret = excluded.oauth_client_secret",
+            oauth_client_secret = excluded.oauth_client_secret
+         WHERE imap_accounts.user_id = excluded.user_id",
     )
     .bind(account_id)
     .bind(user_id)
@@ -191,10 +233,14 @@ pub async fn upsert_account(
     .bind(enc_client_secret)
     .execute(pool)
     .await?;
+    if result.rows_affected() == 0 {
+        return Err(NotOwned.into());
+    }
     Ok(())
 }
 
-pub async fn delete_account(pool: &SqlitePool, account_id: &str, user_id: &str) -> Result<()> {
+pub async fn delete_account(pool: &SqlitePool, account: MailAccountId<'_>) -> Result<()> {
+    let account_id = account.as_str();
     let mut tx = pool.begin().await?;
     sqlx::query("DELETE FROM cached_messages WHERE account_id = ?")
         .bind(account_id)
@@ -212,9 +258,8 @@ pub async fn delete_account(pool: &SqlitePool, account_id: &str, user_id: &str) 
         .bind(account_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("DELETE FROM imap_accounts WHERE account_id = ? AND user_id = ?")
+    sqlx::query("DELETE FROM imap_accounts WHERE account_id = ?")
         .bind(account_id)
-        .bind(user_id)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
@@ -222,7 +267,8 @@ pub async fn delete_account(pool: &SqlitePool, account_id: &str, user_id: &str) 
 }
 
 /// Drops an account's cached mail (not its files: the caller removes them), for an account now on another server.
-pub async fn reset_account_cache(pool: &SqlitePool, account_id: &str) -> Result<()> {
+pub async fn reset_account_cache(pool: &SqlitePool, account: MailAccountId<'_>) -> Result<()> {
+    let account_id = account.as_str();
     let mut tx = pool.begin().await?;
     for sql in [
         "DELETE FROM cached_attachments WHERE account_id = ?",
@@ -305,12 +351,13 @@ pub async fn get_identity(
 pub async fn upsert_identity(
     pool: &SqlitePool,
     identity_id: &str,
-    account_id: &str,
+    account: MailAccountId<'_>,
     user_id: &str,
     name: &str,
     email: &str,
     is_default: bool,
 ) -> Result<()> {
+    let account_id = account.as_str();
     let mut tx = pool.begin().await?;
     if is_default {
         sqlx::query(
@@ -321,13 +368,14 @@ pub async fn upsert_identity(
         .execute(&mut *tx)
         .await?;
     }
-    sqlx::query(
+    let result = sqlx::query(
         "INSERT INTO email_identities (identity_id, account_id, user_id, name, email, is_default)
          VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(identity_id) DO UPDATE SET
             name       = excluded.name,
             email      = excluded.email,
-            is_default = excluded.is_default",
+            is_default = excluded.is_default
+         WHERE email_identities.user_id = excluded.user_id",
     )
     .bind(identity_id)
     .bind(account_id)
@@ -337,6 +385,10 @@ pub async fn upsert_identity(
     .bind(is_default as i64)
     .execute(&mut *tx)
     .await?;
+    if result.rows_affected() == 0 {
+        // another user's identity_id: the transaction (the defaults cleared) is dropped
+        return Err(NotOwned.into());
+    }
     tx.commit().await?;
     Ok(())
 }
@@ -361,7 +413,11 @@ pub struct MailboxRow {
     pub subscribed: bool,
 }
 
-pub async fn list_mailboxes(pool: &SqlitePool, account_id: &str) -> Result<Vec<MailboxRow>> {
+pub async fn list_mailboxes(
+    pool: &SqlitePool,
+    account: MailAccountId<'_>,
+) -> Result<Vec<MailboxRow>> {
+    let account_id = account.as_str();
     let rows = sqlx::query(
         "SELECT account_id, name, delimiter, uidvalidity, subscribed
          FROM cached_mailboxes WHERE account_id = ? ORDER BY name",
@@ -477,7 +533,7 @@ pub async fn get_unread_counts_virtual(
              JOIN virtual_folder_rules r
                  ON (r.account_id = '' OR r.account_id = m.account_id)
                  AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
-             JOIN virtual_folders vf ON vf.folder_id = r.folder_id
+             JOIN virtual_folders vf ON vf.folder_id = r.folder_id AND vf.user_id = a.user_id
              WHERE a.user_id = ?
                AND m.is_unread = 1
                AND (vf.only_flagged = 0 OR EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Flagged'))

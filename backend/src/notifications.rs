@@ -448,6 +448,7 @@ pub async fn vapid(State(state): State<AppState>, _user: CurrentUser) -> impl In
     responses(
         (status = 204, description = "stored"),
         (status = 400, body = ApiError, description = "not an https endpoint, keys of the wrong size, an unknown timezone, or an endpoint not on a public address (unless NOTIFICATIONS_ALLOW_PRIVATE)"),
+        (status = 409, body = ApiError, description = "the endpoint is another user's subscription, with other keys"),
         (status = 500, description = "plain text: database error")
     )
 )]
@@ -463,10 +464,14 @@ pub async fn subscribe(State(state): State<AppState>, user: CurrentUser, Json(bo
     if !state.notifier.allow_private && !reachable_publicly(url.as_ref().unwrap()).await {
         return (StatusCode::BAD_REQUEST, Json(ApiError::new("endpoint not on a public address"))).into_response();
     }
+    // An endpoint of another user's moves to this one only with the same keys (the same device's subscription,
+    // signed in to another account): knowing the endpoint alone takes nothing over.
     let result = sqlx::query(
         "INSERT INTO notification_subscriptions(endpoint, user_id, p256dh, auth, timezone, created_at) VALUES(?, ?, ?, ?, ?, ?)
          ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth,
-           timezone = excluded.timezone",
+           timezone = excluded.timezone
+         WHERE notification_subscriptions.user_id = excluded.user_id
+            OR (notification_subscriptions.p256dh = excluded.p256dh AND notification_subscriptions.auth = excluded.auth)",
     )
     .bind(&body.endpoint)
     .bind(&user.user_id)
@@ -477,6 +482,11 @@ pub async fn subscribe(State(state): State<AppState>, user: CurrentUser, Json(bo
     .execute(&state.db)
     .await;
     match result {
+        Ok(r) if r.rows_affected() == 0 => (
+            StatusCode::CONFLICT,
+            Json(ApiError::new("endpoint of another subscription")),
+        )
+            .into_response(),
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             eprintln!("[notifications] subscribe: {e}");

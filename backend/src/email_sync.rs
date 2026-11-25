@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, sleep};
 
-use crate::email_db;
+use crate::email_db::{self, MailAccountId};
 use crate::imap_client;
 use crate::oidc_tokens::OidcTokens;
 use crate::search::SearchMode;
@@ -467,8 +467,12 @@ impl EmailSyncManager {
             email_db::delete_attachments_for_mailbox(&self.db, account_id, mailbox).await?;
             email_db::delete_messages_for_mailbox(&self.db, account_id, mailbox).await?;
             // Delete the mailbox's entire .eml directory
-            let _ =
-                tokio::fs::remove_dir_all(mailbox_dir(&self.data_dir, account_id, mailbox)).await;
+            let _ = tokio::fs::remove_dir_all(mailbox_dir(
+                &self.data_dir,
+                MailAccountId::internal(account_id),
+                mailbox,
+            ))
+            .await;
             self.broadcaster.send(
                 user_id,
                 SseMessage::EmailsRefetch {
@@ -494,8 +498,13 @@ impl EmailSyncManager {
         let deleted: Vec<u32> = cached_uids.difference(&server_uids).copied().collect();
         if !deleted.is_empty() {
             for &uid in &deleted {
-                let _ = tokio::fs::remove_file(eml_path(&self.data_dir, account_id, mailbox, uid))
-                    .await;
+                let _ = tokio::fs::remove_file(eml_path(
+                    &self.data_dir,
+                    MailAccountId::internal(account_id),
+                    mailbox,
+                    uid,
+                ))
+                .await;
             }
             email_db::delete_attachments_by_uids(&self.db, account_id, mailbox, &deleted).await?;
             email_db::delete_messages_by_uids(&self.db, account_id, mailbox, &deleted).await?;
@@ -660,7 +669,12 @@ impl EmailSyncManager {
                 self.search_mode.normalize_text(&render_body.search_text)
             };
 
-            let path = eml_path(&self.data_dir, account_id, mailbox, uid);
+            let path = eml_path(
+                &self.data_dir,
+                MailAccountId::internal(account_id),
+                mailbox,
+                uid,
+            );
             if let Some(dir) = path.parent() {
                 tokio::fs::create_dir_all(dir).await?;
             }
@@ -769,26 +783,32 @@ fn sha2_hex(input: String) -> String {
         .collect()
 }
 
+/// The directory of an account's `.eml.zst` files. Only an owned (or a sync's own) account has one: the id is
+/// never a path from a request.
+pub fn account_dir(
+    data_dir: &std::path::Path,
+    account: crate::email_db::MailAccountId<'_>,
+) -> std::path::PathBuf {
+    data_dir.join("messages").join(account.as_str())
+}
+
 /// The directory of a mailbox's `.eml.zst` files.
 pub fn mailbox_dir(
     data_dir: &std::path::Path,
-    account_id: &str,
+    account: crate::email_db::MailAccountId<'_>,
     mailbox: &str,
 ) -> std::path::PathBuf {
-    data_dir
-        .join("messages")
-        .join(account_id)
-        .join(sha2_hex(mailbox.to_owned()))
+    account_dir(data_dir, account).join(sha2_hex(mailbox.to_owned()))
 }
 
 /// Deterministic path to the compressed `.eml.zst` file for a given message.
 pub fn eml_path(
     data_dir: &std::path::Path,
-    account_id: &str,
+    account: crate::email_db::MailAccountId<'_>,
     mailbox: &str,
     uid: u32,
 ) -> std::path::PathBuf {
-    mailbox_dir(data_dir, account_id, mailbox).join(format!("{uid}.eml.zst"))
+    mailbox_dir(data_dir, account, mailbox).join(format!("{uid}.eml.zst"))
 }
 
 #[cfg(test)]

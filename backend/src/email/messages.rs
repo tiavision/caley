@@ -202,9 +202,13 @@ pub async fn list_messages(
             Some(mb) => mb,
             None => return (StatusCode::BAD_REQUEST, "mailbox required").into_response(),
         };
+        let account = match super::owned_account(&state, &user.user_id, &account_id).await {
+            Ok(account) => account,
+            Err(response) => return response,
+        };
         email_db::list_messages(
             &state.db,
-            &account_id,
+            account.id(),
             &mailbox,
             limit,
             cursor,
@@ -251,34 +255,22 @@ pub async fn get_message(
     user: CurrentUser,
     Query(q): Query<GetMessageQuery>,
 ) -> impl IntoResponse {
-    // Verify account belongs to user
-    match email_db::get_account(
-        &state.db,
-        &q.account_id,
-        &user.user_id,
-        &state.encryption_key,
-    )
-    .await
-    {
-        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
-        Err(e) => {
-            eprintln!("[email] get_message account lookup error: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-        }
-        Ok(Some(_)) => {}
-    }
+    let account = match super::owned_account(&state, &user.user_id, &q.account_id).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
 
-    match email_db::get_message(&state.db, &q.account_id, &q.mailbox, q.uid).await {
+    match email_db::get_message(&state.db, account.id(), &q.mailbox, q.uid).await {
         Ok(Some(mut msg)) => {
             if msg.reply_to_addrs.is_none() {
-                msg.reply_to_addrs = backfill_reply_to(&state, &q).await;
+                msg.reply_to_addrs = backfill_reply_to(&state, account.id(), &q).await;
             }
             let attachments =
-                email_db::list_attachments(&state.db, &q.account_id, &q.mailbox, q.uid)
+                email_db::list_attachments(&state.db, account.id(), &q.mailbox, q.uid)
                     .await
                     .unwrap_or_default();
             let render_body =
-                email_db::get_message_render_body(&state.db, &q.account_id, &q.mailbox, q.uid)
+                email_db::get_message_render_body(&state.db, account.id(), &q.mailbox, q.uid)
                     .await
                     .unwrap_or_default();
             Json(message_to_json_with_attachments(
@@ -297,11 +289,15 @@ pub async fn get_message(
 }
 
 /// Parses Reply-To from the cached .eml for rows synced before the column existed.
-async fn backfill_reply_to(state: &AppState, q: &GetMessageQuery) -> Option<String> {
-    let raw = load_raw_eml(&state.data_dir, &q.account_id, &q.mailbox, q.uid).await?;
+async fn backfill_reply_to(
+    state: &AppState,
+    account: email_db::MailAccountId<'_>,
+    q: &GetMessageQuery,
+) -> Option<String> {
+    let raw = load_raw_eml(&state.data_dir, account, &q.mailbox, q.uid).await?;
     let addrs = serde_json::to_string(&crate::imap_client::parse_reply_to(&raw)).ok()?;
     if let Err(e) =
-        email_db::set_message_reply_to(&state.db, &q.account_id, &q.mailbox, q.uid, &addrs).await
+        email_db::set_message_reply_to(&state.db, account, &q.mailbox, q.uid, &addrs).await
     {
         eprintln!("[email] reply_to backfill error: {e}");
     }
@@ -310,11 +306,12 @@ async fn backfill_reply_to(state: &AppState, q: &GetMessageQuery) -> Option<Stri
 
 async fn load_raw_eml(
     data_dir: &std::path::Path,
-    account_id: &str,
+    account: email_db::MailAccountId<'_>,
     mailbox: &str,
     uid: u32,
 ) -> Option<Vec<u8>> {
-    let path = eml_path(data_dir, account_id, mailbox, uid);
+    let account_id = account.as_str();
+    let path = eml_path(data_dir, account, mailbox, uid);
     let compressed = tokio::fs::read(&path).await.ok()?;
     let raw = zstd::decode_all(compressed.as_slice())
         .map_err(|e| {
@@ -361,23 +358,12 @@ pub async fn get_raw_message(
     Query(q): Query<RawMessageQuery>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    match email_db::get_account(
-        &state.db,
-        &q.account_id,
-        &user.user_id,
-        &state.encryption_key,
-    )
-    .await
-    {
-        Ok(Some(_)) => {}
-        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
-        Err(e) => {
-            eprintln!("[email] get_raw_message account lookup error: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-        }
-    }
+    let account = match super::owned_account(&state, &user.user_id, &q.account_id).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
 
-    let Some(raw) = load_raw_eml(&state.data_dir, &q.account_id, &q.mailbox, q.uid).await else {
+    let Some(raw) = load_raw_eml(&state.data_dir, account.id(), &q.mailbox, q.uid).await else {
         return (StatusCode::NOT_FOUND, "message source not found").into_response();
     };
     raw_response(raw, q.omit, &headers)
@@ -500,23 +486,12 @@ pub async fn get_thread(
     user: CurrentUser,
     Query(q): Query<GetMessageQuery>,
 ) -> impl IntoResponse {
-    match email_db::get_account(
-        &state.db,
-        &q.account_id,
-        &user.user_id,
-        &state.encryption_key,
-    )
-    .await
-    {
-        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
-        Err(e) => {
-            eprintln!("[email] get_thread account lookup error: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-        }
-        Ok(Some(_)) => {}
-    }
+    let account = match super::owned_account(&state, &user.user_id, &q.account_id).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
 
-    match email_db::list_thread_messages(&state.db, &q.account_id, &q.mailbox, q.uid).await {
+    match email_db::list_thread_messages(&state.db, account.id(), &q.mailbox, q.uid).await {
         Ok(messages) => {
             let messages = dedupe_thread_messages(messages, &q.account_id, &q.mailbox, q.uid);
             let messages = messages.iter().map(thread_message_to_json).collect();
@@ -639,7 +614,7 @@ async fn apply(
         .iter()
         .any(|(m, c)| matches!(c, Change::Delete) && !is_trash_mailbox_name(&m.mailbox))
     {
-        email_db::find_trash_mailbox(&state.db, &account.account_id)
+        email_db::find_trash_mailbox(&state.db, account.id())
             .await
             .unwrap_or(None)
     } else {
@@ -703,14 +678,16 @@ async fn apply(
     let mut refetch: Vec<String> = Vec::new();
     for (m, change) in changes {
         match change {
-            Change::Flags { flags, set } => cache_flags(state, user_id, m, &flags, set).await,
+            Change::Flags { flags, set } => {
+                cache_flags(state, user_id, account.id(), m, &flags, set).await
+            }
             Change::Move { dest } => {
-                cache_remove(state, user_id, m).await;
+                cache_remove(state, user_id, account.id(), m).await;
                 if !refetch.contains(&dest) {
                     refetch.push(dest);
                 }
             }
-            Change::Delete => cache_remove(state, user_id, m).await,
+            Change::Delete => cache_remove(state, user_id, account.id(), m).await,
         }
     }
     for mailbox in refetch {
@@ -771,15 +748,21 @@ async fn apply_on_jmap(
 }
 
 /// Adds or removes flags of a cached message; `email_updated` reports the new flags.
-async fn cache_flags(state: &AppState, user_id: &str, m: MessageRef, flags: &[String], set: bool) {
-    let mut current: Vec<String> =
-        email_db::get_message(&state.db, &m.account_id, &m.mailbox, m.uid)
-            .await
-            .ok()
-            .flatten()
-            .and_then(|row| row.flags)
-            .and_then(|f| serde_json::from_str(&f).ok())
-            .unwrap_or_default();
+async fn cache_flags(
+    state: &AppState,
+    user_id: &str,
+    account: email_db::MailAccountId<'_>,
+    m: MessageRef,
+    flags: &[String],
+    set: bool,
+) {
+    let mut current: Vec<String> = email_db::get_message(&state.db, account, &m.mailbox, m.uid)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|row| row.flags)
+        .and_then(|f| serde_json::from_str(&f).ok())
+        .unwrap_or_default();
     if set {
         for f in flags {
             if !current.contains(f) {
@@ -791,7 +774,7 @@ async fn cache_flags(state: &AppState, user_id: &str, m: MessageRef, flags: &[St
     }
     let flags_json = serde_json::to_string(&current).unwrap_or_default();
     let _ =
-        email_db::update_message_flags(&state.db, &m.account_id, &m.mailbox, m.uid, &flags_json)
+        email_db::update_message_flags(&state.db, account.as_str(), &m.mailbox, m.uid, &flags_json)
             .await;
     state.sse_broadcaster.send(
         user_id,
@@ -805,12 +788,17 @@ async fn cache_flags(state: &AppState, user_id: &str, m: MessageRef, flags: &[St
 }
 
 /// Drops a message from the cache (its .eml, attachments and row); `email_removed` reports it.
-async fn cache_remove(state: &AppState, user_id: &str, m: MessageRef) {
+async fn cache_remove(
+    state: &AppState,
+    user_id: &str,
+    account: email_db::MailAccountId<'_>,
+    m: MessageRef,
+) {
+    let _ = tokio::fs::remove_file(eml_path(&state.data_dir, account, &m.mailbox, m.uid)).await;
     let _ =
-        tokio::fs::remove_file(eml_path(&state.data_dir, &m.account_id, &m.mailbox, m.uid)).await;
-    let _ =
-        email_db::delete_attachments_for_message(&state.db, &m.account_id, &m.mailbox, m.uid).await;
-    let _ = email_db::delete_message(&state.db, &m.account_id, &m.mailbox, m.uid).await;
+        email_db::delete_attachments_for_message(&state.db, account.as_str(), &m.mailbox, m.uid)
+            .await;
+    let _ = email_db::delete_message(&state.db, account.as_str(), &m.mailbox, m.uid).await;
     state.sse_broadcaster.send(
         user_id,
         SseMessage::EmailRemoved {
@@ -819,22 +807,6 @@ async fn cache_remove(state: &AppState, user_id: &str, m: MessageRef) {
             mailbox: m.mailbox,
         },
     );
-}
-
-/// The account of a single-message request: 404 when there is none.
-async fn account_or_error(
-    state: &AppState,
-    user_id: &str,
-    account_id: &str,
-) -> Result<email_db::ImapAccountRow, Response> {
-    match email_db::get_account(&state.db, account_id, user_id, &state.encryption_key).await {
-        Ok(Some(a)) => Ok(a),
-        Ok(None) => Err((StatusCode::NOT_FOUND, "account not found").into_response()),
-        Err(e) => {
-            eprintln!("[email] account lookup: {e}");
-            Err((StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response())
-        }
-    }
 }
 
 /// Runs one change per message, grouped by account; the messages whose account is unknown failed.
@@ -882,7 +854,7 @@ pub async fn update_flags(
     user: CurrentUser,
     Json(body): Json<FlagsBody>,
 ) -> impl IntoResponse {
-    let account = match account_or_error(&state, &user.user_id, &body.account_id).await {
+    let account = match super::owned_account(&state, &user.user_id, &body.account_id).await {
         Ok(a) => a,
         Err(r) => return r,
     };
@@ -923,7 +895,7 @@ pub async fn delete_message(
     user: CurrentUser,
     Query(q): Query<DeleteMessageQuery>,
 ) -> impl IntoResponse {
-    let account = match account_or_error(&state, &user.user_id, &q.account_id).await {
+    let account = match super::owned_account(&state, &user.user_id, &q.account_id).await {
         Ok(a) => a,
         Err(r) => return r,
     };
@@ -961,7 +933,7 @@ pub async fn move_message(
     user: CurrentUser,
     Json(body): Json<MoveMessageBody>,
 ) -> impl IntoResponse {
-    let account = match account_or_error(&state, &user.user_id, &body.account_id).await {
+    let account = match super::owned_account(&state, &user.user_id, &body.account_id).await {
         Ok(a) => a,
         Err(r) => return r,
     };
@@ -1113,20 +1085,9 @@ pub async fn empty_trash(
         return (StatusCode::BAD_REQUEST, "mailbox is not trash").into_response();
     }
 
-    let account = match email_db::get_account(
-        &state.db,
-        &body.account_id,
-        &user.user_id,
-        &state.encryption_key,
-    )
-    .await
-    {
-        Ok(Some(a)) => a,
-        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
-        Err(e) => {
-            eprintln!("[email] empty_trash account lookup: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-        }
+    let account = match super::owned_account(&state, &user.user_id, &body.account_id).await {
+        Ok(account) => account,
+        Err(response) => return response,
     };
 
     if account.is_jmap() && !state.demo_mode {
@@ -1201,8 +1162,7 @@ pub async fn empty_trash(
     };
 
     if let Err(e) =
-        delete_cached_messages_and_files(&state, &body.account_id, &body.mailbox, &deleted_uids)
-            .await
+        delete_cached_messages_and_files(&state, account.id(), &body.mailbox, &deleted_uids).await
     {
         eprintln!("[email] empty_trash cache cleanup: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
@@ -1248,15 +1208,16 @@ fn imap_savedbefore_date(days: i64) -> String {
 
 async fn delete_cached_messages_and_files(
     state: &AppState,
-    account_id: &str,
+    account: email_db::MailAccountId<'_>,
     mailbox: &str,
     uids: &[u32],
 ) -> anyhow::Result<()> {
+    let account_id = account.as_str();
     if uids.is_empty() {
         return Ok(());
     }
     for uid in uids {
-        let _ = tokio::fs::remove_file(eml_path(&state.data_dir, account_id, mailbox, *uid)).await;
+        let _ = tokio::fs::remove_file(eml_path(&state.data_dir, account, mailbox, *uid)).await;
     }
     for chunk in uids.chunks(500) {
         email_db::delete_attachments_by_uids(&state.db, account_id, mailbox, chunk).await?;
@@ -1381,13 +1342,24 @@ pub async fn search(
         email_db::PageDirection::Backward | email_db::PageDirection::Last
     );
 
+    let account = match (
+        q.folder_id.as_deref(),
+        q.account_id.as_deref(),
+        q.mailbox.as_deref(),
+    ) {
+        (None, Some(account_id), Some(_)) => {
+            match super::owned_account(&state, &user.user_id, account_id).await {
+                Ok(account) => Some(account),
+                Err(response) => return response,
+            }
+        }
+        _ => None,
+    };
     let scope = if let Some(folder_id) = q.folder_id.as_deref() {
         email_db::SearchScope::Virtual { folder_id }
-    } else if let (Some(account_id), Some(mailbox)) =
-        (q.account_id.as_deref(), q.mailbox.as_deref())
-    {
+    } else if let (Some(account), Some(mailbox)) = (&account, q.mailbox.as_deref()) {
         email_db::SearchScope::Mailbox {
-            account_id,
+            account: account.id(),
             mailbox,
         }
     } else {

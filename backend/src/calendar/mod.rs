@@ -196,35 +196,48 @@ pub(super) fn extract_vevent(ical: &str) -> String {
 
 // ── Event building helper ─────────────────────────────────────────────────────
 
-pub(super) async fn require_account_client(
+/// The user's CalDAV/CardDAV account `account_id`: the one way a handler turns an id from a request into an
+/// account, whose [`db::CalDavAccount::id`] the cache functions require. 404 when it is not the user's (or does not
+/// exist: the two are not told apart).
+pub(crate) async fn owned_account(
     state: &AppState,
-    user: &CurrentUser,
+    user_id: &str,
     account_id: &str,
-) -> Result<CalDavClient, Response> {
-    if state.demo_mode {
-        return Ok(CalDavClient::demo());
-    }
-    match db::get_caldav_account(&state.db, &user.user_id, account_id, &state.encryption_key).await
-    {
-        Ok(Some(account)) => CalDavClient::new(
-            account.caldav_base_url,
-            account.caldav_username,
-            account.caldav_password,
-        )
-        .map_err(|e| {
-            eprintln!("CalDAV client error: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "CalDAV configuration error",
-            )
-                .into_response()
-        }),
+) -> Result<db::CalDavAccount, Response> {
+    match db::get_caldav_account(&state.db, user_id, account_id, &state.encryption_key).await {
+        Ok(Some(account)) => Ok(account),
         Ok(None) => Err((StatusCode::NOT_FOUND, "CalDAV account not found").into_response()),
         Err(e) => {
             eprintln!("Database error: {e}");
             Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response())
         }
     }
+}
+
+/// The user's account `account_id` (as [`owned_account`]) with a client for its server (demo mode: none).
+pub(crate) async fn require_account_client(
+    state: &AppState,
+    user: &CurrentUser,
+    account_id: &str,
+) -> Result<(db::CalDavAccount, CalDavClient), Response> {
+    let account = owned_account(state, &user.user_id, account_id).await?;
+    if state.demo_mode {
+        return Ok((account, CalDavClient::demo()));
+    }
+    let client = CalDavClient::new(
+        account.caldav_base_url.clone(),
+        account.caldav_username.clone(),
+        account.caldav_password.clone(),
+    )
+    .map_err(|e| {
+        eprintln!("CalDAV client error: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "CalDAV configuration error",
+        )
+            .into_response()
+    })?;
+    Ok((account, client))
 }
 
 /// Today's date in the viewer's timezone, falling back to server-local time
@@ -650,19 +663,15 @@ pub async fn toggle_calendar(
     if account_id.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing account_id parameter").into_response();
     }
-    match db::get_user_id_for_caldav_account(&state.db, &account_id).await {
-        Ok(Some(owner)) if owner == user.user_id => {}
-        Ok(_) => return (StatusCode::NOT_FOUND, "CalDAV account not found").into_response(),
-        Err(e) => {
-            eprintln!("Database error checking account: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
-        }
-    }
+    let account = match owned_account(&state, &user.user_id, &account_id).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
 
     let result = if active {
-        db::activate_calendar(&state.db, &account_id, &href, &state.encryption_key).await
+        db::activate_calendar(&state.db, account.id(), &href, &state.encryption_key).await
     } else {
-        db::deactivate_calendar(&state.db, &account_id, &href, &state.encryption_key).await
+        db::deactivate_calendar(&state.db, account.id(), &href, &state.encryption_key).await
     };
 
     match result {

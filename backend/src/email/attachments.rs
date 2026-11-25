@@ -127,14 +127,19 @@ pub async fn proxy_image(
         (&q.cid, &q.account_id, &q.mailbox, q.uid)
     {
         // Verify the account belongs to the current user before serving its data.
-        match email_db::get_account(&state.db, account_id, &user.user_id, &state.encryption_key)
-            .await
+        let account = match email_db::get_account(
+            &state.db,
+            account_id,
+            &user.user_id,
+            &state.encryption_key,
+        )
+        .await
         {
-            Ok(Some(_)) => {}
+            Ok(Some(account)) => account,
             _ => return transparent_pixel(),
-        }
+        };
         let eml_raw =
-            match tokio::fs::read(eml_path(&state.data_dir, account_id, mailbox, uid)).await {
+            match tokio::fs::read(eml_path(&state.data_dir, account.id(), mailbox, uid)).await {
                 Ok(b) => b,
                 Err(_) => return transparent_pixel(),
             };
@@ -143,7 +148,8 @@ pub async fn proxy_image(
         // Try the indexed path first (fast); fall back to scanning all MIME
         // parts by Content-ID for messages cached before the index was built.
         let bytes =
-            match email_db::get_attachment_by_cid(&state.db, account_id, mailbox, uid, cid).await {
+            match email_db::get_attachment_by_cid(&state.db, account.id(), mailbox, uid, cid).await
+            {
                 Ok(Some(att)) => match extract_part_bytes(&eml, att.part_index as usize) {
                     Some(b) => b,
                     None => return transparent_pixel(),
@@ -306,26 +312,14 @@ pub async fn download_attachment(
     user: CurrentUser,
     Query(q): Query<DownloadAttachmentQuery>,
 ) -> Response {
-    // Verify account belongs to user
-    match email_db::get_account(
-        &state.db,
-        &q.account_id,
-        &user.user_id,
-        &state.encryption_key,
-    )
-    .await
-    {
-        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
-        Err(e) => {
-            eprintln!("[email] download_attachment account lookup error: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-        }
-        Ok(Some(_)) => {}
-    }
+    let account = match super::owned_account(&state, &user.user_id, &q.account_id).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
 
     let att = match email_db::get_attachment_by_filename(
         &state.db,
-        &q.account_id,
+        account.id(),
         &q.mailbox,
         q.uid,
         &q.filename,
@@ -341,7 +335,7 @@ pub async fn download_attachment(
     };
 
     let eml =
-        match tokio::fs::read(eml_path(&state.data_dir, &q.account_id, &q.mailbox, q.uid)).await {
+        match tokio::fs::read(eml_path(&state.data_dir, account.id(), &q.mailbox, q.uid)).await {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("[email] download_attachment read error: {e}");
@@ -421,26 +415,15 @@ pub async fn export_account(
     user: CurrentUser,
     Query(q): Query<ExportQuery>,
 ) -> Response {
-    let account = match email_db::get_account(
-        &state.db,
-        &q.account_id,
-        &user.user_id,
-        &state.encryption_key,
-    )
-    .await
-    {
-        Ok(Some(a)) => a,
-        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
-        Err(e) => {
-            eprintln!("[email] export_account account lookup error: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-        }
+    let account = match super::owned_account(&state, &user.user_id, &q.account_id).await {
+        Ok(account) => account,
+        Err(response) => return response,
     };
 
     let rows = match sqlx::query_as::<_, (String, i64)>(
         "SELECT mailbox, uid FROM cached_messages WHERE account_id = ? ORDER BY mailbox, uid",
     )
-    .bind(&q.account_id)
+    .bind(account.id().as_str())
     .fetch_all(&state.db)
     .await
     {
@@ -451,8 +434,13 @@ pub async fn export_account(
         }
     };
 
-    let account_id = q.account_id.clone();
-    let data_dir = state.data_dir.clone();
+    let files: Vec<(String, i64, std::path::PathBuf)> = rows
+        .into_iter()
+        .map(|(mailbox, uid)| {
+            let path = eml_path(&state.data_dir, account.id(), &mailbox, uid as u32);
+            (mailbox, uid, path)
+        })
+        .collect();
     let display_name = account.display_name.replace(['"', '\\', '\0'], "_");
 
     let (writer, reader) = tokio::io::duplex(128 * 1024);
@@ -466,8 +454,7 @@ pub async fn export_account(
         let gz = GzEncoder::new(sync_writer, Compression::default());
         let mut tar = tar::Builder::new(gz);
 
-        for (mailbox, uid) in &rows {
-            let path = eml_path(&data_dir, &account_id, mailbox, *uid as u32);
+        for (mailbox, uid, path) in &files {
             let entry_name = format!("{}/{}.eml", mailbox, uid);
             if let Ok(compressed) = std::fs::read(&path) {
                 if let Ok(bytes) = decompress_eml(&compressed) {

@@ -216,6 +216,9 @@ pub async fn register_finish(
             )
             .await
             {
+                if e.is::<crate::email_db::NotOwned>() {
+                    return (StatusCode::BAD_REQUEST, "registration failed").into_response();
+                }
                 eprintln!("[pgp] store_webauthn_credential: {e}");
                 return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
             }
@@ -376,6 +379,7 @@ pub async fn authenticate_finish(
                         let now = chrono::Utc::now().timestamp();
                         let _ = db::update_webauthn_credential(
                             &state.db,
+                            &user.user_id,
                             &matched_id,
                             &updated_json,
                             auth_result.counter(),
@@ -1191,7 +1195,7 @@ pub async fn raw_email(
     user: CurrentUser,
     Query(q): Query<RawEmailQuery>,
 ) -> impl IntoResponse {
-    match email_db::get_account(
+    let account = match email_db::get_account(
         &state.db,
         &q.account_id,
         &user.user_id,
@@ -1204,10 +1208,10 @@ pub async fn raw_email(
             eprintln!("[pgp] raw_email account lookup: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
         }
-        Ok(Some(_)) => {}
-    }
+        Ok(Some(account)) => account,
+    };
 
-    let path = eml_path(&state.data_dir, &q.account_id, &q.mailbox, q.uid);
+    let path = eml_path(&state.data_dir, account.id(), &q.mailbox, q.uid);
     let compressed = match tokio::fs::read(&path).await {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {

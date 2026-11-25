@@ -21,6 +21,33 @@ pub(crate) mod send;
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
 
+/// The user's mail account `account_id`: the one way a handler turns an id from a request into an account, whose
+/// [`email_db::ImapAccountRow::id`] the account's data functions require. 404 when it is not the user's (or does
+/// not exist: the two are not told apart).
+pub(crate) async fn owned_account(
+    state: &AppState,
+    user_id: &str,
+    account_id: &str,
+) -> Result<email_db::ImapAccountRow, axum::response::Response> {
+    match email_db::get_account(&state.db, account_id, user_id, &state.encryption_key).await {
+        Ok(Some(a)) => Ok(a),
+        Ok(None) => Err((StatusCode::NOT_FOUND, "account not found").into_response()),
+        Err(e) => {
+            eprintln!("[email] account lookup: {e}");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response())
+        }
+    }
+}
+
+/// A failed save whose error is [`email_db::NotOwned`] (an id of another user's) is a 404, as a lookup of it is.
+pub(crate) fn save_error(context: &str, e: anyhow::Error) -> axum::response::Response {
+    if e.is::<email_db::NotOwned>() {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    }
+    eprintln!("[email] {context} error: {e}");
+    (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+}
+
 /// A mail account, IMAP or JMAP (its password is never sent).
 #[derive(Serialize, ToSchema)]
 pub struct Account {
@@ -204,17 +231,14 @@ pub async fn save_account(
         Protocol::Jmap => body.auth.unwrap_or(AccountAuth::Password),
     };
 
+    // An account_id names an account of the user's to update: never one to create (the ids are the server's) nor
+    // another user's.
     let existing = if is_new {
         None
     } else {
-        match email_db::get_account(&state.db, &account_id, &user.user_id, &state.encryption_key)
-            .await
-        {
-            Ok(existing) => existing,
-            Err(e) => {
-                eprintln!("[email] save_account lookup error: {e}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-            }
+        match owned_account(&state, &user.user_id, &account_id).await {
+            Ok(existing) => Some(existing),
+            Err(response) => return response,
         }
     };
     if auth == AccountAuth::Oauth {
@@ -281,9 +305,12 @@ pub async fn save_account(
         if moved {
             _no_sync = Some(state.email_sync_manager.jmap_lock(&account_id).await);
             state.email_sync_manager.stop_idle_for(&account_id);
-            let _ =
-                tokio::fs::remove_dir_all(state.data_dir.join("messages").join(&account_id)).await;
-            if let Err(e) = email_db::reset_account_cache(&state.db, &account_id).await {
+            let _ = tokio::fs::remove_dir_all(crate::email_sync::account_dir(
+                &state.data_dir,
+                existing.id(),
+            ))
+            .await;
+            if let Err(e) = email_db::reset_account_cache(&state.db, existing.id()).await {
                 eprintln!("[email] save_account cache reset error: {e}");
             }
         }
@@ -317,16 +344,18 @@ pub async fn save_account(
     )
     .await
     {
-        eprintln!("[email] save_account error: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        return save_error("save_account", e);
     }
 
     if is_new {
-        if let Some(name) = body.sender_name.filter(|n| !n.is_empty()) {
+        if let (Some(name), Ok(account)) = (
+            body.sender_name.filter(|n| !n.is_empty()),
+            owned_account(&state, &user.user_id, &account_id).await,
+        ) {
             if let Err(e) = email_db::upsert_identity(
                 &state.db,
                 &Uuid::new_v4().to_string(),
-                &account_id,
+                account.id(),
                 &user.user_id,
                 &name,
                 &username,
@@ -481,8 +510,7 @@ async fn save_oauth_account(
     )
     .await
     {
-        eprintln!("[email] save_account error: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        return save_error("save_account", e);
     }
     state
         .sse_broadcaster
@@ -558,14 +586,22 @@ pub async fn delete_account(
     user: CurrentUser,
     Query(q): Query<AccountIdQuery>,
 ) -> impl IntoResponse {
+    // nothing of the account is touched before it is known to be the user's
+    let account = match owned_account(&state, &user.user_id, &q.account_id).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
     // Delete all .eml files for this account
-    let messages_dir = state.data_dir.join("messages").join(&q.account_id);
-    let _ = tokio::fs::remove_dir_all(&messages_dir).await;
+    let _ = tokio::fs::remove_dir_all(crate::email_sync::account_dir(
+        &state.data_dir,
+        account.id(),
+    ))
+    .await;
 
     state.email_sync_manager.stop_idle_for(&q.account_id);
     state.email_sync_manager.stop_task_for(&q.account_id);
 
-    if let Err(e) = email_db::delete_account(&state.db, &q.account_id, &user.user_id).await {
+    if let Err(e) = email_db::delete_account(&state.db, account.id()).await {
         eprintln!("[email] delete_account error: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
@@ -658,32 +694,26 @@ pub async fn save_identity(
     user: CurrentUser,
     Json(body): Json<IdentityBody>,
 ) -> impl IntoResponse {
-    // Verify the account belongs to this user
-    match email_db::get_account(
-        &state.db,
-        &body.account_id,
-        &user.user_id,
-        &state.encryption_key,
-    )
-    .await
-    {
-        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
-        Err(e) => {
-            eprintln!("[email] save_identity account lookup error: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-        }
-        Ok(Some(_)) => {}
-    }
+    let account = match owned_account(&state, &user.user_id, &body.account_id).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
 
-    let identity_id = body
-        .identity_id
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    // An identity_id names an identity of the user's to update, never one to create.
+    let identity_id = match body.identity_id {
+        Some(id) => match email_db::get_identity(&state.db, &id, &user.user_id).await {
+            Ok(Some(_)) => id,
+            Ok(None) => return (StatusCode::NOT_FOUND, "identity not found").into_response(),
+            Err(e) => return save_error("save_identity lookup", e),
+        },
+        None => Uuid::new_v4().to_string(),
+    };
     let is_default = body.is_default.unwrap_or(false);
 
     if let Err(e) = email_db::upsert_identity(
         &state.db,
         &identity_id,
-        &body.account_id,
+        account.id(),
         &user.user_id,
         &body.name,
         &body.email,
@@ -691,8 +721,7 @@ pub async fn save_identity(
     )
     .await
     {
-        eprintln!("[email] save_identity error: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
+        return save_error("save_identity", e);
     }
 
     Json(IdentitySaved { identity_id }).into_response()
@@ -757,24 +786,12 @@ pub async fn list_mailboxes(
     user: CurrentUser,
     Query(q): Query<AccountIdQuery>,
 ) -> impl IntoResponse {
-    // Verify the account belongs to this user
-    match email_db::get_account(
-        &state.db,
-        &q.account_id,
-        &user.user_id,
-        &state.encryption_key,
-    )
-    .await
-    {
-        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
-        Err(e) => {
-            eprintln!("[email] list_mailboxes account lookup error: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-        }
-        Ok(Some(_)) => {}
-    }
+    let account = match owned_account(&state, &user.user_id, &q.account_id).await {
+        Ok(account) => account,
+        Err(response) => return response,
+    };
 
-    match email_db::list_mailboxes(&state.db, &q.account_id).await {
+    match email_db::list_mailboxes(&state.db, account.id()).await {
         Ok(mbs) => {
             let mailboxes = mbs
                 .into_iter()
@@ -819,20 +836,8 @@ pub async fn trigger_mailbox_sync(
     user: CurrentUser,
     Query(q): Query<MailboxSyncQuery>,
 ) -> impl IntoResponse {
-    match email_db::get_account(
-        &state.db,
-        &q.account_id,
-        &user.user_id,
-        &state.encryption_key,
-    )
-    .await
-    {
-        Ok(None) => return (StatusCode::NOT_FOUND, "account not found").into_response(),
-        Err(e) => {
-            eprintln!("[email] trigger_mailbox_sync account lookup error: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
-        }
-        Ok(Some(_)) => {}
+    if let Err(response) = owned_account(&state, &user.user_id, &q.account_id).await {
+        return response;
     }
 
     state
@@ -979,6 +984,14 @@ pub async fn save_virtual_folder(
         .collect();
     let only_flagged = body.only_flagged.unwrap_or(false);
     let only_attachments = body.only_attachments.unwrap_or(false);
+    // a rule names one of the user's accounts (or none: all of them)
+    for account_id in body.rules.iter().filter_map(|r| r.account_id.as_deref()) {
+        if !account_id.is_empty() {
+            if let Err(response) = owned_account(&state, &user.user_id, account_id).await {
+                return response;
+            }
+        }
+    }
 
     let (folder_id, result) = match body.folder_id {
         Some(folder_id) => {

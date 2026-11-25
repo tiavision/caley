@@ -102,36 +102,7 @@ fn cached_to_json(c: &db::CachedContact) -> ContactJson {
     }
 }
 
-async fn require_account_client(
-    state: &AppState,
-    user: &CurrentUser,
-    account_id: &str,
-) -> Result<crate::caldav::CalDavClient, Response> {
-    if state.demo_mode {
-        return Ok(crate::caldav::CalDavClient::demo());
-    }
-    match db::get_caldav_account(&state.db, &user.user_id, account_id, &state.encryption_key).await
-    {
-        Ok(Some(account)) => crate::caldav::CalDavClient::new(
-            account.caldav_base_url,
-            account.caldav_username,
-            account.caldav_password,
-        )
-        .map_err(|e| {
-            eprintln!("CalDAV client error: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "CalDAV configuration error",
-            )
-                .into_response()
-        }),
-        Ok(None) => Err((StatusCode::NOT_FOUND, "CalDAV account not found").into_response()),
-        Err(e) => {
-            eprintln!("[contacts] account lookup error: {e}");
-            Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response())
-        }
-    }
-}
+use crate::calendar::require_account_client;
 
 /// All address books and their contacts (from the cache).
 #[utoipa::path(
@@ -204,7 +175,7 @@ pub async fn save_contact(
     user: CurrentUser,
     Json(req): Json<SaveContactRequest>,
 ) -> impl IntoResponse {
-    let client = match require_account_client(&state, &user, &req.account_id).await {
+    let (account, client) = match require_account_client(&state, &user, &req.account_id).await {
         Ok(c) => c,
         Err(r) => return r,
     };
@@ -212,21 +183,17 @@ pub async fn save_contact(
     let (uid, href, existing_raw, existing_photo, is_new) = if let Some(ref existing_uid) = req.uid
     {
         // Update: look up stored href and raw vCard for non-destructive rebuild
-        let stored = match db::get_contact(
-            &state.db,
-            &req.account_id,
-            &req.addressbook_href,
-            existing_uid,
-        )
-        .await
-        {
-            Ok(Some(c)) => c,
-            Ok(None) => return (StatusCode::NOT_FOUND, "Contact not found").into_response(),
-            Err(e) => {
-                eprintln!("[contacts] get_contact error: {e}");
-                return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
-            }
-        };
+        let stored =
+            match db::get_contact(&state.db, account.id(), &req.addressbook_href, existing_uid)
+                .await
+            {
+                Ok(Some(c)) => c,
+                Ok(None) => return (StatusCode::NOT_FOUND, "Contact not found").into_response(),
+                Err(e) => {
+                    eprintln!("[contacts] get_contact error: {e}");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response();
+                }
+            };
         let h = stored
             .href
             .unwrap_or_else(|| contact_href(&req.addressbook_href, existing_uid));
@@ -269,7 +236,7 @@ pub async fn save_contact(
     let cache_etag = new_etag.unwrap_or_default();
     if let Err(e) = db::upsert_contact(
         &state.db,
-        &req.account_id,
+        account.id(),
         &req.addressbook_href,
         &uid,
         &cache_etag,
@@ -339,13 +306,13 @@ pub async fn delete_contact(
     user: CurrentUser,
     Json(req): Json<DeleteContactRequest>,
 ) -> impl IntoResponse {
-    let client = match require_account_client(&state, &user, &req.account_id).await {
+    let (account, client) = match require_account_client(&state, &user, &req.account_id).await {
         Ok(c) => c,
         Err(r) => return r,
     };
 
     let stored =
-        match db::get_contact(&state.db, &req.account_id, &req.addressbook_href, &req.uid).await {
+        match db::get_contact(&state.db, account.id(), &req.addressbook_href, &req.uid).await {
             Ok(Some(c)) => c,
             Ok(None) => return (StatusCode::NOT_FOUND, "Contact not found").into_response(),
             Err(e) => {
@@ -368,7 +335,7 @@ pub async fn delete_contact(
     }
 
     if let Err(e) =
-        db::delete_contact_from_cache(&state.db, &req.account_id, &req.addressbook_href, &req.uid)
+        db::delete_contact_from_cache(&state.db, account.id(), &req.addressbook_href, &req.uid)
             .await
     {
         eprintln!("[contacts] delete_contact_from_cache error: {e}");
@@ -416,15 +383,11 @@ pub async fn get_contact_photo(
     Query(q): Query<PhotoQuery>,
     headers: HeaderMap,
 ) -> Response {
-    match db::get_user_id_for_caldav_account(&state.db, &q.account_id).await {
-        Ok(Some(owner)) if owner == user.user_id => {}
-        Ok(_) => return StatusCode::NOT_FOUND.into_response(),
-        Err(e) => {
-            eprintln!("[contacts] account lookup error: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    }
-    let contact = match db::get_contact(&state.db, &q.account_id, &q.addressbook_href, &q.uid).await
+    let Ok(account) = crate::calendar::owned_account(&state, &user.user_id, &q.account_id).await
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let contact = match db::get_contact(&state.db, account.id(), &q.addressbook_href, &q.uid).await
     {
         Ok(Some(c)) => c,
         _ => return StatusCode::NOT_FOUND.into_response(),
@@ -501,15 +464,11 @@ pub async fn get_contact_vcf(
     user: CurrentUser,
     Query(q): Query<PhotoQuery>,
 ) -> Response {
-    match db::get_user_id_for_caldav_account(&state.db, &q.account_id).await {
-        Ok(Some(owner)) if owner == user.user_id => {}
-        Ok(_) => return StatusCode::NOT_FOUND.into_response(),
-        Err(e) => {
-            eprintln!("[contacts] account lookup error: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    }
-    let contact = match db::get_contact(&state.db, &q.account_id, &q.addressbook_href, &q.uid).await
+    let Ok(account) = crate::calendar::owned_account(&state, &user.user_id, &q.account_id).await
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let contact = match db::get_contact(&state.db, account.id(), &q.addressbook_href, &q.uid).await
     {
         Ok(Some(c)) => c,
         _ => return StatusCode::NOT_FOUND.into_response(),

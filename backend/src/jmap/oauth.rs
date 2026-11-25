@@ -315,9 +315,12 @@ pub async fn finish(app: &AppState, user_id: &str, p: &Pending, code: &str) -> R
         if existing.jmap_url.as_deref() != Some(p.jmap_url.as_str()) || !existing.is_jmap() {
             _no_sync = Some(mgr.jmap_lock(&p.account_id).await);
             mgr.stop_idle_for(&p.account_id);
-            let _ =
-                tokio::fs::remove_dir_all(app.data_dir.join("messages").join(&p.account_id)).await;
-            email_db::reset_account_cache(&app.db, &p.account_id).await?;
+            let _ = tokio::fs::remove_dir_all(crate::email_sync::account_dir(
+                &app.data_dir,
+                existing.id(),
+            ))
+            .await;
+            email_db::reset_account_cache(&app.db, existing.id()).await?;
         }
     } else if !p.is_new {
         return Err(anyhow!("the account was removed meanwhile"));
@@ -355,11 +358,13 @@ pub async fn finish(app: &AppState, user_id: &str, p: &Pending, code: &str) -> R
     .await?;
     if p.is_new
         && let Some(name) = p.sender_name.as_deref().filter(|n| !n.is_empty())
+        && let Some(account) =
+            email_db::get_account(&app.db, &p.account_id, user_id, &app.encryption_key).await?
     {
         email_db::upsert_identity(
             &app.db,
             &uuid::Uuid::new_v4().to_string(),
-            &p.account_id,
+            account.id(),
             user_id,
             name,
             &username,

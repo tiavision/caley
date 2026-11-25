@@ -2542,6 +2542,16 @@
               }
             }
           },
+          "409": {
+            "description": "the endpoint is another user's subscription, with other keys",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
           "500": {
             "description": "plain text: database error"
           }

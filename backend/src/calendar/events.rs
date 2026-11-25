@@ -244,13 +244,13 @@ pub async fn save_event(
     }
 
     let event_href = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
-    let client = match require_account_client(&state, &user, &account_id).await {
+    let (account, client) = match require_account_client(&state, &user, &account_id).await {
         Ok(c) => c,
         Err(r) => return r,
     };
 
     if scope == EventScope::ThisInstance {
-        let raw_ical = match fetch_event_ical(&state, &client, &account_id, &calendar_href, &uid)
+        let raw_ical = match fetch_event_ical(&state, &client, account.id(), &calendar_href, &uid)
             .await
         {
             Ok(Some(s)) => s,
@@ -308,7 +308,7 @@ pub async fn save_event(
                 optimistic_upsert(
                     &state,
                     &user.user_id,
-                    &account_id,
+                    account.id(),
                     &calendar_href,
                     &event_href,
                     &modified,
@@ -331,7 +331,7 @@ pub async fn save_event(
         }
     } else {
         let fetch_href = original_calendar_href.as_deref().unwrap_or(&calendar_href);
-        let original_client = match original_account_id.as_deref() {
+        let original = match original_account_id.as_deref() {
             Some(orig_account_id) if orig_account_id != account_id => {
                 match require_account_client(&state, &user, orig_account_id).await {
                     Ok(c) => Some(c),
@@ -340,11 +340,15 @@ pub async fn save_event(
             }
             _ => None,
         };
+        let (original_account, original_client) = match &original {
+            Some((a, c)) => (a, Some(c)),
+            None => (&account, None),
+        };
         let ical = if is_edit {
             let original = fetch_event_ical(
                 &state,
-                original_client.as_ref().unwrap_or(&client),
-                original_account_id.as_deref().unwrap_or(&account_id),
+                original_client.unwrap_or(&client),
+                original_account.id(),
                 fetch_href,
                 &uid,
             )
@@ -436,14 +440,14 @@ pub async fn save_event(
                         .as_deref()
                         .is_some_and(|id| id != account_id);
                     if (!orig.is_empty()) && (*orig != calendar_href || moved_account) {
-                        let delete_client = original_client.as_ref().unwrap_or(&client);
+                        let delete_client = original_client.unwrap_or(&client);
                         if let Err(e) = delete_client.delete_event(orig, &uid).await {
                             eprintln!("Failed to delete event from old calendar: {e}");
                         } else {
                             let old_href = format!("{}/{}.ics", orig.trim_end_matches('/'), uid);
                             let _ = db::delete_event_by_href(
                                 &state.db,
-                                original_account_id.as_deref().unwrap_or(&account_id),
+                                original_account.id().as_str(),
                                 orig,
                                 &old_href,
                             )
@@ -454,7 +458,7 @@ pub async fn save_event(
                 optimistic_upsert(
                     &state,
                     &user.user_id,
-                    &account_id,
+                    account.id(),
                     &calendar_href,
                     &event_href,
                     &ical,
@@ -511,14 +515,14 @@ pub async fn delete_event(
         return (StatusCode::BAD_REQUEST, "Missing account_id").into_response();
     }
 
-    let client = match require_account_client(&state, &user, &account_id).await {
+    let (account, client) = match require_account_client(&state, &user, &account_id).await {
         Ok(c) => c,
         Err(r) => return r,
     };
 
     if let (Some(EventScope::ThisInstance), Some(original_dtstart)) = (scope, original_dtstart) {
         let raw_ical =
-            match fetch_event_ical(&state, &client, &account_id, &calendar_href, &uid).await {
+            match fetch_event_ical(&state, &client, account.id(), &calendar_href, &uid).await {
                 Ok(Some(s)) => s,
                 Ok(None) => return (StatusCode::NOT_FOUND, "Event not found").into_response(),
                 Err(e) => {
@@ -537,7 +541,7 @@ pub async fn delete_event(
                 optimistic_upsert(
                     &state,
                     &user.user_id,
-                    &account_id,
+                    account.id(),
                     &calendar_href,
                     &event_href,
                     &modified,
@@ -562,7 +566,7 @@ pub async fn delete_event(
 
     match client.delete_event(&calendar_href, &uid).await {
         Ok(_) => {
-            let _ = db::delete_cached_event(&state.db, &account_id, &calendar_href, &uid).await;
+            let _ = db::delete_cached_event(&state.db, account.id(), &calendar_href, &uid).await;
             state.sse_broadcaster.send(
                 &user.user_id,
                 crate::sse::SseMessage::EventRemoved {
@@ -592,7 +596,7 @@ pub async fn delete_event(
 async fn fetch_event_ical(
     state: &AppState,
     client: &CalDavClient,
-    account_id: &str,
+    account: db::CalDavAccountId<'_>,
     calendar_href: &str,
     uid: &str,
 ) -> anyhow::Result<Option<String>> {
@@ -600,7 +604,7 @@ async fn fetch_event_ical(
         let raw = sqlx::query_scalar::<_, String>(
             "SELECT raw_ical FROM cached_events WHERE account_id = ? AND calendar_href = ? AND uid = ? LIMIT 1",
         )
-        .bind(account_id)
+        .bind(account.as_str())
         .bind(calendar_href)
         .bind(uid)
         .fetch_optional(&state.db)
@@ -613,15 +617,16 @@ async fn fetch_event_ical(
 pub(super) async fn optimistic_upsert(
     state: &AppState,
     user_id: &str,
-    account_id: &str,
+    account: db::CalDavAccountId<'_>,
     calendar_href: &str,
     event_href: &str,
     raw_ical: &str,
     uid: &str,
 ) {
+    let account_id = account.as_str();
     if let Err(e) = db::upsert_cached_event_raw(
         &state.db,
-        account_id,
+        account,
         calendar_href,
         event_href,
         "",
@@ -698,12 +703,21 @@ pub async fn create_calendar_handler(
     if account_id.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing account_id").into_response();
     }
-    let client = match require_account_client(&state, &user, &account_id).await {
+    let (account, client) = match require_account_client(&state, &user, &account_id).await {
         Ok(c) => c,
         Err(r) => return r,
     };
 
-    match create_calendar(&state, &user, &client, &account_id, &name, color.as_deref()).await {
+    match create_calendar(
+        &state,
+        &user,
+        &client,
+        account.id(),
+        &name,
+        color.as_deref(),
+    )
+    .await
+    {
         Ok(href) => Json(CalendarJson {
             account_id,
             href,
@@ -722,14 +736,14 @@ pub(super) async fn create_calendar(
     state: &AppState,
     user: &CurrentUser,
     client: &CalDavClient,
-    account_id: &str,
+    account: db::CalDavAccountId<'_>,
     name: &str,
     color: Option<&str>,
 ) -> Result<String, Response> {
     match client.create_calendar(name, color).await {
         Ok(href) => {
             if let Err(e) =
-                db::upsert_cached_calendar(&state.db, account_id, &href, name, color).await
+                db::upsert_cached_calendar(&state.db, account.as_str(), &href, name, color).await
             {
                 eprintln!("Failed to cache new calendar: {e}");
             }

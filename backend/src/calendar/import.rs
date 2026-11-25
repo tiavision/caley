@@ -175,9 +175,17 @@ pub async fn import_ics(
     if events.is_empty() {
         return (StatusCode::BAD_REQUEST, "No events found in ICS file").into_response();
     }
+    // the message the events come from is linked to them (event-emails shows it): only one of the user's
+    let email_account = match &email_account_id {
+        Some(ea) => match crate::email::owned_account(&state, &user.user_id, ea).await {
+            Ok(account) => Some(account),
+            Err(response) => return response,
+        },
+        None => None,
+    };
     let source_message_identity =
-        if let (Some(ea), Some(em), Some(eu)) = (&email_account_id, &email_mailbox, email_uid) {
-            email_db::get_message(&state.db, ea, em, eu)
+        if let (Some(ea), Some(em), Some(eu)) = (&email_account, &email_mailbox, email_uid) {
+            email_db::get_message(&state.db, ea.id(), em, eu)
                 .await
                 .ok()
                 .flatten()
@@ -185,14 +193,14 @@ pub async fn import_ics(
         } else {
             None
         };
-    let client = match require_account_client(&state, &user, &account_id).await {
+    let (account, client) = match require_account_client(&state, &user, &account_id).await {
         Ok(c) => c,
         Err(r) => return r,
     };
     let calendar_href = match (calendar_href, new_calendar_name) {
         (Some(href), _) => href,
         (None, Some(name)) => {
-            match super::events::create_calendar(&state, &user, &client, &account_id, &name, None)
+            match super::events::create_calendar(&state, &user, &client, account.id(), &name, None)
                 .await
             {
                 Ok(href) => href,
@@ -211,7 +219,7 @@ pub async fn import_ics(
                 let event_href = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
                 if let Err(e) = db::upsert_cached_event_raw(
                     &state.db,
-                    &account_id,
+                    account.id(),
                     &calendar_href,
                     &event_href,
                     "",
@@ -446,6 +454,9 @@ pub async fn get_message_events(
     user: CurrentUser,
     Query(q): Query<MessageEventsQuery>,
 ) -> Response {
+    if let Err(response) = crate::email::owned_account(&state, &user.user_id, &q.account_id).await {
+        return response;
+    }
     let rows = sqlx::query(
         "WITH current_message AS (
              SELECT message_id
@@ -716,6 +727,7 @@ async fn query_event_source_emails(
                  ON cm.account_id = ie.email_account_id
                 AND ie.email_message_id IS NOT NULL
                 AND cm.message_id = ie.email_message_id
+               JOIN imap_accounts ia ON ia.account_id = cm.account_id AND ia.user_id = ca.user_id
               WHERE ie.cal_account_id = ? AND ie.calendar_href = ? AND ie.event_uid = ?
                 AND ca.user_id = ?
              UNION ALL
@@ -734,6 +746,7 @@ async fn query_event_source_emails(
                  ON cm.account_id = ie.email_account_id
                 AND cm.mailbox = ie.email_mailbox
                 AND cm.uid = ie.email_uid
+               JOIN imap_accounts ia ON ia.account_id = cm.account_id AND ia.user_id = ca.user_id
               WHERE ie.cal_account_id = ? AND ie.calendar_href = ? AND ie.event_uid = ?
                 AND ca.user_id = ?
                 AND NOT EXISTS (
@@ -828,18 +841,14 @@ pub async fn get_event_ics(
     user: CurrentUser,
     Query(q): Query<EventIcsQuery>,
 ) -> Response {
-    match db::get_user_id_for_caldav_account(&state.db, &q.account_id).await {
-        Ok(Some(owner)) if owner == user.user_id => {}
-        Ok(_) => return StatusCode::NOT_FOUND.into_response(),
-        Err(e) => {
-            eprintln!("[calendar] account lookup error: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    }
+    let account = match super::owned_account(&state, &user.user_id, &q.account_id).await {
+        Ok(account) => account,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
     let raw: Option<String> = sqlx::query_scalar(
         "SELECT raw_ical FROM cached_events WHERE account_id = ? AND calendar_href = ? AND uid = ?",
     )
-    .bind(&q.account_id)
+    .bind(account.id().as_str())
     .bind(&q.calendar_href)
     .bind(&q.uid)
     .fetch_optional(&state.db)
@@ -904,6 +913,17 @@ mod tests {
         .await
         .unwrap();
         sqlx::query("INSERT INTO caldav_accounts (account_id, user_id) VALUES ('cal', 'user')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        // the mail account the source messages are in: the same user's
+        sqlx::query(
+            "CREATE TABLE imap_accounts (account_id TEXT PRIMARY KEY, user_id TEXT NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO imap_accounts (account_id, user_id) VALUES ('mail', 'user')")
             .execute(&pool)
             .await
             .unwrap();

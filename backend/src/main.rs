@@ -3,6 +3,8 @@ mod caldav;
 mod calendar;
 mod carddav;
 mod contacts;
+#[cfg(test)]
+mod cross_user_tests;
 mod crypto;
 mod db;
 mod demo;

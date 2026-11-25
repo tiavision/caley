@@ -238,7 +238,7 @@ mod tests {
                 at(start),
                 at(start + 3600)
             );
-            crate::db::upsert_cached_event_raw(&db, &account, "/cal/", &format!("/cal/{uid}.ics"), "1", &raw, &crate::search::SearchMode::Default)
+            crate::db::upsert_cached_event_raw(&db, crate::db::CalDavAccountId::internal(&account), "/cal/", &format!("/cal/{uid}.ics"), "1", &raw, &crate::search::SearchMode::Default)
                 .await
                 .unwrap();
         }

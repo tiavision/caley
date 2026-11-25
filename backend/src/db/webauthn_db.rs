@@ -18,10 +18,12 @@ pub async fn store_webauthn_credential(
     has_prf: bool,
 ) -> anyhow::Result<()> {
     let now = chrono::Utc::now().timestamp();
-    sqlx::query(
+    // A credential id is the authenticator's, which a client can choose: another user's changes nothing.
+    let result = sqlx::query(
         "INSERT INTO webauthn_credentials(cred_id, user_id, passkey, device_label, has_prf, created_at, last_seen)
          VALUES(?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(cred_id) DO UPDATE SET passkey = excluded.passkey, last_seen = excluded.last_seen",
+         ON CONFLICT(cred_id) DO UPDATE SET passkey = excluded.passkey, last_seen = excluded.last_seen
+         WHERE webauthn_credentials.user_id = excluded.user_id",
     )
     .bind(cred_id)
     .bind(user_id)
@@ -32,6 +34,9 @@ pub async fn store_webauthn_credential(
     .bind(now)
     .execute(pool)
     .await?;
+    if result.rows_affected() == 0 {
+        return Err(crate::email_db::NotOwned.into());
+    }
     Ok(())
 }
 
@@ -68,18 +73,20 @@ pub async fn get_webauthn_cred_ids(pool: &Db, user_id: &str) -> anyhow::Result<V
 
 pub async fn update_webauthn_credential(
     pool: &Db,
+    user_id: &str,
     cred_id: &str,
     passkey_json: &str,
     sign_count: u32,
     last_seen: i64,
 ) -> anyhow::Result<()> {
     sqlx::query(
-        "UPDATE webauthn_credentials SET passkey = ?, sign_count = ?, last_seen = ? WHERE cred_id = ?",
+        "UPDATE webauthn_credentials SET passkey = ?, sign_count = ?, last_seen = ? WHERE cred_id = ? AND user_id = ?",
     )
     .bind(passkey_json)
     .bind(sign_count as i64)
     .bind(last_seen)
     .bind(cred_id)
+    .bind(user_id)
     .execute(pool)
     .await?;
     Ok(())

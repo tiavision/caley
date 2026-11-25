@@ -158,25 +158,18 @@ pub async fn save_caldav_account(
     Form(form): Form<CalDavAccountForm>,
 ) -> Response {
     let account_id = form.account_id.as_deref().filter(|s| !s.trim().is_empty());
+    // An account_id names an account of the user's to update: never one to create (ids are made here) nor
+    // another user's. Checked before anything else, the connection test included.
+    let existing = match account_id {
+        Some(id) => match crate::calendar::owned_account(&state, &user.user_id, id).await {
+            Ok(account) => Some(account),
+            Err(response) => return response,
+        },
+        None => None,
+    };
     let password = if form.caldav_password.is_empty() {
-        match account_id {
-            Some(id) => match crate::db::get_caldav_account_password(
-                &state.db,
-                &user.user_id,
-                id,
-                &state.encryption_key,
-            )
-            .await
-            {
-                Ok(Some(p)) => p,
-                _ => {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(ApiError::new("Password is required for new connections.")),
-                    )
-                        .into_response();
-                }
-            },
+        match existing {
+            Some(account) => account.caldav_password,
             None => {
                 return (
                     StatusCode::BAD_REQUEST,
@@ -249,6 +242,9 @@ pub async fn save_caldav_account(
     .await
     {
         Ok(id) => id,
+        Err(e) if e.is::<crate::email_db::NotOwned>() => {
+            return (StatusCode::NOT_FOUND, "CalDAV account not found").into_response();
+        }
         Err(e) => {
             eprintln!("Database error saving CalDAV account: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save account").into_response();

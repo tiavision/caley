@@ -1,4 +1,6 @@
 use anyhow::Result;
+
+use super::MailAccountId;
 use std::collections::HashMap;
 
 use sqlx::{AssertSqlSafe, QueryBuilder, Row, Sqlite, SqlitePool};
@@ -280,10 +282,11 @@ where
 
 pub async fn get_message_render_body(
     pool: &SqlitePool,
-    account_id: &str,
+    account: MailAccountId<'_>,
     mailbox: &str,
     uid: u32,
 ) -> Result<Option<MessageBodyRow>> {
+    let account_id = account.as_str();
     let row = sqlx::query(
         "SELECT is_signed
          FROM cached_message_bodies WHERE account_id = ? AND mailbox = ? AND uid = ?",
@@ -452,10 +455,11 @@ where
 
 pub async fn list_attachments(
     pool: &SqlitePool,
-    account_id: &str,
+    account: MailAccountId<'_>,
     mailbox: &str,
     uid: u32,
 ) -> Result<Vec<AttachmentRow>> {
+    let account_id = account.as_str();
     let rows = sqlx::query(
         "SELECT filename, content_type, size, part_index, content_id
          FROM cached_attachments WHERE account_id = ? AND mailbox = ? AND uid = ?",
@@ -480,11 +484,12 @@ pub async fn list_attachments(
 
 pub async fn get_attachment_by_cid(
     pool: &SqlitePool,
-    account_id: &str,
+    account: MailAccountId<'_>,
     mailbox: &str,
     uid: u32,
     cid: &str,
 ) -> Result<Option<AttachmentRow>> {
+    let account_id = account.as_str();
     let row = sqlx::query(
         "SELECT filename, content_type, size, part_index, content_id
          FROM cached_attachments
@@ -508,11 +513,12 @@ pub async fn get_attachment_by_cid(
 
 pub async fn get_attachment_by_filename(
     pool: &SqlitePool,
-    account_id: &str,
+    account: MailAccountId<'_>,
     mailbox: &str,
     uid: u32,
     filename: &str,
 ) -> Result<Option<AttachmentRow>> {
+    let account_id = account.as_str();
     let row = sqlx::query(
         "SELECT filename, content_type, size, part_index, content_id
          FROM cached_attachments
@@ -535,7 +541,11 @@ pub async fn get_attachment_by_filename(
 }
 
 /// Returns the name of the first mailbox that looks like a Trash folder.
-pub async fn find_trash_mailbox(pool: &SqlitePool, account_id: &str) -> Result<Option<String>> {
+pub async fn find_trash_mailbox(
+    pool: &SqlitePool,
+    account: MailAccountId<'_>,
+) -> Result<Option<String>> {
+    let account_id = account.as_str();
     let rows = sqlx::query("SELECT name FROM cached_mailboxes WHERE account_id = ? ORDER BY name")
         .bind(account_id)
         .fetch_all(pool)
@@ -612,13 +622,14 @@ fn push_keyset_backward(qb: &mut QueryBuilder<Sqlite>, cursor: &PageCursor) {
 
 pub async fn list_messages(
     pool: &SqlitePool,
-    account_id: &str,
+    account: MailAccountId<'_>,
     mailbox: &str,
     limit: i64,
     cursor: Option<PageCursor>,
     direction: PageDirection,
     offset: Option<i64>,
 ) -> Result<(Vec<MessageRow>, i64)> {
+    let account_id = account.as_str();
     let total: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM cached_messages WHERE account_id = ? AND mailbox = ?",
     )
@@ -705,7 +716,7 @@ pub async fn list_messages_virtual(
          JOIN virtual_folder_rules r ON r.folder_id = ?
              AND (r.account_id = '' OR r.account_id = m.account_id)
              AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
-         JOIN virtual_folders vf ON vf.folder_id = r.folder_id
+         JOIN virtual_folders vf ON vf.folder_id = r.folder_id AND vf.user_id = a.user_id
          WHERE a.user_id = ?
            AND (vf.only_flagged = 0 OR EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Flagged'))
            AND (vf.only_attachments = 0 OR m.has_attachments = 1)",
@@ -725,7 +736,7 @@ pub async fn list_messages_virtual(
              JOIN virtual_folder_rules r ON r.folder_id = ?
                  AND (r.account_id = '' OR r.account_id = m.account_id)
                  AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
-             JOIN virtual_folders vf ON vf.folder_id = r.folder_id
+             JOIN virtual_folders vf ON vf.folder_id = r.folder_id AND vf.user_id = a.user_id
              WHERE a.user_id = ?
                AND (vf.only_flagged = 0 OR EXISTS (SELECT 1 FROM json_each(m.flags) WHERE value = '\\Flagged'))
                AND (vf.only_attachments = 0 OR m.has_attachments = 1)
@@ -757,7 +768,7 @@ pub async fn list_messages_virtual(
     qb.push_bind(folder_id).push(
         " AND (r.account_id = '' OR r.account_id = m.account_id)
              AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
-         JOIN virtual_folders vf ON vf.folder_id = r.folder_id
+         JOIN virtual_folders vf ON vf.folder_id = r.folder_id AND vf.user_id = a.user_id
          WHERE a.user_id = ",
     );
     qb.push_bind(user_id).push(
@@ -796,10 +807,11 @@ pub async fn list_messages_virtual(
 
 pub async fn get_message(
     pool: &SqlitePool,
-    account_id: &str,
+    account: MailAccountId<'_>,
     mailbox: &str,
     uid: u32,
 ) -> Result<Option<MessageRow>> {
+    let account_id = account.as_str();
     let row = sqlx::query(
         "SELECT uid, account_id, mailbox, message_id, thread_id, from_addr, to_addrs, cc_addrs,
                 subject, sent_at, flags, has_attachments, size, rowid, is_encrypted, reply_to_addrs
@@ -815,10 +827,11 @@ pub async fn get_message(
 
 pub async fn list_thread_messages(
     pool: &SqlitePool,
-    account_id: &str,
+    account: MailAccountId<'_>,
     mailbox: &str,
     uid: u32,
 ) -> Result<Vec<MessageRow>> {
+    let account_id = account.as_str();
     let rows = sqlx::query(
         "WITH RECURSIVE connected(id) AS (
              SELECT message_id FROM cached_messages
@@ -908,11 +921,12 @@ fn row_to_message_full(r: &sqlx::sqlite::SqliteRow) -> MessageRow {
 /// Stores Reply-To addresses parsed lazily for rows cached before the column existed.
 pub async fn set_message_reply_to(
     pool: &SqlitePool,
-    account_id: &str,
+    account: MailAccountId<'_>,
     mailbox: &str,
     uid: u32,
     reply_to_addrs: &str,
 ) -> Result<()> {
+    let account_id = account.as_str();
     sqlx::query(
         "UPDATE cached_messages SET reply_to_addrs = ? WHERE account_id = ? AND mailbox = ? AND uid = ?",
     )
@@ -956,7 +970,7 @@ fn push_filter_clauses(qb: &mut QueryBuilder<Sqlite>, filters: &SearchFilters) {
 /// Where a search looks: every account of the user, one mailbox, or a virtual folder's rules.
 pub enum SearchScope<'a> {
     All,
-    Mailbox { account_id: &'a str, mailbox: &'a str },
+    Mailbox { account: MailAccountId<'a>, mailbox: &'a str },
     Virtual { folder_id: &'a str },
 }
 
@@ -981,7 +995,7 @@ fn push_search_body(
             .push(
                 " AND (r.account_id = '' OR r.account_id = m.account_id)
                    AND (r.mailbox_pattern = '' OR m.mailbox LIKE r.mailbox_pattern)
-                  JOIN virtual_folders vf ON vf.folder_id = r.folder_id",
+                  JOIN virtual_folders vf ON vf.folder_id = r.folder_id AND vf.user_id = a.user_id",
             );
     }
     qb.push(" WHERE a.user_id = ").push_bind(user_id.to_string());
@@ -990,9 +1004,9 @@ fn push_search_body(
     }
     match scope {
         SearchScope::All => {}
-        SearchScope::Mailbox { account_id, mailbox } => {
+        SearchScope::Mailbox { account, mailbox } => {
             qb.push(" AND m.account_id = ")
-                .push_bind(account_id.to_string())
+                .push_bind(account.as_str().to_string())
                 .push(" AND m.mailbox = ")
                 .push_bind(mailbox.to_string());
         }
@@ -1115,7 +1129,7 @@ mod tests {
         .await
         .unwrap();
 
-        let body = get_message_render_body(&pool, "account", "INBOX", 1)
+        let body = get_message_render_body(&pool, MailAccountId::internal("account"), "INBOX", 1)
             .await
             .unwrap()
             .unwrap();
@@ -1156,9 +1170,10 @@ mod tests {
         insert_thread_message(&pool, "account", "Archive", 3, "leaf", Some("reply"), 3).await;
         insert_thread_message(&pool, "other", "INBOX", 4, "foreign", Some("reply"), 4).await;
 
-        let messages = list_thread_messages(&pool, "account", "Archive", 3)
-            .await
-            .unwrap();
+        let messages =
+            list_thread_messages(&pool, MailAccountId::internal("account"), "Archive", 3)
+                .await
+                .unwrap();
         let ids: Vec<_> = messages
             .iter()
             .filter_map(|m| m.message_id.as_deref())

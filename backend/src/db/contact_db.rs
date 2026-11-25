@@ -1,3 +1,4 @@
+use super::calendar_db::CalDavAccountId;
 use sqlx::{AssertSqlSafe, Row, SqlitePool};
 use std::collections::HashSet;
 
@@ -144,7 +145,7 @@ pub struct CachedContact {
 
 pub async fn upsert_contact(
     pool: &SqlitePool,
-    account_id: &str,
+    account: CalDavAccountId<'_>,
     addressbook_href: &str,
     uid: &str,
     etag: &str,
@@ -157,6 +158,7 @@ pub async fn upsert_contact(
     org: &str,
     photo: Option<&str>,
 ) -> anyhow::Result<()> {
+    let account_id = account.as_str();
     sqlx::query(
         "INSERT INTO cached_contacts
              (account_id, addressbook_href, uid, etag, href, raw_vcard, fn_name, emails, phones, addresses, org, photo)
@@ -205,10 +207,11 @@ pub async fn get_contacts(pool: &SqlitePool, user_id: &str) -> anyhow::Result<Ve
 
 pub async fn get_contact(
     pool: &SqlitePool,
-    account_id: &str,
+    account: CalDavAccountId<'_>,
     addressbook_href: &str,
     uid: &str,
 ) -> anyhow::Result<Option<CachedContact>> {
+    let account_id = account.as_str();
     let contact = sqlx::query_as::<_, CachedContact>(
         "SELECT account_id, uid, addressbook_href, href, etag, raw_vcard, fn_name, emails, phones, addresses, org, photo
          FROM cached_contacts
@@ -224,10 +227,11 @@ pub async fn get_contact(
 
 pub async fn delete_contact_from_cache(
     pool: &SqlitePool,
-    account_id: &str,
+    account: CalDavAccountId<'_>,
     addressbook_href: &str,
     uid: &str,
 ) -> anyhow::Result<()> {
+    let account_id = account.as_str();
     sqlx::query(
         "DELETE FROM cached_contacts WHERE account_id = ? AND addressbook_href = ? AND uid = ?",
     )

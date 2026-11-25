@@ -169,7 +169,7 @@ impl Env {
     }
 
     async fn mailboxes(&self) -> Vec<String> {
-        email_db::list_mailboxes(&self.db, ACC)
+        email_db::list_mailboxes(&self.db, crate::email_db::MailAccountId::internal(ACC))
             .await
             .unwrap()
             .into_iter()
@@ -178,7 +178,13 @@ impl Env {
     }
 
     fn eml(&self, mailbox: &str, uid: u32) -> Option<Vec<u8>> {
-        let bytes = std::fs::read(eml_path(&self.dir, ACC, mailbox, uid)).ok()?;
+        let bytes = std::fs::read(eml_path(
+            &self.dir,
+            crate::email_db::MailAccountId::internal(ACC),
+            mailbox,
+            uid,
+        ))
+        .ok()?;
         Some(zstd::decode_all(bytes.as_slice()).unwrap())
     }
 }
@@ -558,15 +564,25 @@ async fn the_first_sync_caches_mailboxes_messages_and_sources() {
 
     // the source as the server has it, its attachment listed, the body indexed
     assert_eq!(env.eml("INBOX", report.0).unwrap(), raw);
-    let atts = email_db::list_attachments(&env.db, ACC, "INBOX", report.0)
-        .await
-        .unwrap();
+    let atts = email_db::list_attachments(
+        &env.db,
+        crate::email_db::MailAccountId::internal(ACC),
+        "INBOX",
+        report.0,
+    )
+    .await
+    .unwrap();
     assert_eq!(atts.len(), 1);
     assert_eq!(atts[0].filename.as_deref(), Some("report.pdf"));
-    let row = email_db::get_message(&env.db, ACC, "INBOX", report.0)
-        .await
-        .unwrap()
-        .unwrap();
+    let row = email_db::get_message(
+        &env.db,
+        crate::email_db::MailAccountId::internal(ACC),
+        "INBOX",
+        report.0,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert!(row.has_attachments);
     assert_eq!(row.from_addr.as_deref(), Some("Ann <ann@example.org>"));
 
@@ -703,7 +719,9 @@ async fn nested_and_renamed_mailboxes() {
         .deliver(&[&projects], &mail("Plan", "a@example.org"), &[]);
     env.sync().await;
     assert_eq!(subjects(&env.cached("INBOX/Projects").await), vec!["Plan"]);
-    let mbs = email_db::list_mailboxes(&env.db, ACC).await.unwrap();
+    let mbs = email_db::list_mailboxes(&env.db, crate::email_db::MailAccountId::internal(ACC))
+        .await
+        .unwrap();
     let p = mbs.iter().find(|m| m.name == "INBOX/Projects").unwrap();
     assert_eq!(p.delimiter.as_deref(), Some("/"));
     env.drain();
@@ -1119,7 +1137,9 @@ async fn deleting_the_account_drops_its_jmap_rows() {
         &[],
     );
     env.sync().await;
-    email_db::delete_account(&env.db, ACC, USER).await.unwrap();
+    email_db::delete_account(&env.db, crate::email_db::MailAccountId::internal(ACC))
+        .await
+        .unwrap();
     for table in ["jmap_messages", "jmap_mailboxes", "jmap_states"] {
         let n: i64 =
             sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))

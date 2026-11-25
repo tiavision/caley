@@ -473,9 +473,14 @@ impl SyncManager {
         addressbook_href: &str,
         uid: &str,
     ) -> Option<String> {
-        let contact = db::get_contact(&self.db, account_id, addressbook_href, uid)
-            .await
-            .ok()??;
+        let contact = db::get_contact(
+            &self.db,
+            db::CalDavAccountId::internal(account_id),
+            addressbook_href,
+            uid,
+        )
+        .await
+        .ok()??;
         let cj = crate::contacts::cached_to_json_pub(&contact);
         serde_json::to_string(&cj).ok()
     }

@@ -589,7 +589,12 @@ pub(super) async fn seed_messages(
         .await?;
 
         // Write the .eml file so the frontend can render via MIME parse.
-        let path = crate::email_sync::eml_path(data_dir, m.account, m.mailbox, m.uid as u32);
+        let path = crate::email_sync::eml_path(
+            data_dir,
+            crate::email_db::MailAccountId::internal(m.account),
+            m.mailbox,
+            m.uid as u32,
+        );
         if !path.exists() {
             if let Some(dir) = path.parent() {
                 tokio::fs::create_dir_all(dir).await?;

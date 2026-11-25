@@ -18,7 +18,7 @@ use serde_json::json;
 use tokio::time::{Duration, sleep};
 
 use super::{Auth, Client, Email};
-use crate::email_db::{self, ImapAccountRow, jmap_db};
+use crate::email_db::{self, ImapAccountRow, MailAccountId, jmap_db};
 use crate::email_sync::{EmailSyncManager, EmailSyncTrigger, eml_path, mailbox_dir};
 use crate::imap_client;
 use crate::sse::SseMessage;
@@ -290,12 +290,13 @@ impl EmailSyncManager {
                     .await;
                 continue;
             }
-            let cached = email_db::get_message(&self.db, account_id, mailbox, *uid)
-                .await?
-                .and_then(|row| row.flags)
-                .and_then(|f| serde_json::from_str::<Vec<String>>(&f).ok())
-                .map(normalize)
-                .unwrap_or_default();
+            let cached =
+                email_db::get_message(&self.db, MailAccountId::internal(account_id), mailbox, *uid)
+                    .await?
+                    .and_then(|row| row.flags)
+                    .and_then(|f| serde_json::from_str::<Vec<String>>(&f).ok())
+                    .map(normalize)
+                    .unwrap_or_default();
             if cached != flags {
                 let flags_json = serde_json::to_string(&flags)?;
                 email_db::update_message_flags(&self.db, account_id, mailbox, *uid, &flags_json)
@@ -355,7 +356,13 @@ impl EmailSyncManager {
 
     /// Drops a cached message (its `.eml`, attachments, row and JMAP id); `email_removed` reports it.
     async fn jmap_remove_cached(&self, account_id: &str, user_id: &str, mailbox: &str, uid: u32) {
-        let _ = tokio::fs::remove_file(eml_path(&self.data_dir, account_id, mailbox, uid)).await;
+        let _ = tokio::fs::remove_file(eml_path(
+            &self.data_dir,
+            MailAccountId::internal(account_id),
+            mailbox,
+            uid,
+        ))
+        .await;
         let _ = email_db::delete_attachments_for_message(&self.db, account_id, mailbox, uid).await;
         let _ = email_db::delete_message(&self.db, account_id, mailbox, uid).await;
         self.broadcaster.send(
@@ -372,7 +379,12 @@ impl EmailSyncManager {
     async fn jmap_drop_mailbox(&self, account_id: &str, name: &str) -> Result<()> {
         email_db::delete_attachments_for_mailbox(&self.db, account_id, name).await?;
         email_db::delete_messages_for_mailbox(&self.db, account_id, name).await?;
-        let _ = tokio::fs::remove_dir_all(mailbox_dir(&self.data_dir, account_id, name)).await;
+        let _ = tokio::fs::remove_dir_all(mailbox_dir(
+            &self.data_dir,
+            MailAccountId::internal(account_id),
+            name,
+        ))
+        .await;
         jmap_db::delete_cached_mailbox(&self.db, account_id, name).await?;
         Ok(())
     }
