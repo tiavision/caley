@@ -115,7 +115,6 @@ pub fn private() -> OpenApiRouter<AppState> {
 pub fn public() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .merge(crate::sse::public_routes())
-        .merge(crate::email::public_routes())
         .merge(crate::oidc::public_routes())
 }
 

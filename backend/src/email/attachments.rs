@@ -548,76 +548,6 @@ fn transparent_pixel() -> Response {
         .into_response()
 }
 
-// ── Navigate (link warning page) ─────────────────────────────────────────────
-
-#[derive(Deserialize, IntoParams)]
-#[into_params(parameter_in = Query)]
-pub struct NavigateQuery {
-    /// the external http(s) URL
-    pub to: String,
-}
-
-/// A warning page before an external link of a message: the destination, Continue and Cancel.
-#[utoipa::path(
-    get,
-    path = "/email/navigate",
-    params(NavigateQuery),
-    responses(
-        (status = 200, description = "the warning page", body = String, content_type = "text/html"),
-        (status = 400, description = "`to` not an http(s) URL (plain text)", body = String, content_type = "text/plain")
-    )
-)]
-pub async fn navigate(Query(q): Query<NavigateQuery>) -> Response {
-    let url = &q.to;
-    match url::Url::parse(url) {
-        Ok(u) if matches!(u.scheme(), "http" | "https") => {}
-        _ => return (StatusCode::BAD_REQUEST, "invalid url").into_response(),
-    }
-
-    let esc = html_escape(url);
-    let html = format!(
-        r##"<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>External Link</title>
-<style>
-  body {{ font-family: sans-serif; max-width: 560px; margin: 3rem auto; padding: 0 1.5rem; color: #222; }}
-  h2 {{ font-size: 1.1rem; margin-bottom: 1rem; }}
-  .url {{ word-break: break-all; background: #f5f5f5; padding: .6rem .8rem; border-radius: 4px; margin: 1rem 0; font-size: .9rem; }}
-  .actions {{ display: flex; gap: .75rem; margin-top: 1.5rem; }}
-  .continue {{ background: #2a6496; color: #fff; padding: .55rem 1.1rem; border-radius: 4px; text-decoration: none; font-size: .9rem; }}
-  .cancel {{ padding: .55rem 1.1rem; border-radius: 4px; text-decoration: none; font-size: .9rem; border: 1px solid #999; color: inherit; cursor: pointer; background: none; }}
-</style>
-</head>
-<body>
-<h2>You are about to visit an external site</h2>
-<p>Destination:</p>
-<div class="url">{esc}</div>
-<div class="actions">
-  <a class="continue" href="{esc}">Continue</a>
-  <button class="cancel" onclick="window.close()">Cancel</button>
-</div>
-</body>
-</html>"##
-    );
-
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        html,
-    )
-        .into_response()
-}
-
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
 // ── Image origin whitelist API ────────────────────────────────────────────────
 
 /// A list of image origins (`scheme://host`): the allowed ones or the ignored ones.
@@ -816,11 +746,6 @@ pub fn routes() -> OpenApiRouter<AppState> {
             add_image_blacklist_origin,
             remove_image_blacklist_origin
         ))
-}
-
-/// This file's public routes, relative to `/api` (api.rs).
-pub fn public_routes() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(navigate))
 }
 
 #[cfg(test)]
