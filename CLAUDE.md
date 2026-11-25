@@ -32,7 +32,7 @@ OIDC is the **only** sign-in; there is no sign-in with CalDAV credentials (it wo
 
 `CurrentUser` in `oidc.rs` is the unified extractor for protected handlers. It tries OIDC claims first, then the server-side session. Do not use `OidcClaims` directly in handlers.
 
-`RequireAuthLayer` allows public paths (the login page `/` or `/<lang>/`, `/auth/*`, `/logout`, `/api/auth/config`, `/api/push/webhook`, `/api/email/navigate`, and static assets) and requires either OIDC claims or a session user for everything else. Unauthenticated API requests return 401; page requests redirect to the login page in their language with the page (`/de/?next=/de/mail/?uid=3`; with OIDC, to `/auth/oidc?auto=1`, the page kept in the session).
+`RequireAuthLayer` allows public paths (the login page `/` or `/<lang>/`, `/auth/*`, `/logout`, `/api/auth/config`, `/api/push/webhook`, and static assets) and requires either OIDC claims or a session user for everything else. Unauthenticated API requests return 401; page requests redirect to the login page in their language with the page (`/de/?next=/de/mail/?uid=3`; with OIDC, to `/auth/oidc?auto=1`, the page kept in the session).
 
 Where a sign-in lands (`landing.rs`): the `next` page (kept in the session from `/?next=…` or the redirect above, used once), else the app page the user loaded last (`last_page` in the session, its path with the language prefix, no query; prefetches and `/mail/view/` not counted), else `/calendar/` (in the login page's language). Signed-in `GET /` (or `/de/`) redirects there; the demo's `POST /auth/login` answers it as `{"redirect": …}`, which the login page's `data-sn-then` goes to with `navigate()`; the OIDC callback redirects there. The session is lost at logout or expiry, and `last_page` with it.
 
@@ -171,7 +171,6 @@ Email:
 - `GET|POST|DELETE /api/email/image-blacklist`
 - `GET /api/email/identities`
 - `POST|PUT|DELETE /api/email/identity`
-- `GET /api/email/navigate` public helper route.
 
 Notifications (Web Push to the user's devices):
 

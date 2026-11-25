@@ -57,11 +57,6 @@ const NO_FOREIGN_IDS: &[(&str, &str, &str)] = &[
     ),
     (
         "GET",
-        "/email/navigate",
-        "public warning page for a URL, no user data",
-    ),
-    (
-        "GET",
         "/email/autodiscover",
         "looks up an address's servers, no user data",
     ),

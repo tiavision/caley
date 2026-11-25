@@ -1074,8 +1074,3 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .merge(attachments::routes())
         .merge(send::routes())
 }
-
-/// The public mail routes, relative to `/api` (api.rs).
-pub fn public_routes() -> OpenApiRouter<AppState> {
-    attachments::public_routes()
-}

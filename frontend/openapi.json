@@ -1659,45 +1659,6 @@
         }
       }
     },
-    "/email/navigate": {
-      "get": {
-        "summary": "A warning page before an external link of a message: the destination, Continue and Cancel.",
-        "operationId": "navigate",
-        "parameters": [
-          {
-            "name": "to",
-            "in": "query",
-            "description": "the external http(s) URL",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "the warning page",
-            "content": {
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`to` not an http(s) URL (plain text)",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/email/proxy-image": {
       "get": {
         "summary": "An image of a message: an inline part by Content-ID, or a remote image of a whitelisted origin.\nOnly PNG, JPEG, GIF, WebP and AVIF (sniffed from the bytes) are served; anything else, an\norigin not whitelisted, an unsafe address or a failed fetch is a 1×1 transparent GIF.",
