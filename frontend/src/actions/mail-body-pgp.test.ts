@@ -47,18 +47,20 @@ let trusted: { fingerprint: string; email: string; armored: string; is_own: bool
 let calls: string[] = [];
 let uid = 100;
 let cutOptions: { rootCiphertext?: boolean } = {};   // the stand-in server's mail.cut options
+let serverFrom = 'Alice <alice@example.com>';        // the From the stand-in server reports (Message.from)
 
 beforeEach(() => {
   calls = [];
   trusted = [];
   cutOptions = {};
+  serverFrom = 'Alice <alice@example.com>';
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     const range = new Headers(init?.headers).get('Range');
     calls.push(range ? `${url} ${range}` : url);
     if (url.startsWith('/api/email/message?')) {
       return Response.json({
         uid: Number(new URL(url, 'http://x').searchParams.get('uid')), account_id: 'work', mailbox: 'INBOX', rowid: 1,
-        message_id: null, thread_id: null, from: 'Alice <alice@example.com>', to: ['bob@example.com'], cc: [], subject: '...',
+        message_id: null, thread_id: null, from: serverFrom, to: ['bob@example.com'], cc: [], subject: '...',
         sent_at: 1, flags: [], has_attachments: true, body_cached: true, is_read: true, is_flagged: false, attachments: [], ...flags,
       });
     }
@@ -196,4 +198,20 @@ test('a signature by a key found in mail that the user has not accepted is not v
   const b = await read();
   expect(b.badges).not.toContain('verified');
   expect(b.parts.map((p) => p.mark)).toEqual(['unverified']);
+});
+
+test('verified for another sender than the server reports: the reader gets the checked sender and the warning', async () => {
+  const alice = await keys('alice@example.com');
+  whole = await buildProtectedMime(draft({ encrypt: false, sign: true, signingKey: alice.privateKey, attachments: [] }));
+  trusted = [{ fingerprint: alice.publicKey.getFingerprint(), email: 'alice@example.com', armored: alice.publicKey.armor(), is_own: false, source: 'imported', trust: 'trusted' }];
+  flags = { is_encrypted: false, is_signed: true };
+  serverFrom = 'Mallory <mallory@evil.example>';                      // the server parsed another From than the reader
+  const b = await read();
+  expect(b.badges).toEqual(['verified', 'from_differs']);
+  expect(b.sender).toBe('Alice <alice@example.com>');
+
+  serverFrom = 'alice@example.com';
+  const same = await read();
+  expect(same.badges).toEqual(['verified']);
+  expect(same.sender).toBe('');
 });

@@ -34,11 +34,13 @@ const openedParts: string[] = [];
 // what mail.composeKeys answers, and how often it was asked
 let composeKeysResult: object = { keys: [], pending: [], vault: [], unlocked: [] };
 let composeKeysCalls = 0;
+// fields of the body mail.body answers, over the defaults
+let bodyExtra: object = {};
 // the drafts mail.send was given
 const sent: { encrypt: boolean }[] = [];
 
 // the app's retry policies: the flag toggles name one (data-sn-retry="flags")
-beforeEach(() => { composeKeysResult = { keys: [], pending: [], vault: [], unlocked: [] }; composeKeysCalls = 0; sent.length = 0; discovery = { found: false }; bodyGate = null; htmlBody = ''; decrypted = false; partsOverride = null; openedParts.length = 0; localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'], retry: retryPolicies }); });
+beforeEach(() => { composeKeysResult = { keys: [], pending: [], vault: [], unlocked: [] }; composeKeysCalls = 0; sent.length = 0; bodyExtra = {}; discovery = { found: false }; bodyGate = null; htmlBody = ''; decrypted = false; partsOverride = null; openedParts.length = 0; localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'], retry: retryPolicies }); });
 afterEach(() => configure({ confirm: null as never, urlSchemes: [], retry: null }));
 
 async function show(routes: Record<string, RouteResponse> = {}, pending: { subject: string; files: File[] } | null = null, storage = memoryStorage(),
@@ -83,7 +85,7 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
         return {
           key: `${ref.account_id} ${ref.mailbox} ${ref.uid}`, message: current.find((msg) => msg.uid === ref.uid) ?? inbox[0], parts: partsOverride ?? (htmlBody ? [{ ...part, kind: 'html', html: htmlBody }] : textParts), textParts: partsOverride ?? textParts,
           html: htmlBody, text: `body ${ref.uid}`, quotable: !decrypted, mode: htmlBody ? 'html' : 'text', encrypted: decrypted, decrypted, signed: false,
-          locked: false, badges: [], subject: '', reply: decrypted ? [`Sender ${ref.uid} <s${ref.uid}@x>`] : null, replyCc: decrypted ? [] : null, error: '', files: [], importable: {}, cids: null, forwardCids: null,
+          locked: false, badges: [], subject: '', reply: decrypted ? [`Sender ${ref.uid} <s${ref.uid}@x>`] : null, replyCc: decrypted ? [] : null, error: '', files: [], importable: {}, cids: null, forwardCids: null, ...bodyExtra,
         };
       },
       openPart: (_ref: unknown, step: string) => { openedParts.push(step); },
@@ -633,6 +635,20 @@ test('a reply to decrypted mail starts encrypted; without a key for a recipient 
   dialog.querySelector<HTMLFormElement>('.compose-form')!.requestSubmit();
   await settle();
   expect(sent.map((d) => d.encrypt)).toEqual([true, false]);
+});
+
+test('a message verified for another sender than the server\'s From shows the checked sender, with the warning', async () => {
+  bodyExtra = { badges: ['verified', 'from_differs'], sender: 'Alice <alice@x>' };
+  const { root, settle } = await show();
+  rows(root)[2].click();
+  await settle();
+  const meta = root.querySelector('.detail-meta')!;
+  expect(meta.querySelector('.meta-line [data-truncate]')!.textContent).toBe('Alice <alice@x>');
+  expect(root.querySelector('.detail-body')!.textContent).toContain(m.pgp_badgeFromDiffers());
+  meta.querySelector<HTMLButtonElement>('.meta-primary')!.click();
+  await settle();
+  expect(meta.querySelector('.meta-details')!.textContent).toContain(m.mail_metaFromHeader());
+  expect(meta.querySelector('.meta-details')!.textContent).toContain('Sender 1 <s1@x>');
 });
 
 test('compose shows a recipient\'s key found in mail with its full fingerprint and user IDs, and accepts it only on request', async () => {

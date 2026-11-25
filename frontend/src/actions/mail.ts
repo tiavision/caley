@@ -9,7 +9,9 @@ import {
 } from '../lib/mail.ts';
 import { cidReferencesFromHtml, htmlToPlainText, withInlineImages } from '../lib/mail-html.ts';
 import { htmlAddsValue, isPgpPublicKeyAttachment, bareMailbox, keyHasEmail } from '../lib/mailUtils.ts';
-import { messageBadges, protectedSubject, quotable, readerParts, replyAddresses, replyAllAddresses, type ReaderPart } from '../lib/mail-reader.ts';
+import {
+  addressText, checkedSender, messageBadges, protectedSubject, quotable, readerParts, replyAddresses, replyAllAddresses, senderDiffers, type ReaderPart,
+} from '../lib/mail-reader.ts';
 import * as mail from '@tiavision/sinter-mail';
 import type { ImageType, Message as MimeMessage, MimeOptions, Ref } from '@tiavision/sinter-mail';
 // openpgp is a lazy package (sinter({ lazy }) in vite.config.ts): these modules import it as usual, sinter loads it
@@ -86,6 +88,9 @@ export interface ReaderBody {
   /** encrypted and no key is unlocked yet: the reader offers to unlock the vault */
   locked: boolean;
   badges: string[];
+  /** the sender the signature was checked for, when it is verified and not the From the server reported (then with
+   * the `from_differs` badge): the reader shows it instead of the server's From; '' otherwise */
+  sender: string;
   /** the protected subject of a decrypted message */
   subject: string;
   /** whom a reply goes to: for decrypted content only whom the protected message names (maybe none), else protected
@@ -241,7 +246,10 @@ async function fromRaw(msg: Message, src: Source, out: ReaderBody): Promise<Read
   out.encrypted ||= decrypts.length > 0 || mime.parts.some((p) => p.type === 'encrypted');
   out.decrypted = mime.summary.encrypted !== 'none';
   out.signed ||= mime.steps.some((s) => s.kind !== 'decrypt');
-  out.badges = messageBadges(mime);
+  out.badges = messageBadges(mime, msg.from);
+  // a verified sender the server's From does not name: the reader shows the one the signature was checked for
+  const checked = checkedSender(mime);
+  out.sender = checked && senderDiffers(mime, msg.from) ? addressText(checked) : '';
   for (const s of decrypts) {
     const d = r.decrypted[s.id];
     if (d?.status === 'locked') out.locked = true;
@@ -304,7 +312,7 @@ async function fromRaw(msg: Message, src: Source, out: ReaderBody): Promise<Read
 function blank(msg: Message): ReaderBody {
   return {
     key: messageKey(msg), message: msg, parts: [], textParts: [], html: '', text: '', quotable: true, mode: 'text',
-    encrypted: msg.is_encrypted, decrypted: false, signed: msg.is_signed, locked: false, badges: [], subject: '', reply: null, replyCc: null, error: '',
+    encrypted: msg.is_encrypted, decrypted: false, signed: msg.is_signed, locked: false, badges: [], sender: '', subject: '', reply: null, replyCc: null, error: '',
     files: [], importable: {}, cids: null, forwardCids: null, pending: false, wholeSize: 0,
   };
 }
