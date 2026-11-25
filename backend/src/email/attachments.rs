@@ -204,16 +204,7 @@ pub async fn proxy_image(
         _ => return transparent_pixel(),
     }
 
-    // Do not follow redirects: a whitelisted origin could otherwise 302 to an
-    // internal address (e.g. 127.0.0.1 / link-local metadata) that the pre-fetch
-    // is_ssrf_safe() check never sees.
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .user_agent(version::USER_AGENT)
-        .use_preconfigured_tls(crate::imap_client::tls_config())
-        .redirect(reqwest::redirect::Policy::default())
-        .build()
-    {
+    let client = match image_client() {
         Ok(c) => c,
         Err(_) => return transparent_pixel(),
     };
@@ -252,6 +243,18 @@ pub async fn proxy_image(
         bytes,
     )
         .into_response()
+}
+
+/// The client remote images are fetched with. It does not follow redirects: a whitelisted origin could
+/// otherwise 302 to an internal address (e.g. 127.0.0.1 / link-local metadata) that the pre-fetch
+/// is_ssrf_safe() check never sees. A redirect is not a success, so it is answered with the transparent pixel.
+fn image_client() -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .user_agent(version::USER_AGENT)
+        .use_preconfigured_tls(crate::imap_client::tls_config())
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
 }
 
 // ── Attachment download ───────────────────────────────────────────────────────
@@ -824,8 +827,42 @@ pub fn public_routes() -> OpenApiRouter<AppState> {
 mod tests {
     use super::{
         AllowedImage, attachment_disposition, can_preview_attachment, detect_allowed_image,
-        extract_part_bytes,
+        extract_part_bytes, image_client,
     };
+
+    #[tokio::test]
+    async fn the_image_client_does_not_follow_redirects() {
+        use axum::{Router, response::Redirect, routing::get};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        // `/image` redirects to `/internal`, which counts its requests
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&hits);
+        let app = Router::new()
+            .route("/image", get(|| async { Redirect::temporary("/internal") }))
+            .route(
+                "/internal",
+                get(move || async move {
+                    counted.fetch_add(1, Ordering::SeqCst);
+                    "secret"
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let response = image_client()
+            .unwrap()
+            .get(format!("http://{addr}/image"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::TEMPORARY_REDIRECT);
+        assert!(!response.status().is_success());
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
 
     #[test]
     fn reads_an_attachment_by_its_root_part_index() {
