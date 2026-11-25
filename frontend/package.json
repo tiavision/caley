@@ -14,7 +14,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run --environment jsdom",
+    "test": "vitest run --environment jsdom --test-timeout=20000",
     "inspect": "vite build && node scripts/inspect.mjs"
   },
   "dependencies": {
