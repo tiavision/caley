@@ -293,7 +293,7 @@ pub async fn push_webhook(
         }
     };
 
-    eprintln!("[push] webhook called with token {token}");
+    // The token is the webhook's only secret and caller input: it is never logged, matched or not.
 
     // Check calendar push subscriptions first
     match db::get_user_and_calendar_from_push_token(&state.db, &token).await {
@@ -332,7 +332,7 @@ pub async fn push_webhook(
         _ => {
             // Return the same status as a matched token so this public endpoint
             // can't be used to enumerate valid push tokens.
-            eprintln!("[push] webhook token not found in any push_subscriptions table");
+            eprintln!("[push] webhook called with an unknown token");
             axum::http::StatusCode::CREATED.into_response()
         }
     }
