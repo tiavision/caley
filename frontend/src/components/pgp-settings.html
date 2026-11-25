@@ -1,5 +1,5 @@
 <!-- Settings → Encryption: the synced OpenPGP private-key vault (passkeys with PRF, devices, keys, identities)
-     and trusted senders' public keys. In the settings page's encryption tab panel:
+     and senders' public keys (trusted, or found in mail and waiting to be accepted). In the settings page's encryption tab panel:
        <pgp-settings data-sn-with="{ opened: encOpened }"></pgp-settings>
      It loads its resources (`vault`, `publicKeys`) once `opened` (the tab was opened at least once) and keeps them:
      `when` empties a resource while it is false, so it must not follow the open tab. All crypto and WebAuthn runs in
@@ -22,7 +22,8 @@
          ownPub: { fingerprint: '', armored: '' },
          keyError: '',
          pubArmored: '',
-         pubKey: /** @type {PublicKeyBody|null} */ (null),
+         pubKey: /** @type {KeyCandidate|null} */ (null),
+         accepting: /** @type {{ key: StoredPublicKey; facts: KeyFacts; change: boolean } | null} */ (null),
          pubError: '',
          pubSuccess: '',
        }"
@@ -251,7 +252,7 @@
         <div data-layout="row" data-gap="sm" data-wrap="none">
           <h3 data-grow data-sn-text="m.pgp_publicKeysHeading()"></h3>
           <button type="button" data-variant="ghost" data-size="sm" data-icon="import" data-tooltip
-                  commandfor="pgp-public-key-dialog" command="show-modal" data-sn-on-click="pubArmored = ''; pubError = ''"
+                  commandfor="pgp-public-key-dialog" command="show-modal" data-sn-on-click="pubArmored = ''; pubKey = null; pubError = ''"
                   data-sn-attr="{'aria-label': m.pgp_importPublicKeyButton()}"></button>
         </div>
         <p data-muted data-sn-text="m.pgp_publicKeysHint()"></p>
@@ -260,12 +261,18 @@
 
         <template data-sn-if="publicKeys.some(k => !k.is_own)">
           <h4 data-sn-text="m.pgp_trustedKeys()"></h4>
-          <ul data-list>
-            <template data-sn-for="key in publicKeys.filter(k => !k.is_own)">
-              <li data-layout="row" data-justify="between" data-wrap="none">
+          <!-- Each key with its full fingerprint and its state: trusted, or found in mail and waiting to be accepted
+               (a key change when another key is trusted for its address), which only the accept dialog trusts. -->
+          <ul data-list class="sender-keys">
+            <template data-sn-for="key in publicKeys.filter(k => !k.is_own)" data-sn-key="key.fingerprint">
+              <li data-layout="row" data-justify="between" data-wrap="none" data-sn-let="{ state: keyState(key, publicKeys) }">
                 <div data-grow data-layout="stack" data-gap="none">
-                  <span data-truncate data-sn-text="key.email || m.pgp_noKeyEmail()"></span>
-                  <small><code data-sn-text="key.fingerprint.slice(0, 16) + '…'"></code></small>
+                  <span data-layout="row" data-gap="xs" data-wrap="none">
+                    <span data-truncate data-sn-text="key.email || m.pgp_noKeyEmail()"></span>
+                    <span data-badge data-sn-attr="{'data-tone': state === 'trusted' ? 'success' : state === 'change' ? 'danger' : 'warning'}"
+                          data-sn-text="keyStateLabel(state)"></span>
+                  </span>
+                  <small><code class="key-fingerprint" data-sn-text="fingerprintText(key.fingerprint)"></code></small>
                   <template data-sn-if="key.source === 'harvested_autocrypt'">
                     <small data-muted data-sn-text="m.pgp_sourceAutocrypt()"></small>
                   </template>
@@ -273,12 +280,21 @@
                     <small data-muted data-sn-text="m.pgp_sourceSignedAttachment()"></small>
                   </template>
                 </div>
-                <button type="button" data-variant="ghost" data-size="sm" data-tone="danger" data-icon="trash-2" data-tooltip
-                        data-sn-delete="/pgp/key" data-sn-body="{ fingerprint: key.fingerprint }"
-                        data-sn-confirm="m.pgp_confirmRemovePublicKey()"
-                        data-sn-optimistic="remove(key)"
-                        data-sn-catch="pubError = m.pgp_publicKeyRemoveError()"
-                        data-sn-attr="{'aria-label': m.pgp_removeKey()}"></button>
+                <div data-layout="row" data-gap="xs" data-wrap="none">
+                  <template data-sn-if="state !== 'trusted'">
+                    <button type="button" data-variant="outline" data-size="sm" data-sn-on-click="pubError = ''"
+                            data-sn-call="pgpKeys.storedKeyFacts(key)"
+                            data-sn-then="accepting = { key, facts: $result, change: state === 'change' }; openDialog('pgp-accept-dialog')"
+                            data-sn-catch="pubError = loadErrorOr($error, $error.detail ?? m.pgp_keyAcceptError())"
+                            data-sn-text="m.pgp_reviewKey()"></button>
+                  </template>
+                  <button type="button" data-variant="ghost" data-size="sm" data-tone="danger" data-icon="trash-2" data-tooltip
+                          data-sn-delete="/pgp/key" data-sn-body="{ fingerprint: key.fingerprint }"
+                          data-sn-confirm="m.pgp_confirmRemovePublicKey()"
+                          data-sn-optimistic="remove(key)"
+                          data-sn-catch="pubError = m.pgp_publicKeyRemoveError()"
+                          data-sn-attr="{'aria-label': m.pgp_removeKey()}"></button>
+                </div>
               </li>
             </template>
           </ul>
@@ -468,29 +484,79 @@
         <button type="button" commandfor="pgp-public-key-dialog" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
       </header>
       <template data-sn-if="pubError"><div data-callout data-tone="danger" role="alert" data-sn-text="pubError"></div></template>
-      <!-- Import: the key is read here (pgpKeys.publicKey, openpgp), then stored (#pub-key-save). -->
-      <span hidden id="pub-key-save" data-sn-post="/pgp/key" data-sn-when="pubKey" data-sn-body="pubKey"
-            data-sn-then="upsert(publicKeys, $result); pubArmored = ''; pubSuccess = m.pgp_publicKeyImported(); closeDialog('pgp-public-key-dialog')"
-            data-sn-catch="pubError = m.pgp_publicKeyImportError()"></span>
-      <form data-layout="stack" data-gap="md"
-            data-sn-call="pgpKeys.publicKey(pubArmored)" data-sn-on-submit="pubError = ''; pubSuccess = ''"
-            data-sn-then="pubKey = $result; run('pub-key-save')"
-            data-sn-catch="pubError = loadErrorOr($error, m.pgp_publicKeyImportError())">
-        <label>
-          <span data-sn-text="m.pgp_keyFile()"></span>
-          <input type="file" accept=".asc,.gpg,.pgp,.key,.txt,application/pgp-keys"
-                 data-sn-call="pgpKeys.keyFile($el.files?.[0])" data-sn-trigger="change" data-sn-on-change="pubError = ''"
-                 data-sn-then="pubArmored = $result || pubArmored" data-sn-catch="pubError = loadErrorOr($error, m.pgp_keyFileError())">
-        </label>
-        <label>
-          <span data-sn-text="m.pgp_importArmoredPublicKey()"></span>
-          <textarea rows="6" placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----" data-sn-model="pubArmored"></textarea>
-        </label>
-        <footer>
-          <button type="button" data-variant="ghost" commandfor="pgp-public-key-dialog" command="close" data-sn-text="m.event_cancel()"></button>
-          <button type="submit" data-sn-attr="{disabled: !pubArmored}" data-sn-text="m.pgp_importPublicKeyButton()"></button>
-        </footer>
-      </form>
+      <!-- Import: the key is read here (pgpKeys.publicKey, openpgp) and shown, its full fingerprint and user IDs, for
+           the user to check; only "Trust and import" stores it (trusted) for the address chosen among the key's own. -->
+      <template data-sn-if="pubKey">
+        <div data-layout="stack" data-gap="md">
+          <p data-muted data-sn-text="m.pgp_importConfirmHint()"></p>
+          <pgp-key-facts data-sn-with="{ fingerprint: pubKey.facts.fingerprint, userIds: pubKey.facts.userIds }"></pgp-key-facts>
+          <template data-sn-if="pubKey.facts.emails.length > 1">
+            <label>
+              <span data-sn-text="m.pgp_importForAddress()"></span>
+              <select data-sn-model="pubKey.body.email">
+                <template data-sn-for="addr in pubKey.facts.emails" data-sn-key="addr">
+                  <option data-sn-attr="{value: addr}" data-sn-text="addr"></option>
+                </template>
+              </select>
+            </label>
+          </template>
+          <footer>
+            <button type="button" data-variant="ghost" data-sn-on-click="pubKey = null" data-sn-text="m.event_cancel()"></button>
+            <button type="button" data-icon="shield-check" data-sn-attr="{disabled: !pubKey.body.email}"
+                    data-sn-post="/pgp/key" data-sn-body="pubKey.body"
+                    data-sn-then="upsert(publicKeys, $result); pubKey = null; pubSuccess = m.pgp_publicKeyImported(); closeDialog('pgp-public-key-dialog')"
+                    data-sn-catch="pubError = m.pgp_publicKeyImportError()"
+                    data-sn-text="m.pgp_trustImportButton()"></button>
+          </footer>
+        </div>
+      </template>
+      <template data-sn-else>
+        <form data-layout="stack" data-gap="md"
+              data-sn-call="pgpKeys.publicKey(pubArmored)" data-sn-on-submit="pubError = ''; pubSuccess = ''"
+              data-sn-then="pubKey = $result"
+              data-sn-catch="pubError = loadErrorOr($error, m.pgp_publicKeyImportError())">
+          <label>
+            <span data-sn-text="m.pgp_keyFile()"></span>
+            <input type="file" accept=".asc,.gpg,.pgp,.key,.txt,application/pgp-keys"
+                   data-sn-call="pgpKeys.keyFile($el.files?.[0])" data-sn-trigger="change" data-sn-on-change="pubError = ''"
+                   data-sn-then="pubArmored = $result || pubArmored" data-sn-catch="pubError = loadErrorOr($error, m.pgp_keyFileError())">
+          </label>
+          <label>
+            <span data-sn-text="m.pgp_importArmoredPublicKey()"></span>
+            <textarea rows="6" placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----" data-sn-model="pubArmored"></textarea>
+          </label>
+          <footer>
+            <button type="button" data-variant="ghost" commandfor="pgp-public-key-dialog" command="close" data-sn-text="m.event_cancel()"></button>
+            <button type="submit" data-sn-attr="{disabled: !pubArmored}" data-sn-text="m.pgp_readKeyButton()"></button>
+          </footer>
+        </form>
+      </template>
+    </dialog>
+
+    <!-- Accept a key found in mail: shown with its full fingerprint and user IDs first; trusted only by "Accept" (POST
+         /pgp/key/accept), for the address it was stored for. A key change replaces the key trusted for that address. -->
+    <dialog id="pgp-accept-dialog" closedby="any" aria-labelledby="pgp-accept-title">
+      <header>
+        <h2 id="pgp-accept-title" data-sn-text="m.pgp_acceptHeading()"></h2>
+        <button type="button" commandfor="pgp-accept-dialog" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
+      </header>
+      <template data-sn-if="accepting">
+        <div data-layout="stack" data-gap="md">
+          <p data-sn-text="m.pgp_acceptHint({ email: accepting.key.email })"></p>
+          <template data-sn-if="accepting.change">
+            <p data-callout data-tone="warning" data-sn-text="m.pgp_acceptChangeHint({ email: accepting.key.email })"></p>
+          </template>
+          <pgp-key-facts data-sn-with="{ fingerprint: accepting.facts.fingerprint, userIds: accepting.facts.userIds }"></pgp-key-facts>
+          <footer>
+            <button type="button" data-variant="ghost" commandfor="pgp-accept-dialog" command="close" data-sn-text="m.event_cancel()"></button>
+            <button type="button" data-icon="shield-check"
+                    data-sn-post="/pgp/key/accept" data-sn-body="{ fingerprint: accepting.key.fingerprint, replace: accepting.change }"
+                    data-sn-then="refresh(publicKeys); accepting = null; closeDialog('pgp-accept-dialog')"
+                    data-sn-catch="pubError = m.pgp_keyAcceptError(); closeDialog('pgp-accept-dialog')"
+                    data-sn-text="accepting.change ? m.pgp_acceptNewKey() : m.pgp_acceptKey()"></button>
+          </footer>
+        </div>
+      </template>
     </dialog>
   </div>
 </template>

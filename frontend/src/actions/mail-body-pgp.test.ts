@@ -187,3 +187,13 @@ test('an encrypted message forwarded in a plain one, its ciphertext cut: shown c
   expect(opened.parts.filter((p) => p.kind === 'text').map((p) => p.text.trim())).toEqual(['See the forward below.', 'The report is attached.']);
   expect(opened.parts.some((p) => p.kind === 'encrypted')).toBe(false);
 });
+
+test('a signature by a key found in mail that the user has not accepted is not verified', async () => {
+  const alice = await keys('alice@example.com');
+  whole = await buildProtectedMime(draft({ encrypt: false, sign: true, signingKey: alice.privateKey, attachments: [] }));
+  trusted = [{ fingerprint: alice.publicKey.getFingerprint(), email: 'alice@example.com', armored: alice.publicKey.armor(), is_own: false, source: 'harvested_autocrypt', trust: 'unverified' }];
+  flags = { is_encrypted: false, is_signed: true };
+  const b = await read();
+  expect(b.badges).not.toContain('verified');
+  expect(b.parts.map((p) => p.mark)).toEqual(['unverified']);
+});

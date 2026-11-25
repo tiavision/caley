@@ -31,9 +31,12 @@ let bodyGate: Promise<void> | null = null;
 // what the account dialog's autodiscovery finds
 let discovery: object = { found: false };
 const openedParts: string[] = [];
+// what mail.composeKeys answers, and how often it was asked
+let composeKeysResult: object = { keys: [], pending: [], vault: [], unlocked: [] };
+let composeKeysCalls = 0;
 
 // the app's retry policies: the flag toggles name one (data-sn-retry="flags")
-beforeEach(() => { discovery = { found: false }; bodyGate = null; htmlBody = ''; decrypted = false; partsOverride = null; openedParts.length = 0; localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'], retry: retryPolicies }); });
+beforeEach(() => { composeKeysResult = { keys: [], pending: [], vault: [], unlocked: [] }; composeKeysCalls = 0; discovery = { found: false }; bodyGate = null; htmlBody = ''; decrypted = false; partsOverride = null; openedParts.length = 0; localStorage.clear(); configure({ confirm: () => true, urlSchemes: ['blob:'], retry: retryPolicies }); });
 afterEach(() => configure({ confirm: null as never, urlSchemes: [], retry: null }));
 
 async function show(routes: Record<string, RouteResponse> = {}, pending: { subject: string; files: File[] } | null = null, storage = memoryStorage(),
@@ -84,7 +87,7 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
       openPart: (_ref: unknown, step: string) => { openedParts.push(step); },
       verify: () => {},
       wipe: () => {},
-      composeKeys: async () => ({ keys: [], vault: [], unlocked: [] }),
+      composeKeys: async () => { composeKeysCalls++; return composeKeysResult; },
       autodiscover: async () => discovery,
       send: async () => null,
       forwardFiles: async () => ({ files: [], html: '' }),
@@ -599,6 +602,31 @@ test('reply opens the compose dialog with the quoted message, and sends it', asy
   root.querySelector<HTMLFormElement>('.compose-form')!.requestSubmit();
   await settle();
   expect(root.querySelector<HTMLDialogElement>('#email-compose')!.open).toBe(false);
+});
+
+test('compose shows a recipient\'s key found in mail with its full fingerprint and user IDs, and accepts it only on request', async () => {
+  composeKeysResult = {
+    keys: [], vault: [], unlocked: [],
+    pending: [{ fingerprint: 'ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234', email: 's1@x', userIds: ['Sender 1 <s1@x>'], change: false }],
+  };
+  const { root, settle, requests } = await show({ 'POST /api/pgp/key/accept': (call) => ({ ...(call.body as object), trust: 'trusted' }) });
+  rows(root)[2].click();
+  await settle();
+  rows(root)[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));
+  await settle();
+  const dialog = root.querySelector<HTMLDialogElement>('#email-compose')!;
+  const box = dialog.querySelector('.compose-keys')!;
+  expect(box.textContent).toContain(m.pgp_composeKeyWaiting({ email: 's1@x' }));
+  expect(box.querySelector('.key-fingerprint')!.textContent).toBe('ABCD 1234 ABCD 1234 ABCD 1234 ABCD 1234 ABCD 1234');
+  expect(box.textContent).toContain('Sender 1 <s1@x>');
+  expect(requests.calls.some((c) => c.path === '/api/pgp/key/accept')).toBe(false);
+  const asked = composeKeysCalls;
+  composeKeysResult = { keys: [{ fingerprint: 'ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234', emails: ['s1@x'], is_own: false }], pending: [], vault: [], unlocked: [] };
+  [...box.querySelectorAll('button')].find((b) => b.textContent === m.pgp_acceptKey())!.click();
+  await settle();
+  expect(requests.calls.find((c) => c.path === '/api/pgp/key/accept')!.body).toEqual({ fingerprint: 'ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234', replace: false });
+  expect(composeKeysCalls).toBeGreaterThan(asked);
+  expect(dialog.querySelector('.compose-keys')).toBeNull();
 });
 
 test('leaving the page is refused while the open draft has been edited, with a note; untouched or discarded, it goes', async () => {

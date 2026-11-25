@@ -598,6 +598,14 @@ $phone: 639px;
   border-block-start: 1px solid var(--tm-border);
 }
 
+// the recipients' keys waiting to be accepted: kept short, the body keeps the room
+.compose-keys {
+  flex-shrink: 0;
+  max-block-size: 40vh;
+  overflow: auto;
+  border-block-end: 1px solid var(--tm-border);
+}
+
 .compose-error {
   padding: var(--tm-space-xs) var(--tm-space-md);
 }

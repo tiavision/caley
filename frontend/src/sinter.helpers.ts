@@ -78,6 +78,8 @@ export { calendarValue, importEventDate, importDraft, importSummary } from './li
 export { caldavDraft, caldavBody, withCalendarActive, keyImportError, enrollErrorText } from './lib/settings.ts';
 // Errors of calls that may load openpgp: "reload the page" for a stale one (encryption tab, mail reader, compose).
 export { loadErrorOr } from './lib/errors.ts';
+// Public keys before they are trusted (src/components/pgp-key-facts.html, the settings' key list, the reader, compose).
+export { fingerprintText, keyState, keyStateLabel, keyChanges } from './lib/pgp-keys.ts';
 
 // Mail bodies (src/components/email-reader.html, email-compose.html): sinter-mail's email.parse turns an HTML body into
 // the tree <mail-body> renders (no iframe, nothing to sanitize; built by its script builder).
@@ -90,7 +92,7 @@ export {
   withFlag, flagBody, moveBody, bulkFlagsBody, bulkMoveBody, bulkBody, inTrash, emptyTrashDays, validTrashDays, clampWidth,
   keyWidth, isSentMailbox, messageDateTime, shownAttachments, attachmentUrl, attachmentCount, pgpBadgeLabel, isIconBadge,
   bodyOrigins, bodyImages, partOptions, viewOrigins, replyOf, shownMessages, matching, isThreadCurrent, composeDraft, composeTitle, recipientToken, withRecipient, contactAddresses,
-  recipientHits, senderHits, senderLabel, canSign, canEncrypt, signs, newAccount, editAccount, discovered, accountBody, accountUi, needsPassword, signsInAtServer, jmapRedirectUri,
+  recipientHits, senderHits, senderLabel, canSign, canEncrypt, signs, waitingKeys, newAccount, editAccount, discovered, accountBody, accountUi, needsPassword, signsInAtServer, jmapRedirectUri,
   identityBody, folderDraft, folderBody, subscribed, canPreviewAttachment, folderKind, htmlAddsValue,
   isIcsAttachment, formatDate, humanSize, textSegments, messageKey, senderName,
   // page state (src/lib/mail.ts "Page state") and the keys without a control of their own

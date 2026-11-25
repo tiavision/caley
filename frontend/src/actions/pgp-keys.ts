@@ -1,12 +1,26 @@
-// `pgpKeys` actions: trusted senders' public keys on the settings page (src/components/pgp-settings.html).
+// `pgpKeys` actions: senders' public keys on the settings page (src/components/pgp-settings.html).
 // keyFile() reads a key file for the import dialogs' textareas. Parsing a key needs openpgp (a lazy package, loaded by
-// sinter on the first call); listing, storing and deleting are plain requests in the markup.
+// sinter on the first call); listing, storing, accepting and deleting are plain requests in the markup.
 import { armorBinaryKey } from '../lib/pgp/keyring.ts';
-import { parsePublicKey, publicKeyBody, type PublicKeyBody } from '../lib/pgp/public-keys.ts';
+import { keyFacts, parsePublicKey, publicKeyBody, type StoredPublicKey } from '../lib/pgp/public-keys.ts';
+import type { KeyCandidate, KeyFacts } from '../lib/pgp-keys.ts';
+import { m } from '@tiaforge-ui/sinter/messages';
 
-/** Reads an armored public key: the body of POST /pgp/key that stores it as trusted. */
-export async function publicKey(armored: string): Promise<PublicKeyBody> {
-  return publicKeyBody(await parsePublicKey(armored), 'imported');
+/**
+ * Reads an armored public key for the import dialog, which shows its fingerprint and user IDs before it is stored
+ * (POST /pgp/key, trusted) for the address chosen there: the key's first, unless the user picks another of its own.
+ */
+export async function publicKey(armored: string): Promise<KeyCandidate> {
+  const key = await parsePublicKey(armored);
+  const facts = keyFacts(key);
+  return { body: { ...publicKeyBody(key, 'imported'), email: facts.emails[0] ?? '' }, facts, claimsAddress: true };
+}
+
+/** What a stored key says of itself, for the dialog that accepts it; rejects a record whose armor is another key. */
+export async function storedKeyFacts(record: StoredPublicKey): Promise<KeyFacts> {
+  const facts = keyFacts(await parsePublicKey(record.armored));
+  if (facts.fingerprint !== record.fingerprint.toUpperCase()) throw new Error(m.pgp_storedKeyMismatch());
+  return facts;
 }
 
 /**
