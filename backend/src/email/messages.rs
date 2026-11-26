@@ -62,9 +62,14 @@ pub struct Message {
     pub message_id: Option<String>,
     #[schema(required)]
     pub thread_id: Option<String>,
-    /// the From header
+    /// the From header, for display
     #[schema(required)]
     pub from: Option<String>,
+    /// the sender's address (lowercased): the From header's single mailbox, read from the cached source; null when
+    /// From has no mailbox or more than one, or the source is not cached. What a sender's keys are bound to, never
+    /// `from`. GET /email/message only; null in lists
+    #[schema(required)]
+    pub from_address: Option<String>,
     pub to: Vec<String>,
     pub cc: Vec<String>,
     pub reply_to: Vec<String>,
@@ -273,12 +278,12 @@ pub async fn get_message(
                 email_db::get_message_render_body(&state.db, account.id(), &q.mailbox, q.uid)
                     .await
                     .unwrap_or_default();
-            Json(message_to_json_with_attachments(
-                &msg,
-                &attachments,
-                render_body.as_ref(),
-            ))
-            .into_response()
+            let mut json =
+                message_to_json_with_attachments(&msg, &attachments, render_body.as_ref());
+            json.from_address = load_eml_head(&state.data_dir, account.id(), &q.mailbox, q.uid)
+                .await
+                .and_then(|head| imap_client::single_sender(&head));
+            Json(json).into_response()
         }
         Ok(None) => (StatusCode::NOT_FOUND, "message not found").into_response(),
         Err(e) => {
@@ -319,6 +324,28 @@ async fn load_raw_eml(
         })
         .ok()?;
     Some(raw)
+}
+
+/// The start of a message's cached source, enough for its header section (`imap_client::single_sender` checks that
+/// the section ends in it): decompressed only that far.
+async fn load_eml_head(
+    data_dir: &std::path::Path,
+    account: email_db::MailAccountId<'_>,
+    mailbox: &str,
+    uid: u32,
+) -> Option<Vec<u8>> {
+    use std::io::Read;
+    const LIMIT: u64 = 256 * 1024;
+    let compressed = tokio::fs::read(eml_path(data_dir, account, mailbox, uid))
+        .await
+        .ok()?;
+    let mut head = Vec::new();
+    zstd::stream::read::Decoder::new(compressed.as_slice())
+        .ok()?
+        .take(LIMIT)
+        .read_to_end(&mut head)
+        .ok()?;
+    Some(head)
 }
 
 /// Which message's source, and whether its large attachments are left out.
@@ -1444,6 +1471,7 @@ pub(super) fn message_to_json_with_attachments(
         message_id: m.message_id.clone(),
         thread_id: m.thread_id.clone(),
         from: m.from_addr.clone(),
+        from_address: None,
         to: json_strings(m.to_addrs.as_deref()),
         cc: json_strings(m.cc_addrs.as_deref()),
         reply_to: json_strings(m.reply_to_addrs.as_deref()),
@@ -1555,6 +1583,33 @@ mod tests {
         assert_eq!(json["body_cached"], true);
         assert!(json.get("body_text").is_none() && json.get("body_html").is_none());
         assert!(json.get("raw_eml").is_none());
+        // the sender's address only from the source (GET /email/message), present and null in lists
+        assert!(json["from_address"].is_null());
+    }
+
+    #[tokio::test]
+    async fn the_senders_address_comes_from_the_cached_source_never_the_display_name() {
+        let dir = std::env::temp_dir().join(format!("caley-sender-{}", uuid::Uuid::new_v4()));
+        let account = crate::email_db::MailAccountId::internal("account");
+        let path = crate::email_sync::eml_path(&dir, account, "INBOX", 1);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let raw =
+            b"From: \"<ceo@bank.example>\" <Attacker@Evil.example>\r\nSubject: hi\r\n\r\nbody";
+        std::fs::write(&path, zstd::encode_all(&raw[..], 3).unwrap()).unwrap();
+
+        let head = super::load_eml_head(&dir, account, "INBOX", 1)
+            .await
+            .unwrap();
+        assert_eq!(
+            crate::imap_client::single_sender(&head).as_deref(),
+            Some("attacker@evil.example")
+        );
+        assert!(
+            super::load_eml_head(&dir, account, "INBOX", 2)
+                .await
+                .is_none()
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
 

@@ -551,6 +551,7 @@
   "pgp_trustImportButton": "Trust and import",
   "pgp_importForSender": "It will be trusted for {email}, the sender's address, which the key names.",
   "pgp_keyNotSender": "This key does not name the sender's address ({sender}). It names: {emails}. Choose the address to trust it for.",
+  "pgp_keyNoSender": "This message has no single sender address, so the key is not trusted for the sender. It names: {emails}. Choose the address to trust it for.",
   "pgp_chooseAddress": "Choose an address",
   "pgp_keyNoAddress": "This key names no email address, so it cannot be trusted for one.",
   "pgp_composeKeyWaiting": "A key for {email} was found in mail but has not been accepted: mail to {email} cannot be encrypted until you accept it. Compare its fingerprint with {email} first.",

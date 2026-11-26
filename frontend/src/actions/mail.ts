@@ -8,7 +8,7 @@ import {
   attachmentUrl, canEncrypt, messageKey, missingKeys, type Autodiscovery, type ComposeDraft, type ComposeKeys, type Identity, type Message, type MessageRef,
 } from '../lib/mail.ts';
 import { cidReferencesFromHtml, htmlToPlainText, withInlineImages } from '../lib/mail-html.ts';
-import { htmlAddsValue, isPgpPublicKeyAttachment, bareMailbox, keyHasEmail } from '../lib/mailUtils.ts';
+import { htmlAddsValue, isPgpPublicKeyAttachment, keyHasEmail } from '../lib/mailUtils.ts';
 import {
   addressText, checkedSender, messageBadges, protectedSubject, quotable, readerParts, replyAddresses, replyAllAddresses, senderDiffers, type ReaderPart,
 } from '../lib/mail-reader.ts';
@@ -19,7 +19,7 @@ import type { ImageType, Message as MimeMessage, MimeOptions, Ref } from '@tiavi
 import { getKeys, isUnlocked, onLock, openVault } from '../lib/pgp/session.ts';
 import { autocryptKeys } from '../lib/pgp/autocrypt.ts';
 import {
-  keyFacts, listPublicKeys, parsePublicKey, publicKeyBody, savePublicKey, trustedKeys, type StoredPublicKey,
+  keyFacts, listPublicKeys, parsePublicKey, publicKeyBody, savePublicKey, trustedKeys, type PublicKeyBody, type StoredPublicKey,
 } from '../lib/pgp/public-keys.ts';
 import { attachedKey, keyChanges, type KeyCandidate, type PendingKey } from '../lib/pgp-keys.ts';
 import { knownKeys, settle, type Results } from '../lib/pgp/steps.ts';
@@ -136,35 +136,52 @@ async function bytes(url: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer());
 }
 
-/** Stores the sender's Autocrypt keys; in the background (body() does not wait), errors ignored. */
+/**
+ * Stores the sender's Autocrypt keys, for the sender's address as the server parsed it (Message.from_address; none
+ * without a single sender); in the background (body() does not wait), errors ignored.
+ */
 async function harvestAutocrypt(headers: readonly string[], msg: Message) {
-  if (headers.length === 0) return;
+  const sender = msg.from_address;
+  if (headers.length === 0 || !sender) return;
   const raw = new TextEncoder().encode(`${headers.map((v) => `Autocrypt: ${v}`).join('\r\n')}\r\n\r\n`);
-  for (const key of await autocryptKeys(raw, msg.from)) {
-    await savePublicKey(key, 'harvested_autocrypt', bareMailbox(msg.from)).catch(() => {});
+  for (const key of await autocryptKeys(raw, sender)) {
+    await savePublicKey(key, 'harvested_autocrypt', sender).catch(() => {});
   }
 }
 
 /**
  * The public keys attached to the message that the user does not trust yet, by attachment name: each with its
- * fingerprint and user IDs for the reader's import dialog, offered for the sender's address only when the key names it.
+ * fingerprint and user IDs for the reader's import dialog, offered for the sender's address (Message.from_address) only
+ * when the key names it, with the addresses importing it would change the trusted key of.
  */
 async function importableKeys(msg: Message, files: { filename: string; content_type: string }[]): Promise<Record<string, KeyCandidate>> {
   const candidates = files.filter((f) => isPgpPublicKeyAttachment({ ...f, size: 0, content_id: null }));
   if (candidates.length === 0) return {};
-  const trusted = new Set(trustedKeys(await listPublicKeys()).map((r) => r.fingerprint.toUpperCase()));
+  const stored = await listPublicKeys();
+  const trusted = new Set(trustedKeys(stored).map((r) => r.fingerprint.toUpperCase()));
   const out: Record<string, KeyCandidate> = {};
   for (const c of candidates) {
     try {
       const data = decryptedData.get(c.filename) ?? await bytes(attachmentUrl(msg, c.filename));
       const key = await parsePublicKey(new TextDecoder().decode(data));
-      if (!trusted.has(key.getFingerprint().toUpperCase())) out[c.filename] = attachedKey(publicKeyBody(key, 'message_attachment'), keyFacts(key), bareMailbox(msg.from));
+      if (!trusted.has(key.getFingerprint().toUpperCase())) out[c.filename] = attachedKey(publicKeyBody(key, 'message_attachment'), keyFacts(key), msg.from_address, stored);
     } catch (e) {
       if (e instanceof SinterError) throw e;
       /* only parsed public keys get an import button */
     }
   }
   return out;
+}
+
+/**
+ * Stores a key attached to the open message as trusted, for the address the reader's import dialog chose. A key change
+ * (`replace`: another key is trusted for that address, KeyCandidate.changes) then takes that key's place, as accepting
+ * a changed key in Settings or compose does (POST /pgp/key/accept with `replace`). Answers the key as stored.
+ */
+export async function importKey(body: PublicKeyBody, replace: boolean, ctx: CallContext): Promise<StoredPublicKey> {
+  const stored = await ctx.request('/api/pgp/key', { method: 'POST', body }) as StoredPublicKey;
+  if (!replace) return stored;
+  return await ctx.request('/api/pgp/key/accept', { method: 'POST', body: { fingerprint: stored.fingerprint, replace: true } }) as StoredPublicKey;
 }
 
 // ── Messages read here: sinter-mail's mail.mime, and the OpenPGP steps it asks for ──────────────────────────────
@@ -254,10 +271,10 @@ async function fromRaw(msg: Message, src: Source, out: ReaderBody): Promise<Read
   out.encrypted ||= decrypts.length > 0 || mime.parts.some((p) => p.type === 'encrypted');
   out.decrypted = mime.summary.encrypted !== 'none';
   out.signed ||= mime.steps.some((s) => s.kind !== 'decrypt');
-  out.badges = messageBadges(mime, msg.from);
+  out.badges = messageBadges(mime, msg.from_address ?? null);
   // a verified sender the server's From does not name: the reader shows the one the signature was checked for
   const checked = checkedSender(mime);
-  out.sender = checked && senderDiffers(mime, msg.from) ? addressText(checked) : '';
+  out.sender = checked && senderDiffers(mime, msg.from_address ?? null) ? addressText(checked) : '';
   for (const s of decrypts) {
     const d = r.decrypted[s.id];
     if (d?.status === 'locked') out.locked = true;

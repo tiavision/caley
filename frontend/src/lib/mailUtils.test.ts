@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { canPreviewContentType, senderName } from './mailUtils.ts';
+import { bareMailbox, canPreviewContentType, senderName } from './mailUtils.ts';
+import { parseEnvelopeAddresses } from './addresses.ts';
+
+describe('bareMailbox, parseEnvelopeAddresses', () => {
+  it('take the last angle-address: a name comes first and may look like one', () => {
+    expect(bareMailbox('Ann <Ann@X.example>')).toBe('ann@x.example');
+    expect(bareMailbox('<ceo@bank.example> <attacker@evil.example>')).toBe('attacker@evil.example');
+    expect(bareMailbox('"<ceo@bank.example>" <attacker@evil.example>')).toBe('attacker@evil.example');
+    expect(bareMailbox('ann@x.example')).toBe('ann@x.example');
+    expect(parseEnvelopeAddresses('<ceo@bank.example> <attacker@evil.example>, Bob <bob@x>')).toEqual(['attacker@evil.example', 'bob@x']);
+  });
+});
 
 describe('senderName', () => {
   it('drops the quotes of a quoted display name', () => {

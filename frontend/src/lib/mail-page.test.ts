@@ -311,6 +311,13 @@ describe('public keys before they are trusted', () => {
     const facts = { fingerprint: 'AB', userIds: ['Alice <alice@x>', 'Alice <a@work>'], emails: ['alice@x', 'a@work'] };
     expect(attachedKey(body, facts, 'Alice@X')).toMatchObject({ claimsAddress: true, sender: 'alice@x', body: { email: 'alice@x' } });
     expect(attachedKey(body, facts, 'mallory@evil')).toMatchObject({ claimsAddress: false, sender: 'mallory@evil', body: { email: '' } });
+    expect(attachedKey(body, facts, null)).toMatchObject({ claimsAddress: false, sender: '', body: { email: '' } });   // no single sender
+  });
+  test('an attached key lists the addresses another trusted key is stored for (a key change)', () => {
+    const facts = { fingerprint: 'AB', userIds: ['Alice <alice@x>', 'Alice <a@work>'], emails: ['alice@x', 'a@work'] };
+    const k = (fingerprint: string, email: string, trust = 'trusted', is_own = false) => ({ fingerprint, email, armored: '', is_own, source: 'imported', trust });
+    expect(attachedKey(body, facts, 'alice@x', [k('OLD', 'Alice@X'), k('AB', 'a@work'), k('W', 'a@work', 'unverified'), k('OWN', 'a@work', 'trusted', true)]).changes).toEqual(['alice@x']);
+    expect(attachedKey(body, facts, 'alice@x').changes).toEqual([]);
   });
   test('fingerprints in groups of four; a key\'s state among the stored ones', () => {
     expect(fingerprintText('abcd1234ef')).toBe('ABCD 1234 EF');

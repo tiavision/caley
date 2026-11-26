@@ -364,8 +364,9 @@
       </template>
     </template>
     <!-- Importing an attached public key: its full fingerprint and user IDs are shown first; it is stored
-         (trusted) for the sender's address only when the key names it, else for the address the user picks
-         among the key's own. -->
+         (trusted) for the sender's address (the server's Message.from_address) only when the key names it, else for
+         the address the user picks among the key's own. Another key trusted for that address is a key change, warned
+         of and replaced as in Settings and compose (mail.importKey). -->
     <dialog id="email-key-import" closedby="any" aria-labelledby="email-key-import-title">
       <header>
         <h2 id="email-key-import-title" data-sn-text="m.pgp_importPublicKeyButton()"></h2>
@@ -380,7 +381,9 @@
           </template>
           <template data-sn-else data-sn-if="keyImport.facts.emails.length > 0">
             <p data-callout data-tone="warning"
-               data-sn-text="m.pgp_keyNotSender({ sender: keyImport.sender, emails: keyImport.facts.emails.join(', ') })"></p>
+               data-sn-text="keyImport.sender
+                 ? m.pgp_keyNotSender({ sender: keyImport.sender, emails: keyImport.facts.emails.join(', ') })
+                 : m.pgp_keyNoSender({ emails: keyImport.facts.emails.join(', ') })"></p>
             <label>
               <span data-sn-text="m.pgp_importForAddress()"></span>
               <select data-sn-model="keyImport.body.email">
@@ -394,14 +397,17 @@
           <template data-sn-else>
             <p data-callout data-tone="warning" data-sn-text="m.pgp_keyNoAddress()"></p>
           </template>
+          <template data-sn-if="keyImport.changes.includes(keyImport.body.email)">
+            <p data-callout data-tone="warning" data-sn-text="m.pgp_acceptChangeHint({ email: keyImport.body.email })"></p>
+          </template>
           <template data-sn-if="keyImportError"><p data-tone="danger" role="alert" data-sn-text="keyImportError"></p></template>
           <footer>
             <button type="button" data-variant="ghost" commandfor="email-key-import" command="close" data-sn-text="m.event_cancel()"></button>
             <button type="button" data-icon="shield-check" data-sn-attr="{disabled: !keyImport.body.email}"
-                    data-sn-post="/pgp/key" data-sn-body="keyImport.body"
+                    data-sn-call="mail.importKey(keyImport.body, keyImport.changes.includes(keyImport.body.email))"
                     data-sn-then="keyImported = body ? body.key : ''; keyImport = null; closeDialog('email-key-import'); refresh(body)"
                     data-sn-catch="keyImportError = m.pgp_publicKeyImportError()"
-                    data-sn-text="m.pgp_trustImportButton()"></button>
+                    data-sn-text="keyImport.changes.includes(keyImport.body.email) ? m.pgp_acceptNewKey() : m.pgp_trustImportButton()"></button>
           </footer>
         </div>
       </template>

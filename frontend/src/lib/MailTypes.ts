@@ -68,7 +68,11 @@ export interface Message {
   rowid: number;
   message_id: string | null;
   thread_id: string | null;
+  /** the From header, for display only */
   from: string | null;
+  /** the sender's address (lowercase), the From header's single mailbox as the server parsed it: what a sender's keys
+   * are bound to, never `from`; null without one (or in lists) */
+  from_address: string | null;
   to: string[];
   cc: string[];
   reply_to?: string[];

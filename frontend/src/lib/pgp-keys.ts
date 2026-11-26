@@ -10,17 +10,22 @@ export interface KeyFacts { fingerprint: string; userIds: string[]; emails: stri
 
 /**
  * A key about to be stored as trusted (the settings' import, the reader's import button): the body of POST /pgp/key,
- * what the key says of itself, the address it is offered for (`sender`: the message's sender; '' in Settings) and
- * whether the key names it (`claimsAddress`: then `body.email` is that address; else the user chooses one of
- * `facts.emails`, `body.email` empty until then).
+ * what the key says of itself, the address it is offered for (`sender`: the message's sender, Message.from_address,
+ * '' when it has no single one; '' in Settings), whether the key names it (`claimsAddress`: then `body.email` is that
+ * address; else the user chooses one of `facts.emails`, `body.email` empty until then), and the key's addresses for
+ * which another key is trusted (`changes`: importing it for one is a key change, which replaces that key).
  */
-export interface KeyCandidate { body: PublicKeyBody; facts: KeyFacts; sender: string; claimsAddress: boolean }
+export interface KeyCandidate { body: PublicKeyBody; facts: KeyFacts; sender: string; claimsAddress: boolean; changes: string[] }
 
-/** A key attached to a message from `sender`, to import: for the sender's address only when the key names it. */
-export function attachedKey(body: PublicKeyBody, facts: KeyFacts, sender: string): KeyCandidate {
-  const address = sender.trim().toLowerCase();
+/**
+ * A key attached to a message from `sender` (Message.from_address), to import: for the sender's address only when the
+ * key names it; `all` the stored keys, for its key changes.
+ */
+export function attachedKey(body: PublicKeyBody, facts: KeyFacts, sender: string | null, all: StoredPublicKey[] = []): KeyCandidate {
+  const address = sender?.trim().toLowerCase() ?? '';
   const claimsAddress = !!address && facts.emails.includes(address);
-  return { body: { ...body, email: claimsAddress ? address : '' }, facts, sender: address, claimsAddress };
+  const changes = facts.emails.filter((email) => keyChanges({ fingerprint: facts.fingerprint, email }, all));
+  return { body: { ...body, email: claimsAddress ? address : '' }, facts, sender: address, claimsAddress, changes };
 }
 
 /** A key found in mail that waits to be accepted; `change`: another key is trusted for its address. */

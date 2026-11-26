@@ -48,6 +48,8 @@ let calls: string[] = [];
 let uid = 100;
 let cutOptions: { rootCiphertext?: boolean } = {};   // the stand-in server's mail.cut options
 let serverFrom = 'Alice <alice@example.com>';        // the From the stand-in server reports (Message.from)
+let serverSender: string | null = 'alice@example.com';   // and its sender's address (Message.from_address)
+let posted: { email: string; source: string }[] = [];    // the keys POSTed to /api/pgp/key
 let attachments: { filename: string; content_type: string; size: number; content_id: null; bytes: string }[] = [];   // the server's list
 
 beforeEach(() => {
@@ -55,6 +57,8 @@ beforeEach(() => {
   trusted = [];
   cutOptions = {};
   serverFrom = 'Alice <alice@example.com>';
+  serverSender = 'alice@example.com';
+  posted = [];
   attachments = [];
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     const range = new Headers(init?.headers).get('Range');
@@ -62,12 +66,13 @@ beforeEach(() => {
     if (url.startsWith('/api/email/message?')) {
       return Response.json({
         uid: Number(new URL(url, 'http://x').searchParams.get('uid')), account_id: 'work', mailbox: 'INBOX', rowid: 1,
-        message_id: null, thread_id: null, from: serverFrom, to: ['bob@example.com'], cc: [], subject: '...',
+        message_id: null, thread_id: null, from: serverFrom, from_address: serverSender, to: ['bob@example.com'], cc: [], subject: '...',
         sent_at: 1, flags: [], has_attachments: true, body_cached: true, is_read: true, is_flagged: false,
         attachments: attachments.map(({ bytes: _, ...a }) => a), ...flags,
       });
     }
     if (url === '/api/pgp/keys') return Response.json(trusted);
+    if (url === '/api/pgp/key' && init?.method === 'POST') { posted.push(JSON.parse(String(init.body))); return Response.json({}); }
     if (url.startsWith('/api/email/attachment?')) return new Response(attachments.find((a) => url.endsWith(`filename=${encodeURIComponent(a.filename)}`))?.bytes ?? '', { status: 200 });
     if (!url.startsWith('/api/email/message/raw?')) return new Response('', { status: 404 });
     if (range) {
@@ -210,11 +215,13 @@ test('verified for another sender than the server reports: the reader gets the c
   trusted = [{ fingerprint: alice.publicKey.getFingerprint(), email: 'alice@example.com', armored: alice.publicKey.armor(), is_own: false, source: 'imported', trust: 'trusted' }];
   flags = { is_encrypted: false, is_signed: true };
   serverFrom = 'Mallory <mallory@evil.example>';                      // the server parsed another From than the reader
+  serverSender = 'mallory@evil.example';
   const b = await read();
   expect(b.badges).toEqual(['verified', 'from_differs']);
   expect(b.sender).toBe('Alice <alice@example.com>');
 
   serverFrom = 'alice@example.com';
+  serverSender = 'alice@example.com';
   const same = await read();
   expect(same.badges).toEqual(['verified']);
   expect(same.sender).toBe('');
@@ -239,4 +246,59 @@ test('an attached public key is offered with its fingerprint and user IDs, for t
   ];
   const again = await read();
   expect(Object.keys(again.importable)).toEqual(['alice.asc']);
+});
+
+// A display name that holds an angle-address (`"<ceo@bank.example>" <attacker@evil.example>`): the server sends the
+// sender's address apart (Message.from_address), and only that is what keys are bound to.
+const forgedFrom = '"<ceo@bank.example>" <attacker@evil.example>';
+async function fromAttacker(headers: string[]) {
+  return new TextEncoder().encode([`From: ${forgedFrom}`, 'To: bob@example.com', 'Subject: keys', ...headers, 'Content-Type: text/plain', '', 'Hi.', ''].join('\r\n'));
+}
+const autocrypt = (addr: string, key: openpgp.PublicKey) =>
+  `Autocrypt: addr=${addr}; keydata=${Buffer.from(key.write()).toString('base64')}`;
+const settled = () => new Promise((resolve) => setTimeout(resolve, 50));   // harvestAutocrypt runs in the background
+
+test('a display name naming another address harvests no Autocrypt key and offers no attached key for that address', async () => {
+  const ceo = await keys('ceo@bank.example');
+  whole = await fromAttacker([autocrypt('ceo@bank.example', ceo.publicKey)]);
+  flags = { is_encrypted: false, is_signed: false };
+  serverFrom = forgedFrom;
+  serverSender = 'attacker@evil.example';
+  attachments = [{ filename: 'ceo.asc', content_type: 'application/pgp-keys', size: 1, content_id: null, bytes: ceo.publicKey.armor() }];
+  const b = await read();
+  await settled();
+  expect(posted).toEqual([]);
+  expect(b.importable['ceo.asc']).toMatchObject({ claimsAddress: false, sender: 'attacker@evil.example', body: { email: '' } });
+});
+
+test('the sender\'s own Autocrypt key is harvested for its address; none without a single sender address', async () => {
+  const attacker = await keys('attacker@evil.example');
+  whole = await fromAttacker([autocrypt('attacker@evil.example', attacker.publicKey)]);
+  flags = { is_encrypted: false, is_signed: false };
+  serverFrom = forgedFrom;
+  serverSender = 'attacker@evil.example';
+  await read();
+  await settled();
+  expect(posted).toMatchObject([{ email: 'attacker@evil.example', source: 'harvested_autocrypt' }]);
+
+  posted = [];
+  serverSender = null;                                                 // From with no mailbox or more than one
+  attachments = [{ filename: 'a.asc', content_type: 'application/pgp-keys', size: 1, content_id: null, bytes: attacker.publicKey.armor() }];
+  const b = await read();
+  await settled();
+  expect(posted).toEqual([]);
+  expect(b.importable['a.asc']).toMatchObject({ claimsAddress: false, sender: '', body: { email: '' } });
+});
+
+test('an attached key for an address another trusted key is stored for: its key change is listed', async () => {
+  const alice = await keys('alice@example.com');
+  const old = await keys('alice@example.com');
+  whole = new TextEncoder().encode(['From: Alice <alice@example.com>', 'To: bob@example.com', 'Subject: keys', 'Content-Type: text/plain', '', 'New key.', ''].join('\r\n'));
+  flags = { is_encrypted: false, is_signed: false };
+  attachments = [{ filename: 'alice.asc', content_type: 'application/pgp-keys', size: 1, content_id: null, bytes: alice.publicKey.armor() }];
+  trusted = [{ fingerprint: old.publicKey.getFingerprint(), email: 'alice@example.com', armored: old.publicKey.armor(), is_own: false, source: 'imported', trust: 'trusted' }];
+  const b = await read();
+  expect(b.importable['alice.asc']).toMatchObject({ claimsAddress: true, changes: ['alice@example.com'] });
+  trusted = [];
+  expect((await read()).importable['alice.asc']!.changes).toEqual([]);
 });

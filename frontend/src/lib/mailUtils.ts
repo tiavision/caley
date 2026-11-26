@@ -69,8 +69,12 @@ export function isIcsAttachment(attachment: Attachment): boolean {
 
 // ── Email address helpers ─────────────────────────────────────────────────────
 
+/**
+ * The address of a display address (`Name <addr>`), lowercase: the last angle-address, as a name comes first. For
+ * display and recipients only; a sender's keys are bound to Message.from_address, never to a parsed display string.
+ */
 export function bareMailbox(value: string | null): string {
-  const match = /<([^<>]+)>/.exec(value ?? '');
+  const match = /<([^<>]+)>[^<>]*$/.exec(value ?? '');
   return (match?.[1] ?? value ?? '').trim().toLowerCase();
 }
 

@@ -4881,6 +4881,7 @@
           "message_id",
           "thread_id",
           "from",
+          "from_address",
           "to",
           "cc",
           "reply_to",
@@ -4928,7 +4929,14 @@
               "string",
               "null"
             ],
-            "description": "the From header"
+            "description": "the From header, for display"
+          },
+          "from_address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the sender's address (lowercased): the From header's single mailbox, read from the cached source; null when\nFrom has no mailbox or more than one, or the source is not cached. What a sender's keys are bound to, never\n`from`. GET /email/message only; null in lists"
           },
           "to": {
             "type": "array",
