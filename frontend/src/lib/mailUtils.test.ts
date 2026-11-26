@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { senderName } from './mailUtils.ts';
+import { canPreviewContentType, senderName } from './mailUtils.ts';
 
 describe('senderName', () => {
   it('drops the quotes of a quoted display name', () => {
@@ -19,5 +19,22 @@ describe('senderName', () => {
 
   it('falls back to the address for an empty quoted name', () => {
     expect(senderName('"" <jane@example.com>')).toBe('jane@example.com');
+  });
+});
+
+describe('canPreviewContentType', () => {
+  it('previews the types the server shows, by essence', () => {
+    for (const type of ['application/pdf', 'APPLICATION/PDF; version=1.7', ' text/plain; charset=utf-8', 'image/png',
+      'image/avif', 'audio/mpeg', 'Video/MP4', 'video/quicktime']) {
+      expect(canPreviewContentType(type), type).toBe(true);
+    }
+  });
+
+  it('downloads anything else', () => {
+    for (const type of ['audio/mpeg,text/html', 'video/mp4 , text/html', 'text/plain,text/html', 'audio/x\ttext/html',
+      'text/html', 'image/svg+xml', 'application/javascript', 'text/javascript', 'text/css', 'audio/x-unknown',
+      'audio/', 'video/', 'application/octet-stream', '', null, undefined]) {
+      expect(canPreviewContentType(type), String(type)).toBe(false);
+    }
   });
 });

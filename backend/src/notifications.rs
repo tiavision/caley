@@ -9,11 +9,10 @@
 //!
 //! The endpoints are URLs a signed-in user gives, so the server only posts to public addresses: an endpoint
 //! whose host is (or resolves only to) a loopback, private, link-local, shared or other non-public address
-//! is refused when subscribed, and sending resolves through `PublicOnly`, so a name that later resolves to
-//! such an address (DNS rebinding) gets nothing; redirects are not followed. `NOTIFICATIONS_ALLOW_PRIVATE`
-//! allows them, for a push service (e.g. ntfy) on the server's own network.
+//! is refused when subscribed, and sending resolves through `PublicOnly` (public_net.rs), so a name that
+//! later resolves to such an address (DNS rebinding) gets nothing; redirects are not followed.
+//! `NOTIFICATIONS_ALLOW_PRIVATE` allows them, for a push service (e.g. ntfy) on the server's own network.
 
-use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -34,6 +33,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use crate::api::ApiError;
 use crate::db::Db;
 use crate::oidc::{AppState, CurrentUser};
+use crate::public_net::{PublicOnly, is_public, literal_host_is_public, literal_ip};
 use crate::sse::SseMessage;
 
 /// How long a push service keeps a notification for a device that is offline.
@@ -220,10 +220,8 @@ impl Notifier {
             .map_err(|e| failed(e.to_string()))?;
         let url = url::Url::parse(endpoint).map_err(|e| failed(e.to_string()))?;
         // an address in the URL is not resolved (PublicOnly): checked here
-        if let Some(url::Host::Ipv4(_) | url::Host::Ipv6(_)) = url.host() {
-            if !self.allow_private && !url.host_str().and_then(literal_ip).is_some_and(is_public) {
-                return Err(failed("not a public address".into()));
-            }
+        if !self.allow_private && !literal_host_is_public(&url) {
+            return Err(failed("not a public address".into()));
         }
         let authorization = vapid_authorization(
             vapid,
@@ -285,66 +283,6 @@ impl Notifier {
 enum Delivery {
     Gone,
     Failed(String),
-}
-
-/// Resolves the push services' names to their public addresses only (see the module).
-struct PublicOnly;
-
-impl reqwest::dns::Resolve for PublicOnly {
-    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
-        let host = name.as_str().to_owned();
-        Box::pin(async move {
-            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
-                .await?
-                .filter(|addr| is_public(addr.ip()))
-                .collect();
-            if addrs.is_empty() {
-                return Err(format!("{host}: no public address").into());
-            }
-            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
-        })
-    }
-}
-
-/// `host` as an address, if it is one (an IPv6 one in brackets, as URLs write it).
-fn literal_ip(host: &str) -> Option<IpAddr> {
-    host.trim_start_matches('[')
-        .trim_end_matches(']')
-        .parse()
-        .ok()
-}
-
-/// Whether `ip` is on the public internet: not loopback, private (RFC 1918, IPv6 unique local), link-local,
-/// shared (100.64/10), unspecified, broadcast, multicast, benchmarking or documentation; IPv4 in IPv6 as IPv4.
-fn is_public(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            let [a, b, ..] = v4.octets();
-            !(v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-                || v4.is_multicast()
-                || v4.is_documentation()
-                || a == 0
-                || (a == 100 && (64..128).contains(&b))
-                || (a == 198 && (18..20).contains(&b))
-                || a >= 240)
-        }
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_public(IpAddr::V4(v4));
-            }
-            let first = v6.segments()[0];
-            !(v6.is_loopback()
-                || v6.is_unspecified()
-                || v6.is_multicast()
-                || (first & 0xfe00) == 0xfc00
-                || (first & 0xffc0) == 0xfe80
-                || (first == 0x2001 && v6.segments()[1] == 0x0db8))
-        }
-    }
 }
 
 /// Whether the server may post to `endpoint`'s host: a public address, or a name with one.
@@ -788,33 +726,6 @@ mod tests {
                 "url": "/mail/view/?account_id=work&mailbox=INBOX&uid=42",
             })
         );
-    }
-
-    #[test]
-    fn public_addresses() {
-        for ip in ["93.184.215.14", "2606:4700::6810:84e5", "::ffff:8.8.8.8"] {
-            assert!(is_public(ip.parse().unwrap()), "{ip}");
-        }
-        for ip in [
-            "127.0.0.1",
-            "10.1.2.3",
-            "172.16.0.1",
-            "192.168.178.20",
-            "169.254.169.254",
-            "100.64.0.1",
-            "0.0.0.0",
-            "255.255.255.255",
-            "224.0.0.1",
-            "198.18.0.1",
-            "::1",
-            "::",
-            "fd00::1",
-            "fe80::1",
-            "::ffff:127.0.0.1",
-            "2001:db8::1",
-        ] {
-            assert!(!is_public(ip.parse().unwrap()), "{ip}");
-        }
     }
 
     /// Without NOTIFICATIONS_ALLOW_PRIVATE nothing is posted to a private address: not by its name (the

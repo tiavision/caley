@@ -22,7 +22,9 @@ mod notifications;
 mod oidc;
 mod oidc_tokens;
 mod pgp;
+mod public_net;
 mod public_origin;
+mod raster_image;
 mod reminders;
 mod search;
 mod session_store;
@@ -35,7 +37,7 @@ mod xml_util;
 
 use axum::Router;
 use axum::extract::Request;
-use axum::http::HeaderValue;
+use axum::http::{HeaderValue, header};
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::{get, post};
@@ -182,6 +184,7 @@ async fn main() -> anyhow::Result<()> {
 
     let session_store = SqliteStore::new(db.clone());
     session_store.migrate().await?;
+    session_store.spawn_cleanup();
 
     // Build the WebAuthn instance from APP_BASE_URL (rp_id = host, origin = full URL).
     let webauthn = {
@@ -205,6 +208,10 @@ async fn main() -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!("Webauthn build error: {e:?}"))?,
         )
     };
+
+    if let (true, Some(warning)) = (use_oidc, args.oidc_user_id_claim.warning()) {
+        eprintln!("Warning: {warning}");
+    }
 
     let mut token_url: Option<String> = None;
     let oidc_provider: Option<Arc<OidcProvider>> = if use_oidc {
@@ -392,7 +399,8 @@ async fn main() -> anyhow::Result<()> {
 /// are JSON data, which is not executed), so `script-src 'self'`; inline `style=` attributes require
 /// `style-src 'unsafe-inline'`. Email HTML is parsed in the page by sinter-mail and rendered as
 /// part of it (no iframe, so `frame-src 'none'`); its images are proxied to same-origin or `data:`,
-/// both covered below.
+/// both covered below. A response with a policy of its own keeps it (an attachment shown in the
+/// browser is sandboxed, email/attachments.rs); a handler that sets one must keep it as strict.
 async fn security_headers(req: Request, next: Next) -> Response {
     const CSP: &str = "default-src 'self'; \
         base-uri 'self'; \
@@ -407,7 +415,12 @@ async fn security_headers(req: Request, next: Next) -> Response {
 
     let mut resp = next.run(req).await;
     let h = resp.headers_mut();
-    h.insert("content-security-policy", HeaderValue::from_static(CSP));
+    if !h.contains_key(header::CONTENT_SECURITY_POLICY) {
+        h.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(CSP),
+        );
+    }
     h.insert(
         "x-content-type-options",
         HeaderValue::from_static("nosniff"),
@@ -418,4 +431,38 @@ async fn security_headers(req: Request, next: Next) -> Response {
         HeaderValue::from_static("strict-origin-when-cross-origin"),
     );
     resp
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{Router, body::Body, http::Request, middleware, routing::get};
+    use tower::ServiceExt;
+
+    /// Every response gets the app's policy, unless it has its own.
+    #[tokio::test]
+    async fn a_responses_own_policy_is_kept() {
+        let app = Router::new()
+            .route("/plain", get(|| async { "x" }))
+            .route(
+                "/own",
+                get(|| async { ([("content-security-policy", "sandbox")], "x") }),
+            )
+            .layer(middleware::from_fn(super::security_headers));
+        let csp = |path: &'static str| {
+            let app = app.clone();
+            async move {
+                let response = app
+                    .oneshot(Request::get(path).body(Body::empty()).unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+                response.headers()["content-security-policy"]
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+            }
+        };
+        assert!(csp("/plain").await.contains("script-src 'self'"));
+        assert_eq!(csp("/own").await, "sandbox");
+    }
 }

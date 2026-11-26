@@ -365,14 +365,15 @@ pub struct PhotoQuery {
     pub v: Option<String>,
 }
 
-/// The contact's embedded photo (raster images only, never SVG or a remote URL). With `v` the
-/// current version it is cached for good, else revalidated by `ETag` (`If-None-Match` → 304).
+/// The contact's embedded photo, if its bytes are a PNG, JPEG, GIF, WebP or AVIF: served as that type
+/// (never SVG, the declared type or a remote URL). With `v` the current version it is cached for good,
+/// else revalidated by `ETag` (`If-None-Match` → 304).
 #[utoipa::path(
     get,
     path = "/contact/photo",
     params(PhotoQuery),
     responses(
-        (status = 200, body = crate::api::Binary, content_type = "image/*", description = "the photo, in its own image type"),
+        (status = 200, body = crate::api::Binary, content_type = "image/*", description = "the photo, as the image type its bytes are"),
         (status = 304, description = "unchanged (`If-None-Match`)"),
         (status = 404, description = "no such contact, or no photo served")
     )
@@ -405,48 +406,50 @@ pub async fn get_contact_photo(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    // Parse data URI: data:<mime>;base64,<data>
-    if let Some(rest) = photo.strip_prefix("data:") {
-        if let Some((meta, b64)) = rest.split_once(',') {
-            let mime = meta.split(';').next().unwrap_or("application/octet-stream");
-            let mime_lower = mime.to_ascii_lowercase();
-            // The MIME comes from untrusted contact data. Restrict to non-SVG
-            // images so a text/html or image/svg+xml payload can't render as a
-            // same-origin document if the URL is opened directly.
-            if !mime_lower.starts_with("image/") || mime_lower.contains("svg") {
-                return StatusCode::NOT_FOUND.into_response();
+    if let Some((image, bytes)) = photo_image(&photo) {
+        {
+            // The URL names the version (`v` = photo_rev): a changed photo gets another URL, so the
+            // browser keeps this one. Without it (or with an old one), revalidate by ETag.
+            let rev = photo_rev(Some(&photo)).unwrap_or_default();
+            let etag = format!("\"{rev}\"");
+            let cache = if q.v.as_deref() == Some(rev.as_str()) {
+                "private, max-age=31536000, immutable"
+            } else {
+                "private, no-cache"
+            };
+            let fresh = headers
+                .get(header::IF_NONE_MATCH)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| v.split(',').any(|t| t.trim() == etag));
+            let common = [
+                (header::CACHE_CONTROL, cache.to_string()),
+                (header::ETAG, etag),
+                (
+                    header::HeaderName::from_static("x-content-type-options"),
+                    "nosniff".to_string(),
+                ),
+            ];
+            if fresh {
+                return (StatusCode::NOT_MODIFIED, common).into_response();
             }
-            if let Ok(bytes) = BASE64_STANDARD.decode(b64.trim()) {
-                // The URL names the version (`v` = photo_rev): a changed photo gets another URL, so the
-                // browser keeps this one. Without it (or with an old one), revalidate by ETag.
-                let rev = photo_rev(Some(&photo)).unwrap_or_default();
-                let etag = format!("\"{rev}\"");
-                let cache = if q.v.as_deref() == Some(rev.as_str()) {
-                    "private, max-age=31536000, immutable"
-                } else {
-                    "private, no-cache"
-                };
-                let fresh = headers
-                    .get(header::IF_NONE_MATCH)
-                    .and_then(|v| v.to_str().ok())
-                    .is_some_and(|v| v.split(',').any(|t| t.trim() == etag));
-                let common = [
-                    (header::CACHE_CONTROL, cache.to_string()),
-                    (header::ETAG, etag),
-                    (
-                        header::HeaderName::from_static("x-content-type-options"),
-                        "nosniff".to_string(),
-                    ),
-                ];
-                if fresh {
-                    return (StatusCode::NOT_MODIFIED, common).into_response();
-                }
-                return (common, [(header::CONTENT_TYPE, mime.to_string())], bytes).into_response();
-            }
+            return (
+                common,
+                [(header::CONTENT_TYPE, image.content_type())],
+                bytes,
+            )
+                .into_response();
         }
     }
 
     StatusCode::NOT_FOUND.into_response()
+}
+
+/// An embedded photo (`data:<mime>;base64,<data>`) and the image type its bytes are. The mime is the
+/// vCard's (untrusted): only bytes that are a raster image are served, so nothing active renders same-origin.
+fn photo_image(photo: &str) -> Option<(crate::raster_image::AllowedImage, Vec<u8>)> {
+    let (_, b64) = photo.strip_prefix("data:")?.split_once(',')?;
+    let bytes = BASE64_STANDARD.decode(b64.trim()).ok()?;
+    Some((crate::raster_image::detect_allowed_image(&bytes)?, bytes))
 }
 
 /// The contact's vCard as stored on the server.
@@ -500,6 +503,25 @@ mod photo_tests {
         assert!(!servable_photo("data:image/svg+xml;base64,AAAA"));
         assert!(!servable_photo("data:text/html;base64,AAAA"));
         assert!(!servable_photo("https://example.com/a.jpg"));
+    }
+
+    #[test]
+    fn photos_are_served_as_their_bytes_are() {
+        use crate::raster_image::{AllowedImage, tests::PNG};
+        let png = BASE64_STANDARD.encode(PNG);
+        let html = BASE64_STANDARD.encode("<!doctype html><script>alert(1)</script>");
+        for declared in ["image/png", "image/jpeg", "image/svg+xml", "text/html"] {
+            let served = photo_image(&format!("data:{declared};base64,{png}"));
+            assert_eq!(
+                served.map(|(t, _)| t),
+                Some(AllowedImage::Png),
+                "{declared}"
+            );
+        }
+        for declared in ["image/png", "image/jpeg", "image/gif", "text/html"] {
+            assert!(photo_image(&format!("data:{declared};base64,{html}")).is_none());
+        }
+        assert!(photo_image("data:image/png;base64,not base64!").is_none());
     }
 
     #[test]

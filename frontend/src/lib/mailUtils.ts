@@ -2,19 +2,33 @@ import type { Attachment, BodySegment, FolderKind, Message, ThreadNode, ThreadTr
 
 // ── Attachment type checks ────────────────────────────────────────────────────
 
+/** The declared types the server shows an attachment as (`serve_as` and `MEDIA_TYPES`, backend
+ * email/attachments.rs), compared by essence exactly; anything else is downloaded. The server also shows an
+ * image by its bytes whatever was declared, and downloads a declared image, PDF or text that is not one. */
+const PREVIEW_TYPES = new Set([
+  'application/pdf',
+  'text/plain',
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/avif',
+  'audio/aac',
+  'audio/flac',
+  'audio/mp4',
+  'audio/mpeg',
+  'audio/ogg',
+  'audio/wav',
+  'audio/webm',
+  'audio/x-wav',
+  'video/mp4',
+  'video/ogg',
+  'video/quicktime',
+  'video/webm',
+]);
+
 export function canPreviewContentType(value: string | null | undefined): boolean {
-  const contentType = value?.split(';', 1)[0].trim().toLowerCase() ?? '';
-  return [
-    'application/pdf',
-    'text/plain',
-    'image/png',
-    'image/jpeg',
-    'image/gif',
-    'image/webp',
-    'image/avif',
-  ].includes(contentType) ||
-    (contentType.startsWith('audio/') && contentType.length > 'audio/'.length) ||
-    (contentType.startsWith('video/') && contentType.length > 'video/'.length);
+  return PREVIEW_TYPES.has(value?.split(';', 1)[0].trim().toLowerCase() ?? '');
 }
 
 export function canPreviewAttachment(attachment: Attachment): boolean {
