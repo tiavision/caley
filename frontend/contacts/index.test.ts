@@ -75,10 +75,25 @@ test('lists the contacts by letter, with avatar, first email and phone, org', as
   const [first, second] = root.querySelectorAll('main article');
   expect(first!.querySelector('[data-avatar]')!.textContent!.trim()).toBe('A');
   expect(first!.querySelector('a[href="mailto:ada@example.com"]')).not.toBeNull();
-  expect(first!.querySelector('a[href="tel:+44 1"]')).not.toBeNull();
+  expect(first!.querySelector('a[href="tel:+44%201"]')).not.toBeNull();
   expect(first!.querySelector('small[data-muted]')!.textContent).toBe('Engines Ltd');
   expect(second!.querySelector('[data-avatar] img')!.getAttribute('src')).toBe('/api/contact/photo?account_id=acc&uid=2&addressbook_href=%2Fab%2Fpersonal%2F');
   expect(root.querySelector('button[popovertarget="ab-menu"]')).toBeNull();
+});
+
+test("mailto: and tel: links encode a vCard's value whole: a ? or & in it prefills nothing", async () => {
+  const eve = contact('4', 'Eve', {
+    emails: [{ value: 'bob@x.org?bcc=evil@e.org&body=hi', type_label: 'work' }, { value: 'a+b@x.org', type_label: 'home' }],
+    phones: [{ value: '+49 30 123;ext=9?x#1', type_label: 'mobile' }],
+  });
+  const r = await show({ 'GET /api/contacts': { addressbooks: [book('/ab/personal/', 'Personal')], contacts: [eve] } });
+  const card = r.root.querySelector('main article')!;
+  expect(card.querySelector('a')!.getAttribute('href')).toBe('mailto:bob@x.org%3Fbcc%3Devil@e.org%26body%3Dhi');
+  expect(card.querySelectorAll('a')[1]!.getAttribute('href')).toBe('tel:+49%2030%20123%3Bext%3D9%3Fx%231');
+  const dialog = await openDetail(r, 'Eve');
+  expect([...dialog.querySelectorAll('dd a')].map((a) => a.getAttribute('href'))).toEqual([
+    'mailto:bob@x.org%3Fbcc%3Devil@e.org%26body%3Dhi', 'mailto:a%2Bb@x.org', 'tel:+49%2030%20123%3Bext%3D9%3Fx%231',
+  ]);
 });
 
 test('filters by name, email, org or phone', async () => {

@@ -95,10 +95,10 @@
                   <button type="button" data-stretch data-variant="link" data-truncate
                           commandfor="contact-detail" command="show-modal" data-sn-on-click="sel = c"><strong data-sn-text="c.fn_name || '—'"></strong></button>
                   <template data-sn-if="c.emails[0]">
-                    <small data-truncate><a data-sn-attr="{href: 'mailto:' + c.emails[0].value}" data-sn-text="c.emails[0].value"></a></small>
+                    <small data-truncate><a data-sn-attr="{href: mailtoHref(c.emails[0].value)}" data-sn-text="c.emails[0].value"></a></small>
                   </template>
                   <template data-sn-if="c.phones[0]">
-                    <small data-truncate><a data-sn-attr="{href: 'tel:' + c.phones[0].value}" data-sn-text="c.phones[0].value"></a></small>
+                    <small data-truncate><a data-sn-attr="{href: telHref(c.phones[0].value)}" data-sn-text="c.phones[0].value"></a></small>
                   </template>
                   <template data-sn-if="c.org">
                     <small data-muted data-truncate data-sn-text="c.org"></small>
@@ -154,7 +154,7 @@
                 <template data-sn-for="(e, i) in c.emails" data-sn-key="i">
                   <span data-layout="row" data-gap="sm" data-wrap="none">
                     <span data-badge data-sn-text="types[e.type_label] ?? e.type_label"></span>
-                    <a data-truncate data-sn-attr="{href: 'mailto:' + e.value}" data-sn-text="e.value"></a>
+                    <a data-truncate data-sn-attr="{href: mailtoHref(e.value)}" data-sn-text="e.value"></a>
                   </span>
                 </template>
               </dd>
@@ -166,7 +166,7 @@
                 <template data-sn-for="(p, i) in c.phones" data-sn-key="i">
                   <span data-layout="row" data-gap="sm" data-wrap="none">
                     <span data-badge data-sn-text="types[p.type_label] ?? p.type_label"></span>
-                    <a data-sn-attr="{href: 'tel:' + p.value}" data-sn-text="p.value"></a>
+                    <a data-sn-attr="{href: telHref(p.value)}" data-sn-text="p.value"></a>
                   </span>
                 </template>
               </dd>

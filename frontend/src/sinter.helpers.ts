@@ -30,6 +30,8 @@ export {
   contactPhotoUrl,
   addressQuery,
   addressLines,
+  mailtoHref,
+  telHref,
   newDraft,
   editDraft,
   draftBody,
