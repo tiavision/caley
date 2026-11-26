@@ -5884,7 +5884,8 @@
           "has_caldav",
           "oidc_enabled",
           "map_url",
-          "oidc_signed_in"
+          "oidc_signed_in",
+          "logout_token"
         ],
         "properties": {
           "display_name": {
@@ -5909,6 +5910,10 @@
           "oidc_signed_in": {
             "type": "boolean",
             "description": "whether the user's OIDC sign-in is kept for mail accounts that sign in with it (JMAP)"
+          },
+          "logout_token": {
+            "type": "string",
+            "description": "the session's logout token: `GET /logout?t=<token>` ends the session, nothing else does"
           }
         }
       },

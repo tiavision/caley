@@ -29,6 +29,7 @@ pub async fn demo_login(State(state): State<AppState>, session: Session) -> Resp
             .into_response();
     }
     let _ = session.insert("user_id", demo_user_id).await;
+    crate::oidc::new_logout_token(&session).await;
     let _ = session.insert("display_name", "Demo User").await;
     state.sync_manager.ensure_task_for(demo_user_id);
     // where the login page goes next (landing.rs)

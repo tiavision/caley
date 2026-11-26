@@ -196,6 +196,8 @@ pub struct User {
     pub map_url: String,
     /// whether the user's OIDC sign-in is kept for mail accounts that sign in with it (JMAP)
     pub oidc_signed_in: bool,
+    /// the session's logout token: `GET /logout?t=<token>` ends the session, nothing else does
+    pub logout_token: String,
 }
 
 /// What the login page offers.
@@ -213,7 +215,12 @@ pub struct AuthConfig {
     path = "/user",
     responses((status = 200, body = User), (status = 401, body = crate::api::ApiError))
 )]
-pub async fn user_info(State(state): State<AppState>, user: CurrentUser) -> impl IntoResponse {
+pub async fn user_info(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    session: Session,
+) -> impl IntoResponse {
+    let logout_token = logout_token(&session).await;
     let display_name = user.display_name.unwrap_or_else(|| user.user_id.clone());
 
     let has_settings = db::get_settings(&state.db, &user.user_id, &state.encryption_key)
@@ -232,6 +239,7 @@ pub async fn user_info(State(state): State<AppState>, user: CurrentUser) -> impl
         has_caldav: has_settings,
         oidc_enabled: state.oidc_enabled,
         map_url: state.map_url,
+        logout_token,
     })
 }
 
@@ -252,6 +260,49 @@ fn from_this_site(headers: &axum::http::HeaderMap) -> bool {
         .is_none_or(|v| v == "same-origin" || v == "none")
 }
 
+const LOGOUT_TOKEN: &str = "logout_token";
+
+/// The session's logout token (32 random bytes, base64url), made on first need and kept in the session: what
+/// `GET /logout` must be given. A link in a mail is on the app's own page (same-origin), so only a secret the
+/// app's pages know tells the app's logout link from a mail's.
+pub async fn logout_token(session: &Session) -> String {
+    if let Some(token) = session.get::<String>(LOGOUT_TOKEN).await.ok().flatten() {
+        return token;
+    }
+    use base64::Engine;
+    let token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>());
+    if let Err(e) = session.insert(LOGOUT_TOKEN, &token).await {
+        eprintln!("[auth] logout token not kept: {e}");
+    }
+    token
+}
+
+/// A new logout token for a sign-in: none made before it counts.
+pub async fn new_logout_token(session: &Session) {
+    let _ = session.remove::<String>(LOGOUT_TOKEN).await;
+    logout_token(session).await;
+}
+
+/// Whether `given` is the session's logout token, compared in constant time.
+fn is_logout_token(kept: Option<&str>, given: Option<&str>) -> bool {
+    let (Some(kept), Some(given)) = (kept, given) else {
+        return false;
+    };
+    let (kept, given) = (kept.as_bytes(), given.as_bytes());
+    !kept.is_empty()
+        && kept.len() == given.len()
+        && kept
+            .iter()
+            .zip(given)
+            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+            == 0
+}
+
+#[derive(serde::Deserialize)]
+pub struct LogoutQuery {
+    t: Option<String>,
+}
+
 /// Unified logout. For OIDC sessions, performs RP-initiated logout using the
 /// end_session_endpoint from discovery. Other sessions (the demo's) just get a flush.
 pub async fn logout_handler(
@@ -259,10 +310,13 @@ pub async fn logout_handler(
     RequestOrigin(origin): RequestOrigin,
     session: Session,
     headers: axum::http::HeaderMap,
+    Query(query): Query<LogoutQuery>,
 ) -> Response {
     // A GET that ends the session: not for another site to send someone to (the session cookie is
-    // SameSite=Lax, which a link or redirect from elsewhere still carries).
-    if !from_this_site(&headers) {
+    // SameSite=Lax, which a link or redirect from elsewhere still carries), nor for a link in a mail, which is on
+    // the app's own page: only with the session's logout token, which the app's pages have from /api/user.
+    let kept = session.get::<String>(LOGOUT_TOKEN).await.ok().flatten();
+    if !from_this_site(&headers) || !is_logout_token(kept.as_deref(), query.t.as_deref()) {
         return Redirect::to("/").into_response();
     }
     let is_oidc = session
@@ -406,6 +460,7 @@ pub async fn oidc_handler(
             eprintln!("session cycle_id failed: {e}");
         }
         session.insert("user_id", &user_id).await.ok();
+        new_logout_token(&session).await;
         if let Some(ref dn) = display_name {
             session.insert("display_name", dn).await.ok();
         }
@@ -683,5 +738,29 @@ mod tests {
         };
         assert!(from(Some("same-origin")) && from(Some("none")) && from(None));
         assert!(!from(Some("cross-site")) && !from(Some("same-site")));
+    }
+
+    #[test]
+    fn logout_needs_the_sessions_token() {
+        assert!(is_logout_token(Some("abc"), Some("abc")));
+        assert!(!is_logout_token(Some("abc"), Some("abd")));
+        assert!(!is_logout_token(Some("abc"), Some("ab")));
+        assert!(!is_logout_token(Some("abc"), None));
+        assert!(!is_logout_token(None, Some("abc")));
+        assert!(!is_logout_token(None, None));
+        assert!(!is_logout_token(Some(""), Some("")));
+    }
+
+    #[tokio::test]
+    async fn the_logout_token_is_made_once_per_session() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let store = std::sync::Arc::new(crate::session_store::SqliteStore::new(pool));
+        store.migrate().await.unwrap();
+        let session = Session::new(None, store.clone(), None);
+        let token = logout_token(&session).await;
+        assert_eq!(token.len(), 43);
+        assert_eq!(logout_token(&session).await, token);
+        let other = Session::new(None, store, None);
+        assert_ne!(logout_token(&other).await, token);
     }
 }

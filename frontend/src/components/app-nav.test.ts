@@ -16,7 +16,10 @@ const page = (here: string) => `
 const live = new Set<object>();
 const scripts = { 'email-notifier': class { connected() { live.add(this); } disconnected() { live.delete(this); } } };
 
-const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '' };
+const user = {
+  display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '', oidc_signed_in: false,
+  logout_token: 'tok/en+1',
+};
 
 function notify(initial: NotificationStatus) {
   let current = initial;
@@ -46,7 +49,10 @@ test('shows the rail for the signed-in user, with the current page marked', asyn
   expect(rail.querySelector('a[href="/mail/"]')!.textContent).toBe('Mail');
   expect(rail.querySelector('a[href="/mail/"]')!.getAttribute('data-tooltip')).toBe('Mail');
   expect(rail.querySelector('footer [data-caption]')!.textContent).toBe('Demo User');
-  expect(rail.querySelector('a[href="/logout"]')!.textContent).toBe('Logout');
+  // /logout ends the session only with the session's token: a link to /logout in a mail does not
+  const logout = rail.querySelector('a[data-icon="log-out"]')!;
+  expect(logout.getAttribute('href')).toBe('/logout?t=tok%2Fen%2B1');
+  expect(logout.textContent).toBe('Logout');
   expect(root.querySelector('main button[popovertarget="nav"]')!.getAttribute('aria-label')).toBe('Open menu');
 });
 

@@ -1,6 +1,7 @@
 <!-- Navigation rail (temper app.css), the first child of every app page's body (src/layouts/app-layout.html).
      `here` is the current page's URL ('/mail/', …): its item is marked. Below 48rem the rail is a popover drawer,
-     opened by <nav-toggle>. It reads the layout's `user` resource.
+     opened by <nav-toggle>. It reads the layout's `user` resource (its `logout_token`: /logout ends the session only
+     with it, so a link to /logout in a mail does not).
      New-mail notifications: <email-notifier> (src/components/email-notifier.ts) shows the `new_email` events of the
      rail's own <sn-sync>; a page's <sn-sync> for the same URL shares its connection. /mail/ shows its own notifications. -->
 <template data-sn-props="{ here: string }">
@@ -33,7 +34,7 @@
                 }"><span data-sn-text="m.mail_notifications()"></span></button>
       </template>
       <a href="/settings/" data-icon="settings" data-sn-attr="{'aria-current': here === '/settings/' ? 'page' : null, 'data-tooltip': m.nav_settings()}"><span data-sn-text="m.nav_settings()"></span></a>
-      <a href="/logout" data-icon="log-out" data-sn-attr="{'data-tooltip': m.nav_logout()}"><span data-sn-text="m.nav_logout()"></span></a>
+      <a data-sn-href="/logout?t={user?.logout_token}" data-icon="log-out" data-sn-attr="{'data-tooltip': m.nav_logout()}"><span data-sn-text="m.nav_logout()"></span></a>
     </footer>
     <template data-sn-if="notifications?.enabled && here !== '/mail/'">
       <email-notifier></email-notifier>

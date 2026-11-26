@@ -36,7 +36,7 @@ OIDC is the **only** sign-in; there is no sign-in with CalDAV credentials (it wo
 
 Where a sign-in lands (`landing.rs`): the `next` page (kept in the session from `/?next=…` or the redirect above, used once), else the app page the user loaded last (`last_page` in the session, its path with the language prefix, no query; prefetches and `/mail/view/` not counted), else `/calendar/` (in the login page's language). Signed-in `GET /` (or `/de/`) redirects there; the demo's `POST /auth/login` answers it as `{"redirect": …}`, which the login page's `data-sn-then` goes to with `navigate()`; the OIDC callback redirects there. The session is lost at logout or expiry, and `last_page` with it.
 
-Sessions are stored in SQLite (`session_store.rs`) and expire after 7 days of inactivity; expired ones are deleted once an hour (visitors who are not signed in get a session too: the page wanted, a sign-in under way). `GET /logout` ends the session only for a request from the app or the user (`Sec-Fetch-Site` `same-origin` or `none`); from another site it is a redirect to `/`.
+Sessions are stored in SQLite (`session_store.rs`) and expire after 7 days of inactivity; expired ones are deleted once an hour (visitors who are not signed in get a session too: the page wanted, a sign-in under way). `GET /logout?t=<token>` ends the session only with the session's logout token (random, kept in the session, made anew at each sign-in; `/api/user`'s `logout_token`, which the rail's link carries: a link to `/logout` in a mail is on the app's own page, `same-origin`) and only for a request from the app or the user (`Sec-Fetch-Site` `same-origin` or `none`); anything else is a redirect to `/`.
 
 ## Backend
 
