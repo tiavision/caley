@@ -43,9 +43,11 @@ seeded gradient.
 | Phone, light | ![](screenshots/contacts-before-phone-light.png) | ![](screenshots/contacts-after-phone-light.png) |
 | Phone, dark | ![](screenshots/contacts-before-phone-dark.png) | ![](screenshots/contacts-after-phone-dark.png) |
 
-A mesh masthead with the page's title (it had no `h1` before) and the counts as stat tiles, a glass toolbar that
-stays at the top while the list scrolls under it, the letters in display type, raised cards that lift on hover, and
-`<person-avatar>`: two initials on the name's seeded gradient, so each person keeps a colour.
+The page's one expressive moment is its top: a wash of the brand colour behind the title (it had no `h1` before), in
+the display face, with the counts in one quiet line. Everything people work with (the search field, the letters,
+the cards) stays plain temper; the cards are raised and lift on hover, and `<person-avatar>` puts two initials on
+the name's seeded gradient, so each person keeps a colour. The page's padding is now 16px (was 8px), which aligns the
+title with the list and gives the cards more room.
 
 ### Contact detail
 
@@ -71,7 +73,7 @@ Twelve attributes in temper's `vocab.json` (module `expressive`), checked by `te
 
 | Attribute | Values | |
 |---|---|---|
-| `data-tm-surface` | glass, gradient, mesh | The background as a material. Panels (not body/main) get temper's large radius; on `<body>` it covers the canvas. |
+| `data-tm-surface` | glass, gradient, mesh, wash | The background as a material. Panels (not body/main) get temper's large radius; on `<body>` it covers the canvas. `wash` is the mesh at the top of a working view only. |
 | `data-tm-grain` | (boolean) | Film grain over any surface (an inline SVG: the CSP needs `img-src data:`, which caley's has). |
 | `data-tm-elevation` | raised, floating | Brand-tinted shadows; a raised card with a `data-tm-stretch` control lifts on hover. |
 | `data-tm-halo` | (boolean) | A soft accent glow. |
@@ -82,7 +84,7 @@ Twelve attributes in temper's `vocab.json` (module `expressive`), checked by `te
 | `data-tm-bento` | (boolean) | With `data-tm-layout="grid"`: row height (`--tm-bento-row`), dense flow, spans. |
 | `data-tm-span` | wide, tall, large, full | A bento tile's size (from a 32rem grid up). |
 | `data-tm-pairing` | editorial, grotesk | Fraunces or Bricolage Grotesque for display, self-hosted by the app through Fontsource. |
-| `data-tm-seed` | 0 … 11 | Twelve gradient fills (and inks) spread ±82.5° around the brand hue. |
+| `data-tm-seed` | 0 … 11 | Twelve gradient fills (and inks) spread ±50° around the brand hue. |
 
 Tokens to set: `--tm-font-display`, `--tm-display-weight`, `--tm-display-tracking`, `--tm-glass-blur`,
 `--tm-bento-row`. Read only: `--tm-tint-1…3`, `--tm-glass`, `--tm-ink-1…2`, `--tm-glow`, `--tm-shadow-raised`,
@@ -94,6 +96,22 @@ glass over each, in light and dark mode, at every 15° of hue for chroma 0.04–
 `prefers-contrast: more` and forced colours give plain surfaces and solid text, `prefers-reduced-transparency` opaque
 glass, `prefers-reduced-motion` no lift. No script; 1.9 KB brotli. The Fraunces face (36.6 kB) loads only on the two
 pages that import it, preloaded by sinter.
+
+## The design review of the contacts page
+
+The first version had a boxed mesh masthead with gradient-ink title and three glass stat tiles. It looked pasted in,
+especially in dark mode. A review against design fundamentals (one place for boldness; big-number tiles only when the
+numbers are the point; no purple-to-blue gradient defaults; cards by role) and a second reviewer looking only at the
+screenshots led, over five rounds, to:
+
+- the colour moved from a box to a `wash` at the top of the view (new in temper), with an eased falloff, 60% strength
+  in dark and no seam at the scrollbar;
+- the mesh's hues narrowed to the brand hue ±20° (it read as blue and magenta) and the light tints made paler (no cyan);
+- one display moment: the title at `lg`; the counts as one small line; toolbar and letters back to plain temper;
+- the avatar seeds narrowed to ±50° and calmer in dark (no red or maroon);
+- the title aligned with the list.
+
+Out of scope and unchanged: the floating add button can cover the last card on a phone, as before.
 
 ## What changed in caley
 

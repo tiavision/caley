@@ -3,9 +3,9 @@
      draft: the form dialog's ContactDraft (src/lib/contacts.ts); hiddenBooks: addressbookKey()s filtered out.
      Shortcuts: c = new contact, e = edit the open contact (data-shortcut on those buttons).
      `contact-saved` {detail: the contact}: the form saved it, the detail dialog shows it.
-     The page wears temper's expressive.css: a mesh masthead with the counts in glass tiles, a glass toolbar that stays at the
-     top, the letters in the editorial display face, raised cards with seeded avatars (<person-avatar>), and a gradient
-     band in the detail dialog. -->
+     The page wears temper's expressive.css lightly: a wash of the brand colour at the top that scrolls away, the title in
+     the editorial display face, raised cards with seeded avatars (<person-avatar>), and a gradient band in the detail
+     dialog. Everything people work with (toolbar, letters, cards) stays plain temper. -->
 <app-layout data-sn-with="{ here: '/contacts/', title: 'Caley - Contacts' }"
             data-sn-state="{
               q: '',
@@ -30,7 +30,7 @@
     <sn-event name="contacts_refetch" resource="contacts" op="refresh"></sn-event>
     <sn-event name="contacts_refetch" resource="addressbooks" op="refresh"></sn-event>
   </sn-sync>
-  <main data-tm-gutter data-tm-pairing="editorial" data-sn-on-contact-saved="sel = $event.detail; openDialog('contact-detail')">
+  <main data-tm-gutter data-tm-pairing="editorial" data-tm-surface="wash" data-sn-on-contact-saved="sel = $event.detail; openDialog('contact-detail')">
     <div data-tm-density="compact"
          data-sn-let="{
            shown: filterContacts(contacts, addressbooks, hiddenBooks, q),
@@ -40,30 +40,31 @@
              fax: m.contacts_type_fax(), pager: m.contacts_type_pager(), other: m.contacts_type_other(),
            },
          }">
-      <div class="contacts-page" data-tm-layout="stack" data-tm-gap="md" data-tm-pad="sm">
-        <!-- The masthead: the page's name and its counts (the counts once the list has loaded). -->
-        <header data-tm-surface="mesh" data-tm-grain data-tm-layout="row" data-tm-justify="between" data-tm-align="end" data-tm-gap="lg" data-tm-pad="lg">
-          <h1 data-tm-display="xl" data-tm-ink="gradient" data-sn-text="m.nav_contacts()"></h1>
+      <div class="contacts-page" data-tm-layout="stack" data-tm-gap="md" data-tm-pad="md">
+        <!-- The masthead: the page's name, the page's one piece of display type, and its counts in one quiet line (once
+             the list has loaded). The colour behind it is <main>'s wash, which fades out above the list. The page's md padding
+             aligns it with the list and gives it room at the top. -->
+        <header data-tm-layout="stack" data-tm-gap="xs">
+          <h1 data-tm-display="lg" data-sn-text="m.nav_contacts()"></h1>
           <template data-sn-if="contacts.length > 0">
-            <dl data-tm-layout="grid" data-tm-bento data-tm-gap="sm" data-tm-grow style="--tm-min: 8rem; --tm-bento-row: 5.5rem; --tm-grow-basis: 18rem"
-                data-sn-attr="{ 'aria-label': m.contacts_stats() }">
-              <div data-tm-surface="glass" data-tm-layout="stack" data-tm-gap="xs" data-tm-pad="md">
-                <dt data-tm-caption data-sn-text="m.contacts_stat_people()"></dt>
-                <dd data-tm-figure data-sn-text="number(contacts.length)"></dd>
+            <dl data-tm-layout="row" data-tm-gap="md" data-tm-muted data-sn-attr="{ 'aria-label': m.contacts_stats() }">
+              <div data-tm-layout="row" data-tm-gap="xs" data-tm-wrap="none">
+                <dt><small data-sn-text="m.contacts_stat_people()"></small></dt>
+                <dd><small><strong data-sn-text="number(contacts.length)"></strong></small></dd>
               </div>
-              <div data-tm-surface="glass" data-tm-layout="stack" data-tm-gap="xs" data-tm-pad="md">
-                <dt data-tm-caption data-sn-text="m.contacts_stat_orgs()"></dt>
-                <dd data-tm-figure data-sn-text="number(organizationCount(contacts))"></dd>
+              <div data-tm-layout="row" data-tm-gap="xs" data-tm-wrap="none">
+                <dt><small data-sn-text="m.contacts_stat_orgs()"></small></dt>
+                <dd><small><strong data-sn-text="number(organizationCount(contacts))"></strong></small></dd>
               </div>
-              <div data-tm-surface="glass" data-tm-layout="stack" data-tm-gap="xs" data-tm-pad="md">
-                <dt data-tm-caption data-sn-text="m.contacts_stat_books()"></dt>
-                <dd data-tm-figure data-sn-text="number(addressbooks.length)"></dd>
+              <div data-tm-layout="row" data-tm-gap="xs" data-tm-wrap="none">
+                <dt><small data-sn-text="m.contacts_stat_books()"></small></dt>
+                <dd><small><strong data-sn-text="number(addressbooks.length)"></strong></small></dd>
               </div>
             </dl>
           </template>
         </header>
 
-        <div class="contacts-toolbar" data-tm-surface="glass" data-tm-sticky="top" data-tm-layout="row" data-tm-gap="sm" data-tm-pad="xs">
+        <div class="contacts-toolbar" data-tm-layout="row" data-tm-gap="sm">
           <nav-toggle></nav-toggle>
           <div data-tm-field data-tm-grow style="--tm-grow-basis: 12rem">
             <span data-tm-icon="search" aria-hidden="true"></span>
@@ -109,7 +110,7 @@
 
         <template data-sn-for="g in groupByLetter(shown)" data-sn-key="g.letter">
           <section data-tm-layout="stack" data-tm-gap="sm">
-            <h2 data-tm-display="lg" data-tm-ink="gradient" data-sn-text="g.letter"></h2>
+            <h2 data-tm-caption data-sn-text="g.letter"></h2>
             <div data-tm-layout="grid" data-tm-gap="sm" style="--tm-min: 10rem">
               <template data-sn-for="c in g.items" data-sn-key="contactKey(c)">
                 <article data-tm-elevation="raised" data-tm-layout="stack" data-tm-gap="xs" data-tm-align="center">

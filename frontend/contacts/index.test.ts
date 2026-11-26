@@ -86,7 +86,7 @@ test('lists the contacts by letter, with avatar, first email and phone, org', as
 test('the masthead counts people, organizations and address books', async () => {
   const { root } = await show();
   expect(root.querySelector('main h1')!.textContent).toBe('Contacts');
-  const stats = [...root.querySelectorAll('main header dl > div')].map((d) => [d.querySelector('dt')!.textContent, d.querySelector('dd[data-tm-figure]')!.textContent]);
+  const stats = [...root.querySelectorAll('main header dl > div')].map((d) => [d.querySelector('dt')!.textContent, d.querySelector('dd')!.textContent]);
   expect(stats).toEqual([['People', '3'], ['Organizations', '1'], ['Address books', '1']]);
 });
 
