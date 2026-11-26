@@ -26,6 +26,8 @@ struct RawIcalEvent {
     location: String,
     dtstart: NaiveDateTime,
     dtstart_is_date: bool,
+    /// DTSTART's TZID as written (an occurrence of a VTIMEZONE-only zone is resolved again on its date).
+    dtstart_tzid: Option<String>,
     dtstart_tz: ResolvedTz,
     duration: TimeDelta,
     rrule: Option<String>,
@@ -44,9 +46,9 @@ enum ResolvedTz {
     /// Resolved to a real IANA zone, either matched directly against the raw
     /// TZID or via the Windows/CLDR timezone name table.
     Named(chrono_tz::Tz),
-    /// Resolved via an embedded VTIMEZONE block to a fixed UTC offset, with
-    /// no IANA equivalent found. `canonical` is the raw TZID string, kept
-    /// only as a display label.
+    /// Resolved via an embedded VTIMEZONE block, with no IANA equivalent found: the UTC offset in
+    /// effect on this value's date (a recurring event's occurrences each resolve their own, see
+    /// `expand_events`). `canonical` is the raw TZID string, kept only as a display label.
     Fixed {
         offset: FixedOffset,
         canonical: String,
@@ -79,8 +81,8 @@ impl ResolvedTz {
 
 /// Resolves the TZIDs of one calendar object, with the transitions of its VTIMEZONEs computed once per
 /// year (an Outlook VTIMEZONE's rules start in 1601, and an event may name it in thousands of EXDATEs).
-struct TzResolver<'a> {
-    timezones: &'a [ical::parser::ical::component::IcalTimeZone],
+struct TzResolver {
+    timezones: Vec<ical::parser::ical::component::IcalTimeZone>,
     /// A VTIMEZONE's transitions (sorted) around one year, keyed by its index and the year; `None`
     /// for one that cannot be used.
     years: RefCell<HashMap<(usize, i32), Option<Vec<(NaiveDateTime, FixedOffset)>>>>,
@@ -92,8 +94,8 @@ struct TzResolver<'a> {
 /// How many (VTIMEZONE, year) pairs of an unusual shape one object may have computed by the crate.
 const MAX_ZONE_WALKS: usize = 4;
 
-impl<'a> TzResolver<'a> {
-    fn new(timezones: &'a [ical::parser::ical::component::IcalTimeZone]) -> Self {
+impl TzResolver {
+    fn new(timezones: Vec<ical::parser::ical::component::IcalTimeZone>) -> Self {
         Self {
             timezones,
             years: RefCell::default(),
@@ -741,14 +743,14 @@ pub(crate) fn unescape_ical_text(s: &str) -> String {
     result
 }
 
-fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
+/// The object's VEVENTs, and the resolver of its TZIDs (its VTIMEZONEs), which expanding them uses.
+fn parse_raw_events(ical_data: &str) -> (Vec<RawIcalEvent>, TzResolver) {
     let calendar = match ical::IcalParser::new(ical_data.as_bytes()).next() {
         Some(Ok(c)) => c,
-        _ => return vec![],
+        _ => return (vec![], TzResolver::new(vec![])),
     };
 
-    let timezones = calendar.timezones;
-    let tz = TzResolver::new(&timezones);
+    let tz = TzResolver::new(calendar.timezones);
     let mut results = Vec::new();
 
     for event in calendar.events {
@@ -1039,6 +1041,7 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
             location,
             dtstart,
             dtstart_is_date,
+            dtstart_tzid,
             dtstart_tz,
             duration,
             rrule,
@@ -1051,7 +1054,7 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
         });
     }
 
-    results
+    (results, tz)
 }
 
 fn parse_relative_trigger(s: &str) -> Option<i64> {
@@ -1126,10 +1129,28 @@ pub(super) fn parse_and_expand_events(
     start: NaiveDate,
     end: NaiveDate,
 ) -> Vec<Event> {
-    expand_events(parse_raw_events(raw_ical), start, end)
+    let (raw_events, tz) = parse_raw_events(raw_ical);
+    expand_events(raw_events, &tz, start, end)
 }
 
-fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate) -> Vec<Event> {
+/// The zone of an occurrence of `master` at `dt` (its wall clock): a VTIMEZONE-only zone's offset on
+/// that date (the master's when the zone gives none there), any other zone as the master's.
+fn occurrence_tz(master: &RawIcalEvent, tz: &TzResolver, dt: NaiveDateTime) -> ResolvedTz {
+    match &master.dtstart_tz {
+        ResolvedTz::Fixed { .. } => match tz.resolve(master.dtstart_tzid.as_deref(), dt, false) {
+            fixed @ ResolvedTz::Fixed { .. } => fixed,
+            _ => master.dtstart_tz.clone(),
+        },
+        other => other.clone(),
+    }
+}
+
+fn expand_events(
+    raw_events: Vec<RawIcalEvent>,
+    tz: &TzResolver,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Vec<Event> {
     use std::collections::HashMap;
 
     let mut groups: HashMap<String, Vec<RawIcalEvent>> = HashMap::new();
@@ -1148,7 +1169,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
 
         if master.rrule.is_some() || !master.rdates.is_empty() {
             let recurrence = master.rrule.as_ref().map(|r| parse_rrule_info(r));
-            let expanded = expand_recurring(master, start, end);
+            let expanded = expand_recurring(master, tz, start, end);
 
             let master_dtstart_str = if master.dtstart_is_date {
                 format_datetime_with_tz(master.dtstart, &ResolvedTz::Floating)
@@ -1161,10 +1182,11 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
             };
 
             for dt in expanded {
+                let dt_tz = occurrence_tz(master, tz, dt);
                 let matched_override = overrides.iter().find(|o| {
                     o.recurrence_id.as_ref().map_or(false, |rid| {
                         let rid_ts = naive_to_utc_timestamp(*rid, &o.recurrence_id_tz);
-                        let exp_ts = naive_to_utc_timestamp(dt, &master.dtstart_tz);
+                        let exp_ts = naive_to_utc_timestamp(dt, &dt_tz);
                         rid_ts == exp_ts
                     })
                 });
@@ -1196,7 +1218,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                         master.dtstart_is_date,
                         Some(end_of(dt, master.duration)),
                         master.dtstart_is_date,
-                        &master.dtstart_tz,
+                        &dt_tz,
                         true,
                         recurrence.clone(),
                         master_dtstart_str.clone(),
@@ -1230,8 +1252,45 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
 
 /// Append an `RDATE`/`EXDATE` line to a synthetic RRULE-crate input string,
 /// using the property's resolved timezone (mirrors the DTSTART handling in
-/// `expand_recurring`).
-fn push_date_property_line(out: &mut String, prop: &str, date_property: &DateProperty) {
+/// `expand_recurring`). `wall` is the master's VTIMEZONE-only zone (its TZID) when the set is
+/// expanded in that zone's wall clock: a value is then written as that wall clock.
+fn push_date_property_line(
+    out: &mut String,
+    prop: &str,
+    date_property: &DateProperty,
+    wall: Option<(&str, &TzResolver)>,
+) {
+    if let Some((tzid, tz)) = wall {
+        let v = &date_property.value;
+        let same_zone = date_property.tzid.as_deref() == Some(tzid);
+        let line = match parse_dtstart(v) {
+            Some(dt) if v.contains('T') => {
+                let local = if same_zone || !date_property.resolved.is_anchored() {
+                    dt
+                } else {
+                    // an instant: the zone's wall clock then (the offset looked up at the UTC
+                    // time, off only within a few hours of a transition)
+                    let utc = chrono::DateTime::from_timestamp(
+                        naive_to_utc_timestamp(dt, &date_property.resolved),
+                        0,
+                    )
+                    .map_or(dt, |d| d.naive_utc());
+                    match tz.resolve(Some(tzid), utc, false) {
+                        ResolvedTz::Fixed { offset, .. } => utc
+                            .checked_add_signed(TimeDelta::seconds(i64::from(
+                                offset.local_minus_utc(),
+                            )))
+                            .unwrap_or(utc),
+                        _ => utc,
+                    }
+                };
+                format!("{prop}:{}Z\n", local.format("%Y%m%dT%H%M%S"))
+            }
+            _ => format!("{prop};VALUE=DATE-TIME:{v}\n"),
+        };
+        out.push_str(&line);
+        return;
+    }
     match &date_property.resolved {
         ResolvedTz::Named(tz) => {
             out.push_str(&format!(
@@ -1264,7 +1323,16 @@ fn push_date_property_line(out: &mut String, prop: &str, date_property: &DatePro
 /// The occurrences of `master` from `start` to `end` (at most MAX_OCCURRENCES). DTSTART is first moved
 /// forward to the window (`fast_forward`) and the walk to it is bounded (WALK_BUDGET); a set the
 /// crate refuses or panics on is the event once, at its DTSTART.
-fn expand_recurring(master: &RawIcalEvent, start: NaiveDate, end: NaiveDate) -> Vec<NaiveDateTime> {
+///
+/// A VTIMEZONE-only zone (`ResolvedTz::Fixed`) is expanded in its wall clock, as floating time is: the
+/// rule, BYDAY and the window see the zone's local dates, and each occurrence gets the offset of its
+/// own date afterwards (`occurrence_tz`).
+fn expand_recurring(
+    master: &RawIcalEvent,
+    tz: &TzResolver,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Vec<NaiveDateTime> {
     let (Some(from), Some(to)) = (
         start
             .checked_sub_days(Days::new(1))
@@ -1296,11 +1364,8 @@ fn expand_recurring(master: &RawIcalEvent, start: NaiveDate, end: NaiveDate) -> 
                     dtstart.format("%Y%m%dT%H%M%S")
                 ));
             }
-            ResolvedTz::Fixed { offset, .. } => {
-                let utc_dt = fixed_offset_to_utc_naive(dtstart, *offset);
-                rrule_str.push_str(&format!("DTSTART:{}Z\n", utc_dt.format("%Y%m%dT%H%M%S")));
-            }
-            ResolvedTz::Utc | ResolvedTz::Floating => {
+            // the wall clock, labelled UTC as floating time is (read back as naive wall clock)
+            ResolvedTz::Fixed { .. } | ResolvedTz::Utc | ResolvedTz::Floating => {
                 rrule_str.push_str(&format!("DTSTART:{}Z\n", dtstart.format("%Y%m%dT%H%M%S")));
             }
         }
@@ -1310,12 +1375,16 @@ fn expand_recurring(master: &RawIcalEvent, start: NaiveDate, end: NaiveDate) -> 
         rrule_str.push_str(&format!("RRULE:{rrule}\n"));
     }
 
+    let wall = match (&master.dtstart_tz, master.dtstart_tzid.as_deref()) {
+        (ResolvedTz::Fixed { .. }, Some(tzid)) if !master.dtstart_is_date => Some((tzid, tz)),
+        _ => None,
+    };
     for rdate in &master.rdates {
-        push_date_property_line(&mut rrule_str, "RDATE", rdate);
+        push_date_property_line(&mut rrule_str, "RDATE", rdate, wall);
     }
 
     for exdate in &master.exdates {
-        push_date_property_line(&mut rrule_str, "EXDATE", exdate);
+        push_date_property_line(&mut rrule_str, "EXDATE", exdate, wall);
     }
 
     let utc = |dt: NaiveDateTime| rrule::Tz::UTC.from_utc_datetime(&dt);
@@ -1524,6 +1593,7 @@ fn parse_dtstart(raw: &str) -> Option<NaiveDateTime> {
 
 pub fn preview_events_from_raw_ical(raw_ical: &str) -> Vec<Event> {
     parse_raw_events(raw_ical)
+        .0
         .into_iter()
         .filter(|raw| raw.recurrence_id.is_none())
         .map(|raw| {
@@ -2035,6 +2105,144 @@ END:VCALENDAR\r\n";
         assert_eq!(summer.tz, "My/Custom");
         assert!(summer.dtstart.starts_with("2026-07-15T09:00:00-04:00"));
         assert!(winter.dtstart.starts_with("2026-01-15T09:00:00-05:00"));
+    }
+
+    /// A zone known only by its VTIMEZONE (+01:00 in winter, +02:00 in summer, EU rules).
+    const CUSTOM_ZONE: &str = "BEGIN:VTIMEZONE\r\n\
+TZID:Custom/Zone\r\n\
+BEGIN:STANDARD\r\n\
+DTSTART:19701025T030000\r\n\
+RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\n\
+TZOFFSETFROM:+0200\r\n\
+TZOFFSETTO:+0100\r\n\
+END:STANDARD\r\n\
+BEGIN:DAYLIGHT\r\n\
+DTSTART:19700329T020000\r\n\
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\n\
+TZOFFSETFROM:+0100\r\n\
+TZOFFSETTO:+0200\r\n\
+END:DAYLIGHT\r\n\
+END:VTIMEZONE\r\n";
+
+    fn starts(events: &[Event]) -> Vec<(String, String)> {
+        events
+            .iter()
+            .map(|e| (e.summary.clone(), e.dtstart.clone()))
+            .collect()
+    }
+
+    fn ts(s: &str) -> i64 {
+        chrono::DateTime::parse_from_rfc3339(s).unwrap().timestamp()
+    }
+
+    /// A rule in a VTIMEZONE-only zone recurs in that zone's wall clock, each occurrence with the
+    /// offset in effect on its date; overrides, EXDATE and RDATE match in that zone.
+    #[test]
+    fn recurring_event_in_embedded_vtimezone_keeps_its_wall_clock() {
+        let ical = format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n{CUSTOM_ZONE}\
+BEGIN:VEVENT\r\n\
+UID:weekly\r\n\
+SUMMARY:Weekly\r\n\
+DTSTART;TZID=Custom/Zone:20260105T090000\r\n\
+DTEND;TZID=Custom/Zone:20260105T100000\r\n\
+RRULE:FREQ=WEEKLY\r\n\
+EXDATE;TZID=Custom/Zone:20260126T090000\r\n\
+EXDATE:20260608T070000Z\r\n\
+RDATE;TZID=Custom/Zone:20260707T090000\r\n\
+END:VEVENT\r\n\
+BEGIN:VEVENT\r\n\
+UID:weekly\r\n\
+SUMMARY:Moved\r\n\
+RECURRENCE-ID;TZID=Custom/Zone:20260112T090000\r\n\
+DTSTART;TZID=Custom/Zone:20260112T110000\r\n\
+DTEND;TZID=Custom/Zone:20260112T120000\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n"
+        );
+        let start = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let end = NaiveDate::from_ymd_opt(2026, 7, 31).unwrap();
+        let events = parse_and_expand_events(&ical, start, end);
+        let on = |date: &str| -> Vec<&Event> {
+            events
+                .iter()
+                .filter(|e| e.date.to_string() == date)
+                .collect()
+        };
+
+        let winter = on("2026-01-19");
+        assert_eq!(winter.len(), 1, "{:?}", starts(&events));
+        assert_eq!(winter[0].dtstart, "2026-01-19T09:00:00+01:00");
+        assert_eq!(
+            winter[0].dtend.as_deref(),
+            Some("2026-01-19T10:00:00+01:00")
+        );
+        assert_eq!(winter[0].start_ts, Some(ts("2026-01-19T08:00:00Z")));
+        assert_eq!(winter[0].tz, "Custom/Zone");
+
+        let summer = on("2026-07-13");
+        assert_eq!(summer.len(), 1);
+        assert_eq!(summer[0].dtstart, "2026-07-13T09:00:00+02:00");
+        assert_eq!(summer[0].start_ts, Some(ts("2026-07-13T07:00:00Z")));
+
+        // the override replaces its occurrence
+        let moved = on("2026-01-12");
+        assert_eq!(moved.len(), 1);
+        assert_eq!(moved[0].summary, "Moved");
+        assert_eq!(moved[0].dtstart, "2026-01-12T11:00:00+01:00");
+
+        // EXDATE removes one, RDATE adds one (a Tuesday in summer time)
+        assert!(on("2026-01-26").is_empty());
+        // an EXDATE in UTC: 07:00Z is 09:00 summer time
+        assert!(on("2026-06-08").is_empty());
+        let extra = on("2026-07-07");
+        assert_eq!(extra.len(), 1);
+        assert_eq!(extra[0].dtstart, "2026-07-07T09:00:00+02:00");
+
+        // every other occurrence is a Monday at 09:00 local
+        for e in events.iter().filter(|e| e.date.to_string() != "2026-07-07") {
+            assert_eq!(e.date.weekday(), chrono::Weekday::Mon, "{}", e.dtstart);
+            assert_eq!(
+                e.start_time.as_deref(),
+                Some(if e.summary == "Moved" {
+                    "11:00"
+                } else {
+                    "09:00"
+                })
+            );
+        }
+        // 30 Mondays from Jan 5 to Jul 27, less the EXDATEs, plus the RDATE
+        assert_eq!(events.len(), 29);
+    }
+
+    /// BYDAY and the window are the zone's local dates: 00:30 on a Monday stays on Monday.
+    #[test]
+    fn byday_in_embedded_vtimezone_is_the_local_weekday() {
+        let ical = format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n{CUSTOM_ZONE}\
+BEGIN:VEVENT\r\n\
+UID:late\r\n\
+SUMMARY:Late\r\n\
+DTSTART;TZID=Custom/Zone:20260105T003000\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=MO\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n"
+        );
+        let start = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let end = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
+        let events = parse_and_expand_events(&ical, start, end);
+        let mut dates: Vec<String> = events.iter().map(|e| e.date.to_string()).collect();
+        dates.sort();
+        assert_eq!(
+            dates,
+            ["2026-01-05", "2026-01-12", "2026-01-19", "2026-01-26"],
+            "{:?}",
+            starts(&events)
+        );
+        for e in &events {
+            assert_eq!(e.start_time.as_deref(), Some("00:30"));
+            assert!(e.dtstart.ends_with("T00:30:00+01:00"), "{}", e.dtstart);
+        }
     }
 
     #[test]

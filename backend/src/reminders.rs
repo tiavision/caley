@@ -403,6 +403,49 @@ mod tests {
         );
     }
 
+    /// A weekly event in a zone known only by its VTIMEZONE (+01:00 winter, +02:00 summer) is reminded
+    /// at its own local time in summer too: 09:00 +02:00 is 07:00 UTC, 15 minutes before is 06:45.
+    #[test]
+    fn recurring_event_in_embedded_vtimezone_is_reminded_at_its_local_time() {
+        let raw = format!(
+            "{ICAL}BEGIN:VTIMEZONE\r\nTZID:Custom/Zone\r\nBEGIN:STANDARD\r\nDTSTART:19701025T030000\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nEND:STANDARD\r\nBEGIN:DAYLIGHT\r\nDTSTART:19700329T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:weekly\r\nSUMMARY:x\r\nDTSTART;TZID=Custom/Zone:20260105T090000\r\nRRULE:FREQ=WEEKLY\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        );
+        let timezones = vec![(
+            "Europe/Berlin".to_string(),
+            "Europe/Berlin".parse().unwrap(),
+        )];
+        let day = chrono::NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let window = (
+            day - chrono::TimeDelta::days(2),
+            day + chrono::TimeDelta::days(15),
+        );
+        let fire = utc("2026-06-01 06:45");
+        let all = due("acc", "/cal/", &raw, &timezones, window, fire + 60);
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].3, fire);
+        assert!(
+            due(
+                "acc",
+                "/cal/",
+                &raw,
+                &timezones,
+                window,
+                utc("2026-06-01 07:50")
+            )
+            .is_empty()
+        );
+        // and in winter: 09:00 +01:00 is 08:00 UTC
+        let day = chrono::NaiveDate::from_ymd_opt(2026, 1, 12).unwrap();
+        let window = (
+            day - chrono::TimeDelta::days(2),
+            day + chrono::TimeDelta::days(15),
+        );
+        let fire = utc("2026-01-12 07:45");
+        let all = due("acc", "/cal/", &raw, &timezones, window, fire + 60);
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].3, fire);
+    }
+
     /// A reminder due now goes out once, to the device, encrypted as every notification; not again on the
     /// next tick, and not one whose time is long past.
     #[tokio::test]
