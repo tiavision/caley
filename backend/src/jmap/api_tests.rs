@@ -404,7 +404,8 @@ async fn emptying_a_jmap_trash_by_date_is_unsupported() {
 async fn the_user_says_whether_an_oidc_sign_in_is_kept() {
     let state = app_state().await;
     let read = |state: AppState| async move {
-        let r = crate::oidc::user_info(State(state), user())
+        let session = session(&state).await;
+        let r = crate::oidc::user_info(State(state), user(), session)
             .await
             .into_response();
         let (_, body) = text(r).await;
@@ -417,4 +418,36 @@ async fn the_user_says_whether_an_oidc_sign_in_is_kept() {
         .await
         .unwrap();
     assert_eq!(read(state.clone()).await, true);
+}
+
+#[tokio::test]
+async fn logout_ends_the_session_only_with_its_token() {
+    let state = app_state().await;
+    let session = session(&state).await;
+    let token = crate::oidc::logout_token(&session).await;
+    let logout = |query: String, site: &'static str| {
+        let (state, session) = (state.clone(), session.clone());
+        async move {
+            let mut headers = axum::http::HeaderMap::new();
+            headers.insert("sec-fetch-site", site.parse().unwrap());
+            let uri: axum::http::Uri = format!("/logout{query}").parse().unwrap();
+            let query = axum::extract::Query::try_from_uri(&uri).unwrap();
+            let r = crate::oidc::logout_handler(
+                State(state),
+                crate::public_origin::RequestOrigin("http://localhost:3000".into()),
+                session.clone(),
+                headers,
+                query,
+            )
+            .await;
+            assert!(r.status().is_redirection());
+            // still signed in?
+            session.get::<String>("user_id").await.unwrap().is_some()
+        }
+    };
+    // a mail's link to /logout is on the app's own page: same-origin, without the token
+    assert!(logout(String::new(), "same-origin").await);
+    assert!(logout("?t=wrong".into(), "same-origin").await);
+    assert!(logout(format!("?t={token}"), "cross-site").await);
+    assert!(!logout(format!("?t={token}"), "same-origin").await);
 }

@@ -194,6 +194,9 @@ object Push {
 
   private fun prefs(context: Context) = context.getSharedPreferences("push", Context.MODE_PRIVATE)
 
+  /** Whether the server at `origin` has this device's subscription (its notifications' taps open its pages). */
+  fun registered(context: Context, origin: String) = prefs(context).contains(origin)
+
   private fun stored(context: Context, origin: String): JSONObject? =
     prefs(context).getString(origin, null)?.let { runCatching { JSONObject(it) }.getOrNull() }
 

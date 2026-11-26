@@ -72,6 +72,19 @@ export function contactPhotoUrl(c: ContactJson): string {
   return `/api/contact/photo?${params}`;
 }
 
+/**
+ * A `mailto:` link to one address. A vCard's EMAIL is anyone's text: the whole value is encoded, so a `?` or `&` in it
+ * (`bob@x?bcc=evil@e&body=…`) stays part of the address instead of prefilling the mail client. `@` stays readable.
+ */
+export function mailtoHref(address: string): string {
+  return `mailto:${encodeURIComponent(address.trim()).replace(/%40/g, '@')}`;
+}
+
+/** A `tel:` link to one number, encoded as `mailtoHref` (spaces `%20`, `;`/`?`/`#` encoded); a `+` stays a `+`. */
+export function telHref(number: string): string {
+  return `tel:${encodeURIComponent(number.trim()).replace(/%2B/g, '+')}`;
+}
+
 /** One-line query for a map search. */
 export function addressQuery(a: AddressEntry): string {
   return [a.street, a.city, a.region, a.postal, a.country].filter(Boolean).join(', ');

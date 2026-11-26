@@ -20,11 +20,22 @@ export function draft(accounts: CalDavAccountJson[], file: File | null, ctx: Imp
   return importDraft(accounts, defaultCal, file, ctx);
 }
 
-/** The events in the file, as the server reads them. */
-export async function preview(file: File, ctx: CallContext): Promise<ImportPreviewEvent[]> {
+/** A preview row: the event, and whether importing it into the target calendar replaces one there (its UID). */
+export interface ImportPreviewRow extends ImportPreviewEvent {
+  replaces: boolean;
+}
+
+/** The events in the file, as the server reads them, for the calendar `target` (calendarValue(); none or
+ *  NEW_CALENDAR: nothing replaces). */
+export async function preview(file: File, target: string, ctx: CallContext): Promise<ImportPreviewRow[]> {
   const body = new FormData();
   body.append('file', file);
-  return (await ctx.request('/api/import/preview', { method: 'POST', body })) as ImportPreviewEvent[];
+  if (target && target !== NEW_CALENDAR) {
+    const [accountId = '', href = ''] = target.split('\0');
+    body.append('account_id', accountId);
+    body.append('calendar_href', href);
+  }
+  return (await ctx.request('/api/import/preview', { method: 'POST', body })) as ImportPreviewRow[];
 }
 
 /** Imports the file into the chosen calendar (the server creates it for "new calendar"); `calendar` is where it went. */

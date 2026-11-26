@@ -57,12 +57,58 @@ describe('reading what caley sends', () => {
     expect(quotable(msg)).toBe(false);
   });
 
-  it('caley\'s own encrypted message reads back (it carries no protected headers yet: the outer ones show)', async () => {
-    const bob = await keys('bob@example.com');
-    const raw = await buildProtectedMime(draft({ encryptionKeys: [bob.publicKey] }));
-    const msg = await settle(raw, empty(), [bob.privateKey], async () => []);
-    expect(readerParts(msg).map((p) => [p.kind, p.text.trim()])).toEqual([['text', 'Encrypted body']]);
-    expect(msg.headers.subject).toBe('The real secret subject');
+  // Every encrypted message caley sends protects its headers: outside, the Subject is "[...]"; the reader shows the
+  // real one from inside, for each shape of the payload (text, text and HTML, with attachments).
+  const shapes: [string, Partial<ProtectedComposeMessage>, string][] = [
+    ['text', {}, 'text/plain'],
+    ['text and HTML', { bodyHtml: '<p>Encrypted <b>body</b></p>' }, 'multipart/alternative'],
+    ['with an attachment', { attachments: [new File(['x'], 'plan.txt', { type: 'text/plain' })] }, 'multipart/mixed'],
+    ['text and HTML with an attachment', { bodyHtml: '<p>Encrypted <b>body</b></p>', attachments: [new File(['x'], 'plan.txt', { type: 'text/plain' })] }, 'multipart/mixed'],
+  ];
+  for (const [shape, over, root] of shapes) {
+    it(`caley's own encrypted message (${shape}): the subject only inside, and the reader shows it`, async () => {
+      const bob = await keys('bob@example.com');
+      const raw = await buildProtectedMime(draft({
+        encryptionKeys: [bob.publicKey], cc: ['carol@example.com'], inReplyTo: '<0@example.com>', references: '<0@example.com>', ...over,
+      }));
+      const text = new TextDecoder().decode(raw);
+      expect(text).toMatch(/^Subject: \[\.\.\.\]\r$/m);
+      expect(text).not.toContain('secret subject');
+      expect(text).not.toMatch(/^Bcc:/im);
+
+      const locked = await settle(raw, empty(), [], async () => []);
+      expect(locked.headers.subject).toBe('[...]');
+      expect(protectedSubject(locked)).toBe('');
+
+      const msg = await settle(raw, empty(), [bob.privateKey], async () => []);
+      expect(protectedSubject(msg)).toBe('The real secret subject');
+      expect(msg.headers.subject).toBe('The real secret subject');
+      expect(msg.outer.subject).toBe('[...]');
+      expect(msg.sources.subject).toBe('protected');
+      expect(msg.headers.to.map((a) => a.address)).toEqual(['bob@example.com']);
+      expect(msg.sources.cc).toBe('protected');
+      expect(msg.headers.from.map((a) => a.address)).toEqual(['alice@example.com']);
+      expect(msg.summary.from).toBe('unknown');                         // unsigned: the same From, but nothing proves it
+      expect(readerParts(msg).some((p) => p.text.trim() === 'Encrypted body' || p.html.includes('Encrypted'))).toBe(true);
+
+      // the payload's root carries the real headers, and nothing the sender left out
+      const decrypted = await openpgp.decrypt({
+        message: await openpgp.readMessage({ armoredMessage: /-----BEGIN PGP MESSAGE-----[\s\S]*?-----END PGP MESSAGE-----/.exec(text)![0] }),
+        decryptionKeys: bob.privateKey, format: 'binary',
+      });
+      const payload = new TextDecoder().decode(decrypted.data as Uint8Array);
+      const head = payload.slice(0, payload.indexOf('\r\n\r\n'));
+      expect(head).toMatch(new RegExp(`^Content-Type: ${root};[^]*protected-headers="v1"`));
+      for (const field of ['Date', 'Message-ID', 'From', 'To', 'Cc', 'Subject', 'In-Reply-To', 'References']) expect(head).toMatch(new RegExp(`^${field}: `, 'm'));
+      expect(head).not.toMatch(/^(Bcc|Autocrypt|MIME-Version):/im);
+    });
+  }
+
+  it('signed only, without attachments: the subject stays outside, as before', async () => {
+    const alice = await keys('alice@example.com');
+    const text = new TextDecoder().decode(await buildProtectedMime(draft({ encrypt: false, sign: true, signingKey: alice.privateKey })));
+    expect(text).toMatch(/^Subject: The real secret subject\r$/m);
+    expect(text).not.toContain('protected-headers');
   });
 
   it('encrypted and signed by a key trusted for the sender: verified, and a reply may quote it', async () => {
@@ -72,8 +118,10 @@ describe('reading what caley sends', () => {
     const msg = await settle(raw, empty(), [bob.privateKey], async () => [{ key: alice.publicKey, addresses: ['alice@example.com'] }]);
     expect(messageBadges(msg)).toEqual(['encrypted', 'verified']);
     expect(quotable(msg)).toBe(true);
-    expect(protectedReply(msg)).toBeNull();   // no protected headers
-    expect(replyAddresses(msg)).toEqual(['Alice <alice@example.com>']);   // the outer From, which the signature inside binds
+    expect(protectedSubject(msg)).toBe('The real secret subject');
+    expect(msg.sources.from).toBe('protected');                       // the signature binds the protected From
+    expect(protectedReply(msg)).toEqual(['Alice <alice@example.com>']);
+    expect(replyAddresses(msg)).toEqual(['Alice <alice@example.com>']);
   });
 
   it('signed by a key trusted for someone else: no verified badge, the part marked, a warning on the sender', async () => {

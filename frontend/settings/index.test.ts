@@ -15,6 +15,7 @@ import * as ics from '../src/actions/ics.ts';
 import page from './index.html?raw';
 import { app, scripts } from '../src/test-components.ts';
 import type { VaultView } from '../src/actions/pgp-vault.ts';
+import type { StoredPublicKey } from '../src/lib/pgp/public-keys.ts';
 import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, commandfor, Blob.stream
 
 // The helpers the page and its components use (not the whole helpers module: other pages' helpers load more).
@@ -87,12 +88,17 @@ function fakeVault(initial: VaultView | null, failUnlock = false) {
   };
 }
 
-type ReadPublicKey = (armored: string) => Promise<unknown>;
-const readKey: ReadPublicKey = async (armored) => ({
-  body: { fingerprint: 'FFFF0000', email: armored, armored, is_own: false, source: 'imported' },
-  facts: { fingerprint: 'FFFF0000', userIds: [`Carol <${armored}>`, 'Carol <carol@work.example>'], emails: [armored, 'carol@work.example'] },
-  claimsAddress: true,
-});
+type ReadPublicKey = (armored: string, all?: StoredPublicKey[]) => Promise<unknown>;
+// as pgpKeys.publicKey: the key's addresses another sender's trusted key is stored for are its key changes
+const readKey: ReadPublicKey = async (armored, all = []) => {
+  const emails = [armored, 'carol@work.example'];
+  return {
+    body: { fingerprint: 'FFFF0000', email: armored, armored, is_own: false, source: 'imported' },
+    facts: { fingerprint: 'FFFF0000', userIds: [`Carol <${armored}>`, 'Carol <carol@work.example>'], emails },
+    claimsAddress: true,
+    changes: emails.filter((email) => keyChanges({ fingerprint: 'FFFF0000', email }, all)),
+  };
+};
 // what pgpKeys.storedKeyFacts reads of a stored key (the accept dialog)
 const storedKeyFacts = async (key: { fingerprint: string; email: string }) => ({ fingerprint: key.fingerprint, userIds: [`Bob <${key.email}>`], emails: [key.email] });
 
@@ -269,7 +275,7 @@ test('imports an ICS file into the remembered calendar, after a preview', async 
   storage.setItem('sn:event-default-calendar', JSON.stringify({ defaultCal: 'acc\0/cal/private/' }));
   const { root, requests, settle } = await show({
     'GET /api/caldav/accounts': { accounts: [account({ calendars: [cal('/cal/work/', 'Work'), cal('/cal/private/', 'Private')] })] },
-    'POST /api/import/preview': [{ uid: 'e1', summary: 'Standup', dtstart: '2026-11-09T09:00', dtend: '2026-11-09T09:15', is_all_day: false, location: 'Room 1' }],
+    'POST /api/import/preview': [{ uid: 'e1', summary: 'Standup', dtstart: '2026-11-09T09:00', dtend: '2026-11-09T09:15', is_all_day: false, location: 'Room 1', replaces: false }],
     'POST /api/import': { account_id: 'acc', calendar_href: '/cal/work/', imported: 1, errors: 0 },
   });
   button(root, m.cal_import()).click();
@@ -556,7 +562,7 @@ test('encryption tab: sender keys with their full fingerprint and state; an impo
   await settle();
   expect(dialog.open).toBe(false);
   expect(requests.calls.at(-1)).toMatchObject({ method: 'POST', path: '/api/pgp/key' });
-  expect(requests.calls.at(-1)!.body).toEqual({ fingerprint: 'FFFF0000', email: 'carol@work.example', armored: 'carol@example.com', is_own: false, source: 'imported' });
+  expect(requests.calls.at(-1)!.body).toEqual({ fingerprint: 'FFFF0000', email: 'carol@work.example', armored: 'carol@example.com', is_own: false, source: 'imported', replace: false });
   expect(trusted()).toEqual(['bob@example.com', 'carol@work.example']);
   expect(panel.querySelector('[role=status] [data-tone=success]')!.textContent).toBe(m.pgp_publicKeyImported());
 
@@ -609,6 +615,62 @@ test('encryption tab: a key found in mail for an address with a trusted key is a
   button(dialog, m.pgp_acceptNewKey()).click();
   await settle();
   expect(requests.calls.find((c) => c.path === '/api/pgp/key/accept')!.body).toEqual({ fingerprint: 'BBBB', replace: true });
+});
+
+const carolsKey = { fingerprint: 'DDDD5555', email: 'Carol@Work.example', armored: '', is_own: false, source: 'imported', trust: 'trusted' };
+
+async function importCarol(routes: Record<string, RouteResponse>) {
+  const r = await encryptionTab(lockedVault, routes);
+  button(r.root, m.pgp_importPublicKeyButton()).click();
+  await r.settle();
+  const dialog = r.root.querySelector<HTMLDialogElement>('#pgp-public-key-dialog')!;
+  type(dialog.querySelector('textarea')!, 'carol@example.com');
+  await r.settle();
+  dialog.querySelector('form')!.requestSubmit();
+  await r.settle();
+  return { ...r, dialog };
+}
+
+test('encryption tab: importing a key for an address another sender\'s key is trusted for warns of the key change, and replaces it in one request', async () => {
+  let keys = [carolsKey];
+  const { dialog, settle, requests, root } = await importCarol({
+    'GET /api/pgp/keys': () => keys,
+    'POST /api/pgp/key': (call) => { keys = [{ ...(call.body as typeof carolsKey), trust: 'trusted' }]; return keys[0]!; },
+  });
+  // the key's first address has no other key: no warning, the usual button
+  expect(dialog.textContent).not.toContain(m.pgp_acceptChangeHint({ email: 'carol@example.com' }));
+  expect(button(dialog, m.pgp_acceptNewKey())).toBeUndefined();
+  type(dialog.querySelector('select')!, 'carol@work.example');
+  await settle();
+  expect(dialog.textContent).toContain(m.pgp_acceptChangeHint({ email: 'carol@work.example' }));
+  expect(requests.calls.some((c) => c.method === 'POST')).toBe(false);
+  button(dialog, m.pgp_acceptNewKey()).click();
+  await settle();
+  const posts = requests.calls.filter((c) => c.method === 'POST');
+  expect(posts.map((c) => [c.path, c.body])).toEqual([
+    ['/api/pgp/key', { fingerprint: 'FFFF0000', email: 'carol@work.example', armored: 'carol@example.com', is_own: false, source: 'imported', replace: true }],
+  ]);
+  expect(dialog.open).toBe(false);
+  // the list as the server has it now: the old key is gone
+  const panel = root.querySelector('#settings-panel-encryption')!;
+  expect([...panel.querySelectorAll('.sender-keys li code')].map((c) => c.textContent)).toEqual(['FFFF 0000']);
+});
+
+test('encryption tab: a key change the dialog did not know of (409) says so and goes back to reading the key', async () => {
+  let keys: (typeof carolsKey)[] = [];
+  const { dialog, settle, requests } = await importCarol({
+    'GET /api/pgp/keys': () => keys,
+    'POST /api/pgp/key': () => { keys = [{ ...carolsKey, email: 'carol@example.com' }]; return { status: 409, body: { error: 'key_change' } }; },
+  });
+  button(dialog, m.pgp_trustImportButton()).click();
+  await settle();
+  expect(requests.calls.filter((c) => c.method === 'POST').map((c) => (c.body as { replace: boolean }).replace)).toEqual([false]);
+  expect(dialog.querySelector('[role=alert]')!.textContent).toBe(m.pgp_keyChangeConflict());
+  expect(dialog.querySelector('textarea')).not.toBeNull();
+  // read again: now the change is shown
+  dialog.querySelector('form')!.requestSubmit();
+  await settle();
+  expect(dialog.textContent).toContain(m.pgp_acceptChangeHint({ email: 'carol@example.com' }));
 });
 
 test('encryption tab: a failed key removal brings the key back with the error', async () => {

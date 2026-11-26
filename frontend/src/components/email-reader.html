@@ -406,7 +406,7 @@
             <button type="button" data-icon="shield-check" data-sn-attr="{disabled: !keyImport.body.email}"
                     data-sn-call="mail.importKey(keyImport.body, keyImport.changes.includes(keyImport.body.email))"
                     data-sn-then="keyImported = body ? body.key : ''; keyImport = null; closeDialog('email-key-import'); refresh(body)"
-                    data-sn-catch="keyImportError = m.pgp_publicKeyImportError()"
+                    data-sn-catch="keyImportError = $error.status === 409 ? m.pgp_keyChangeConflict() : m.pgp_publicKeyImportError()"
                     data-sn-text="keyImport.changes.includes(keyImport.body.email) ? m.pgp_acceptNewKey() : m.pgp_trustImportButton()"></button>
           </footer>
         </div>

@@ -531,27 +531,32 @@ pub async fn get_thread(
     }
 }
 
+/// One row per message of a thread: copies of a message (in several mailboxes) are one. Rows are copies only when
+/// their Message-ID, sender (`from_addr`, the From header as parsed) and Date all match, since a Message-ID is
+/// whatever the sender writes: a mail carrying another's Message-ID is shown beside it, never instead of it. Of
+/// copies the open message is kept, else the one cached first.
 fn dedupe_thread_messages(
     mut messages: Vec<email_db::MessageRow>,
     account_id: &str,
     mailbox: &str,
     uid: u32,
 ) -> Vec<email_db::MessageRow> {
-    messages.sort_by_key(|m| (m.sent_at.is_none(), m.sent_at.unwrap_or_default(), m.rowid));
-    let mut result = Vec::new();
-    let mut logical_indices: HashMap<String, usize> = HashMap::new();
+    messages.sort_by_key(|m| m.rowid);
+    let mut result: Vec<email_db::MessageRow> = Vec::new();
+    let mut copies: HashMap<(String, Option<String>, Option<i64>), usize> = HashMap::new();
     for message in messages {
         let is_open_message = message.account_id == account_id
             && message.mailbox == mailbox
             && message.uid == uid as i64;
         if let Some(message_id) = message.message_id.clone() {
-            if let Some(&index) = logical_indices.get(&message_id) {
+            let key = (message_id, message.from_addr.clone(), message.sent_at);
+            if let Some(&index) = copies.get(&key) {
                 if is_open_message {
                     result[index] = message;
                 }
                 continue;
             }
-            logical_indices.insert(message_id, result.len());
+            copies.insert(key, result.len());
         }
         result.push(message);
     }
@@ -1569,6 +1574,55 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].mailbox, "INBOX");
         assert_eq!(result[0].uid, 2);
+    }
+
+    fn from(mut row: MessageRow, from: &str) -> MessageRow {
+        row.from_addr = Some(from.to_owned());
+        row
+    }
+
+    #[test]
+    fn a_mail_with_a_known_message_id_never_stands_in_for_the_real_one() {
+        // the real message, then a forgery with its Message-ID and an earlier Date, then one from another sender
+        let messages = vec![
+            from(
+                thread_row("INBOX", 1, "known", 100),
+                "Alice <alice@example.com>",
+            ),
+            from(
+                thread_row("INBOX", 2, "known", 50),
+                "Alice <alice@example.com>",
+            ),
+            from(
+                thread_row("INBOX", 3, "known", 100),
+                "Mallory <alice@example.com.evil>",
+            ),
+        ];
+        let result = dedupe_thread_messages(messages, "account", "INBOX", 9);
+        let uids: Vec<i64> = result.iter().map(|m| m.uid).collect();
+        assert_eq!(uids, vec![2, 1, 3]);
+    }
+
+    #[test]
+    fn copies_keep_the_one_cached_first_unless_another_is_open() {
+        let copy = |mailbox, uid| from(thread_row(mailbox, uid, "same", 7), "a@example.com");
+        // cached in Archive first (rowid 1), then INBOX
+        let result = dedupe_thread_messages(
+            vec![copy("INBOX", 2), copy("Archive", 1)],
+            "account",
+            "Sent",
+            5,
+        );
+        assert_eq!(result.len(), 1);
+        assert_eq!((result[0].mailbox.as_str(), result[0].uid), ("Archive", 1));
+        let result = dedupe_thread_messages(
+            vec![copy("INBOX", 2), copy("Archive", 1)],
+            "account",
+            "INBOX",
+            2,
+        );
+        assert_eq!(result.len(), 1);
+        assert_eq!((result[0].mailbox.as_str(), result[0].uid), ("INBOX", 2));
     }
 
     #[test]

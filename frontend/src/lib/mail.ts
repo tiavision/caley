@@ -11,7 +11,7 @@ import {
   bareMailbox,
 } from './mailUtils.ts';
 import type { Account, Attachment, Identity, Mailbox, Message, ThreadNode, VirtualFolder } from './MailTypes.ts';
-import { parseEnvelopeAddresses } from './addresses.ts';
+import { formatAddress, isPlainAddress, lastEntryStart, parseEnvelopeAddresses } from './addresses.ts';
 import type { Body, ParseOptions } from '@tiavision/sinter-mail';
 import type { ReaderPart } from './mail-reader.ts';
 import type { PendingKey } from './pgp-keys.ts';
@@ -549,8 +549,26 @@ export function bodyOf<B extends { key: string }>(body: B | null | undefined, ms
   return body && body.key === messageKey(msg) ? body : null;
 }
 
+/** The names servers and clients give the sent mailbox (lowercase), in the languages Caley's users are likely to meet. */
+const SENT_NAMES = new Set([
+  'sent', 'sent items', 'sent mail', 'sent messages', 'sent-mail', 'sentmail', 'sent-items',
+  'gesendet', 'gesendete elemente', 'gesendete objekte', 'gesendete nachrichten',
+  'envoyés', 'envoyes', 'éléments envoyés', 'messages envoyés',
+  'enviados', 'elementos enviados', 'mensajes enviados', 'itens enviados',
+  'posta inviata', 'inviata', 'inviati', 'verzonden', 'verzonden items', 'verzonden berichten',
+  'skickat', 'skickade objekt', 'sendt', 'sendte elementer', 'sendt post', 'lähetetyt', 'wysłane', 'odeslané',
+  'отправленные',
+]);
+
+/**
+ * Is this the sent mailbox (the reader then shows the recipients, not the sender). The mailbox list carries no role,
+ * so its name's last segment (split at `/` and `.`: `INBOX/Sent`, `INBOX.Sent`, `[Gmail]/Sent Mail`) is compared
+ * whole with the usual names: "Presents" or "Consent" is not a sent mailbox.
+ */
 export function isSentMailbox(mailbox: string | null): boolean {
-  return !!mailbox && /sent/i.test(mailbox);
+  if (!mailbox) return false;
+  const leaf = mailbox.split(/[/.]/).pop() ?? '';
+  return SENT_NAMES.has(leaf.normalize('NFC').trim().toLowerCase());
 }
 
 export function messageDateTime(ts: number | null): string {
@@ -662,13 +680,6 @@ export function replyOf(msg: Message, b: { subject: string; reply: string[] | nu
 
 export function matching(origins: string[], q: string): string[] {
   return q ? origins.filter((o) => o.includes(q)) : origins;
-}
-
-/** Is `node` the open message (same Message-ID, else the same place)? */
-export function isThreadCurrent(node: ThreadNode, msg: Message | null): boolean {
-  if (!msg) return false;
-  if (node.message_id && msg.message_id) return node.message_id === msg.message_id;
-  return isRef(node, msg);
 }
 
 // ── Compose ───────────────────────────────────────────────────────────────────
@@ -849,25 +860,28 @@ export function composeTitle(mode: ComposeMode): string {
   return mode === 'forward' ? m.mail_forward() : mode === 'replyAll' ? m.mail_replyAll() : mode === 'reply' ? m.mail_reply() : m.mail_newMessage();
 }
 
-/** The address being typed: what follows the last comma. */
+/** The address being typed: what follows the last comma that separates entries (not one in a quoted name). */
 export function recipientToken(value: string): string {
-  return value.split(',').at(-1)!.trim();
+  return value.slice(lastEntryStart(value)).trim();
 }
 
 /** `value` with the address being typed replaced by `addr`. */
 export function withRecipient(value: string, addr: string): string {
-  const comma = value.lastIndexOf(',');
-  return `${comma >= 0 ? value.slice(0, comma + 1) + ' ' : ''}${addr}, `;
+  const start = lastEntryStart(value);
+  return `${start > 0 ? value.slice(0, start) + ' ' : ''}${addr}, `;
 }
 
 export interface AddressSuggestion { name: string; email: string }
 
-/** Every contact e-mail address once, with the contact's name (GET /api/contacts). */
+/**
+ * Every contact e-mail address once, with the contact's name (GET /api/contacts). A vCard's EMAIL is anyone's text:
+ * one that is not a plain `local@domain` is not offered.
+ */
 export function contactAddresses(contacts: ContactAddresses[]): AddressSuggestion[] {
   const seen = new Set<string>();
   const out: AddressSuggestion[] = [];
   for (const c of contacts) for (const e of c.emails ?? []) {
-    if (e.value && !seen.has(e.value.toLowerCase())) {
+    if (e.value && isPlainAddress(e.value) && !seen.has(e.value.toLowerCase())) {
       seen.add(e.value.toLowerCase());
       out.push({ name: c.fn_name || '', email: e.value });
     }
@@ -875,15 +889,18 @@ export function contactAddresses(contacts: ContactAddresses[]): AddressSuggestio
   return out;
 }
 
-/** Up to 7 recipient suggestions for `token`: matching contacts first, then addresses seen in mail. */
+/**
+ * Up to 7 recipient suggestions for `token`: matching contacts first (the name quoted as the backend quotes it, so a
+ * name holding a comma or an address stays one recipient), then the plain addresses seen in mail.
+ */
 export function recipientHits(token: string, contacts: AddressSuggestion[], seen: string[]): string[] {
   if (token.length < 2) return [];
   const q = token.toLowerCase();
   const hits = contacts.filter((c) => c.email.toLowerCase().includes(q) || c.name.toLowerCase().includes(q));
   const emails = new Set(hits.map((c) => c.email.toLowerCase()));
   return [
-    ...hits.slice(0, 5).map((c) => (c.name ? `${c.name} <${c.email}>` : c.email)),
-    ...seen.filter((a) => !emails.has(a.toLowerCase())),
+    ...hits.slice(0, 5).map((c) => formatAddress(c.name, c.email)),
+    ...seen.filter((a) => isPlainAddress(a) && !emails.has(a.toLowerCase())),
   ].slice(0, 7);
 }
 
@@ -922,7 +939,7 @@ export function canSign(draft: ComposeDraft, identities: Identity[], keys: Compo
 export function canEncrypt(draft: ComposeDraft, identities: Identity[], keys: ComposeKeys | null): boolean {
   const identity = identities.find((i) => i.identity_id === draft.identity_id);
   if (!identity || !keys) return false;
-  const recipients = [...parseEnvelopeAddresses(draft.to), ...parseEnvelopeAddresses(draft.cc), ...parseEnvelopeAddresses(draft.bcc)];
+  const recipients = draftRecipients(draft);
   return recipients.length > 0 &&
     recipients.every((r) => keys.keys.some((k) => hasEmail(k, r))) &&
     keys.keys.some((k) => k.is_own && hasEmail(k, identity.email));

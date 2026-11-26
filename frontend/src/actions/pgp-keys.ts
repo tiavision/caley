@@ -3,17 +3,20 @@
 // sinter on the first call); listing, storing, accepting and deleting are plain requests in the markup.
 import { armorBinaryKey } from '../lib/pgp/keyring.ts';
 import { keyFacts, parsePublicKey, publicKeyBody, type StoredPublicKey } from '../lib/pgp/public-keys.ts';
-import type { KeyCandidate, KeyFacts } from '../lib/pgp-keys.ts';
+import { keyChanges, type KeyCandidate, type KeyFacts } from '../lib/pgp-keys.ts';
 import { m } from '@tiaforge-ui/sinter/messages';
 
 /**
  * Reads an armored public key for the import dialog, which shows its fingerprint and user IDs before it is stored
  * (POST /pgp/key, trusted) for the address chosen there: the key's first, unless the user picks another of its own.
+ * `all` (the stored keys) gives its key changes: the key's addresses another sender's key is trusted for, warned of
+ * in the dialog and replaced only then (`replace`).
  */
-export async function publicKey(armored: string): Promise<KeyCandidate> {
+export async function publicKey(armored: string, all: StoredPublicKey[] = []): Promise<KeyCandidate> {
   const key = await parsePublicKey(armored);
   const facts = keyFacts(key);
-  return { body: { ...publicKeyBody(key, 'imported'), email: facts.emails[0] ?? '' }, facts, sender: '', claimsAddress: true, changes: [] };
+  const changes = facts.emails.filter((email) => keyChanges({ fingerprint: facts.fingerprint, email }, all));
+  return { body: { ...publicKeyBody(key, 'imported'), email: facts.emails[0] ?? '' }, facts, sender: '', claimsAddress: true, changes };
 }
 
 /** What a stored key says of itself, for the dialog that accepts it; rejects a record whose armor is another key. */

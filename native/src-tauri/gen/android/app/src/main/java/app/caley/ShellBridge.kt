@@ -3,6 +3,7 @@ package app.caley
 import android.Manifest
 import android.app.DownloadManager
 import android.app.PendingIntent
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
@@ -30,13 +31,20 @@ import java.io.File
  * What the server's pages get from the app (res/raw/shell_bridge.js, injected at document start): Android
  * notifications behind `Notification`, the share sheet behind `navigator.share`, saving downloads of data the
  * page made (blob:/data: links), Android's download manager for downloads from the server, with the page's
- * cookies, and passkeys behind `navigator.credentials` (Authenticator.kt). The page and the app talk over the `caleyShell` web message channel, top frames only; the
- * picker (the app's own page) gets none of it.
+ * cookies, passkeys behind `navigator.credentials` (Authenticator.kt), and the phone's browser for links that
+ * open a window on another site (every link in a mail). The page and the app talk over the `caleyShell` web
+ * message channel, top frames only, and only the server the picker opened gets any of it (`server`: exactly
+ * its origin; the script is injected there alone, every other origin's messages are dropped), so a page a link
+ * led to gets no notifications, no files in Downloads and not the device's push endpoint. The picker (the
+ * app's own page) says which server that is and gets nothing else.
  */
 class ShellBridge(private val activity: MainActivity, private val webView: WebView) {
   private val prefs = activity.getSharedPreferences("shell", Context.MODE_PRIVATE)
   private val notifications = NotificationManagerCompat.from(activity)
+  private var installed = false
   private var script: ScriptHandler? = null
+  // the server the picker opened last (or a pushed notification's tap), kept across restarts of the app
+  private var server: String? = prefs.getString(SERVER, null)
   // the page that said hello last: notification clicks and permission changes go there
   private var page: JavaScriptReplyProxy? = null
   // a page's notification ("<page>:<id>") → the Android one (tag, id)
@@ -49,9 +57,12 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
     if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) ||
       !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
     ) return
+    installed = true
     WebViewCompat.addWebMessageListener(webView, "caleyShell", setOf("*")) { _, message, origin, isMainFrame, reply ->
-      val data = message.data
-      if (isMainFrame && origin.host != "tauri.localhost" && data != null) handle(JSONObject(data), origin, reply)
+      val data = message.data?.let { runCatching { JSONObject(it) }.getOrNull() }
+      if (!isMainFrame || data == null) return@addWebMessageListener
+      if (origin.host == PICKER_HOST) picked(data, reply)
+      else if (server != null && originOf(origin) == server) handle(data, origin, reply)
     }
     inject()
     webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
@@ -60,27 +71,50 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
     Push.channel(activity)
   }
 
+  /** The server whose pages get the bridge from now on (the picker's choice, or a pushed notification's). */
+  fun bind(origin: String) {
+    if (origin == server) return
+    server = origin
+    page = null
+    prefs.edit().putString(SERVER, origin).apply()
+    if (installed) inject()
+  }
+
+  // the picker names the server it opens (ui/start.js) and waits for this answer before it goes there, so the
+  // server's first page finds it bound
+  private fun picked(message: JSONObject, reply: JavaScriptReplyProxy) {
+    if (message.optString("type") != "server") return
+    val origin = message.optString("origin")
+    val uri = Uri.parse(origin)
+    if ((uri.scheme == "http" || uri.scheme == "https") && !uri.host.isNullOrEmpty() && originOf(uri) == origin) bind(origin)
+    answer(reply, message.optInt("id"), null)
+  }
+
   /** Back in front: the permission may have been changed in the system settings meanwhile. */
   fun resumed() {
-    if (script == null) return
+    if (!installed) return
     inject()
     page?.postMessage(JSONObject().put("permission", permission()).toString())
   }
 
   /** A notification tapped (the intent that brought the app to front): its click, on the page that sent it. */
   fun opened(intent: Intent) {
-    val click = intent.getStringExtra(EXTRA_CLICK) ?: return
-    val (pageId, id) = click.split(":", limit = 2).let { it[0] to it[1].toInt() }
+    val click = intent.getStringExtra(EXTRA_CLICK)?.split(":", limit = 2) ?: return
+    val pageId = click[0]
+    val id = click.getOrNull(1)?.toIntOrNull() ?: return
     page?.postMessage(JSONObject().put("click", id).put("page", pageId).toString())
   }
 
-  // the script, with the permission as it is now written in (the page reads it at once)
+  // the script, with the permission as it is now written in (the page reads it at once), for the server's
+  // pages only
   private fun inject() {
     script?.remove()
+    script = null
+    val server = server ?: return
     val source = activity.resources.openRawResource(R.raw.shell_bridge).bufferedReader().use { it.readText() }
       .replace("__PERMISSION__", permission())
       .replace("__WEBAUTHN__", (authenticator != null).toString())
-    script = WebViewCompat.addDocumentStartJavaScript(webView, source, setOf("*"))
+    script = runCatching { WebViewCompat.addDocumentStartJavaScript(webView, source, setOf(server)) }.getOrNull()
   }
 
   private fun handle(message: JSONObject, origin: Uri, reply: JavaScriptReplyProxy) {
@@ -95,6 +129,7 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
       "mail" -> Push.follow(activity, originOf(origin), message.optBoolean("on"))
       "permission" -> requestPermission { answer(reply, id, it) }
       "notify" -> notify(message)
+      "open" -> browse(message.optString("url"))
       "close" -> shown.remove("${message.optString("page")}:${message.optInt("id")}")?.let { (tag, n) -> notifications.cancel(tag, n) }
       "webauthn.create", "webauthn.get" -> {
         val authenticator = authenticator ?: return answer(reply, id, null, error = "not supported", name = "NotSupportedError")
@@ -219,9 +254,23 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
     resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
   }
 
-  // a download from the server: Android's download manager, with the session cookie the page has
+  // a link on the server's page that opens a window on another site, or a window the page opens there
+  // (shell_bridge.js): the phone's browser, not this webview
+  private fun browse(url: String) {
+    val uri = Uri.parse(url)
+    if (uri.scheme != "http" && uri.scheme != "https") return
+    try {
+      activity.startActivity(Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE))
+    } catch (_: ActivityNotFoundException) {
+      // no browser on the phone
+    }
+  }
+
+  // a download from the server: Android's download manager, with the session cookie the page has; one from
+  // another site: the phone's browser
   private fun download(url: String, userAgent: String, contentDisposition: String?, mimeType: String?) {
     if (!url.startsWith("http")) return
+    if (originOf(Uri.parse(url)) != server) return browse(url)
     val name = URLUtil.guessFileName(url, contentDisposition, mimeType)
     val request = DownloadManager.Request(Uri.parse(url))
       .addRequestHeader("User-Agent", userAgent)
@@ -234,8 +283,6 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
     toast(R.string.shell_downloading, name)
   }
 
-  private fun originOf(origin: Uri) = "${origin.scheme}://${origin.host}${if (origin.port != -1) ":${origin.port}" else ""}"
-
   private fun toast(text: Int, name: String) =
     Toast.makeText(activity, activity.getString(text, name), Toast.LENGTH_SHORT).show()
 
@@ -245,5 +292,24 @@ class ShellBridge(private val activity: MainActivity, private val webView: WebVi
 
   companion object {
     private const val EXTRA_CLICK = "app.caley.notification"
+    private const val SERVER = "server"
+    // where Tauri serves the picker (MainActivity.kt)
+    private const val PICKER_HOST = "tauri.localhost"
+
+    fun originOf(origin: Uri) = "${origin.scheme}://${origin.host}${if (origin.port != -1) ":${origin.port}" else ""}"
+
+    /**
+     * `url` if it is on a server the app knows (the one bound, or one registered for push), rebuilt from the
+     * parts Android parsed, so the webview loads the host that was checked; else null.
+     */
+    fun serverUrl(context: Context, url: String): String? {
+      val uri = Uri.parse(url)
+      if ((uri.scheme != "http" && uri.scheme != "https") || uri.host.isNullOrEmpty()) return null
+      val origin = originOf(uri)
+      val bound = context.getSharedPreferences("shell", Context.MODE_PRIVATE).getString(SERVER, null)
+      if (origin != bound && !Push.registered(context, origin)) return null
+      return origin + (uri.encodedPath?.ifEmpty { null } ?: "/") +
+        (uri.encodedQuery?.let { "?$it" } ?: "") + (uri.encodedFragment?.let { "#$it" } ?: "")
+    }
   }
 }

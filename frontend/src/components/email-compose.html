@@ -125,7 +125,8 @@
                     <pgp-key-facts data-sn-with="{ fingerprint: k.fingerprint, userIds: k.userIds }"></pgp-key-facts>
                     <button type="button" data-variant="outline" data-size="sm" data-self="start" data-icon="shield-check"
                             data-sn-post="/pgp/key/accept" data-sn-body="{ fingerprint: k.fingerprint, replace: k.change }"
-                            data-sn-then="refresh(composeKeys)" data-sn-catch="composeError = m.pgp_keyAcceptError()"
+                            data-sn-then="refresh(composeKeys)"
+                            data-sn-catch="composeError = $error.status === 409 ? m.pgp_keyChangeConflict() : m.pgp_keyAcceptError(); refresh(composeKeys)"
                             data-sn-text="k.change ? m.pgp_acceptNewKey() : m.pgp_acceptKey()"></button>
                   </div>
                 </template>

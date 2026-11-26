@@ -47,9 +47,13 @@ function nodeEvents(node: ThreadNode, byKey: Map<string, EventJson[]>, single: b
 export function threadRows(messages: readonly ThreadNode[], groups: readonly MessageEventGroupJson[], ref: ThreadRef | null): ThreadRow[] {
   const byKey = new Map(groups.map((g) => [identityKey(g.account_id, g.mailbox, g.uid), g.events] as const));
   const rows: ThreadRow[] = [];
+  // two messages may share a Message-ID (one mail claiming another's): a reply to it is under the first only
+  const shown = new Set<string>();
   const walk = (branches: ThreadTreeNode[], depth: number) => {
     for (const { message: node, children } of branches) {
       const key = identityKey(node.account_id, node.mailbox, node.uid);
+      if (shown.has(key)) continue;
+      shown.add(key);
       rows.push({
         kind: 'message', key, depth, node, from: senderName(node.from), date: formatDate(node.sent_at),
         current: !!ref?.current && ref.account_id === node.account_id && ref.mailbox === node.mailbox && ref.uid === node.uid,

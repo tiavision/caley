@@ -1039,6 +1039,7 @@
           {
             "name": "origin",
             "in": "query",
+            "description": "the origin as listed (an http(s) URL is taken as its origin, as when it was added)",
             "required": true,
             "schema": {
               "type": "string"
@@ -1133,6 +1134,7 @@
           {
             "name": "origin",
             "in": "query",
+            "description": "the origin as listed (an http(s) URL is taken as its origin, as when it was added)",
             "required": true,
             "schema": {
               "type": "string"
@@ -2471,6 +2473,9 @@
           },
           "400": {
             "description": "no file, no importable events in it, or more than 1,000 events (plain text)"
+          },
+          "404": {
+            "description": "no such CalDAV account (plain text)"
           }
         }
       }
@@ -2607,7 +2612,7 @@
     },
     "/pgp/key": {
       "post": {
-        "summary": "Adds or replaces a public key; answers the key as stored. Its trust follows its `source`: a key the user\nimported is trusted, one found in mail (`harvested_…`) is stored `unverified`, and never changes a stored key\nthe user trusts or owns (the answer is then that key, unchanged).",
+        "summary": "Adds or replaces a public key; answers the key as stored. Its trust follows its `source`: a key the user\nimported is trusted, one found in mail (`harvested_…`) is stored `unverified`, and never changes a stored key\nthe user trusts or owns (the answer is then that key, unchanged). One sender's key is trusted for an address:\na trusted key for an address with another's trusted key is a key change, stored only with `replace`.",
         "operationId": "save_public_key",
         "requestBody": {
           "content": {
@@ -2632,6 +2637,16 @@
           },
           "400": {
             "description": "plain text: invalid public key, an unknown source, or an own key with a `harvested_…` source"
+          },
+          "409": {
+            "description": "`key_change`: another sender's key is trusted for the address (send `replace` once the user accepted the change)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           },
           "500": {
             "description": "plain text: database error"
@@ -2663,7 +2678,7 @@
     },
     "/pgp/key/accept": {
       "post": {
-        "summary": "The user accepted a stored key (one found in mail, after seeing its fingerprint and user IDs): it is trusted for\nthe address it was stored for; with `replace` (a key change) it takes the place of the other senders' keys stored\nfor that address. Answers the key.",
+        "summary": "The user accepted a stored key (one found in mail, after seeing its fingerprint and user IDs): it is trusted for\nthe address it was stored for; with `replace` (a key change) it takes the place of the other senders' keys stored\nfor that address, without it a key change is a 409. Answers the key.",
         "operationId": "accept_public_key",
         "requestBody": {
           "content": {
@@ -2688,6 +2703,16 @@
           },
           "404": {
             "description": "plain text: no such key"
+          },
+          "409": {
+            "description": "`key_change`: another sender's key is trusted for the address (send `replace` once the user accepted the change)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           },
           "500": {
             "description": "plain text: database error"
@@ -4563,6 +4588,7 @@
       },
       "IcsFileForm": {
         "type": "object",
+        "description": "An ICS file to preview, and optionally the calendar it would be imported into (`replaces` is then\nset for its events already there; without one, or for a new calendar, nothing replaces).",
         "required": [
           "file"
         ],
@@ -4571,6 +4597,20 @@
             "type": "string",
             "format": "binary",
             "description": "the ICS file (UTF-8)"
+          },
+          "account_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the account of the target calendar"
+          },
+          "calendar_href": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the target calendar"
           }
         }
       },
@@ -4673,13 +4713,13 @@
         "properties": {
           "origin": {
             "type": "string",
-            "description": "an http(s) URL; stored as its `scheme://host`"
+            "description": "an http(s) URL; stored as its origin, `scheme://host[:port]` (the default port left out)"
           }
         }
       },
       "ImageOrigins": {
         "type": "object",
-        "description": "A list of image origins (`scheme://host`): the allowed ones or the ignored ones.",
+        "description": "A list of image origins (`scheme://host[:port]`): the allowed ones or the ignored ones.",
         "required": [
           "origins"
         ],
@@ -4746,14 +4786,15 @@
       },
       "ImportPreviewEvent": {
         "type": "object",
-        "description": "An event of an ICS file, before the import.",
+        "description": "An event of an ICS file, before the import (a recurring event with its overrides is one).",
         "required": [
           "uid",
           "summary",
           "dtstart",
           "dtend",
           "is_all_day",
-          "location"
+          "location",
+          "replaces"
         ],
         "properties": {
           "uid": {
@@ -4773,6 +4814,10 @@
           },
           "location": {
             "type": "string"
+          },
+          "replaces": {
+            "type": "boolean",
+            "description": "importing it into the target calendar replaces an event already there (the same UID)"
           }
         }
       },
@@ -4794,7 +4839,7 @@
           },
           "imported": {
             "type": "integer",
-            "description": "events written to the calendar",
+            "description": "events written to the calendar (a recurring event with its overrides is one)",
             "minimum": 0
           },
           "errors": {
@@ -5400,6 +5445,13 @@
               "null"
             ],
             "description": "default `imported`; `harvested_autocrypt` and `harvested_attachment` (found in mail, not chosen by the user)\nstore the key `unverified`"
+          },
+          "replace": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "a key change the user saw and accepted: a trusted key for an address another sender's key is trusted for\ntakes its place (the others stored for the address are removed). Without it such a key is a 409 (default false)"
           }
         }
       },
@@ -5884,7 +5936,8 @@
           "has_caldav",
           "oidc_enabled",
           "map_url",
-          "oidc_signed_in"
+          "oidc_signed_in",
+          "logout_token"
         ],
         "properties": {
           "display_name": {
@@ -5909,6 +5962,10 @@
           "oidc_signed_in": {
             "type": "boolean",
             "description": "whether the user's OIDC sign-in is kept for mail accounts that sign in with it (JMAP)"
+          },
+          "logout_token": {
+            "type": "string",
+            "description": "the session's logout token: `GET /logout?t=<token>` ends the session, nothing else does"
           }
         }
       },

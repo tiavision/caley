@@ -41,6 +41,66 @@ async function show() {
   return { ...r, requests };
 }
 
+/** A multipart body's field: a FormData (jsdom) or the encoded text. */
+function field(body: unknown, name: string): string | undefined {
+  const form = body as { get?: (n: string) => unknown };
+  if (typeof form?.get === 'function') {
+    const v = form.get(name);
+    return v == null ? undefined : String(v);
+  }
+  return String(body).match(new RegExp(`name="${name}"\\r\\n\\r\\n([^\\r]*)\\r\\n`))?.[1];
+}
+
+test('the preview marks the events that replace one in the chosen calendar, and previews again for another', async () => {
+  const row = (uid: string, summary: string, replaces: boolean) =>
+    ({ uid, summary, dtstart: '2026-11-09T09:00', dtend: '2026-11-09T10:00', is_all_day: false, location: '', replaces });
+  const requests = mockRequests({
+    'GET /api/caldav/accounts': { accounts },
+    // the work calendar has "a" already; any other calendar has nothing of the file
+    'POST /api/import/preview': (call) => {
+      const work = field(call.body, 'calendar_href') === '/cal/work/';
+      return [row('a', 'Standup', work), row('b', 'Retro', false)];
+    },
+  });
+  const r = await render(page, { requests, actions: { ics, attachment: { open: () => null } }, helpers: { calendarValue, importEventDate, importDraft, importSummary }, messages, ...app });
+  await r.settle();
+  const { root, settle } = r;
+  root.querySelector<HTMLButtonElement>('#plain')!.click();
+  await settle();
+  const dialog = root.querySelector<HTMLDialogElement>('#import-ics')!;
+  const input = dialog.querySelector<HTMLInputElement>('input[type=file]')!;
+  Object.defineProperty(input, 'files', { value: [new File(['BEGIN:VCALENDAR'], 'team.ics')], configurable: true });
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  const warnings = () => [...dialog.querySelectorAll('ul[data-list] li')].map((li) =>
+    [li.querySelector('strong')!.textContent, li.querySelector('small[data-tone=warning]')?.textContent ?? null]);
+
+  dialog.querySelector<HTMLButtonElement>('#import-ics-preview')!.click();
+  await settle();
+  const sent = requests.calls.filter((c) => c.path === '/api/import/preview');
+  expect(sent).toHaveLength(1);
+  expect([field(sent[0]!.body, 'account_id'), field(sent[0]!.body, 'calendar_href')]).toEqual(['acc', '/cal/work/']);
+  expect(warnings()).toEqual([['Standup', m.cal_importReplaces()], ['Retro', null]]);
+
+  // another calendar: previewed again for it, nothing replaces there
+  const select = dialog.querySelector<HTMLSelectElement>('select')!;
+  select.value = 'acc\0/cal/private/';
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  const again = requests.calls.filter((c) => c.path === '/api/import/preview');
+  expect(again).toHaveLength(2);
+  expect(field(again[1]!.body, 'calendar_href')).toBe('/cal/private/');
+  expect(warnings()).toEqual([['Standup', null], ['Retro', null]]);
+
+  // a new calendar: no target is sent
+  select.value = '__new__';
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  const last = requests.calls.filter((c) => c.path === '/api/import/preview').at(-1)!;
+  expect(field(last.body, 'account_id')).toBeUndefined();
+  expect(warnings()).toEqual([['Standup', null], ['Retro', null]]);
+});
+
 test('an attachment opens it with the file set; after an import it closes and reopens empty', async () => {
   const { root, settle, requests } = await show();
   const dialog = root.querySelector<HTMLDialogElement>('#import-ics')!;

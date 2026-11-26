@@ -8,6 +8,7 @@ use chrono::NaiveDate;
 use serde::Deserialize;
 
 use crate::caldav::generation::MAX_IMPORT_EVENTS;
+use crate::caldav::generation::without_server_scheduling;
 use crate::caldav::{CalDavClient, preview_events_from_raw_ical, split_vcalendar_into_events};
 use crate::db;
 use crate::email_db;
@@ -24,13 +25,13 @@ pub(crate) struct ImportResult {
     /// the calendar the events went to (a new one for `new_calendar_name`)
     account_id: String,
     calendar_href: String,
-    /// events written to the calendar
+    /// events written to the calendar (a recurring event with its overrides is one)
     imported: usize,
     /// events the CalDAV server refused
     errors: usize,
 }
 
-/// An event of an ICS file, before the import.
+/// An event of an ICS file, before the import (a recurring event with its overrides is one).
 #[derive(serde::Serialize, ToSchema)]
 pub(crate) struct ImportPreviewEvent {
     uid: String,
@@ -39,13 +40,21 @@ pub(crate) struct ImportPreviewEvent {
     dtend: String,
     is_all_day: bool,
     location: String,
+    /// importing it into the target calendar replaces an event already there (the same UID)
+    replaces: bool,
 }
 
+/// An ICS file to preview, and optionally the calendar it would be imported into (`replaces` is then
+/// set for its events already there; without one, or for a new calendar, nothing replaces).
 #[derive(TryFromMultipart, ToSchema)]
 pub(crate) struct IcsFileForm {
     /// the ICS file (UTF-8)
     #[schema(value_type = String, format = Binary)]
     file: String,
+    /// the account of the target calendar
+    account_id: Option<String>,
+    /// the target calendar
+    calendar_href: Option<String>,
 }
 
 /// An ICS file to import into a calendar: an existing one (`calendar_href`) or a new one of the
@@ -93,35 +102,64 @@ pub(crate) struct SearchQuery {
     request_body(content = IcsFileForm, content_type = "multipart/form-data"),
     responses(
         (status = 200, body = Vec<ImportPreviewEvent>),
-        (status = 400, description = "no file, no importable events in it, or more than 1,000 events (plain text)")
+        (status = 400, description = "no file, no importable events in it, or more than 1,000 events (plain text)"),
+        (status = 404, description = "no such CalDAV account (plain text)")
     )
 )]
 pub async fn preview_ics_import(
-    State(_state): State<crate::oidc::AppState>,
-    _user: CurrentUser,
-    TypedMultipart(IcsFileForm { file: ics }): TypedMultipart<IcsFileForm>,
+    State(state): State<crate::oidc::AppState>,
+    user: CurrentUser,
+    TypedMultipart(IcsFileForm {
+        file: ics,
+        account_id,
+        calendar_href,
+    }): TypedMultipart<IcsFileForm>,
 ) -> Response {
+    let account_id = account_id.filter(|a| !a.is_empty());
+    let calendar_href = calendar_href.filter(|h| !h.is_empty());
+    // the target calendar, only one of the user's
+    let account = match &account_id {
+        Some(id) => match super::owned_account(&state, &user.user_id, id).await {
+            Ok(account) => Some(account),
+            Err(response) => return response,
+        },
+        None => None,
+    };
     let events = split_vcalendar_into_events(&ics);
     if let Some(refused) = refuse_split(&events) {
         return refused;
     }
 
-    let previews: Vec<ImportPreviewEvent> = events
-        .events()
-        .filter_map(|(_, wrapped_ical)| {
-            preview_events_from_raw_ical(&wrapped_ical)
-                .into_iter()
-                .next()
-                .map(|event| ImportPreviewEvent {
-                    uid: event.uid,
-                    summary: event.summary,
-                    dtstart: event.dtstart,
-                    dtend: event.dtend.unwrap_or_default(),
-                    is_all_day: event.is_all_day,
-                    location: event.location,
-                })
-        })
-        .collect();
+    let mut previews: Vec<ImportPreviewEvent> = Vec::new();
+    for (uid, wrapped_ical) in events.events() {
+        let Some(event) = preview_events_from_raw_ical(&wrapped_ical)
+            .into_iter()
+            .next()
+        else {
+            continue;
+        };
+        let replaces = match (&account, &calendar_href) {
+            (Some(account), Some(href)) => {
+                // the UID the import puts it under
+                db::has_cached_event(&state.db, account.id(), href, &uid)
+                    .await
+                    .unwrap_or_else(|e| {
+                        eprintln!("Database error: {e}");
+                        false
+                    })
+            }
+            _ => false,
+        };
+        previews.push(ImportPreviewEvent {
+            uid: event.uid,
+            summary: event.summary,
+            dtstart: event.dtstart,
+            dtend: event.dtend.unwrap_or_default(),
+            is_all_day: event.is_all_day,
+            location: event.location,
+            replaces,
+        });
+    }
 
     if previews.is_empty() {
         return (
@@ -202,7 +240,7 @@ pub async fn import_ics(
                 .await
                 .ok()
                 .flatten()
-                .map(|msg| (msg.message_id, msg.thread_id))
+                .map(|msg| (msg.message_id, msg.thread_id, msg.from_addr, msg.sent_at))
         } else {
             None
         };
@@ -226,11 +264,18 @@ pub async fn import_ics(
     let mut imported = 0usize;
     let mut errors = 0usize;
 
+    // a file from anyone: the server sends no invitation or reply for it in the user's name
+    let mut no_scheduling = header::HeaderMap::new();
+    no_scheduling.insert("schedule-reply", header::HeaderValue::from_static("F"));
     for (uid, wrapped_ical) in events.events() {
+        let wrapped_ical = without_server_scheduling(&wrapped_ical);
         // an event already in the calendar is replaced where it is
         let event_href =
             super::events::resolve_event_href(&state, account.id(), &calendar_href, &uid).await;
-        match client.put_event(&event_href, &wrapped_ical).await {
+        match client
+            .put_event_with(&event_href, &wrapped_ical, no_scheduling.clone())
+            .await
+        {
             Ok(_) => {
                 if let Err(e) = db::upsert_cached_event_raw(
                     &state.db,
@@ -248,23 +293,42 @@ pub async fn import_ics(
                 if let (Some(ea), Some(em), Some(eu)) =
                     (&email_account_id, &email_mailbox, email_uid)
                 {
-                    let (email_message_id, email_thread_id) = source_message_identity
-                        .as_ref()
-                        .map(|(message_id, thread_id)| (message_id.as_ref(), thread_id.as_ref()))
-                        .unwrap_or((None, None));
+                    // the source mail's sender and Date beside its Message-ID: a mail elsewhere is that mail only
+                    // when all three match
+                    let (email_message_id, email_thread_id, email_from_addr, email_sent_at) =
+                        source_message_identity
+                            .as_ref()
+                            .map(|(message_id, thread_id, from_addr, sent_at)| {
+                                (
+                                    message_id.as_ref(),
+                                    thread_id.as_ref(),
+                                    from_addr.as_ref(),
+                                    *sent_at,
+                                )
+                            })
+                            .unwrap_or((None, None, None, None));
                     if let Err(e) = sqlx::query(
                         "INSERT INTO email_imported_events \
-                         (email_account_id, email_mailbox, email_uid, email_message_id, email_thread_id, cal_account_id, calendar_href, event_uid) \
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+                         (email_account_id, email_mailbox, email_uid, email_message_id, email_thread_id, \
+                          email_from_addr, email_sent_at, email_source_known, cal_account_id, calendar_href, event_uid) \
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
                          ON CONFLICT(email_account_id, email_mailbox, email_uid, event_uid) DO UPDATE SET \
                             email_message_id = COALESCE(email_imported_events.email_message_id, excluded.email_message_id), \
-                            email_thread_id = COALESCE(email_imported_events.email_thread_id, excluded.email_thread_id)",
+                            email_thread_id = COALESCE(email_imported_events.email_thread_id, excluded.email_thread_id), \
+                            email_from_addr = CASE WHEN email_imported_events.email_source_known = 1 \
+                                THEN email_imported_events.email_from_addr ELSE excluded.email_from_addr END, \
+                            email_sent_at = CASE WHEN email_imported_events.email_source_known = 1 \
+                                THEN email_imported_events.email_sent_at ELSE excluded.email_sent_at END, \
+                            email_source_known = MAX(email_imported_events.email_source_known, excluded.email_source_known)",
                     )
                     .bind(ea)
                     .bind(em)
                     .bind(i64::from(eu))
                     .bind(email_message_id)
                     .bind(email_thread_id)
+                    .bind(email_from_addr)
+                    .bind(email_sent_at)
+                    .bind(source_message_identity.is_some())
                     .bind(&account_id)
                     .bind(&calendar_href)
                     .bind(&uid)
@@ -474,7 +538,7 @@ pub async fn get_message_events(
     }
     let rows = sqlx::query(
         "WITH current_message AS (
-             SELECT message_id
+             SELECT message_id, from_addr, sent_at
                FROM cached_messages
               WHERE account_id = ? AND mailbox = ? AND uid = ?
               LIMIT 1
@@ -489,7 +553,10 @@ pub async fn get_message_events(
          WHERE ie.email_account_id = ? \
            AND ( \
                 (ie.email_message_id IS NOT NULL \
-                 AND ie.email_message_id = (SELECT message_id FROM current_message)) \
+                 AND EXISTS (SELECT 1 FROM current_message cur \
+                              WHERE cur.message_id = ie.email_message_id \
+                                AND (ie.email_source_known = 0 \
+                                     OR (cur.from_addr IS ie.email_from_addr AND cur.sent_at IS ie.email_sent_at)))) \
              OR (ie.email_mailbox = ? AND ie.email_uid = ?) \
            ) \
            AND ca.user_id = ?",
@@ -591,7 +658,7 @@ pub async fn get_thread_events(
               WHERE m.account_id = ? AND m.thread_id IS NOT NULL
          ),
          thread_messages AS (
-             SELECT DISTINCT m.account_id, m.mailbox, m.uid, m.message_id, m.sent_at, m.rowid
+             SELECT DISTINCT m.account_id, m.mailbox, m.uid, m.message_id, m.from_addr, m.sent_at, m.rowid
                FROM cached_messages m
               WHERE m.account_id = ?
                 AND ((m.mailbox = ? AND m.uid = ?)
@@ -603,7 +670,9 @@ pub async fn get_thread_events(
            FROM thread_messages tm
            JOIN email_imported_events ie
              ON ie.email_account_id = tm.account_id
-            AND ((ie.email_message_id IS NOT NULL AND ie.email_message_id = tm.message_id)
+            AND ((ie.email_message_id IS NOT NULL AND ie.email_message_id = tm.message_id
+                  AND (ie.email_source_known = 0
+                       OR (tm.from_addr IS ie.email_from_addr AND tm.sent_at IS ie.email_sent_at)))
               OR (ie.email_mailbox = tm.mailbox AND ie.email_uid = tm.uid))
            JOIN cached_events e
              ON e.account_id = ie.cal_account_id
@@ -742,6 +811,8 @@ async fn query_event_source_emails(
                  ON cm.account_id = ie.email_account_id
                 AND ie.email_message_id IS NOT NULL
                 AND cm.message_id = ie.email_message_id
+                AND (ie.email_source_known = 0
+                     OR (cm.from_addr IS ie.email_from_addr AND cm.sent_at IS ie.email_sent_at))
                JOIN imap_accounts ia ON ia.account_id = cm.account_id AND ia.user_id = ca.user_id
               WHERE ie.cal_account_id = ? AND ie.calendar_href = ? AND ie.event_uid = ?
                 AND ca.user_id = ?
@@ -770,6 +841,8 @@ async fn query_event_source_emails(
                      WHERE cm2.account_id = ie.email_account_id
                        AND ie.email_message_id IS NOT NULL
                        AND cm2.message_id = ie.email_message_id
+                       AND (ie.email_source_known = 0
+                            OR (cm2.from_addr IS ie.email_from_addr AND cm2.sent_at IS ie.email_sent_at))
                 )
          ),
          ranked_sources AS (
@@ -919,6 +992,9 @@ mod tests {
                 email_uid INTEGER NOT NULL,
                 email_message_id TEXT,
                 email_thread_id TEXT,
+                email_from_addr TEXT,
+                email_sent_at INTEGER,
+                email_source_known INTEGER NOT NULL DEFAULT 0,
                 cal_account_id TEXT NOT NULL,
                 calendar_href TEXT NOT NULL,
                 event_uid TEXT NOT NULL
@@ -1019,5 +1095,55 @@ mod tests {
         assert_eq!(sources[0].mailbox, "INBOX");
         assert_eq!(sources[0].uid, 10);
         assert_eq!(sources[0].subject.as_deref(), Some("Invite"));
+    }
+
+    async fn event_sources(pool: &SqlitePool) -> Vec<SourceEmailJson> {
+        query_event_source_emails(
+            pool,
+            "user",
+            &EventEmailsQuery {
+                cal_account_id: "cal".into(),
+                calendar_href: "/cal".into(),
+                event_uid: "event".into(),
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_mail_sharing_only_the_message_id_is_not_the_events_source() {
+        let pool = source_email_pool().await;
+        // imported from INBOX 10 (Host, 123), which has gone; mails with its Message-ID but another sender or Date
+        sqlx::query(
+            "INSERT INTO email_imported_events
+             (email_account_id, email_mailbox, email_uid, email_message_id, email_from_addr, email_sent_at,
+              email_source_known, cal_account_id, calendar_href, event_uid)
+             VALUES ('mail', 'INBOX', 10, '<invite@example>', 'Host <host@example>', 123, 1, 'cal', '/cal', 'event')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO cached_messages (account_id, mailbox, uid, message_id, from_addr, subject, sent_at)
+             VALUES ('mail', 'INBOX', 11, '<invite@example>', 'Mallory <host@example.evil>', 'Invite', 123),
+                    ('mail', 'INBOX', 12, '<invite@example>', 'Host <host@example>', 'Invite', 99)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(event_sources(&pool).await.is_empty());
+
+        // the real mail, moved: the same Message-ID, sender and Date
+        sqlx::query(
+            "INSERT INTO cached_messages (account_id, mailbox, uid, message_id, from_addr, subject, sent_at)
+             VALUES ('mail', 'Archive', 5, '<invite@example>', 'Host <host@example>', 'Invite', 123)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let found = event_sources(&pool).await;
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].mailbox.as_str(), found[0].uid), ("Archive", 5));
     }
 }

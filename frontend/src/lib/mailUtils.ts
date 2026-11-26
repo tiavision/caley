@@ -198,15 +198,19 @@ export function humanSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-/** Display name of a From header (`"Doe, Jane" <jane@x>` → `Doe, Jane`), or the header itself without one. */
+/**
+ * Display name of a From header (`"Doe, Jane" <jane@x>` → `Doe, Jane`), or the header itself without one. The name is
+ * the sender's to choose: one that holds an `@` (`"ceo@bank.example" <evil@x>`) could pass for an address, so it is
+ * shown with the real address (`ceo@bank.example <evil@x>`). The mail list, search results and threads show this.
+ */
 export function senderName(from: string | null): string {
   if (!from) return '';
   const match = from.match(/^(.+?)\s*<([^>]+)>/);
-  const name = match ? match[1].trim() : from.trim();
+  let name = match ? match[1].trim() : from.trim();
   // RFC 5322 quoted-string: drop the surrounding quotes and undo backslash escapes.
   const quoted = name.match(/^"(.*)"$/s);
-  if (!quoted) return name;
-  return quoted[1].replace(/\\(.)/g, '$1').trim() || match?.[2] || name;
+  if (quoted) name = quoted[1].replace(/\\(.)/g, '$1').trim() || match?.[2] || name;
+  return match && name.includes('@') && name !== match[2] ? `${name} <${match[2]}>` : name;
 }
 
 // ── DOM utilities ─────────────────────────────────────────────────────────────

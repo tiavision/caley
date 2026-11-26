@@ -1101,6 +1101,9 @@ pub struct SavePublicKeyBody {
     /// default `imported`; `harvested_autocrypt` and `harvested_attachment` (found in mail, not chosen by the user)
     /// store the key `unverified`
     pub source: Option<String>,
+    /// a key change the user saw and accepted: a trusted key for an address another sender's key is trusted for
+    /// takes its place (the others stored for the address are removed). Without it such a key is a 409 (default false)
+    pub replace: Option<bool>,
 }
 
 /// Where a posted key came from, and the trust that gives it: a key the user chose to store (imported, an
@@ -1115,7 +1118,8 @@ fn trust_of_source(source: &str) -> Option<&'static str> {
 
 /// Adds or replaces a public key; answers the key as stored. Its trust follows its `source`: a key the user
 /// imported is trusted, one found in mail (`harvested_…`) is stored `unverified`, and never changes a stored key
-/// the user trusts or owns (the answer is then that key, unchanged).
+/// the user trusts or owns (the answer is then that key, unchanged). One sender's key is trusted for an address:
+/// a trusted key for an address with another's trusted key is a key change, stored only with `replace`.
 #[utoipa::path(
     post,
     path = "/pgp/key",
@@ -1123,6 +1127,7 @@ fn trust_of_source(source: &str) -> Option<&'static str> {
     responses(
         (status = 200, body = StoredPublicKey, description = "the key as stored"),
         (status = 400, description = "plain text: invalid public key, an unknown source, or an own key with a `harvested_…` source"),
+        (status = 409, body = crate::api::ApiError, description = "`key_change`: another sender's key is trusted for the address (send `replace` once the user accepted the change)"),
         (status = 500, description = "plain text: database error")
     )
 )]
@@ -1148,7 +1153,7 @@ pub async fn save_public_key(
         return (StatusCode::BAD_REQUEST, "an own key is not found in mail").into_response();
     }
     let stored = if trust == "trusted" {
-        db::upsert_pgp_public_key(
+        match db::store_trusted_public_key(
             &state.db,
             &user.user_id,
             &body.fingerprint,
@@ -1156,9 +1161,14 @@ pub async fn save_public_key(
             &body.armored,
             is_own,
             &source,
-            trust,
+            body.replace.unwrap_or(false),
         )
         .await
+        {
+            Ok(db::TrustedKey::KeyChange) => return key_change(),
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
     } else {
         db::store_harvested_public_key(
             &state.db,
@@ -1187,6 +1197,15 @@ pub async fn save_public_key(
     }
 }
 
+/// 409 `key_change`: another sender's key is trusted for the address.
+fn key_change() -> Response {
+    (
+        StatusCode::CONFLICT,
+        Json(crate::api::ApiError::new("key_change")),
+    )
+        .into_response()
+}
+
 #[derive(Deserialize, ToSchema)]
 pub struct AcceptPublicKeyBody {
     pub fingerprint: String,
@@ -1196,7 +1215,7 @@ pub struct AcceptPublicKeyBody {
 
 /// The user accepted a stored key (one found in mail, after seeing its fingerprint and user IDs): it is trusted for
 /// the address it was stored for; with `replace` (a key change) it takes the place of the other senders' keys stored
-/// for that address. Answers the key.
+/// for that address, without it a key change is a 409. Answers the key.
 #[utoipa::path(
     post,
     path = "/pgp/key/accept",
@@ -1204,6 +1223,7 @@ pub struct AcceptPublicKeyBody {
     responses(
         (status = 200, body = StoredPublicKey, description = "the key, now trusted"),
         (status = 404, description = "plain text: no such key"),
+        (status = 409, body = crate::api::ApiError, description = "`key_change`: another sender's key is trusted for the address (send `replace` once the user accepted the change)"),
         (status = 500, description = "plain text: database error")
     )
 )]
@@ -1220,8 +1240,13 @@ pub async fn accept_public_key(
     )
     .await
     {
-        Ok(false) => return (StatusCode::NOT_FOUND, "no such key").into_response(),
-        Ok(true) => db::get_pgp_public_key(&state.db, &user.user_id, &body.fingerprint).await,
+        Ok(db::TrustedKey::Missing) => {
+            return (StatusCode::NOT_FOUND, "no such key").into_response();
+        }
+        Ok(db::TrustedKey::KeyChange) => return key_change(),
+        Ok(db::TrustedKey::Stored) => {
+            db::get_pgp_public_key(&state.db, &user.user_id, &body.fingerprint).await
+        }
         Err(e) => Err(e),
     };
     match row {
@@ -1379,6 +1404,7 @@ mod key_trust_tests {
             armored: armored.into(),
             is_own: None,
             source: source.map(str::to_string),
+            replace: None,
         };
         let response = save_public_key(State(state.clone()), user(), Json(body))
             .await
@@ -1412,6 +1438,10 @@ mod key_trust_tests {
             let fpr = format!("FPR-{source:?}");
             save(&state, &fpr, ARMOR, source).await;
             assert_eq!(stored(&state, &fpr).await.trust, "trusted");
+            // (one trusted key per address: the next is not a key change)
+            db::delete_pgp_public_key(&state.db, USER, &fpr)
+                .await
+                .unwrap();
         }
         // a source the server does not know is refused, not trusted
         let (status, _) = save(&state, "FPR-x", ARMOR, Some("manual")).await;
@@ -1508,7 +1538,6 @@ mod key_trust_tests {
     async fn accepting_a_key_change_replaces_the_old_key_of_that_address() {
         let state = app_state().await;
         save(&state, "OLD", ARMOR, Some("imported")).await;
-        save(&state, "KEEP", ARMOR, Some("imported")).await;
         db::upsert_pgp_public_key(
             &state.db,
             USER,
@@ -1532,6 +1561,11 @@ mod key_trust_tests {
                 }),
             )
         };
+        // without `replace` accepting it is a key change the user has not seen: nothing changes
+        let refused = accept("NEW", false).await.into_response();
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        assert_eq!(stored(&state, "NEW").await.trust, "unverified");
+        assert_eq!(stored(&state, "OLD").await.trust, "trusted");
         assert_eq!(
             accept("NEW", true).await.into_response().status(),
             StatusCode::OK
@@ -1548,6 +1582,104 @@ mod key_trust_tests {
                 ("NEW".to_string(), "trusted".to_string()),
                 ("KEEP".to_string(), "trusted".to_string())
             ]
+        );
+    }
+
+    async fn import(
+        state: &AppState,
+        fpr: &str,
+        email: &str,
+        is_own: bool,
+        replace: Option<bool>,
+    ) -> StatusCode {
+        let body = SavePublicKeyBody {
+            fingerprint: fpr.into(),
+            email: email.into(),
+            armored: ARMOR.into(),
+            is_own: Some(is_own),
+            source: None,
+            replace,
+        };
+        save_public_key(State(state.clone()), user(), Json(body))
+            .await
+            .into_response()
+            .status()
+    }
+
+    fn fingerprints(rows: Vec<db::pgp_db::PgpPublicKeyRow>) -> Vec<String> {
+        let mut list: Vec<String> = rows.into_iter().map(|r| r.fingerprint).collect();
+        list.sort();
+        list
+    }
+
+    #[tokio::test]
+    async fn importing_a_second_senders_key_for_an_address_is_a_key_change() {
+        let state = app_state().await;
+        assert_eq!(
+            import(&state, "OLD", "bob@example.com", false, None).await,
+            StatusCode::OK
+        );
+        // the same key again is no change
+        assert_eq!(
+            import(&state, "OLD", "bob@example.com", false, None).await,
+            StatusCode::OK
+        );
+        // another key for the address (any case): refused, and nothing stored
+        assert_eq!(
+            import(&state, "NEW", "Bob@Example.com", false, None).await,
+            StatusCode::CONFLICT
+        );
+        assert!(
+            db::get_pgp_public_key(&state.db, USER, "NEW")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        // a key waiting to be accepted is no trusted key: no change, and it stays
+        save(&state, "WAITING", OTHER, Some("harvested_autocrypt")).await;
+        // own keys and keys without an address never conflict, and are never removed
+        assert_eq!(
+            import(&state, "OWN", "bob@example.com", true, None).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            import(&state, "NOADDR1", "", false, None).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            import(&state, "NOADDR2", "", false, None).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            fingerprints(
+                db::get_pgp_public_keys(&state.db, USER, Some("bob@example.com"))
+                    .await
+                    .unwrap()
+            ),
+            ["OLD", "OWN", "WAITING"]
+        );
+
+        // the user saw the change: the new key takes the place of the others' keys, in one step
+        assert_eq!(
+            import(&state, "NEW", "bob@example.com", false, Some(true)).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            fingerprints(
+                db::get_pgp_public_keys(&state.db, USER, Some("bob@example.com"))
+                    .await
+                    .unwrap()
+            ),
+            ["NEW", "OWN"]
+        );
+        assert_eq!(stored(&state, "NEW").await.trust, "trusted");
+        assert_eq!(
+            fingerprints(
+                db::get_pgp_public_keys(&state.db, USER, Some(""))
+                    .await
+                    .unwrap()
+            ),
+            ["NOADDR1", "NOADDR2"]
         );
     }
 

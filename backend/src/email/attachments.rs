@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
@@ -167,10 +168,9 @@ pub async fn proxy_image(
         return transparent_pixel();
     }
 
-    let Some(host) = parsed.host_str() else {
+    let Some(origin) = image_origin(&parsed) else {
         return transparent_pixel();
     };
-    let origin = format!("{}://{}", parsed.scheme(), host);
 
     match email_db::is_origin_whitelisted(&state.db, &user.user_id, &origin).await {
         Ok(true) => {}
@@ -216,13 +216,15 @@ fn image_client() -> Option<&'static reqwest::Client> {
     CLIENT.as_ref()
 }
 
-/// `image_client` but its resolver.
+/// `image_client` but its resolver: no redirects, and no proxy from the environment.
 fn image_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .user_agent(version::USER_AGENT)
         .use_preconfigured_tls(crate::imap_client::tls_config())
         .redirect(reqwest::redirect::Policy::none())
+        // no HTTP_PROXY/HTTPS_PROXY/ALL_PROXY: through a proxy PublicOnly would resolve only the proxy's name
+        .no_proxy()
 }
 
 /// A remote image: a success, at most `MAX_REMOTE_IMAGE` bytes, that sniffs as an allowed image.
@@ -504,19 +506,7 @@ pub async fn export_account(
         let sync_writer = SyncIoBridge::new(writer);
         let gz = GzEncoder::new(sync_writer, Compression::default());
         let mut tar = tar::Builder::new(gz);
-
-        for (mailbox, uid, path) in &files {
-            let entry_name = format!("{}/{}.eml", mailbox, uid);
-            if let Ok(compressed) = std::fs::read(&path) {
-                if let Ok(bytes) = decompress_eml(&compressed) {
-                    let mut header = tar::Header::new_gnu();
-                    header.set_size(bytes.len() as u64);
-                    header.set_mode(0o644);
-                    header.set_cksum();
-                    let _ = tar.append_data(&mut header, &entry_name, bytes.as_slice());
-                }
-            }
-        }
+        write_export(&mut tar, &files);
         let _ = tar.finish();
     });
 
@@ -532,6 +522,73 @@ pub async fn export_account(
         )
         .body(Body::from_stream(stream))
         .unwrap()
+}
+
+/// A mailbox's directory in the export: its name split on `/`, without empty, `.` and `..` components, `\` and
+/// control characters as `_`; `_` when nothing is left. A mailbox name is the server's (or, shared, someone
+/// else's): no entry may leave the archive's directory, whatever a tool does with a long name.
+fn export_dir(mailbox: &str) -> String {
+    let parts: Vec<String> = mailbox
+        .split('/')
+        .filter(|part| !matches!(*part, "" | "." | ".."))
+        .map(|part| {
+            part.chars()
+                .map(|c| if c == '\\' || c.is_control() { '_' } else { c })
+                .collect()
+        })
+        .collect();
+    if parts.is_empty() {
+        "_".to_owned()
+    } else {
+        parts.join("/")
+    }
+}
+
+/// The export's entry names, one per message: `{export_dir(mailbox)}/{uid}.eml`. Mailboxes whose directories are
+/// the same share it; a name taken already gets `-2`, `-3`, … (`{uid}-2.eml`).
+fn export_entry_names<'a>(messages: impl IntoIterator<Item = (&'a str, i64)>) -> Vec<String> {
+    let mut taken = HashSet::new();
+    messages
+        .into_iter()
+        .map(|(mailbox, uid)| {
+            let dir = export_dir(mailbox);
+            let mut name = format!("{dir}/{uid}.eml");
+            let mut n = 1;
+            while !taken.insert(name.clone()) {
+                n += 1;
+                name = format!("{dir}/{uid}-{n}.eml");
+            }
+            name
+        })
+        .collect()
+}
+
+/// Appends each cached message (mailbox, UID, its `.eml` file) to the archive; one that cannot be read is left out,
+/// one that cannot be appended is logged.
+fn write_export<W: std::io::Write>(
+    tar: &mut tar::Builder<W>,
+    files: &[(String, i64, std::path::PathBuf)],
+) {
+    let names = export_entry_names(
+        files
+            .iter()
+            .map(|(mailbox, uid, _)| (mailbox.as_str(), *uid)),
+    );
+    for ((_, _, path), name) in files.iter().zip(names) {
+        let Ok(compressed) = std::fs::read(path) else {
+            continue;
+        };
+        let Ok(bytes) = decompress_eml(&compressed) else {
+            continue;
+        };
+        let mut header = tar::Header::new_gnu();
+        header.set_size(bytes.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        if let Err(e) = tar.append_data(&mut header, &name, bytes.as_slice()) {
+            eprintln!("[email] export: {name} left out: {e}");
+        }
+    }
 }
 
 fn transparent_pixel() -> Response {
@@ -558,7 +615,20 @@ fn transparent_pixel() -> Response {
 
 // ── Image origin whitelist API ────────────────────────────────────────────────
 
-/// A list of image origins (`scheme://host`): the allowed ones or the ignored ones.
+/// The key of the image origin lists: an http(s) URL's origin, `scheme://host[:port]` with the default port left out,
+/// as a browser's `URL.origin` writes it (sinter-mail's `images.origins`). Allowing `https://h` allows no other port.
+/// None for another scheme or no host.
+fn image_origin(url: &url::Url) -> Option<String> {
+    (matches!(url.scheme(), "http" | "https") && url.host().is_some())
+        .then(|| url.origin().ascii_serialization())
+}
+
+/// `image_origin` of a URL given as text.
+fn parse_image_origin(text: &str) -> Option<String> {
+    image_origin(&url::Url::parse(text).ok()?)
+}
+
+/// A list of image origins (`scheme://host[:port]`): the allowed ones or the ignored ones.
 #[derive(serde::Serialize, ToSchema)]
 pub struct ImageOrigins {
     pub origins: Vec<String>,
@@ -588,7 +658,7 @@ pub async fn list_image_origins(
 
 #[derive(Deserialize, ToSchema)]
 pub struct ImageOriginBody {
-    /// an http(s) URL; stored as its `scheme://host`
+    /// an http(s) URL; stored as its origin, `scheme://host[:port]` (the default port left out)
     pub origin: String,
 }
 
@@ -608,15 +678,8 @@ pub async fn add_image_origin(
     user: CurrentUser,
     Json(body): Json<ImageOriginBody>,
 ) -> impl IntoResponse {
-    // Validate that the origin is a well-formed http(s) origin
-    match url::Url::parse(&body.origin) {
-        Ok(u) if matches!(u.scheme(), "http" | "https") && u.host().is_some() => {}
-        _ => return (StatusCode::BAD_REQUEST, "invalid origin").into_response(),
-    }
-    // Normalise to scheme://host (strip path/query)
-    let origin = {
-        let u = url::Url::parse(&body.origin).unwrap();
-        format!("{}://{}", u.scheme(), u.host_str().unwrap_or(""))
+    let Some(origin) = parse_image_origin(&body.origin) else {
+        return (StatusCode::BAD_REQUEST, "invalid origin").into_response();
     };
 
     match email_db::add_image_origin(&state.db, &user.user_id, &origin).await {
@@ -631,7 +694,15 @@ pub async fn add_image_origin(
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ImageOriginQuery {
+    /// the origin as listed (an http(s) URL is taken as its origin, as when it was added)
     pub origin: String,
+}
+
+impl ImageOriginQuery {
+    /// The list key to remove: the origin of the URL given, else the text as it is (a row stored otherwise).
+    fn key(&self) -> String {
+        parse_image_origin(&self.origin).unwrap_or_else(|| self.origin.clone())
+    }
 }
 
 #[utoipa::path(
@@ -648,7 +719,7 @@ pub async fn remove_image_origin(
     user: CurrentUser,
     Query(q): Query<ImageOriginQuery>,
 ) -> impl IntoResponse {
-    match email_db::remove_image_origin(&state.db, &user.user_id, &q.origin).await {
+    match email_db::remove_image_origin(&state.db, &user.user_id, &q.key()).await {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             eprintln!("[email] remove_image_origin error: {e}");
@@ -697,13 +768,8 @@ pub async fn add_image_blacklist_origin(
     user: CurrentUser,
     Json(body): Json<ImageOriginBody>,
 ) -> impl IntoResponse {
-    match url::Url::parse(&body.origin) {
-        Ok(u) if matches!(u.scheme(), "http" | "https") && u.host().is_some() => {}
-        _ => return (StatusCode::BAD_REQUEST, "invalid origin").into_response(),
-    }
-    let origin = {
-        let u = url::Url::parse(&body.origin).unwrap();
-        format!("{}://{}", u.scheme(), u.host_str().unwrap_or(""))
+    let Some(origin) = parse_image_origin(&body.origin) else {
+        return (StatusCode::BAD_REQUEST, "invalid origin").into_response();
     };
 
     match email_db::add_image_blacklist(&state.db, &user.user_id, &origin).await {
@@ -729,7 +795,7 @@ pub async fn remove_image_blacklist_origin(
     user: CurrentUser,
     Query(q): Query<ImageOriginQuery>,
 ) -> impl IntoResponse {
-    match email_db::remove_image_blacklist(&state.db, &user.user_id, &q.origin).await {
+    match email_db::remove_image_blacklist(&state.db, &user.user_id, &q.key()).await {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             eprintln!("[email] remove_image_blacklist_origin error: {e}");
@@ -773,6 +839,208 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         addr
+    }
+
+    #[test]
+    fn image_origins_keep_a_port_other_than_the_default() {
+        use super::parse_image_origin as origin;
+        assert_eq!(
+            origin("https://h.example/a.png?x").as_deref(),
+            Some("https://h.example")
+        );
+        assert_eq!(
+            origin("https://H.Example:443/").as_deref(),
+            Some("https://h.example")
+        );
+        assert_eq!(
+            origin("https://h.example:8443/a.png").as_deref(),
+            Some("https://h.example:8443")
+        );
+        assert_eq!(
+            origin("http://h.example:80/").as_deref(),
+            Some("http://h.example")
+        );
+        assert_eq!(
+            origin("http://[::1]:8080/").as_deref(),
+            Some("http://[::1]:8080")
+        );
+        // as a browser's URL.origin writes it (sinter-mail's images.origins): punycode
+        assert_eq!(
+            origin("https://bücher.example/").as_deref(),
+            Some("https://xn--bcher-kva.example")
+        );
+        assert_eq!(origin("data:image/png;base64,AA"), None);
+        assert_eq!(origin("ftp://h.example/"), None);
+        assert_eq!(origin("not a url"), None);
+    }
+
+    /// Allowing `https://h` allows `https://h` only: not its other ports; adding, checking and removing all use the
+    /// same key, the block list too.
+    #[tokio::test]
+    async fn an_allowed_origin_is_one_port() {
+        use crate::email_db;
+        use crate::jmap::api_tests::{USER, app_state};
+        use axum::extract::{Json, Query, State};
+        use axum::response::IntoResponse;
+        let state = app_state().await;
+        let user = || crate::oidc::CurrentUser {
+            user_id: USER.into(),
+            display_name: None,
+        };
+        let body = |origin: &str| {
+            Json(super::ImageOriginBody {
+                origin: origin.into(),
+            })
+        };
+        let allowed = |url: &str| {
+            let state = state.clone();
+            let key = super::parse_image_origin(url).unwrap();
+            async move {
+                email_db::is_origin_whitelisted(&state.db, USER, &key)
+                    .await
+                    .unwrap()
+            }
+        };
+        let r = super::add_image_origin(State(state.clone()), user(), body("https://h.example/x"))
+            .await
+            .into_response();
+        assert_eq!(r.status(), axum::http::StatusCode::NO_CONTENT);
+        assert!(allowed("https://h.example/a.png").await);
+        assert!(!allowed("https://h.example:8443/a.png").await);
+
+        let _ =
+            super::add_image_origin(State(state.clone()), user(), body("https://h.example:8443"))
+                .await
+                .into_response();
+        assert_eq!(
+            email_db::get_image_whitelist(&state.db, USER)
+                .await
+                .unwrap(),
+            ["https://h.example", "https://h.example:8443"]
+        );
+        // removed by a URL of it, as it was added
+        let _ = super::remove_image_origin(
+            State(state.clone()),
+            user(),
+            Query(super::ImageOriginQuery {
+                origin: "https://h.example:8443/".into(),
+            }),
+        )
+        .await
+        .into_response();
+        assert!(!allowed("https://h.example:8443/a.png").await);
+        assert!(allowed("https://h.example/a.png").await);
+
+        let _ = super::add_image_blacklist_origin(
+            State(state.clone()),
+            user(),
+            body("https://i.example:81/p"),
+        )
+        .await
+        .into_response();
+        assert_eq!(
+            email_db::get_image_blacklist(&state.db, USER)
+                .await
+                .unwrap(),
+            ["https://i.example:81"]
+        );
+        let _ = super::remove_image_blacklist_origin(
+            State(state.clone()),
+            user(),
+            Query(super::ImageOriginQuery {
+                origin: "https://i.example:81".into(),
+            }),
+        )
+        .await
+        .into_response();
+        assert!(
+            email_db::get_image_blacklist(&state.db, USER)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    /// `HTTP_PROXY` and the like are not used by the public-only clients (the image proxy's, notifications'):
+    /// through a proxy `PublicOnly` would resolve only the proxy's name. The environment is the process's, so the
+    /// check runs in a process of its own: this test binary again, running only `proxy_env_child`.
+    #[test]
+    fn the_public_only_clients_use_no_proxy() {
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "email::attachments::tests::proxy_env_child",
+                "--ignored",
+                "--test-threads=1",
+            ])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "{stdout}{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "run by the_public_only_clients_use_no_proxy, in a process of its own"]
+    fn proxy_env_child() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let proxy = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        proxy.set_nonblocking(true).unwrap();
+        let url = format!("http://{}", proxy.local_addr().unwrap());
+        // SAFETY: this process runs this one test, on one thread, before any client is built
+        unsafe {
+            for var in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"] {
+                std::env::set_var(var, &url);
+                std::env::set_var(var.to_lowercase(), &url);
+            }
+            std::env::remove_var("NO_PROXY");
+            std::env::remove_var("no_proxy");
+        }
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let clients = [
+                ("image", super::image_client().unwrap().clone()),
+                (
+                    "notifications",
+                    crate::notifications::http_client_builder(false)
+                        .build()
+                        .unwrap(),
+                ),
+            ];
+            for (name, client) in clients {
+                for target in [
+                    "http://images.invalid/a.png",
+                    "https://images.invalid/a.png",
+                ] {
+                    let sent = client
+                        .get(target)
+                        .timeout(std::time::Duration::from_secs(3))
+                        .send()
+                        .await;
+                    assert!(sent.is_err());
+                    assert!(
+                        proxy.accept().is_err(),
+                        "the {name} client went through the proxy for {target}"
+                    );
+                }
+            }
+            // NOTIFICATIONS_ALLOW_PRIVATE: no public-only limit, the environment's proxy as before
+            let client = crate::notifications::http_client_builder(true)
+                .build()
+                .unwrap();
+            let _ = client
+                .get("http://images.invalid/")
+                .timeout(std::time::Duration::from_millis(500))
+                .send()
+                .await;
+            assert!(proxy.accept().is_ok());
+        });
     }
 
     /// The image client's policy (`image_client` is it with `PublicOnly`, which would not reach 127.0.0.1).
@@ -872,6 +1140,98 @@ mod tests {
         let url = |path: &str| url::Url::parse(&format!("http://{addr}{path}")).unwrap();
         assert!(fetch_image(&client, url("/streamed")).await.is_none());
         assert!(fetch_image(&client, url("/fits")).await.is_some());
+    }
+
+    #[test]
+    fn export_directories_never_leave_the_archive() {
+        use super::export_dir;
+        assert_eq!(export_dir("INBOX"), "INBOX");
+        assert_eq!(export_dir("Archive/2024"), "Archive/2024");
+        assert_eq!(export_dir("/etc/cron.d"), "etc/cron.d");
+        assert_eq!(export_dir("../../x"), "x");
+        assert_eq!(export_dir("a/./../b//c/"), "a/b/c");
+        assert_eq!(export_dir("C:\\x\u{1}y\n"), "C:_x_y_");
+        assert_eq!(export_dir(""), "_");
+        assert_eq!(export_dir("/../."), "_");
+    }
+
+    /// Hostile mailbox names, the long one included (tar checks only a long name's first 100 bytes for `..`), make
+    /// entries inside the archive; mailboxes that end up the same share a directory, and no message is lost.
+    #[test]
+    fn the_export_holds_every_message_under_a_safe_path() {
+        let dir = std::env::temp_dir().join(format!("caley-export-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let long = format!("{}/../../x", "a".repeat(100));
+        let mailboxes = [
+            "INBOX",
+            "/abs",
+            "abs",
+            "../../etc",
+            "a/../b",
+            "x\\y",
+            "ctl\u{1}",
+            "",
+            long.as_str(),
+        ];
+        let files: Vec<(String, i64, std::path::PathBuf)> = mailboxes
+            .iter()
+            .enumerate()
+            .map(|(i, mailbox)| {
+                let path = dir.join(format!("{i}.eml.zst"));
+                let raw = format!("Subject: {i}\r\n\r\nbody");
+                std::fs::write(&path, zstd::encode_all(raw.as_bytes(), 3).unwrap()).unwrap();
+                (mailbox.to_string(), 7, path)
+            })
+            .collect();
+
+        let mut tar = tar::Builder::new(Vec::new());
+        super::write_export(&mut tar, &files);
+        let archive = tar.into_inner().unwrap();
+
+        let mut read = tar::Archive::new(archive.as_slice());
+        let mut entries: Vec<(String, String)> = read
+            .entries()
+            .unwrap()
+            .map(|entry| {
+                let mut entry = entry.unwrap();
+                let path = entry.path().unwrap().to_string_lossy().into_owned();
+                let mut body = String::new();
+                std::io::Read::read_to_string(&mut entry, &mut body).unwrap();
+                (path, body)
+            })
+            .collect();
+        for (path, _) in &entries {
+            let p = std::path::Path::new(path);
+            assert!(
+                p.is_relative()
+                    && p.components()
+                        .all(|c| matches!(c, std::path::Component::Normal(_))),
+                "{path}"
+            );
+        }
+        entries.sort();
+        let x = format!("{}/x", "a".repeat(100));
+        let mut want = vec![
+            ("INBOX/7.eml".to_string(), "0"),
+            ("abs/7.eml".to_string(), "1"),
+            ("abs/7-2.eml".to_string(), "2"),
+            ("etc/7.eml".to_string(), "3"),
+            ("a/b/7.eml".to_string(), "4"),
+            ("x_y/7.eml".to_string(), "5"),
+            ("ctl_/7.eml".to_string(), "6"),
+            ("_/7.eml".to_string(), "7"),
+            (format!("{x}/7.eml"), "8"),
+        ];
+        want.sort();
+        assert_eq!(entries.len(), want.len());
+        for ((path, body), (want_path, i)) in entries.iter().zip(&want) {
+            assert_eq!(path, want_path);
+            assert!(
+                body.starts_with(&format!("Subject: {i}\r\n")),
+                "{path}: {body}"
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
