@@ -549,8 +549,26 @@ export function bodyOf<B extends { key: string }>(body: B | null | undefined, ms
   return body && body.key === messageKey(msg) ? body : null;
 }
 
+/** The names servers and clients give the sent mailbox (lowercase), in the languages Caley's users are likely to meet. */
+const SENT_NAMES = new Set([
+  'sent', 'sent items', 'sent mail', 'sent messages', 'sent-mail', 'sentmail', 'sent-items',
+  'gesendet', 'gesendete elemente', 'gesendete objekte', 'gesendete nachrichten',
+  'envoyés', 'envoyes', 'éléments envoyés', 'messages envoyés',
+  'enviados', 'elementos enviados', 'mensajes enviados', 'itens enviados',
+  'posta inviata', 'inviata', 'inviati', 'verzonden', 'verzonden items', 'verzonden berichten',
+  'skickat', 'skickade objekt', 'sendt', 'sendte elementer', 'sendt post', 'lähetetyt', 'wysłane', 'odeslané',
+  'отправленные',
+]);
+
+/**
+ * Is this the sent mailbox (the reader then shows the recipients, not the sender). The mailbox list carries no role,
+ * so its name's last segment (split at `/` and `.`: `INBOX/Sent`, `INBOX.Sent`, `[Gmail]/Sent Mail`) is compared
+ * whole with the usual names: "Presents" or "Consent" is not a sent mailbox.
+ */
 export function isSentMailbox(mailbox: string | null): boolean {
-  return !!mailbox && /sent/i.test(mailbox);
+  if (!mailbox) return false;
+  const leaf = mailbox.split(/[/.]/).pop() ?? '';
+  return SENT_NAMES.has(leaf.normalize('NFC').trim().toLowerCase());
 }
 
 export function messageDateTime(ts: number | null): string {

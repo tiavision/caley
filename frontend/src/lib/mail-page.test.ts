@@ -6,7 +6,7 @@ import {
   noSelection, openedAt, opensRow, pageKey, readerOn, rowClick, scrollTopFor, searchActive, senderAdded, sharedDraft,
   siblingRow, unmarked, urlRef, urlView, shownView, viewHref, urlLags, noSearchBox, mailSearch, newAccount, editAccount, discovered,
   accountBody, needsPassword, signsInAtServer, replyDraft, forwardDraft, missingKeys, recipientToken, withRecipient,
-  recipientHits, contactAddresses, canEncrypt, draftRecipients, type Account, type Mailbox, type Message, type VirtualFolder,
+  recipientHits, contactAddresses, canEncrypt, draftRecipients, isSentMailbox, type Account, type Mailbox, type Message, type VirtualFolder,
 } from './mail.ts';
 import { caldavBody, caldavDraft, enrollErrorText, keyImportError, withCalendarActive } from './settings.ts';
 import { loadErrorOr } from './errors.ts';
@@ -280,6 +280,15 @@ describe('replies and forwards of encrypted mail', () => {
     expect(missingKeys(draft, ids, keys)).toEqual(['bob@x']);
     expect(missingKeys(draft, ids, { ...keys, keys: keys.keys.slice(0, 1) })).toEqual(['bob@x', 'me@x']);
     expect(missingKeys({ ...draft, cc: '' }, ids, keys)).toEqual([]);
+  });
+});
+
+describe('isSentMailbox', () => {
+  test("the sent mailbox by its name's last segment, compared whole", () => {
+    for (const name of ['Sent', 'SENT', 'INBOX/Sent', 'INBOX.Sent', 'Sent Items', '[Gmail]/Sent Mail', 'Gesendet', 'INBOX.Gesendete Elemente', 'Envoyés', 'Enviados'])
+      expect(isSentMailbox(name), name).toBe(true);
+    for (const name of ['Presents', 'Absent', 'Consent', 'INBOX', 'Sent/Archive', 'Unsent', 'Sentinel', '', null])
+      expect(isSentMailbox(name), String(name)).toBe(false);
   });
 });
 
