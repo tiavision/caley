@@ -16,6 +16,31 @@ use crate::db;
 use crate::search::SearchMode;
 use crate::sse::{SseBroadcaster, SseMessage};
 
+/// A background task's sender in its manager's map, by user or account id.
+pub(crate) type TaskMap<T> = Mutex<HashMap<String, mpsc::UnboundedSender<T>>>;
+
+/// A task's entry in its map, removed however the task ends (a panic included), so `ensure_task_for`
+/// starts it again; an entry a newer task put there is left alone. `tx` is the task's sender, weak (it
+/// must not keep the task's channel open).
+pub(crate) struct TaskEntry<'a, T> {
+    pub(crate) tasks: &'a TaskMap<T>,
+    pub(crate) id: String,
+    pub(crate) tx: mpsc::WeakUnboundedSender<T>,
+}
+
+impl<T> Drop for TaskEntry<'_, T> {
+    fn drop(&mut self) {
+        let mut tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        let ours = match (tasks.get(&self.id), self.tx.upgrade()) {
+            (Some(held), Some(tx)) => held.same_channel(&tx),
+            _ => false,
+        };
+        if ours {
+            tasks.remove(&self.id);
+        }
+    }
+}
+
 pub enum SyncTrigger {
     Full,
     Incremental,
@@ -38,7 +63,7 @@ pub struct SyncManager {
     app_base_url: String,
     sync_interval: Duration,
     search_mode: SearchMode,
-    tasks: Mutex<HashMap<String, mpsc::UnboundedSender<SyncTrigger>>>,
+    tasks: TaskMap<SyncTrigger>,
     demo_mode: bool,
 }
 
@@ -72,13 +97,19 @@ impl SyncManager {
             return false;
         }
         let (tx, rx) = mpsc::unbounded_channel();
+        let weak = tx.downgrade();
         tasks.insert(user_id.to_string(), tx);
         drop(tasks);
 
         let mgr = Arc::clone(self);
         let uid = user_id.to_string();
         tokio::spawn(async move {
-            mgr.run_user_loop(uid, rx).await;
+            let _entry = TaskEntry {
+                tasks: &mgr.tasks,
+                id: uid.clone(),
+                tx: weak,
+            };
+            Arc::clone(&mgr).run_user_loop(uid, rx).await;
         });
         true
     }
@@ -135,10 +166,6 @@ impl SyncManager {
                 }
             }
         }
-
-        // Remove from task map so ensure_task_for can restart it
-        let mut tasks = self.tasks.lock().unwrap();
-        tasks.remove(&user_id);
     }
 
     /// Sync a single calendar by href — used by the push webhook so we don't
@@ -722,4 +749,43 @@ fn derive_push_keys(
     let p256dh = URL_SAFE_NO_PAD.encode(encoded.as_bytes());
     let auth = URL_SAFE_NO_PAD.encode(&okm[32..48]);
     Some((p256dh, auth))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A task that panics leaves the map, so the next `ensure_task_for` starts it again; a newer task's
+    /// entry stays when an older task ends.
+    #[tokio::test]
+    async fn a_task_entry_goes_however_the_task_ends() {
+        let tasks: Arc<TaskMap<()>> = Arc::default();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let weak = tx.downgrade();
+        tasks.lock().unwrap().insert("u".into(), tx);
+        let map = Arc::clone(&tasks);
+        let run = tokio::spawn(async move {
+            let _entry = TaskEntry {
+                tasks: &*map,
+                id: "u".into(),
+                tx: weak,
+            };
+            panic!("a sync that panics");
+        });
+        assert!(run.await.unwrap_err().is_panic());
+        assert!(tasks.lock().unwrap().is_empty());
+
+        // an old task ending after a new one took its place
+        let (old, _old_rx) = mpsc::unbounded_channel::<()>();
+        let (new, _new_rx) = mpsc::unbounded_channel();
+        let old_weak = old.downgrade();
+        tasks.lock().unwrap().insert("u".into(), new);
+        drop(TaskEntry {
+            tasks: &*tasks,
+            id: "u".into(),
+            tx: old_weak,
+        });
+        assert_eq!(tasks.lock().unwrap().len(), 1);
+        drop(old);
+    }
 }

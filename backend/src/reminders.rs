@@ -23,15 +23,22 @@ const AHEAD_DAYS: i64 = 15;
 /// How long a sent reminder is remembered.
 const KEEP: i64 = 3 * 24 * 60 * 60;
 
-/// Starts the minute task.
+/// Starts the minute task. Each tick runs as a task of its own, so one that panics is logged and the
+/// next minute's still runs.
 pub fn spawn(db: Db, key: [u8; 32], notifier: Arc<Notifier>) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
-            if let Err(e) = tick(&db, &key, &notifier, chrono::Utc::now().timestamp()).await {
-                eprintln!("[reminders] {e}");
+            let (db, notifier) = (db.clone(), Arc::clone(&notifier));
+            let run = tokio::spawn(async move {
+                tick(&db, &key, &notifier, chrono::Utc::now().timestamp()).await
+            });
+            match run.await {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => eprintln!("[reminders] {e}"),
+                Err(e) => eprintln!("[reminders] tick failed: {e}"),
             }
         }
     });
@@ -76,41 +83,74 @@ pub(crate) async fn tick(
         for (account_id, calendar_href, raw_ical) in
             active_events(db, key, &user_id, start, end).await?
         {
-            for event in CalDavClient::events_from_raw_ical(&raw_ical, start, end) {
-                for (i, alarm) in event.alarms.iter().enumerate() {
-                    for (name, tz) in &timezones {
-                        let Some(fire) = fire_at(&event, alarm, tz) else {
-                            continue;
-                        };
-                        if fire > now || fire <= now - GRACE {
-                            continue;
-                        }
-                        let key = format!(
-                            "{account_id}|{calendar_href}|{}|{}|{i}|{fire}|{name}",
-                            event.uid, event.dtstart
-                        );
-                        let new = sqlx::query("INSERT OR IGNORE INTO sent_reminders(user_id, key, fire_at) VALUES(?, ?, ?)")
-                            .bind(&user_id)
-                            .bind(&key)
-                            .bind(fire)
-                            .execute(db)
-                            .await?
-                            .rows_affected()
-                            == 1;
-                        if new
-                            && notifier
-                                .send(&user_id, Some(name), &payload(&event, tz, fire))
-                                .await
-                                > 0
-                        {
-                            sent += 1;
-                        }
-                    }
+            for (key, name, payload, fire) in due(
+                &account_id,
+                &calendar_href,
+                &raw_ical,
+                &timezones,
+                (start, end),
+                now,
+            ) {
+                let new = sqlx::query(
+                    "INSERT OR IGNORE INTO sent_reminders(user_id, key, fire_at) VALUES(?, ?, ?)",
+                )
+                .bind(&user_id)
+                .bind(&key)
+                .bind(fire)
+                .execute(db)
+                .await?
+                .rows_affected()
+                    == 1;
+                if new && notifier.send(&user_id, Some(&name), &payload).await > 0 {
+                    sent += 1;
                 }
             }
         }
     }
     Ok(sent)
+}
+
+/// A due reminder: its key in `sent_reminders`, the device timezone's name, the notification, when it
+/// fires.
+type Due = (String, String, Payload, i64);
+
+/// The reminders of one calendar object due at `now`; none (logged) for an object whose expansion
+/// panics, so it does not stop the others' (or other users') reminders.
+fn due(
+    account_id: &str,
+    calendar_href: &str,
+    raw_ical: &str,
+    timezones: &[(String, chrono_tz::Tz)],
+    (start, end): (NaiveDate, NaiveDate),
+    now: i64,
+) -> Vec<Due> {
+    let run = || {
+        #[cfg(test)]
+        assert!(!raw_ical.contains("X-CALEY-TEST-PANIC"), "a test's panic");
+        let mut out = Vec::new();
+        for event in CalDavClient::events_from_raw_ical(raw_ical, start, end) {
+            for (i, alarm) in event.alarms.iter().enumerate() {
+                for (name, tz) in timezones {
+                    let Some(fire) = fire_at(&event, alarm, tz) else {
+                        continue;
+                    };
+                    if fire > now || fire <= now - GRACE {
+                        continue;
+                    }
+                    let key = format!(
+                        "{account_id}|{calendar_href}|{}|{}|{i}|{fire}|{name}",
+                        event.uid, event.dtstart
+                    );
+                    out.push((key, name.clone(), payload(&event, tz, fire), fire));
+                }
+            }
+        }
+        out
+    };
+    std::panic::catch_unwind(run).unwrap_or_else(|_| {
+        eprintln!("[reminders] skipping an event of {calendar_href}: it cannot be read");
+        Vec::new()
+    })
 }
 
 /// The raw events of the user's active calendars from `start` to `end`, as `GET /api/events` reads them.
@@ -173,8 +213,8 @@ fn fire_at(event: &Event, alarm: &Alarm, tz: &chrono_tz::Tz) -> Option<i64> {
             .ok()?;
             Some(at.and_utc().timestamp())
         }
-        "end" => Some(instant(event, true, tz)? + alarm.minutes? * 60),
-        _ => Some(instant(event, false, tz)? + alarm.minutes? * 60),
+        "end" => instant(event, true, tz)?.checked_add(alarm.minutes?.checked_mul(60)?),
+        _ => instant(event, false, tz)?.checked_add(alarm.minutes?.checked_mul(60)?),
     }
 }
 
@@ -191,7 +231,7 @@ fn instant(event: &Event, end: bool, tz: &chrono_tz::Tz) -> Option<i64> {
             .as_deref()
             .and_then(|s| NaiveDate::parse_from_str(s.get(..10)?, "%Y-%m-%d").ok())
             .unwrap_or(if event.is_all_day {
-                event.date + chrono::TimeDelta::days(1)
+                event.date.succ_opt()?
             } else {
                 event.date
             });
@@ -394,5 +434,118 @@ mod tests {
             "not twice"
         );
         assert!(rx.try_recv().is_err());
+    }
+
+    /// An event that panics (or once panicked) the expansion costs only its own reminders: the same
+    /// user's other event and another user's reminder still go out.
+    #[tokio::test]
+    async fn a_hostile_event_does_not_stop_the_tick() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let dir = std::env::temp_dir().join(format!("caley-reminders-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::init_db(dir.join("t.db").to_str().unwrap())
+            .await
+            .unwrap();
+        let key = [9; 32];
+        let settings = crate::db::UserSettings {
+            caldav_base_url: "https://dav.example/".into(),
+            caldav_username: "u".into(),
+            caldav_password: "p".into(),
+        };
+        let now = chrono::Utc::now().timestamp() / 60 * 60;
+        let at = chrono::DateTime::from_timestamp(now + 15 * 60, 0)
+            .unwrap()
+            .format("%Y%m%dT%H%M%SZ")
+            .to_string();
+        let due = format!(
+            "DTSTART:{at}\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\n"
+        );
+        let hostile = [
+            "DTSTART:20200101T000000Z\r\nDURATION:P100000000D\r\nRRULE:FREQ=DAILY\r\n",
+            "DTSTART:20200101T000000Z\r\nRRULE:FREQ=WEEKLY;BYDAY=\u{20ac}\r\n",
+            "DTSTART:20261125T080000Z\r\nX-CALEY-TEST-PANIC:1\r\n",
+        ];
+        // "a@…" comes first: its hostile events are read before "b@…"'s
+        for user in ["a@example", "b@example"] {
+            crate::db::ensure_user(&db, user, None).await.unwrap();
+            let account = crate::db::upsert_caldav_account(&db, user, None, None, &settings, &key)
+                .await
+                .unwrap();
+            crate::db::upsert_cached_calendar(&db, &account, "/cal/", "Work", None)
+                .await
+                .unwrap();
+            let mut bodies = vec![due.clone()];
+            if user == "a@example" {
+                bodies.extend(
+                    hostile
+                        .iter()
+                        .map(|b| format!("{b}{}", &due[due.find("BEGIN").unwrap()..])),
+                );
+            }
+            for (i, body) in bodies.iter().enumerate() {
+                let raw = format!(
+                    "{ICAL}BEGIN:VEVENT\r\nUID:e{i}\r\nSUMMARY:x\r\n{body}END:VEVENT\r\nEND:VCALENDAR\r\n"
+                );
+                crate::db::upsert_cached_event_raw(
+                    &db,
+                    crate::db::CalDavAccountId::internal(&account),
+                    "/cal/",
+                    &format!("/cal/e{i}.ics"),
+                    "1",
+                    &raw,
+                    &crate::search::SearchMode::Default,
+                )
+                .await
+                .unwrap();
+            }
+        }
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(16);
+        let service = axum::Router::new().route(
+            "/push",
+            axum::routing::post(move |body: axum::body::Bytes| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(body.to_vec()).await.unwrap();
+                    axum::http::StatusCode::CREATED
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/push", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, service).await.unwrap() });
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let device = p256::SecretKey::from_slice(&[3; 32]).unwrap();
+        use p256::elliptic_curve::sec1::ToSec1Point as _;
+        for user in ["a@example", "b@example"] {
+            sqlx::query("INSERT INTO notification_subscriptions(endpoint, user_id, p256dh, auth, timezone, created_at) VALUES(?, ?, ?, ?, 'Europe/Berlin', 0)")
+                .bind(format!("{endpoint}?{user}"))
+                .bind(user)
+                .bind(b64.encode(device.public_key().to_sec1_point(false).as_bytes()))
+                .bind(b64.encode([4u8; 16]))
+                .execute(&db)
+                .await
+                .unwrap();
+        }
+
+        let notifier = Notifier::new(db.clone(), key, "https://caley.example", true).unwrap();
+        // the hostile events' own alarms are dropped or theirs alone; the two ordinary ones go out
+        let sent = tick(&db, &key, &notifier, now).await.unwrap();
+        assert!(sent >= 2, "{sent}");
+        let sent_to: i64 = sqlx::query_scalar(
+            "SELECT COUNT(DISTINCT user_id) FROM sent_reminders WHERE key LIKE '%|e0|%'",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(sent_to, 2);
+        let panicked: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sent_reminders WHERE key LIKE '%|e3|%'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(panicked, 0);
+        assert!(rx.recv().await.is_some());
     }
 }

@@ -7,58 +7,169 @@ pub fn generate_new_uid() -> String {
     Uuid::new_v4().to_string()
 }
 
-/// Split a multi-VEVENT VCALENDAR blob into individual per-event (uid, vcalendar) pairs.
-/// VTIMEZONE blocks and other VCALENDAR-level properties are preserved in each wrapper.
-pub fn split_vcalendar_into_events(ical_content: &str) -> Vec<(String, String)> {
-    let normalised = ical_content.replace("\r\n", "\n");
-    let mut header_lines: Vec<&str> = Vec::new();
-    let mut vevent_blocks: Vec<String> = Vec::new();
-    let mut in_vevent = false;
-    let mut current_vevent: Vec<&str> = Vec::new();
+/// At most this many events in one imported file (a larger one is refused).
+pub const MAX_IMPORT_EVENTS: usize = 1000;
+/// A VTIMEZONE larger than this is not carried into the events (real ones are a few KB).
+const MAX_VTIMEZONE_BYTES: usize = 16 * 1024;
+/// At most this many VTIMEZONEs per event.
+const MAX_EVENT_TIMEZONES: usize = 4;
+/// At most this many calendar-level property lines, each at most this long, are carried into each event.
+const MAX_CALENDAR_LINES: usize = 8;
+const MAX_CALENDAR_LINE_BYTES: usize = 256;
 
-    for line in normalised.lines() {
-        if line == "BEGIN:VEVENT" {
-            in_vevent = true;
-            current_vevent.clear();
-            current_vevent.push(line);
-        } else if line == "END:VEVENT" {
-            current_vevent.push(line);
-            vevent_blocks.push(current_vevent.join("\r\n"));
-            current_vevent.clear();
-            in_vevent = false;
-        } else if in_vevent {
-            current_vevent.push(line);
-        } else if line != "BEGIN:VCALENDAR"
-            && line != "END:VCALENDAR"
-            && !line.starts_with("VERSION:")
-            && !line.starts_with("PRODID:")
-        {
-            header_lines.push(line);
-        }
+/// A VCALENDAR file split into its events, each wrapped on demand (`events`), so a file is held once.
+pub struct SplitCalendar {
+    /// Calendar-level property lines (not VERSION, PRODID or METHOD: a stored object has no METHOD).
+    header: String,
+    /// (TZID, the VTIMEZONE's lines).
+    timezones: Vec<(String, String)>,
+    /// The VEVENT blocks, CRLF-joined.
+    blocks: Vec<String>,
+    /// More than MAX_IMPORT_EVENTS events: only the first are in `blocks`.
+    pub too_many: bool,
+}
+
+impl SplitCalendar {
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
     }
 
-    let header = header_lines.join("\r\n");
-    vevent_blocks
-        .into_iter()
-        .map(|vevent_block| {
-            let uid = vevent_block
-                .lines()
-                .find(|l| l.starts_with("UID:"))
-                .map(|l| l[4..].trim().to_string())
+    /// Each event's (uid, VCALENDAR): the event, the calendar-level lines and the VTIMEZONEs its TZIDs
+    /// name. An event without UID gets a new one.
+    pub fn events(&self) -> impl Iterator<Item = (String, String)> + '_ {
+        self.blocks.iter().map(|block| {
+            let unfolded = unfold(block);
+            let uid = unfolded
+                .iter()
+                .find_map(|l| l.strip_prefix("UID:"))
+                .map(|u| u.trim().to_string())
                 .filter(|u| !u.is_empty())
                 .unwrap_or_else(generate_new_uid);
-
-            let header_section = if header.is_empty() {
-                String::new()
-            } else {
-                format!("{}\r\n", header)
-            };
-            let wrapped = format!(
-                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Caley//Caley//EN\r\n{header_section}{vevent_block}\r\nEND:VCALENDAR\r\n"
-            );
+            let mut tzids: Vec<&str> = Vec::new();
+            for line in &unfolded {
+                for tzid in line_tzids(line) {
+                    if !tzids.contains(&tzid) && tzids.len() < MAX_EVENT_TIMEZONES {
+                        tzids.push(tzid);
+                    }
+                }
+            }
+            let mut wrapped =
+                String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Caley//Caley//EN\r\n");
+            wrapped.push_str(&self.header);
+            for (_, vtimezone) in self
+                .timezones
+                .iter()
+                .filter(|(id, _)| tzids.contains(&id.as_str()))
+            {
+                wrapped.push_str(vtimezone);
+            }
+            wrapped.push_str(block);
+            wrapped.push_str("\r\nEND:VCALENDAR\r\n");
             (uid, wrapped)
         })
-        .collect()
+    }
+}
+
+/// The lines of a block with folded continuation lines joined.
+fn unfold(block: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in block.lines() {
+        match (line.strip_prefix([' ', '\t']), out.last_mut()) {
+            (Some(rest), Some(last)) => last.push_str(rest),
+            _ => out.push(line.to_owned()),
+        }
+    }
+    out
+}
+
+/// The TZID parameters of a property line (`DTSTART;TZID=Europe/Berlin:…`, quoted or not).
+fn line_tzids(line: &str) -> impl Iterator<Item = &str> {
+    // the parameters end at the first `:` outside quotes
+    let mut quoted = false;
+    let end = line
+        .char_indices()
+        .find(|&(_, c)| {
+            if c == '"' {
+                quoted = !quoted;
+            }
+            c == ':' && !quoted
+        })
+        .map_or(line.len(), |(i, _)| i);
+    line[..end].split(';').skip(1).filter_map(|param| {
+        let (k, v) = param.split_once('=')?;
+        k.eq_ignore_ascii_case("TZID").then(|| v.trim_matches('"'))
+    })
+}
+
+/// Split a multi-VEVENT VCALENDAR blob into its events (`SplitCalendar::events`), at most
+/// MAX_IMPORT_EVENTS. Each keeps only what it needs: the VTIMEZONEs its TZIDs name, and a few
+/// calendar-level lines; other components (VTODO, …) and METHOD are left out.
+pub fn split_vcalendar_into_events(ical_content: &str) -> SplitCalendar {
+    let normalised = ical_content.replace("\r\n", "\n");
+    let mut split = SplitCalendar {
+        header: String::new(),
+        timezones: Vec::new(),
+        blocks: Vec::new(),
+        too_many: false,
+    };
+    let mut header_lines = 0;
+    // the top-level component being read (other than VCALENDAR), and how deep inside it
+    let mut component: Option<(String, Vec<&str>)> = None;
+    let mut depth = 0usize;
+
+    for line in normalised.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some((name, lines)) = component.as_mut() {
+            lines.push(line);
+            if line.starts_with("BEGIN:") {
+                depth += 1;
+            } else if line.starts_with("END:") {
+                depth -= 1;
+                if depth == 0 {
+                    let (name, lines) = (name.clone(), std::mem::take(lines));
+                    component = None;
+                    match name.as_str() {
+                        "VEVENT" if split.blocks.len() < MAX_IMPORT_EVENTS => {
+                            split.blocks.push(lines.join("\r\n"));
+                        }
+                        "VEVENT" => split.too_many = true,
+                        "VTIMEZONE" => {
+                            let text = lines.join("\r\n") + "\r\n";
+                            let tzid = unfold(&text)
+                                .iter()
+                                .find_map(|l| l.strip_prefix("TZID:").map(|t| t.trim().to_owned()));
+                            if let Some(tzid) = tzid {
+                                if text.len() <= MAX_VTIMEZONE_BYTES
+                                    && !split.timezones.iter().any(|(id, _)| *id == tzid)
+                                {
+                                    split.timezones.push((tzid, text));
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        } else if let Some(name) = line.strip_prefix("BEGIN:") {
+            if name != "VCALENDAR" {
+                component = Some((name.to_owned(), vec![line]));
+                depth = 1;
+            }
+        } else if line.starts_with("END:")
+            || line.starts_with("VERSION:")
+            || line.starts_with("PRODID:")
+            || line.starts_with("METHOD:")
+            || line.starts_with([' ', '\t'])
+            || line.is_empty()
+        {
+            // the wrapper's own, not for a stored object, or a folded line (of a dropped one)
+        } else if header_lines < MAX_CALENDAR_LINES && line.len() <= MAX_CALENDAR_LINE_BYTES {
+            split.header.push_str(line);
+            split.header.push_str("\r\n");
+            header_lines += 1;
+        }
+    }
+    split
 }
 
 fn escape_ical_text(s: &str) -> String {
@@ -881,4 +992,72 @@ pub fn update_vcalendar_event(
     }
 
     Some(fold_lines(&result))
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::*;
+
+    const BERLIN: &str = "BEGIN:VTIMEZONE\nTZID:Custom Berlin\nBEGIN:STANDARD\nDTSTART:16011028T030000\nRRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10\nTZOFFSETFROM:+0200\nTZOFFSETTO:+0100\nEND:STANDARD\nBEGIN:DAYLIGHT\nDTSTART:16010325T020000\nRRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3\nTZOFFSETFROM:+0100\nTZOFFSETTO:+0200\nEND:DAYLIGHT\nEND:VTIMEZONE\n";
+
+    /// Several events sharing a VTIMEZONE: each gets it (and only the zones it names), no METHOD, no
+    /// other component.
+    #[test]
+    fn events_carry_the_timezones_they_name() {
+        let ics = format!(
+            "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:x\nMETHOD:PUBLISH\nX-WR-CALNAME:Team\n{BERLIN}\
+             BEGIN:VTIMEZONE\nTZID:Other\nBEGIN:STANDARD\nDTSTART:19700101T000000\nTZOFFSETFROM:+0300\nTZOFFSETTO:+0300\nEND:STANDARD\nEND:VTIMEZONE\n\
+             BEGIN:VTODO\nUID:todo\nEND:VTODO\n\
+             BEGIN:VEVENT\nUID:a\nDTSTART;TZID=\"Custom Berlin\":20260702T080000\nEND:VEVENT\n\
+             BEGIN:VEVENT\nUID:b\nDTSTART;TZID=Custom Berlin:20261124T080000\nDTEND;TZID=Custom Ber\n lin:20261124T090000\nEND:VEVENT\n\
+             BEGIN:VEVENT\nUID:c\nDTSTART:20261124T080000Z\nEND:VEVENT\nEND:VCALENDAR\n"
+        );
+        let split = split_vcalendar_into_events(&ics);
+        assert!(!split.too_many);
+        let events: Vec<(String, String)> = split.events().collect();
+        assert_eq!(
+            events.iter().map(|(u, _)| u.as_str()).collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
+        for (uid, wrapped) in &events {
+            assert!(!wrapped.contains("METHOD"), "{uid}");
+            assert!(!wrapped.contains("VTODO"), "{uid}");
+            assert!(!wrapped.contains("TZID:Other"), "{uid}");
+            assert!(wrapped.contains("X-WR-CALNAME:Team"), "{uid}");
+            assert_eq!(wrapped.contains("TZID:Custom Berlin"), uid != "c", "{uid}");
+        }
+        // the timezone is used: summer and winter offsets
+        let a = crate::caldav::preview_events_from_raw_ical(&events[0].1);
+        assert_eq!(a[0].dtstart, "2026-07-02T08:00:00+02:00");
+        let b = crate::caldav::preview_events_from_raw_ical(&events[1].1);
+        assert_eq!(b[0].dtstart, "2026-11-24T08:00:00+01:00");
+        assert_eq!(b[0].dtend.as_deref(), Some("2026-11-24T09:00:00+01:00"));
+    }
+
+    /// A large calendar-level part is not copied into every event, and the events are bounded.
+    #[test]
+    fn a_file_is_held_once() {
+        let mut ics = format!("BEGIN:VCALENDAR\nX-PAD:{}\n", "x".repeat(100_000));
+        ics.push_str(&format!(
+            "BEGIN:VTIMEZONE\nTZID:Big\nX-PAD:{}\nEND:VTIMEZONE\n",
+            "y".repeat(50_000)
+        ));
+        for i in 0..MAX_IMPORT_EVENTS {
+            ics.push_str(&format!(
+                "BEGIN:VEVENT\nUID:e{i}\nDTSTART;TZID=Big:20261124T080000\nEND:VEVENT\n"
+            ));
+        }
+        ics.push_str("END:VCALENDAR\n");
+        let split = split_vcalendar_into_events(&ics);
+        assert!(!split.too_many);
+        let largest = split.events().map(|(_, w)| w.len()).max().unwrap();
+        assert!(largest < 200, "{largest}");
+        assert_eq!(split.events().count(), MAX_IMPORT_EVENTS);
+
+        let more = ics.replace(
+            "END:VCALENDAR\n",
+            "BEGIN:VEVENT\nUID:one-more\nEND:VEVENT\nEND:VCALENDAR\n",
+        );
+        assert!(split_vcalendar_into_events(&more).too_many);
+    }
 }
