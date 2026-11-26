@@ -5,7 +5,8 @@ import {
   accountUi, addableSender, afterBulk, bodyOf, canDrop, cleared, currentView, folderView, inMailbox, mailboxView, noView, listStatus, markedRead, noReader, noSearch,
   noSelection, openedAt, opensRow, pageKey, readerOn, rowClick, scrollTopFor, searchActive, senderAdded, sharedDraft,
   siblingRow, unmarked, urlRef, urlView, shownView, viewHref, urlLags, noSearchBox, mailSearch, newAccount, editAccount, discovered,
-  accountBody, needsPassword, signsInAtServer, replyDraft, forwardDraft, missingKeys, type Account, type Mailbox, type Message, type VirtualFolder,
+  accountBody, needsPassword, signsInAtServer, replyDraft, forwardDraft, missingKeys, recipientToken, withRecipient,
+  recipientHits, contactAddresses, canEncrypt, draftRecipients, type Account, type Mailbox, type Message, type VirtualFolder,
 } from './mail.ts';
 import { caldavBody, caldavDraft, enrollErrorText, keyImportError, withCalendarActive } from './settings.ts';
 import { loadErrorOr } from './errors.ts';
@@ -279,6 +280,37 @@ describe('replies and forwards of encrypted mail', () => {
     expect(missingKeys(draft, ids, keys)).toEqual(['bob@x']);
     expect(missingKeys(draft, ids, { ...keys, keys: keys.keys.slice(0, 1) })).toEqual(['bob@x', 'me@x']);
     expect(missingKeys({ ...draft, cc: '' }, ids, keys)).toEqual([]);
+  });
+});
+
+describe('recipients with commas in names', () => {
+  const ids = [{ identity_id: 'i1', account_id: 'a', name: 'Me', email: 'me@x', is_default: true, sort_order: 0 }] as never;
+  const plain = { subject: '', reply: null, replyCc: null, text: 'hello', quotable: true, decrypted: false };
+  test('a reply to "Doe, Jane" has one recipient, and can be encrypted to her key', () => {
+    const from = msg(1, { from: '"Doe, Jane" <jane@x>', to: ['me@x'], cc: [], subject: 'Hi', message_id: '<1@x>', attachments: [] });
+    const draft = { ...replyDraft('reply', from, plain, ids), encrypt: true };
+    expect(draft.to).toBe('"Doe, Jane" <jane@x>');
+    expect(draftRecipients(draft)).toEqual(['jane@x']);
+    const keys = { keys: [{ fingerprint: 'J', emails: ['jane@x'], is_own: false }, { fingerprint: 'M', emails: ['me@x'], is_own: true }], pending: [], vault: [], unlocked: [] };
+    expect(canEncrypt(draft, ids, keys)).toBe(true);
+    expect(missingKeys(draft, ids, keys)).toEqual([]);
+  });
+  test("a contact whose name holds an address and a comma is suggested quoted: one recipient, the contact's", () => {
+    const contacts = contactAddresses([{ fn_name: 'evil@evil.example, Jane Doe', emails: [{ value: 'jane@corp' }] }]);
+    const [hit] = recipientHits('jane', contacts, []);
+    expect(hit).toBe('"evil@evil.example, Jane Doe" <jane@corp>');
+    expect(draftRecipients({ to: withRecipient('', hit!), cc: '', bcc: '' } as never)).toEqual(['jane@corp']);
+  });
+  test('a vCard EMAIL that is not a plain address is not offered, nor is such an address seen in mail', () => {
+    const contacts = contactAddresses([{ fn_name: 'Jane', emails: [{ value: 'jane@corp, evil@evil.example' }, { value: 'Evil <evil@evil.example>' }, { value: 'jane@corp' }] }]);
+    expect(contacts).toEqual([{ name: 'Jane', email: 'jane@corp' }]);
+    expect(recipientHits('ev', [], ['evil@evil.example', 'a@b, evil@evil.example'])).toEqual(['evil@evil.example']);
+  });
+  test('the token being typed follows the last comma outside a quoted name', () => {
+    expect(recipientToken('"Doe, Jane" <jane@x>, bo')).toBe('bo');
+    expect(recipientToken('"Doe, Ja')).toBe('"Doe, Ja');
+    expect(withRecipient('"Doe, Jane" <jane@x>, bo', 'Bob <bob@x>')).toBe('"Doe, Jane" <jane@x>, Bob <bob@x>, ');
+    expect(withRecipient('al', 'al@x')).toBe('al@x, ');
   });
 });
 
