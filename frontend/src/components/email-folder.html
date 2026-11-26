@@ -10,7 +10,7 @@
         <h2 data-sn-text="draft.folder_id ? m.mail_editVirtualFolder() : m.mail_createVirtualFolder()"></h2>
         <button type="button" commandfor="email-folder" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
       </header>
-      <form data-layout="stack" data-gap="md"
+      <form data-tm-layout="stack" data-tm-gap="md"
             data-sn-post="/email/folder" data-sn-body="folderBody(draft)"
             data-sn-then="closeDialog('email-folder'); refresh(folders)"
             data-sn-catch="refresh(folders)">
@@ -18,12 +18,12 @@
           <span data-sn-text="m.mail_name()"></span>
           <input data-sn-model="draft.name" data-sn-attr="{placeholder: m.mail_folderNamePlaceholder()}">
         </label>
-        <fieldset data-layout="stack" data-gap="xs">
+        <fieldset data-tm-layout="stack" data-tm-gap="xs">
           <legend data-sn-text="m.mail_mailboxesToInclude()"></legend>
-          <div class="folder-mailbox-list" data-layout="stack" data-gap="sm" data-pad="sm" data-scroll="y">
+          <div class="folder-mailbox-list" data-tm-layout="stack" data-tm-gap="sm" data-tm-pad="sm" data-tm-scroll="y">
             <template data-sn-for="acc in accounts.filter(a => subscribed(mailboxes, a.account_id).length > 0)">
-              <div data-layout="stack" data-gap="xs">
-                <span data-caption data-sn-text="acc.display_name"></span>
+              <div data-tm-layout="stack" data-tm-gap="xs">
+                <span data-tm-caption data-sn-text="acc.display_name"></span>
                 <template data-sn-for="mb in subscribed(mailboxes, acc.account_id)">
                   <label>
                     <input type="checkbox" data-sn-attr="{value: `${acc.account_id}::${mb.name}`}" data-sn-model="draft.boxes">
@@ -32,16 +32,16 @@
                 </template>
               </div>
             </template>
-            <template data-sn-if="accounts.length === 0"><p data-muted data-sn-text="m.mail_noEmailAccounts()"></p></template>
+            <template data-sn-if="accounts.length === 0"><p data-tm-muted data-sn-text="m.mail_noEmailAccounts()"></p></template>
           </div>
-          <small data-muted data-sn-text="m.mail_allMailboxesHint()"></small>
+          <small data-tm-muted data-sn-text="m.mail_allMailboxesHint()"></small>
         </fieldset>
-        <div data-layout="stack" data-gap="xs">
+        <div data-tm-layout="stack" data-tm-gap="xs">
           <label><input type="checkbox" data-sn-model="draft.only_flagged"> <span data-sn-text="m.mail_onlyFlagged()"></span></label>
           <label><input type="checkbox" data-sn-model="draft.only_attachments"> <span data-sn-text="m.mail_onlyWithAttachments()"></span></label>
         </div>
         <footer>
-          <button type="button" data-variant="ghost" commandfor="email-folder" command="close" data-sn-text="m.mail_cancel()"></button>
+          <button type="button" data-tm-variant="ghost" commandfor="email-folder" command="close" data-sn-text="m.mail_cancel()"></button>
           <button type="submit" data-sn-text="draft.folder_id ? m.mail_save() : m.mail_create()"></button>
         </footer>
       </form>

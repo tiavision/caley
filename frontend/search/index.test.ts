@@ -70,7 +70,7 @@ test('searches every calendar in one request, newest first', async () => {
   expect(urls).toEqual(['/api/search?q=din']); // no calendar checked: all of them
   expect(new URL(url()).search).toBe('?q=din');
   expect(titles(root)).toEqual(['Dinner', 'Standup']);
-  expect(root.querySelector('.search-result small[data-caption]')!.textContent).toBe('Home');
+  expect(root.querySelector('.search-result small[data-tm-caption]')!.textContent).toBe('Home');
 });
 
 test('the calendar menu and dates narrow the search, at once when one is shown', async () => {
@@ -110,10 +110,10 @@ test('a new search keeps the last results, dimmed, with a bar, until its own arr
   root.querySelector<HTMLFormElement>('main form')!.requestSubmit();
   await flush();
   expect(titles(root)).toEqual(['Dinner', 'Standup']);
-  expect(root.querySelector('main ul[data-list]')!.getAttribute('aria-busy')).toBe('true');
+  expect(root.querySelector('main ul[data-tm-list]')!.getAttribute('aria-busy')).toBe('true');
   expect(root.querySelector('.search-progress progress')).not.toBeNull();
   await settle();
-  expect(root.querySelector('main ul[data-list]')!.getAttribute('aria-busy')).toBe(null);
+  expect(root.querySelector('main ul[data-tm-list]')!.getAttribute('aria-busy')).toBe(null);
   expect(root.querySelector('.search-progress progress')).toBeNull();
 });
 
@@ -127,7 +127,7 @@ test('a result opens the detail; edit this instance fills the form; saving posts
   expect(detail.open).toBe(true);
   expect(detail.querySelector('h2')!.textContent).toBe('Standup');
   expect([...detail.querySelectorAll('dt')].map((d) => d.textContent)).toEqual(['Time', 'Location', 'Repeats', 'Description', 'Attendees']);
-  expect(detail.querySelector('[data-badge]')!.getAttribute('data-tone')).toBe('success');
+  expect(detail.querySelector('[data-tm-badge]')!.getAttribute('data-tm-tone')).toBe('success');
 
   detail.querySelectorAll<HTMLButtonElement>('#event-edit-choice button')[1]!.click();
   await flush();
@@ -135,7 +135,7 @@ test('a result opens the detail; edit this instance fills the form; saving posts
   expect(detail.open).toBe(false);
   expect(form.open).toBe(true);
   expect(form.querySelector<HTMLInputElement>('input[type=text]')!.value).toBe('Standup');
-  expect(form.querySelector('small[data-muted]')!.textContent).toBe('Repeat settings apply to the whole series.');
+  expect(form.querySelector('small[data-tm-muted]')!.textContent).toBe('Repeat settings apply to the whole series.');
 
   type(form.querySelector<HTMLInputElement>('input[type=text]')!, 'Standup (moved)');
   const before = requests.calls.length;
@@ -167,5 +167,5 @@ test('a refused save shows the server message in the form', async () => {
 test('no results says so', async () => {
   const { root, settle } = await show({ 'GET /api/search': [] });
   await search(root, settle, 'nothing');
-  expect(root.querySelector('main p[data-muted]')!.textContent).toBe('No events found.');
+  expect(root.querySelector('main p[data-tm-muted]')!.textContent).toBe('No events found.');
 });

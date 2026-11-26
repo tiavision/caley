@@ -14,15 +14,15 @@
     <sn-event name="contacts_refetch" resource="caldavAccounts" op="refresh"></sn-event>
   </sn-sync>
   <!-- defaultCal: the calendar new events and imports go to, shared with the event form (calendar, search). -->
-  <main data-gutter data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
+  <main data-tm-gutter data-sn-state="{ defaultCal: '' }" data-sn-persist="event-default-calendar"
         data-sn-on-ics-imported="$event.detail.errors === 0 && (defaultCal = $event.detail.calendar)">
-    <import-dialog data-density="compact">
-    <div class="settings" data-layout="center" data-gap="lg" data-pad="sm" style="--tm-measure: 40rem">
+    <import-dialog data-tm-density="compact">
+    <div class="settings" data-tm-layout="center" data-tm-gap="lg" data-tm-pad="sm" style="--tm-measure: 40rem">
       <!-- The tabs take the heading's place (it stays for screen readers). -->
-      <div data-layout="row" data-gap="sm" data-wrap="none">
+      <div data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
         <nav-toggle></nav-toggle>
-        <h2 data-sr-only data-sn-text="m.settings_heading()"></h2>
-        <div role="tablist" data-grow data-sn-attr="{'aria-label': m.settings_heading()}">
+        <h2 data-tm-sr-only data-sn-text="m.settings_heading()"></h2>
+        <div role="tablist" data-tm-grow data-sn-attr="{'aria-label': m.settings_heading()}">
           <button type="button" role="tab" id="settings-tab-general" aria-controls="settings-panel-general"
                   data-sn-attr="{'aria-selected': tab === 'settings' ? 'true' : 'false'}"
                   data-sn-on-click="tab = 'settings'" data-sn-text="m.nav_settings()"></button>
@@ -34,12 +34,12 @@
 
       <!-- The language: the Settings tab's first setting, a row of its own (label left, select right), outside the
            template so it shows with the first paint. -->
-      <div data-layout="stack" data-gap="md" data-sn-show="tab === 'settings'">
-        <label data-layout="row" data-gap="sm" data-wrap="none">
-          <span data-icon="globe" data-muted></span>
-          <span data-grow data-sn-text="m.settings_language()"></span>
+      <div data-tm-layout="stack" data-tm-gap="md" data-sn-show="tab === 'settings'">
+        <label data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
+          <span data-tm-icon="globe" data-tm-muted></span>
+          <span data-tm-grow data-sn-text="m.settings_language()"></span>
           <!-- each language is its own page: choosing one goes there (src/islands/common.ts) -->
-          <select data-size="sm" data-locale-switch>
+          <select data-tm-size="sm" data-locale-switch>
             <option data-sn-attr="{ value: localeUrl('en'), selected: $locale === 'en' }">English</option>
             <option data-sn-attr="{ value: localeUrl('de'), selected: $locale === 'de' }">Deutsch</option>
           </select>
@@ -52,45 +52,45 @@
       </template>
       <template data-sn-else>
         <div role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general"
-             data-layout="stack" data-gap="lg" data-sn-show="tab === 'settings'">
+             data-tm-layout="stack" data-tm-gap="lg" data-sn-show="tab === 'settings'">
           <!-- The accounts' actions sit on their heading row, like the Encryption tab's sections. -->
-          <div data-layout="row" data-gap="sm" data-wrap="none">
-            <h3 data-grow data-sn-text="m.settings_accountsHeading()"></h3>
-            <div data-layout="row" data-gap="xs" data-wrap="none">
-              <button type="button" data-variant="ghost" data-size="sm" data-icon="user-plus" data-tooltip
+          <div data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
+            <h3 data-tm-grow data-sn-text="m.settings_accountsHeading()"></h3>
+            <div data-tm-layout="row" data-tm-gap="xs" data-tm-wrap="none">
+              <button type="button" data-tm-variant="ghost" data-tm-size="sm" data-tm-icon="user-plus" data-tm-tooltip
                       commandfor="caldav-account-dialog" command="show-modal"
                       data-sn-on-click="draft = caldavDraft(null); draftError = ''"
                       data-sn-attr="{'aria-label': m.mail_addAccount()}"></button>
-              <button type="button" data-variant="ghost" data-size="sm" data-icon="calendar-plus" data-tooltip
+              <button type="button" data-tm-variant="ghost" data-tm-size="sm" data-tm-icon="calendar-plus" data-tm-tooltip
                       commandfor="create-calendar-dialog" command="show-modal"
                       data-sn-attr="{'aria-label': m.cal_createCalendar()}"></button>
-              <button type="button" data-variant="ghost" data-size="sm" data-icon="upload" data-tooltip
+              <button type="button" data-tm-variant="ghost" data-tm-size="sm" data-tm-icon="upload" data-tm-tooltip
                       data-sn-on-click="emit('ics-import', importDraft(caldavAccounts, defaultCal, null, null))"
                       data-sn-attr="{'aria-label': m.cal_import()}"></button>
             </div>
           </div>
 
           <template data-sn-for="account in caldavAccounts">
-            <article data-layout="stack" data-gap="sm">
-              <header data-layout="row" data-gap="sm" data-justify="between">
-                <div data-layout="stack" data-gap="none">
+            <article data-tm-layout="stack" data-tm-gap="sm">
+              <header data-tm-layout="row" data-tm-gap="sm" data-tm-justify="between">
+                <div data-tm-layout="stack" data-tm-gap="none">
                   <h4 data-sn-text="account.display_name"></h4>
-                  <small data-muted data-sn-text="account.caldav_username"></small>
+                  <small data-tm-muted data-sn-text="account.caldav_username"></small>
                 </div>
-                <div data-layout="row" data-gap="xs">
-                  <button type="button" data-variant="secondary" data-size="sm"
+                <div data-tm-layout="row" data-tm-gap="xs">
+                  <button type="button" data-tm-variant="secondary" data-tm-size="sm"
                           commandfor="caldav-account-dialog" command="show-modal"
                           data-sn-on-click="draft = caldavDraft(account); draftError = ''"
                           data-sn-text="m.contacts_edit()"></button>
-                  <button type="button" data-variant="outline" data-tone="danger" data-size="sm"
+                  <button type="button" data-tm-variant="outline" data-tm-tone="danger" data-tm-size="sm"
                           data-sn-delete="/caldav/account?account_id={account.account_id}"
                           data-sn-confirm="m.settings_removeCaldavAccountConfirm({name: account.display_name})"
                           data-sn-optimistic="remove(account)"
                           data-sn-text="m.contacts_delete()"></button>
                 </div>
               </header>
-              <h4 data-caption data-sn-text="m.cal_calendars()"></h4>
-              <div data-layout="stack" data-gap="xs">
+              <h4 data-tm-caption data-sn-text="m.cal_calendars()"></h4>
+              <div data-tm-layout="stack" data-tm-gap="xs">
                 <template data-sn-for="cal in account.calendars" data-sn-key="cal.account_id + cal.href">
                   <label>
                     <input type="checkbox" data-sn-attr="{checked: cal.is_active}"
@@ -103,8 +103,8 @@
                 </template>
               </div>
               <template data-sn-if="account.addressbooks.length > 0">
-                <h4 data-caption data-sn-text="m.contacts_addressbooks()"></h4>
-                <ul data-layout="stack" data-gap="xs">
+                <h4 data-tm-caption data-sn-text="m.contacts_addressbooks()"></h4>
+                <ul data-tm-layout="stack" data-tm-gap="xs">
                   <template data-sn-for="ab in account.addressbooks" data-sn-key="ab.account_id + ab.href">
                     <li data-sn-text="ab.name"></li>
                   </template>
@@ -114,11 +114,11 @@
           </template>
           <!-- the list's empty state: no account yet, once the accounts have loaded -->
           <template data-sn-else>
-            <p data-muted data-sn-text="m.settings_subtitle()"></p>
+            <p data-tm-muted data-sn-text="m.settings_subtitle()"></p>
           </template>
 
           <hr />
-          <button type="button" data-variant="outline" data-tone="danger" data-self="start" data-icon="trash-2"
+          <button type="button" data-tm-variant="outline" data-tm-tone="danger" data-tm-self="start" data-tm-icon="trash-2"
                   data-sn-delete="/account" data-sn-confirm="m.settings_deleteAccountConfirm()"
                   data-sn-then="navigate(pagePath($result.redirect || '/'))"
                   data-sn-text="m.settings_deleteAccount()"></button>
@@ -139,7 +139,7 @@
         <button type="button" commandfor="caldav-account-dialog" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
       </header>
       <template data-sn-if="draft">
-        <form data-layout="stack" data-gap="md"
+        <form data-tm-layout="stack" data-tm-gap="md"
               data-sn-post="/caldav/account" data-sn-encoding="form"
               data-sn-body="caldavBody(draft)"
               data-sn-on-submit="draftError = ''"
@@ -164,10 +164,10 @@
                    data-sn-model="draft.caldav_password">
           </label>
           <template data-sn-if="draftError">
-            <div data-callout data-tone="danger" role="alert" data-sn-text="draftError"></div>
+            <div data-tm-callout data-tm-tone="danger" role="alert" data-sn-text="draftError"></div>
           </template>
           <footer>
-            <button type="button" data-variant="ghost" commandfor="caldav-account-dialog" command="close" data-sn-text="m.event_cancel()"></button>
+            <button type="button" data-tm-variant="ghost" commandfor="caldav-account-dialog" command="close" data-sn-text="m.event_cancel()"></button>
             <button type="submit" data-sn-text="m.settings_submit()"></button>
           </footer>
         </form>

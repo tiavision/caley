@@ -73,11 +73,11 @@ test('lists the contacts by letter, with avatar, first email and phone, org', as
   expect(letters(root)).toEqual(['A', 'B']);
   expect(names(root)).toEqual(['Ada Lovelace', 'Alan Turing', 'Bob Babbage']);
   const [first, second] = root.querySelectorAll('main article');
-  expect(first!.querySelector('[data-avatar]')!.textContent!.trim()).toBe('A');
+  expect(first!.querySelector('[data-tm-avatar]')!.textContent!.trim()).toBe('A');
   expect(first!.querySelector('a[href="mailto:ada@example.com"]')).not.toBeNull();
   expect(first!.querySelector('a[href="tel:+44 1"]')).not.toBeNull();
-  expect(first!.querySelector('small[data-muted]')!.textContent).toBe('Engines Ltd');
-  expect(second!.querySelector('[data-avatar] img')!.getAttribute('src')).toBe('/api/contact/photo?account_id=acc&uid=2&addressbook_href=%2Fab%2Fpersonal%2F');
+  expect(first!.querySelector('small[data-tm-muted]')!.textContent).toBe('Engines Ltd');
+  expect(second!.querySelector('[data-tm-avatar] img')!.getAttribute('src')).toBe('/api/contact/photo?account_id=acc&uid=2&addressbook_href=%2Fab%2Fpersonal%2F');
   expect(root.querySelector('button[popovertarget="ab-menu"]')).toBeNull();
 });
 
@@ -90,14 +90,14 @@ test('filters by name, email, org or phone', async () => {
   type(search, 'zzz');
   await flush();
   expect(names(root)).toEqual([]);
-  expect(root.querySelector('main p[data-muted]')!.textContent).toBe('No contacts.');
+  expect(root.querySelector('main p[data-tm-muted]')!.textContent).toBe('No contacts.');
 });
 
 test('with several address books: the menu filters them', async () => {
   const { root, flush } = await show({}, [book('/ab/personal/', 'Personal'), book('/ab/work/', 'Work')]);
   const button = root.querySelector('button[popovertarget="ab-menu"]')!;
   expect(button.textContent).toBe('Address books');
-  expect([...root.querySelectorAll('main article')].at(-1)!.querySelector('small[data-muted]')!.textContent).toBe('Work');
+  expect([...root.querySelectorAll('main article')].at(-1)!.querySelector('small[data-tm-muted]')!.textContent).toBe('Work');
   const work = root.querySelectorAll<HTMLInputElement>('#ab-menu input')[1]!;
   expect(work.checked).toBe(true);
   work.checked = false;
@@ -124,7 +124,7 @@ test('the detail dialog shows the contact; an address opens the map', async () =
 
 test('creates a contact: empty rows are left out, then the new contact is shown', async () => {
   const r = await show({ 'POST /api/contact': (call) => ({ ...contact('9', 'contacts-Zed'), ...(call.body as object), uid: '9', has_photo: false }) });
-  r.root.querySelector<HTMLButtonElement>('button[data-fab]')!.click();
+  r.root.querySelector<HTMLButtonElement>('button[data-tm-fab]')!.click();
   const form = await opened(r.root.querySelector<HTMLDialogElement>('#contact-form')!, r.flush);
   expect(form.querySelector('h2')!.textContent).toBe('New contact');
   type(form.querySelector<HTMLInputElement>('input[required]')!, ' contacts-Zed ');
@@ -150,11 +150,11 @@ test('leaving the page is refused while the open contact form has been edited, w
   const root = r.root, settle = r.settle;
   const leave = async () => {
     const click = new MouseEvent('click', { bubbles: true, cancelable: true });
-    root.querySelector('nav[data-rail] a[href$="/mail/"]')!.dispatchEvent(click);
+    root.querySelector('nav[data-tm-rail] a[href$="/mail/"]')!.dispatchEvent(click);
     await settle();
     return click.defaultPrevented;
   };
-  r.root.querySelector<HTMLButtonElement>('button[data-fab]')!.click();
+  r.root.querySelector<HTMLButtonElement>('button[data-tm-fab]')!.click();
   const form = await opened(r.root.querySelector<HTMLDialogElement>('#contact-form')!, r.flush);
   expect(await leave()).toBe(false);
   type(form.querySelector<HTMLInputElement>('input[required]')!, 'contacts-Zed');
@@ -170,13 +170,13 @@ test('edits from the detail dialog: rows can be added and removed, an error is s
   let fail = true;
   const r = await show({ 'POST /api/contact': (call) => (fail ? { status: 502 } : { ...ada, ...(call.body as object) }) });
   const detail = await openDetail(r, 'Ada Lovelace');
-  detail.querySelector<HTMLButtonElement>('button[data-icon=pencil]')!.click();
+  detail.querySelector<HTMLButtonElement>('button[data-tm-icon=pencil]')!.click();
   await r.flush();
   const form = await opened(r.root.querySelector<HTMLDialogElement>('#contact-form')!, r.flush);
   expect(form.querySelector('h2')!.textContent).toBe('Edit');
   expect(form.querySelector<HTMLInputElement>('input[required]')!.value).toBe('Ada Lovelace');
   expect(form.querySelector<HTMLSelectElement>('fieldset select')!.value).toBe('work');
-  form.querySelector<HTMLButtonElement>('fieldset button[data-icon=x]')!.click();   // drop the email
+  form.querySelector<HTMLButtonElement>('fieldset button[data-tm-icon=x]')!.click();   // drop the email
   await r.flush();
   expect(form.querySelectorAll('input[type=email]')).toHaveLength(0);
   form.querySelector('form')!.requestSubmit();
@@ -193,7 +193,7 @@ test('deletes after confirmation', async () => {
   const r = await show({ 'DELETE /api/contact': { status: 204 } });
   confirmAnswer = false;
   let dialog = await openDetail(r, 'Alan Turing');
-  const del = () => dialog.querySelector<HTMLButtonElement>('footer button[data-tone=danger]')!;
+  const del = () => dialog.querySelector<HTMLButtonElement>('footer button[data-tm-tone=danger]')!;
   del().click();
   await r.settle();
   expect(r.requests.calls.some((c) => c.method === 'DELETE')).toBe(false);
@@ -237,7 +237,7 @@ test('the detail dialog closes when another client removes its contact', async (
 test('keyboard: c opens a new contact, e edits the open one', async () => {
   const r = await show();
   const form = r.root.querySelector<HTMLDialogElement>('#contact-form')!;
-  const fab = r.root.querySelector<HTMLButtonElement>('button[data-fab]')!;
+  const fab = r.root.querySelector<HTMLButtonElement>('button[data-tm-fab]')!;
   let clicked = 0;
   fab.addEventListener('click', () => clicked++);
   document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }));

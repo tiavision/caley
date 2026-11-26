@@ -21,8 +21,8 @@
   "dependencies": {
     "@fontsource-variable/figtree": "^5.3.0",
     "@tiaforge-ui/sinter": "^0.22.1",
-    "@tiaforge-ui/temper": "^0.4.0",
-    "@tiavision/sinter-alloy": "https://codeload.github.com/tiavision/sinter-alloy/tar.gz/c2dd01df4b6ac3419f229361666a97021fc4227f",
+    "@tiaforge-ui/temper": "github:tiaforge/temper#4a24228",
+    "@tiavision/sinter-alloy": "https://codeload.github.com/tiavision/sinter-alloy/tar.gz/efcaa5d5a33f2fcd5ddcf09ec57016230614d147",
     "@tiavision/sinter-mail": "^0.22.1",
     "openpgp": "^6.3.1"
   },

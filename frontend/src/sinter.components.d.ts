@@ -89,7 +89,7 @@ declare module '*/alloy-palette.html' {
   type PaletteText = import('../node_modules/@tiavision/sinter-alloy/sinter/sinter.types').PaletteText;
   const Base: typeof import('@tiaforge-ui/sinter/runtime/components').Component;
   /** the base of `@tiavision/sinter-alloy/sinter/components/alloy-palette.ts`: props, events, refs and state as `alloy-palette.html` declares them */
-  export class AlloyPaletteComponent extends Base<{ label: string; src?: string; commands?: readonly PaletteCommand[]; keys?: 'mod+k' | false; text?: Partial<PaletteText> }, { pick: PaletteCommand }, { open: HTMLElementTagNameMap["button"] }, { q: string; results: any[]; loading: boolean; mac: boolean }> {}
+  export class AlloyPaletteComponent extends Base<{ label: string; src?: string; commands?: readonly PaletteCommand[]; keys?: 'mod+k' | false; text?: Partial<PaletteText> }, { pick: PaletteCommand }, { open: HTMLElementTagNameMap["button"]; dialog: HTMLElementTagNameMap["dialog"]; field: HTMLElementTagNameMap["input"] }, { q: string; results: any[]; loading: boolean; mac: boolean }> {}
 }
 declare module '*/alloy-range.html' {
   type DateRange = import('../node_modules/@tiavision/sinter-alloy/sinter/sinter.types').DateRange;

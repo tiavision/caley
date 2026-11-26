@@ -8,6 +8,10 @@ import { apis } from './apis.ts';
 const root = import.meta.dirname;
 
 
+// what temper checks, emits icons for and keeps rules for when it prunes: the app's markup and the sinter-alloy
+// component it uses (its attributes are set through bindings, which temper reads in the markup it is given)
+const temperPaths = ['src', 'index.html', 'calendar', 'contacts', 'mail', 'search', 'settings', 'node_modules/@tiavision/sinter-alloy/sinter/components/alloy-sortable.html'].map((p) => resolve(root, p)).filter(existsSync);
+
 export default defineConfig({
   // one sinter for the app and its libraries: sinter-alloy's scripts find the page's app through sinter's `instance()`,
   // which a second copy (the library's own dev install, under a `file:` link) would not know
@@ -35,7 +39,7 @@ export default defineConfig({
     // prints findings in its terminal; agents check the build with `npm run inspect` instead.
     // alloy's components are checked too, and the icons they name (grip-vertical) served: temper reads only these paths,
     // not sinter's libraries.
-    temper({ paths: ['src', 'index.html', 'calendar', 'contacts', 'mail', 'search', 'settings', 'node_modules/@tiavision/sinter-alloy/sinter/components'].map((p) => resolve(root, p)).filter(existsSync), icons: { lucide: true }, prune: true, inspect: true }),
+    temper({ paths: temperPaths, icons: { lucide: true }, prune: { paths: temperPaths }, inspect: true }),
   ],
   css: {
     preprocessorOptions: {

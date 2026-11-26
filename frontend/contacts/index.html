@@ -27,8 +27,8 @@
     <sn-event name="contacts_refetch" resource="contacts" op="refresh"></sn-event>
     <sn-event name="contacts_refetch" resource="addressbooks" op="refresh"></sn-event>
   </sn-sync>
-  <main data-gutter data-sn-on-contact-saved="sel = $event.detail; openDialog('contact-detail')">
-    <div data-density="compact"
+  <main data-tm-gutter data-sn-on-contact-saved="sel = $event.detail; openDialog('contact-detail')">
+    <div data-tm-density="compact"
          data-sn-let="{
            shown: filterContacts(contacts, addressbooks, hiddenBooks, q),
            nBooks: addressbooks.filter(ab => !hiddenBooks.includes(addressbookKey(ab))).length,
@@ -37,18 +37,18 @@
              fax: m.contacts_type_fax(), pager: m.contacts_type_pager(), other: m.contacts_type_other(),
            },
          }">
-      <div class="contacts-page" data-layout="stack" data-gap="md" data-pad="sm">
-        <div class="contacts-toolbar" data-layout="row" data-gap="sm">
+      <div class="contacts-page" data-tm-layout="stack" data-tm-gap="md" data-tm-pad="sm">
+        <div class="contacts-toolbar" data-tm-layout="row" data-tm-gap="sm">
           <nav-toggle></nav-toggle>
-          <div data-field data-grow style="--tm-grow-basis: 12rem">
-            <span data-icon="search" aria-hidden="true"></span>
+          <div data-tm-field data-tm-grow style="--tm-grow-basis: 12rem">
+            <span data-tm-icon="search" aria-hidden="true"></span>
             <input type="search" data-sn-model="q"
                    data-sn-attr="{placeholder: m.contacts_filterplaceholder(), 'aria-label': m.contacts_filterplaceholder()}">
           </div>
           <template data-sn-if="addressbooks.length > 1">
-            <button type="button" popovertarget="ab-menu" data-variant="outline"
+            <button type="button" popovertarget="ab-menu" data-tm-variant="outline"
                     data-sn-text="addressbooksLabel(nBooks, addressbooks.length)"></button>
-            <div popover id="ab-menu" data-menu>
+            <div popover id="ab-menu" data-tm-menu>
               <template data-sn-for="ab in addressbooks">
                 <label>
                   <input type="checkbox" data-sn-attr="{checked: !hiddenBooks.includes(addressbookKey(ab))}"
@@ -65,14 +65,14 @@
         </div>
 
         <template data-sn-if="$meta.contacts.error && !contacts.length">
-          <div data-callout data-tone="danger" role="alert" data-sn-text="m.contacts_loadError()"></div>
+          <div data-tm-callout data-tm-tone="danger" role="alert" data-sn-text="m.contacts_loadError()"></div>
         </template>
         <template data-sn-else>
           <!-- Nothing to show yet (first visit in this tab): cards of a contact's size. -->
           <template data-sn-if="!$meta.contacts.loadedAt && !contacts.length">
-            <div data-layout="grid" data-gap="sm" style="--tm-min: 10rem" aria-busy="true" data-sn-attr="{'aria-label': m.contacts_loading()}">
+            <div data-tm-layout="grid" data-tm-gap="sm" style="--tm-min: 10rem" aria-busy="true" data-sn-attr="{'aria-label': m.contacts_loading()}">
               <template data-sn-for="w in [70, 55, 80, 60, 65, 50, 75, 58]" data-sn-key="w">
-                <div class="contact-placeholder" data-layout="stack" data-gap="sm" data-align="center" aria-hidden="true">
+                <div class="contact-placeholder" data-tm-layout="stack" data-tm-gap="sm" data-tm-align="center" aria-hidden="true">
                   <span class="placeholder-avatar"></span>
                   <span class="placeholder-bar" data-sn-style="{'--w': w + '%'}"></span>
                   <span class="placeholder-bar" data-sn-style="{'--w': (w - 15) + '%'}"></span>
@@ -83,28 +83,28 @@
         </template>
 
         <template data-sn-for="g in groupByLetter(shown)" data-sn-key="g.letter">
-          <section data-layout="stack" data-gap="sm">
-            <h2 data-caption data-sn-text="g.letter"></h2>
-            <div data-layout="grid" data-gap="sm" style="--tm-min: 10rem">
+          <section data-tm-layout="stack" data-tm-gap="sm">
+            <h2 data-tm-caption data-sn-text="g.letter"></h2>
+            <div data-tm-layout="grid" data-tm-gap="sm" style="--tm-min: 10rem">
               <template data-sn-for="c in g.items" data-sn-key="contactKey(c)">
-                <article data-layout="stack" data-gap="xs" data-align="center">
-                  <span data-avatar>
-                    <template data-sn-if="c.has_photo"><img alt="" loading="lazy" decoding="async" data-sn-attr="{src: contactPhotoUrl(c)}"></template>
+                <article data-tm-layout="stack" data-tm-gap="xs" data-tm-align="center">
+                  <span data-tm-avatar>
+                    <template data-sn-if="c.has_photo"><img alt="" width="40" height="40" loading="lazy" decoding="async" data-sn-attr="{src: contactPhotoUrl(c)}"></template>
                     <template data-sn-else><span data-sn-text="contactInitial(c)"></span></template>
                   </span>
-                  <button type="button" data-stretch data-variant="link" data-truncate
+                  <button type="button" data-tm-stretch data-tm-variant="link" data-tm-truncate
                           commandfor="contact-detail" command="show-modal" data-sn-on-click="sel = c"><strong data-sn-text="c.fn_name || '—'"></strong></button>
                   <template data-sn-if="c.emails[0]">
-                    <small data-truncate><a data-sn-attr="{href: 'mailto:' + c.emails[0].value}" data-sn-text="c.emails[0].value"></a></small>
+                    <small data-tm-truncate><a data-sn-attr="{href: 'mailto:' + c.emails[0].value}" data-sn-text="c.emails[0].value"></a></small>
                   </template>
                   <template data-sn-if="c.phones[0]">
-                    <small data-truncate><a data-sn-attr="{href: 'tel:' + c.phones[0].value}" data-sn-text="c.phones[0].value"></a></small>
+                    <small data-tm-truncate><a data-sn-attr="{href: 'tel:' + c.phones[0].value}" data-sn-text="c.phones[0].value"></a></small>
                   </template>
                   <template data-sn-if="c.org">
-                    <small data-muted data-truncate data-sn-text="c.org"></small>
+                    <small data-tm-muted data-tm-truncate data-sn-text="c.org"></small>
                   </template>
                   <template data-sn-if="addressbooks.length > 1">
-                    <small data-muted data-truncate data-sn-text="addressbookName(addressbooks, c)"></small>
+                    <small data-tm-muted data-tm-truncate data-sn-text="addressbookName(addressbooks, c)"></small>
                   </template>
                 </article>
               </template>
@@ -113,11 +113,11 @@
         </template>
         <!-- the list's empty state: no contact (or none the search finds), once the contacts have loaded -->
         <template data-sn-else>
-          <p data-muted data-sn-text="m.contacts_noContacts()"></p>
+          <p data-tm-muted data-sn-text="m.contacts_noContacts()"></p>
         </template>
       </div>
 
-      <button type="button" data-fab data-icon="plus" data-shortcut="c" data-sn-attr="{'aria-label': m.contacts_new()}"
+      <button type="button" data-tm-fab data-tm-icon="plus" data-shortcut="c" data-sn-attr="{'aria-label': m.contacts_new()}"
               commandfor="contact-form" command="show-modal"
               data-sn-on-click="draft = newDraft(addressbooks); formError = ''"></button>
 
@@ -125,10 +125,10 @@
               data-sn-let="{ c: contacts.find(x => sameContact(x, sel)) }">
         <header>
           <h2 data-sn-text="c?.fn_name || ''"></h2>
-          <div data-layout="row" data-gap="xs" data-wrap="none">
+          <div data-tm-layout="row" data-tm-gap="xs" data-tm-wrap="none">
             <share-menu data-sn-with="{ item: c ? contactShare(c) : null }"></share-menu>
             <template data-sn-if="c">
-              <button type="button" data-icon="pencil" data-variant="ghost" data-tooltip data-shortcut="e"
+              <button type="button" data-tm-icon="pencil" data-tm-variant="ghost" data-tm-tooltip data-shortcut="e"
                       data-sn-attr="{'aria-label': m.contacts_edit()}"
                       data-sn-on-click="draft = editDraft(c); formError = ''; closeDialog(); openDialog('contact-form')"></button>
             </template>
@@ -137,12 +137,12 @@
         </header>
 
         <template data-sn-if="c">
-          <span data-avatar data-self="center" style="--tm-avatar-size: 4rem">
+          <span data-tm-avatar data-tm-self="center" style="--tm-avatar-size: 4rem">
             <template data-sn-if="c.has_photo"><img alt="" data-sn-attr="{src: contactPhotoUrl(c)}"></template>
             <template data-sn-else><span data-sn-text="contactInitial(c)"></span></template>
           </span>
 
-          <dl data-pairs>
+          <dl data-tm-pairs>
             <template data-sn-if="c.org">
               <dt data-sn-text="m.contacts_org()"></dt>
               <dd data-sn-text="c.org"></dd>
@@ -150,11 +150,11 @@
 
             <template data-sn-if="c.emails.length">
               <dt data-sn-text="m.contacts_email()"></dt>
-              <dd data-layout="stack" data-gap="xs">
+              <dd data-tm-layout="stack" data-tm-gap="xs">
                 <template data-sn-for="(e, i) in c.emails" data-sn-key="i">
-                  <span data-layout="row" data-gap="sm" data-wrap="none">
-                    <span data-badge data-sn-text="types[e.type_label] ?? e.type_label"></span>
-                    <a data-truncate data-sn-attr="{href: 'mailto:' + e.value}" data-sn-text="e.value"></a>
+                  <span data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
+                    <span data-tm-badge data-sn-text="types[e.type_label] ?? e.type_label"></span>
+                    <a data-tm-truncate data-sn-attr="{href: 'mailto:' + e.value}" data-sn-text="e.value"></a>
                   </span>
                 </template>
               </dd>
@@ -162,10 +162,10 @@
 
             <template data-sn-if="c.phones.length">
               <dt data-sn-text="m.contacts_phone()"></dt>
-              <dd data-layout="stack" data-gap="xs">
+              <dd data-tm-layout="stack" data-tm-gap="xs">
                 <template data-sn-for="(p, i) in c.phones" data-sn-key="i">
-                  <span data-layout="row" data-gap="sm" data-wrap="none">
-                    <span data-badge data-sn-text="types[p.type_label] ?? p.type_label"></span>
+                  <span data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
+                    <span data-tm-badge data-sn-text="types[p.type_label] ?? p.type_label"></span>
                     <a data-sn-attr="{href: 'tel:' + p.value}" data-sn-text="p.value"></a>
                   </span>
                 </template>
@@ -174,11 +174,11 @@
 
             <template data-sn-if="c.addresses.length">
               <dt data-sn-text="m.contacts_address()"></dt>
-              <dd data-layout="stack" data-gap="sm">
+              <dd data-tm-layout="stack" data-tm-gap="sm">
                 <template data-sn-for="(a, i) in c.addresses" data-sn-key="i">
-                  <span data-layout="row" data-gap="sm" data-wrap="none" data-align="start"
+                  <span data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none" data-tm-align="start"
                         data-sn-let="{ lines: addressLines(a) }">
-                    <span data-badge data-sn-text="types[a.type_label] ?? a.type_label"></span>
+                    <span data-tm-badge data-sn-text="types[a.type_label] ?? a.type_label"></span>
                     <!-- The device's map app, else the web map of the user's settings (src/actions/maps.ts). -->
                     <a rel="noopener noreferrer" data-sn-attr="{href: geoUrl(addressQuery(a))}"
                        data-sn-call="maps.open(addressQuery(a), user.map_url)">
@@ -198,7 +198,7 @@
           </dl>
 
           <footer>
-            <button type="button" data-variant="outline" data-tone="danger" data-icon="trash-2"
+            <button type="button" data-tm-variant="outline" data-tm-tone="danger" data-tm-icon="trash-2"
                     data-sn-delete="/contact"
                     data-sn-body="{account_id: c.account_id, uid: c.uid, addressbook_href: c.addressbook_href}"
                     data-sn-confirm="m.contacts_deleteConfirm()"
@@ -218,13 +218,13 @@
           <button type="button" commandfor="contact-form" command="close" data-sn-attr="{'aria-label': m.weekly_aria_close()}"></button>
         </header>
 
-        <form data-layout="stack" data-gap="md"
+        <form data-tm-layout="stack" data-tm-gap="md"
               data-sn-post="/contact" data-sn-body="draftBody(draft)"
               data-sn-on-submit="saving = true; formError = ''"
               data-sn-then="saving = false; upsert(contacts, $result); closeDialog(); emit('contact-saved', $result)"
               data-sn-catch="saving = false; formError = m.contacts_error()">
           <template data-sn-if="formError">
-            <div data-callout data-tone="danger" role="alert" data-sn-text="formError"></div>
+            <div data-tm-callout data-tm-tone="danger" role="alert" data-sn-text="formError"></div>
           </template>
 
           <label>
@@ -232,29 +232,29 @@
             <input type="text" required autofocus data-sn-model="draft.fn_name">
           </label>
 
-          <fieldset data-layout="stack" data-gap="sm">
+          <fieldset data-tm-layout="stack" data-tm-gap="sm">
             <legend data-sn-text="m.contacts_email()"></legend>
             <template data-sn-for="(e, i) in draft.emails">
-              <div data-layout="row" data-gap="sm" data-wrap="none">
-                <input type="email" data-grow data-sn-attr="{'aria-label': m.contacts_email()}" data-sn-model="draft.emails[i].value">
+              <div data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
+                <input type="email" data-tm-grow data-sn-attr="{'aria-label': m.contacts_email()}" data-sn-model="draft.emails[i].value">
                 <select data-sn-attr="{'aria-label': m.contacts_type()}" data-sn-model="draft.emails[i].type_label">
                   <option value="home" data-sn-text="m.contacts_type_home()"></option>
                   <option value="work" data-sn-text="m.contacts_type_work()"></option>
                   <option value="other" data-sn-text="m.contacts_type_other()"></option>
                 </select>
-                <button type="button" data-icon="x" data-variant="ghost" data-sn-attr="{'aria-label': m.contacts_remove()}"
+                <button type="button" data-tm-icon="x" data-tm-variant="ghost" data-sn-attr="{'aria-label': m.contacts_remove()}"
                         data-sn-on-click="draft.emails.splice(i, 1)"></button>
               </div>
             </template>
-            <button type="button" data-variant="outline" data-size="sm" data-icon="plus" data-self="start"
+            <button type="button" data-tm-variant="outline" data-tm-size="sm" data-tm-icon="plus" data-tm-self="start"
                     data-sn-on-click="draft.emails.push(emptyEntry())" data-sn-text="m.contacts_addEmail()"></button>
           </fieldset>
 
-          <fieldset data-layout="stack" data-gap="sm">
+          <fieldset data-tm-layout="stack" data-tm-gap="sm">
             <legend data-sn-text="m.contacts_phone()"></legend>
             <template data-sn-for="(p, i) in draft.phones">
-              <div data-layout="row" data-gap="sm" data-wrap="none">
-                <input type="tel" data-grow data-sn-attr="{'aria-label': m.contacts_phone()}" data-sn-model="draft.phones[i].value">
+              <div data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
+                <input type="tel" data-tm-grow data-sn-attr="{'aria-label': m.contacts_phone()}" data-sn-model="draft.phones[i].value">
                 <select data-sn-attr="{'aria-label': m.contacts_type()}" data-sn-model="draft.phones[i].type_label">
                   <option value="home" data-sn-text="m.contacts_type_home()"></option>
                   <option value="work" data-sn-text="m.contacts_type_work()"></option>
@@ -263,28 +263,28 @@
                   <option value="pager" data-sn-text="m.contacts_type_pager()"></option>
                   <option value="other" data-sn-text="m.contacts_type_other()"></option>
                 </select>
-                <button type="button" data-icon="x" data-variant="ghost" data-sn-attr="{'aria-label': m.contacts_remove()}"
+                <button type="button" data-tm-icon="x" data-tm-variant="ghost" data-sn-attr="{'aria-label': m.contacts_remove()}"
                         data-sn-on-click="draft.phones.splice(i, 1)"></button>
               </div>
             </template>
-            <button type="button" data-variant="outline" data-size="sm" data-icon="plus" data-self="start"
+            <button type="button" data-tm-variant="outline" data-tm-size="sm" data-tm-icon="plus" data-tm-self="start"
                     data-sn-on-click="draft.phones.push(emptyEntry())" data-sn-text="m.contacts_addPhone()"></button>
           </fieldset>
 
-          <fieldset data-layout="stack" data-gap="sm">
+          <fieldset data-tm-layout="stack" data-tm-gap="sm">
             <legend data-sn-text="m.contacts_address()"></legend>
             <template data-sn-for="(a, i) in draft.addresses">
-              <div data-layout="stack" data-gap="sm">
-                <div data-layout="row" data-gap="sm" data-justify="between" data-wrap="none">
-                  <span data-caption data-sn-text="m.contacts_address() + (draft.addresses.length > 1 ? ` ${i + 1}` : '')"></span>
-                  <button type="button" data-icon="x" data-variant="ghost" data-size="sm" data-sn-attr="{'aria-label': m.contacts_remove()}"
+              <div data-tm-layout="stack" data-tm-gap="sm">
+                <div data-tm-layout="row" data-tm-gap="sm" data-tm-justify="between" data-tm-wrap="none">
+                  <span data-tm-caption data-sn-text="m.contacts_address() + (draft.addresses.length > 1 ? ` ${i + 1}` : '')"></span>
+                  <button type="button" data-tm-icon="x" data-tm-variant="ghost" data-tm-size="sm" data-sn-attr="{'aria-label': m.contacts_remove()}"
                           data-sn-on-click="draft.addresses.splice(i, 1)"></button>
                 </div>
                 <label>
                   <span data-sn-text="m.contacts_street()"></span>
                   <input type="text" data-sn-model="draft.addresses[i].street">
                 </label>
-                <div data-layout="grid" data-gap="sm" style="--tm-min: 8rem">
+                <div data-tm-layout="grid" data-tm-gap="sm" style="--tm-min: 8rem">
                   <label>
                     <span data-sn-text="m.contacts_city()"></span>
                     <input type="text" data-sn-model="draft.addresses[i].city">
@@ -298,7 +298,7 @@
                     <input type="text" data-sn-model="draft.addresses[i].postal">
                   </label>
                 </div>
-                <div data-layout="grid" data-gap="sm" style="--tm-min: 8rem">
+                <div data-tm-layout="grid" data-tm-gap="sm" style="--tm-min: 8rem">
                   <label>
                     <span data-sn-text="m.contacts_country()"></span>
                     <input type="text" data-sn-model="draft.addresses[i].country">
@@ -315,7 +315,7 @@
               </div>
               <hr data-sn-show="i < draft.addresses.length - 1">
             </template>
-            <button type="button" data-variant="outline" data-size="sm" data-icon="plus" data-self="start"
+            <button type="button" data-tm-variant="outline" data-tm-size="sm" data-tm-icon="plus" data-tm-self="start"
                     data-sn-on-click="draft.addresses.push(emptyAddress())" data-sn-text="m.contacts_addAddress()"></button>
           </fieldset>
 
@@ -336,7 +336,7 @@
           </template>
 
           <footer>
-            <button type="button" data-variant="ghost" commandfor="contact-form" command="close" data-sn-text="m.contacts_cancel()"></button>
+            <button type="button" data-tm-variant="ghost" commandfor="contact-form" command="close" data-sn-text="m.contacts_cancel()"></button>
             <button type="submit" data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.contacts_save()"></button>
           </footer>
         </form>

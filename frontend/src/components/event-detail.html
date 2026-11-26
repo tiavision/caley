@@ -12,21 +12,21 @@
   <dialog id="event-detail" closedby="any" data-sn-on-close="elementIn($el, '#event-edit-choice')?.hidePopover()">
     <sn-resource name="eventEmails" when="threads && event"
                  src="/calendar/event-emails?cal_account_id={event.account_id}&calendar_href={event.calendar_href}&event_uid={event.uid}"></sn-resource>
-    <header data-layout="row" data-gap="xs" data-align="start">
-      <h2 data-grow data-sn-text="event?.summary || ''"></h2>
-      <div data-layout="row" data-gap="xs" data-wrap="none">
+    <header data-tm-layout="row" data-tm-gap="xs" data-tm-align="start">
+      <h2 data-tm-grow data-sn-text="event?.summary || ''"></h2>
+      <div data-tm-layout="row" data-tm-gap="xs" data-tm-wrap="none">
         <template data-sn-if="event && threads && eventEmails.length > 0">
-          <button type="button" data-variant="ghost" data-icon="list-tree" data-tooltip
+          <button type="button" data-tm-variant="ghost" data-tm-icon="list-tree" data-tm-tooltip
                   data-sn-attr="{'aria-label': m.mail_threads()}"
                   data-sn-on-click="closeDialog(); emit('event-threads', { email: eventEmails[0], event })"></button>
         </template>
         <share-menu data-sn-with="{ item: event ? eventShare(event) : null }"></share-menu>
         <template data-sn-if="event?.is_recurring">
-          <button type="button" class="event-edit" data-variant="ghost" data-icon="pencil" data-shortcut="e" popovertarget="event-edit-choice"
+          <button type="button" class="event-edit" data-tm-variant="ghost" data-tm-icon="pencil" data-shortcut="e" popovertarget="event-edit-choice"
                   data-sn-attr="{'aria-label': m.event_edit()}"></button>
         </template>
         <template data-sn-else>
-          <button type="button" class="event-edit" data-variant="ghost" data-icon="pencil" data-shortcut="e" data-tooltip
+          <button type="button" class="event-edit" data-tm-variant="ghost" data-tm-icon="pencil" data-shortcut="e" data-tm-tooltip
                   data-sn-attr="{'aria-label': m.event_edit()}"
                   data-sn-on-click="closeDialog(); emit('event-edit', { event, scope: 'series'})"></button>
         </template>
@@ -34,7 +34,7 @@
       </div>
     </header>
 
-    <div popover id="event-edit-choice" data-menu>
+    <div popover id="event-edit-choice" data-tm-menu>
       <button type="button" popovertarget="event-edit-choice" popovertargetaction="hide"
               data-sn-on-click="closeDialog('event-detail'); emit('event-edit', { event, scope: 'series'})"
               data-sn-text="m.event_editSeries()"></button>
@@ -44,14 +44,14 @@
     </div>
 
     <template data-sn-if="event">
-      <dl data-pairs data-sn-let="{ times: formatEventTimes(event), repeats: event.is_recurring ? formatRecurrence(event.recurrence, $locale) : '' }">
+      <dl data-tm-pairs data-sn-let="{ times: formatEventTimes(event), repeats: event.is_recurring ? formatRecurrence(event.recurrence, $locale) : '' }">
         <template data-sn-if="times.localText">
           <div>
             <dt data-sn-text="m.event_time()"></dt>
             <dd>
               <span data-sn-text="times.localText"></span>
               <template data-sn-if="times.sourceText">
-                <br><small data-muted data-sn-text="`${m.event_originalTime()}: ${times.sourceText}`"></small>
+                <br><small data-tm-muted data-sn-text="`${m.event_originalTime()}: ${times.sourceText}`"></small>
               </template>
             </dd>
           </div>
@@ -79,7 +79,7 @@
         <template data-sn-if="event.alarms.length > 0">
           <div>
             <dt data-sn-text="m.event_reminder()"></dt>
-            <dd data-layout="stack" data-gap="xs">
+            <dd data-tm-layout="stack" data-tm-gap="xs">
               <template data-sn-for="(alarm, i) in event.alarms" data-sn-key="i">
                 <span data-sn-text="formatAlarm(alarm)"></span>
               </template>
@@ -89,10 +89,10 @@
         <template data-sn-if="event.attendees.length > 0">
           <div>
             <dt data-sn-text="m.event_attendees()"></dt>
-            <dd data-layout="stack" data-gap="xs">
+            <dd data-tm-layout="stack" data-tm-gap="xs">
               <template data-sn-for="(att, i) in event.attendees" data-sn-key="i">
-                <span data-layout="row" data-gap="sm">
-                  <span data-badge data-sn-attr="{'data-tone': partstatTone(att.partstat)}" data-sn-text="partstatLabel(att.partstat)"></span>
+                <span data-tm-layout="row" data-tm-gap="sm">
+                  <span data-tm-badge data-sn-attr="{'data-tm-tone': partstatTone(att.partstat)}" data-sn-text="partstatLabel(att.partstat)"></span>
                   <span data-sn-text="attendeeLabel(att)"></span>
                 </span>
               </template>

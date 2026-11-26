@@ -16,25 +16,25 @@
         <h2 data-sn-text="only ? m.mail_imageSourcesThisEmail() : m.mail_imageSources()"></h2>
         <button type="button" commandfor="email-origins" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
       </header>
-      <div data-field>
-        <span data-icon="search" aria-hidden="true"></span>
+      <div data-tm-field>
+        <span data-tm-icon="search" aria-hidden="true"></span>
         <input type="search" data-sn-model="q" data-sn-attr="{placeholder: m.mail_originsFilter(), 'aria-label': m.mail_originsFilter()}">
       </div>
       <template data-sn-if="only">
-        <section data-layout="stack" data-gap="xs" data-sn-let="{ shownOrigins: matching(inMail.blocked, q) }">
-          <h3 data-caption data-sn-text="m.mail_originsBlocked()"></h3>
+        <section data-tm-layout="stack" data-tm-gap="xs" data-sn-let="{ shownOrigins: matching(inMail.blocked, q) }">
+          <h3 data-tm-caption data-sn-text="m.mail_originsBlocked()"></h3>
           <template data-sn-if="shownOrigins.length === 0">
-            <p data-muted data-sn-text="q ? m.mail_originsNoMatches() : m.mail_originsNoneBlockedEmail()"></p>
+            <p data-tm-muted data-sn-text="q ? m.mail_originsNoMatches() : m.mail_originsNoneBlockedEmail()"></p>
           </template>
           <template data-sn-else>
-            <ul data-list>
+            <ul data-tm-list>
               <template data-sn-for="origin in shownOrigins" data-sn-key="origin">
-                <li data-layout="row" data-gap="sm" data-wrap="none" data-pad="xs">
-                  <span data-truncate data-grow data-sn-text="origin"></span>
-                  <button type="button" data-variant="outline" data-tone="accent" data-size="sm"
+                <li data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none" data-tm-pad="xs">
+                  <span data-tm-truncate data-tm-grow data-sn-text="origin"></span>
+                  <button type="button" data-tm-variant="outline" data-tm-tone="accent" data-tm-size="sm"
                           data-sn-post="/email/image-origins" data-sn-body="{origin}" data-sn-then="refresh(allowedOrigins)"
                           data-sn-text="m.mail_originsAllow()"></button>
-                  <button type="button" data-variant="ghost" data-size="sm" data-icon="ban" data-tooltip
+                  <button type="button" data-tm-variant="ghost" data-tm-size="sm" data-tm-icon="ban" data-tm-tooltip
                           data-sn-post="/email/image-blacklist" data-sn-body="{origin}" data-sn-then="refresh(ignoredOrigins)"
                           data-sn-attr="{'aria-label': m.mail_blockSilently()}"></button>
                 </li>
@@ -43,17 +43,17 @@
           </template>
         </section>
       </template>
-      <section data-layout="stack" data-gap="xs" data-sn-let="{ shownOrigins: matching(only ? inMail.allowed : allowed, q) }">
-        <h3 data-caption data-sn-text="m.mail_originsAllowed()"></h3>
+      <section data-tm-layout="stack" data-tm-gap="xs" data-sn-let="{ shownOrigins: matching(only ? inMail.allowed : allowed, q) }">
+        <h3 data-tm-caption data-sn-text="m.mail_originsAllowed()"></h3>
         <template data-sn-if="shownOrigins.length === 0">
-          <p data-muted data-sn-text="q ? m.mail_originsNoMatches() : m.mail_originsNoneYet()"></p>
+          <p data-tm-muted data-sn-text="q ? m.mail_originsNoMatches() : m.mail_originsNoneYet()"></p>
         </template>
         <template data-sn-else>
-          <ul data-list>
+          <ul data-tm-list>
             <template data-sn-for="origin in shownOrigins" data-sn-key="origin">
-              <li data-layout="row" data-gap="sm" data-wrap="none" data-pad="xs">
-                <span data-truncate data-grow data-sn-text="origin"></span>
-                <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
+              <li data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none" data-tm-pad="xs">
+                <span data-tm-truncate data-tm-grow data-sn-text="origin"></span>
+                <button type="button" data-tm-variant="ghost" data-tm-size="sm" data-tm-icon="x" data-tm-tooltip
                         data-sn-delete="/email/image-origins?origin={origin}" data-sn-then="refresh(allowedOrigins)"
                         data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
               </li>
@@ -61,21 +61,21 @@
           </ul>
         </template>
       </section>
-      <section data-layout="stack" data-gap="xs" data-sn-let="{ shownOrigins: matching(only ? inMail.ignored : ignored, q) }">
-        <h3 data-caption data-sn-text="m.mail_originsIgnored()"></h3>
+      <section data-tm-layout="stack" data-tm-gap="xs" data-sn-let="{ shownOrigins: matching(only ? inMail.ignored : ignored, q) }">
+        <h3 data-tm-caption data-sn-text="m.mail_originsIgnored()"></h3>
         <template data-sn-if="shownOrigins.length === 0">
-          <p data-muted data-sn-text="q ? m.mail_originsNoMatches() : m.mail_originsNoneYet()"></p>
+          <p data-tm-muted data-sn-text="q ? m.mail_originsNoMatches() : m.mail_originsNoneYet()"></p>
         </template>
         <template data-sn-else>
-          <ul data-list>
+          <ul data-tm-list>
             <template data-sn-for="origin in shownOrigins" data-sn-key="origin">
-              <li data-layout="row" data-gap="sm" data-wrap="none" data-pad="xs">
-                <span data-truncate data-grow data-sn-text="origin"></span>
+              <li data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none" data-tm-pad="xs">
+                <span data-tm-truncate data-tm-grow data-sn-text="origin"></span>
                 <!-- Allow: onto the allow list, which takes it off the ignore list (POST /email/image-origins). -->
-                <button type="button" data-variant="outline" data-tone="accent" data-size="sm"
+                <button type="button" data-tm-variant="outline" data-tm-tone="accent" data-tm-size="sm"
                         data-sn-post="/email/image-origins" data-sn-body="{origin}" data-sn-then="refresh(allowedOrigins, ignoredOrigins)"
                         data-sn-text="m.mail_originsAllow()"></button>
-                <button type="button" data-variant="ghost" data-size="sm" data-icon="x" data-tooltip
+                <button type="button" data-tm-variant="ghost" data-tm-size="sm" data-tm-icon="x" data-tm-tooltip
                         data-sn-delete="/email/image-blacklist?origin={origin}" data-sn-then="refresh(ignoredOrigins)"
                         data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
               </li>

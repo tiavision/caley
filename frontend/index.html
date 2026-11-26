@@ -11,35 +11,35 @@
     <sn-resource name="authConfig" src="/auth/config"></sn-resource>
 
     <!-- The language picker in the page's corner; the column below is the logo, the name and the sign-in card. -->
-    <header class="login-lang" data-layout="row" data-gap="sm" data-wrap="none" data-justify="end" data-pad="md">
-      <span data-icon="globe" data-muted></span>
+    <header class="login-lang" data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none" data-tm-justify="end" data-tm-pad="md">
+      <span data-tm-icon="globe" data-tm-muted></span>
       <!-- each language is its own page: choosing one goes there (src/islands/common.ts) -->
-      <select data-size="sm" data-sn-attr="{'aria-label': m.settings_language()}" data-locale-switch>
+      <select data-tm-size="sm" data-sn-attr="{'aria-label': m.settings_language()}" data-locale-switch>
         <option data-sn-attr="{ value: localeUrl('en'), selected: $locale === 'en' }">English</option>
         <option data-sn-attr="{ value: localeUrl('de'), selected: $locale === 'de' }">Deutsch</option>
       </select>
     </header>
 
-    <main class="login" data-layout="center" data-pad="lg" style="--tm-measure: 24rem"
+    <main class="login" data-tm-layout="center" data-tm-pad="lg" style="--tm-measure: 24rem"
           data-sn-let="{ ready: ($meta.user.loadedAt || $meta.user.error) && !user && ($meta.authConfig.loadedAt || $meta.authConfig.error) }">
-      <div data-layout="stack" data-gap="xl">
-        <div class="login-brand" data-layout="stack" data-gap="sm">
+      <div data-tm-layout="stack" data-tm-gap="xl">
+        <div class="login-brand" data-tm-layout="stack" data-tm-gap="sm">
           <img src="/icons/favicon-128x128.png" alt="" width="72" height="72">
           <h1 data-sn-text="m.app_brand()"></h1>
-          <p data-muted data-sn-text="m.login_tagline()"></p>
+          <p data-tm-muted data-sn-text="m.login_tagline()"></p>
         </div>
 
-        <article data-layout="stack" data-gap="lg" data-pad="lg">
+        <article data-tm-layout="stack" data-tm-gap="lg" data-tm-pad="lg">
           <template data-sn-if="ready">
             <!-- The demo (DEMO_MODE) signs in without credentials, as its fixed user (backend/src/local_auth.rs). -->
             <template data-sn-if="authConfig.demo_mode">
-              <form data-layout="stack" data-gap="md"
+              <form data-tm-layout="stack" data-tm-gap="md"
                     data-sn-post="site:/auth/login" data-sn-encoding="form"
                     data-sn-on-submit="saving = true; error = ''"
                     data-sn-then="navigate(pagePath($result.redirect || '/calendar/'), { replace: true })"
                     data-sn-catch="saving = false; error = $error.detail ?? m.login_error()">
                 <template data-sn-if="error">
-                  <p data-callout data-tone="danger" role="alert" data-sn-text="error"></p>
+                  <p data-tm-callout data-tm-tone="danger" role="alert" data-sn-text="error"></p>
                 </template>
                 <button type="submit" data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.login_demo()"></button>
               </form>

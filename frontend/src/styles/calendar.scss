@@ -56,7 +56,7 @@
 // Phones up to 360px wide: the view menu and the arrows a little tighter (the ▾ stays: it makes "Week" a button).
 @container (width < 23rem) {
   .cal-view-menu { padding-inline: var(--tm-space-xs); }
-  .cal-pager > [data-icon] { min-inline-size: 0; padding-inline: var(--tm-space-xs); }
+  .cal-pager > [data-tm-icon] { min-inline-size: 0; padding-inline: var(--tm-space-xs); }
 }
 
 // The bar while the range shown reloads: a 2px band under the toolbar, nothing moves when it comes and goes.

@@ -12,10 +12,10 @@
     </header>
 
     <template data-sn-if="calError">
-      <div data-callout data-tone="danger" role="alert" data-sn-text="calError"></div>
+      <div data-tm-callout data-tm-tone="danger" role="alert" data-sn-text="calError"></div>
     </template>
 
-    <form data-layout="stack" data-gap="md"
+    <form data-tm-layout="stack" data-tm-gap="md"
           data-sn-post="/calendar" data-sn-encoding="form"
           data-sn-body="newCalendarBody(cal)"
           data-sn-on-submit="calError = ''"
@@ -47,7 +47,7 @@
       </template>
 
       <footer>
-        <button type="button" data-variant="ghost" commandfor="create-calendar-dialog" command="close" data-sn-text="m.event_cancel()"></button>
+        <button type="button" data-tm-variant="ghost" commandfor="create-calendar-dialog" command="close" data-sn-text="m.event_cancel()"></button>
         <button type="submit" data-sn-text="m.cal_createCalendarSave()"></button>
       </footer>
     </form>

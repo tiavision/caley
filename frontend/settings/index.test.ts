@@ -152,7 +152,7 @@ test('lists the CalDAV accounts with their calendars and address books', async (
 test('no accounts: the hint', async () => {
   const { root } = await show({ 'GET /api/caldav/accounts': { accounts: [] } });
   expect(root.querySelector('main article')).toBeNull();
-  expect(root.querySelector('#settings-panel-general p[data-muted]')!.textContent).toBe(m.settings_subtitle());
+  expect(root.querySelector('#settings-panel-general p[data-tm-muted]')!.textContent).toBe(m.settings_subtitle());
 });
 
 test('toggles a calendar', async () => {
@@ -284,11 +284,11 @@ test('imports an ICS file into the remembered calendar, after a preview', async 
   Object.defineProperty(input, 'files', { value: [new File(['BEGIN:VCALENDAR'], 'standup.ics')], configurable: true });
   input.dispatchEvent(new Event('change', { bubbles: true }));
   await settle();
-  expect(dialog.querySelector('small[data-truncate]')!.textContent).toBe('standup.ics');
+  expect(dialog.querySelector('small[data-tm-truncate]')!.textContent).toBe('standup.ics');
 
   button(root, m.cal_importPreview()).click();
   await settle();
-  const row = dialog.querySelector('ul[data-list] li')!;
+  const row = dialog.querySelector('ul[data-tm-list] li')!;
   expect([...row.children].filter((c) => c.localName !== 'template').map((c) => c.textContent)).toEqual(['Standup', '2026-11-09 09:00 - 2026-11-09 09:15', 'Room 1']);
 
   dialog.querySelector('form')!.requestSubmit();
@@ -360,10 +360,10 @@ test('reopening the import dialog shows the new draft: empty form, remembered ca
   expect(dialog.querySelector('input[type=file]')).toBe(input);   // the same form, updated in place
   expect(select().value).toBe('acc\0/cal/private/');           // the new draft's calendar, though reset() had moved the select
   expect(input.required).toBe(true);
-  expect(dialog.querySelector('small[data-truncate]')).toBeNull();
+  expect(dialog.querySelector('small[data-tm-truncate]')).toBeNull();
   expect(dialog.querySelector('[role=alert]')).toBeNull();
   expect(dialog.querySelector('input[type=text]')).toBeNull();
-  expect(dialog.querySelector('ul[data-list]')).toBeNull();
+  expect(dialog.querySelector('ul[data-tm-list]')).toBeNull();
 });
 
 test('deleting the whole account goes where the server says', async () => {
@@ -392,21 +392,21 @@ test('encryption tab: a locked vault, unlocked with this browser\'s passkey, the
   const { root, settle, pgp } = await encryptionTab();
   const panel = root.querySelector<HTMLElement>('#settings-panel-encryption')!;
   expect(panel.hidden).toBe(false);
-  expect(panel.querySelector('[data-badge]')!.textContent).toBe(m.pgp_vaultLocked());
+  expect(panel.querySelector('[data-tm-badge]')!.textContent).toBe(m.pgp_vaultLocked());
   expect(panel.querySelector('code')!.textContent).toBe('AAAA1111');
-  expect([...panel.querySelectorAll('li span[data-grow]')].map((s) => s.textContent!.replace(/\s+/g, ''))).toEqual(['Laptop' + m.pgp_thisBrowser().replace(/\s+/g, ''), 'Phone']);
+  expect([...panel.querySelectorAll('li span[data-tm-grow]')].map((s) => s.textContent!.replace(/\s+/g, ''))).toEqual(['Laptop' + m.pgp_thisBrowser().replace(/\s+/g, ''), 'Phone']);
   expect(button(root, m.pgp_approveDevice())).toBeUndefined();         // only while unlocked
   expect(button(root, m.pgp_importUnlockFirst()).disabled).toBe(true);
 
   button(root, m.pgp_unlockVaultButton()).click();
   await settle();
   expect(pgp.calls.at(-1)).toEqual(['unlock', ['c1']]);
-  expect(panel.querySelector('[data-badge]')!.textContent).toBe(m.pgp_vaultUnlocked());
+  expect(panel.querySelector('[data-tm-badge]')!.textContent).toBe(m.pgp_vaultUnlocked());
   expect(button(root, m.pgp_importPrivateKeyButton()).disabled).toBe(false);
 
   button(root, m.pgp_lockVault()).click();
   await settle();
-  expect(panel.querySelector('[data-badge]')!.textContent).toBe(m.pgp_vaultLocked());
+  expect(panel.querySelector('[data-tm-badge]')!.textContent).toBe(m.pgp_vaultLocked());
 });
 
 test('encryption tab: switching away and back keeps its data (no new load, no empty panel)', async () => {
@@ -470,8 +470,8 @@ test('encryption tab, no vault: import a private key and create the vault with a
   expect(pgp.calls.find((c) => c[0] === 'store')).toEqual(['store', ['Laptop']]);
   expect(dialog.open).toBe(false);
   expect(pgp.calls.at(-1)).toEqual(['forgetKey', []]);
-  expect(panel.querySelector('[data-badge]')!.textContent).toBe(m.pgp_vaultUnlocked());
-  expect(panel.querySelector('small[data-tone=success]')!.textContent).toBe(m.pgp_enrolled());
+  expect(panel.querySelector('[data-tm-badge]')!.textContent).toBe(m.pgp_vaultUnlocked());
+  expect(panel.querySelector('small[data-tm-tone=success]')!.textContent).toBe(m.pgp_enrolled());
 });
 
 test('encryption tab: create a private key in the unlocked vault', async () => {
@@ -500,7 +500,7 @@ test('encryption tab: create a private key in the unlocked vault', async () => {
   await settle();
   expect(pgp.calls.find((c) => c[0] === 'store')).toEqual(['store', ['']]);
   expect(dialog.open).toBe(false);
-  expect(root.querySelector('#settings-panel-encryption small[data-tone=success]')!.textContent).toBe(m.pgp_enrolled());
+  expect(root.querySelector('#settings-panel-encryption small[data-tm-tone=success]')!.textContent).toBe(m.pgp_enrolled());
 });
 
 test('encryption tab: a key file fills the import dialog; a file without a key says so', async () => {
@@ -530,10 +530,10 @@ test('encryption tab: sender keys with their full fingerprint and state; an impo
     'POST /api/pgp/key': (call) => ({ ...(call.body as object), trust: 'trusted' }),
   });
   const panel = root.querySelector('#settings-panel-encryption')!;
-  const trusted = () => [...panel.querySelectorAll('.sender-keys li span[data-truncate]')].map((s) => s.textContent);
+  const trusted = () => [...panel.querySelectorAll('.sender-keys li span[data-tm-truncate]')].map((s) => s.textContent);
   expect(trusted()).toEqual(['bob@example.com']);           // own keys are not listed here
   expect(panel.querySelector('.sender-keys li code')!.textContent).toBe('CCCC 3333 DDDD 4444 EEEE');   // the whole fingerprint
-  expect(panel.querySelector('.sender-keys li [data-badge]')!.textContent).toBe(m.pgp_keyWaiting());
+  expect(panel.querySelector('.sender-keys li [data-tm-badge]')!.textContent).toBe(m.pgp_keyWaiting());
 
   button(root, m.pgp_importPublicKeyButton()).click();
   await settle();
@@ -558,9 +558,9 @@ test('encryption tab: sender keys with their full fingerprint and state; an impo
   expect(requests.calls.at(-1)).toMatchObject({ method: 'POST', path: '/api/pgp/key' });
   expect(requests.calls.at(-1)!.body).toEqual({ fingerprint: 'FFFF0000', email: 'carol@work.example', armored: 'carol@example.com', is_own: false, source: 'imported' });
   expect(trusted()).toEqual(['bob@example.com', 'carol@work.example']);
-  expect(panel.querySelector('[role=status] [data-tone=success]')!.textContent).toBe(m.pgp_publicKeyImported());
+  expect(panel.querySelector('[role=status] [data-tm-tone=success]')!.textContent).toBe(m.pgp_publicKeyImported());
 
-  const remove = panel.querySelectorAll<HTMLButtonElement>('li button[data-tone=danger]');
+  const remove = panel.querySelectorAll<HTMLButtonElement>('li button[data-tm-tone=danger]');
   remove[remove.length - 2]!.click();
   await settle();
   expect(requests.calls.at(-1)!.body).toEqual({ fingerprint: 'CCCC3333DDDD4444EEEE' });
@@ -588,7 +588,7 @@ test('encryption tab: a key found in mail is trusted only once accepted in a dia
   await settle();
   expect(requests.calls.find((c) => c.path === '/api/pgp/key/accept')!.body).toEqual({ fingerprint: 'CCCC3333DDDD4444EEEE', replace: false });
   expect(dialog.open).toBe(false);
-  expect(panel.querySelector('.sender-keys li [data-badge]')!.textContent).toBe(m.pgp_keyTrusted());
+  expect(panel.querySelector('.sender-keys li [data-tm-badge]')!.textContent).toBe(m.pgp_keyTrusted());
   expect(button(root, m.pgp_reviewKey())).toBeUndefined();
 });
 
@@ -601,7 +601,7 @@ test('encryption tab: a key found in mail for an address with a trusted key is a
     'POST /api/pgp/key/accept': (call) => ({ fingerprint: 'BBBB', email: 'bob@example.com', armored: '', is_own: false, source: 'harvested_autocrypt', trust: 'trusted', ...(call.body as object) }),
   });
   const panel = root.querySelector('#settings-panel-encryption')!;
-  expect([...panel.querySelectorAll('.sender-keys li [data-badge]')].map((b) => b.textContent)).toEqual([m.pgp_keyTrusted(), m.pgp_keyChanged()]);
+  expect([...panel.querySelectorAll('.sender-keys li [data-tm-badge]')].map((b) => b.textContent)).toEqual([m.pgp_keyTrusted(), m.pgp_keyChanged()]);
   button(root, m.pgp_reviewKey()).click();
   await settle();
   const dialog = root.querySelector<HTMLDialogElement>('#pgp-accept-dialog')!;
@@ -613,8 +613,8 @@ test('encryption tab: a key found in mail for an address with a trusted key is a
 
 test('encryption tab: a failed key removal brings the key back with the error', async () => {
   const { root, settle } = await encryptionTab(lockedVault, { 'DELETE /api/pgp/key': { status: 500 } });
-  const trusted = () => [...root.querySelectorAll('#settings-panel-encryption li span[data-truncate]')].map((s) => s.textContent);
-  const remove = root.querySelectorAll<HTMLButtonElement>('#settings-panel-encryption li button[data-tone=danger]');
+  const trusted = () => [...root.querySelectorAll('#settings-panel-encryption li span[data-tm-truncate]')].map((s) => s.textContent);
+  const remove = root.querySelectorAll<HTMLButtonElement>('#settings-panel-encryption li button[data-tm-tone=danger]');
   remove[remove.length - 1]!.click();
   await settle();
   expect(trusted()).toEqual(['bob@example.com']);

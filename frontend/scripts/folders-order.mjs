@@ -49,7 +49,7 @@ async function tab(ctx = context) {
   await page.waitForSelector('.alloy-sortable li[data-al-key]');
   return { page, errors };
 }
-const order = (page) => page.$$eval('.alloy-sortable li[data-al-key] .sidebar-item [data-truncate]', (els) => els.map((e) => e.textContent.trim()).filter((t) => t.startsWith('e2e-')));
+const order = (page) => page.$$eval('.alloy-sortable li[data-al-key] .sidebar-item [data-tm-truncate]', (els) => els.map((e) => e.textContent.trim()).filter((t) => t.startsWith('e2e-')));
 const handle = (page, name) => page.locator(`.alloy-sortable button.al-handle[aria-label="Move ${name}"]`);
 const waitOrder = async (page, want, ms = 5000) => {
   const end = Date.now() + ms;
@@ -74,11 +74,11 @@ await a.page.waitForTimeout(50);
 check(await a.page.locator('li[data-al-lifted="pointer"]').count() === 1, 'the dragged row is lifted');
 const dy = await a.page.locator('li[data-al-lifted="pointer"]').evaluate((li) => new DOMMatrix(getComputedStyle(li).transform).m42);
 check(dy < -40, `it follows the pointer (translateY ${Math.round(dy)}px)`);
-check(await a.page.locator('li[data-al-line="before"]').filter({ hasText: 'e2e-Alpha' }).count() === 1, 'the drop line is above Alpha');
+check(await a.page.locator('li[data-tm-drop="before"]').filter({ hasText: 'e2e-Alpha' }).count() === 1, 'the drop line is above Alpha');
 if (shots) await a.page.locator('.mail-sidebar').screenshot({ path: `${shots}/drag.png` });
 await a.page.mouse.up();
 check(await waitOrder(a.page, ['e2e-Gamma', 'e2e-Alpha', 'e2e-Beta'], 300), 'dropped: the order changes at once');
-check(await a.page.locator('li[data-al-lifted], li[data-al-line]').count() === 0, 'nothing lifted or lined after the drop');
+check(await a.page.locator('li[data-al-lifted], li[data-tm-drop]').count() === 0, 'nothing lifted or lined after the drop');
 check(await waitOrder(b.page, ['e2e-Gamma', 'e2e-Alpha', 'e2e-Beta']), 'the other tab follows (folders_changed)');
 
 // ── keyboard: Alpha one down ──
@@ -88,7 +88,7 @@ const status = () => a.page.locator('.alloy-sortable [role="status"]').textConte
 check((await status()) === `Picked up e2e-Alpha. Position 2 of ${total}.`, `announced: ${await status()}`);
 await a.page.keyboard.press('ArrowDown');
 // below Beta: after it when it is the last row, else before the row that follows it
-const line = await a.page.$$eval('.alloy-sortable li[data-al-key]', (rows) => rows.map((r) => [r.textContent.includes('e2e-Beta'), r.getAttribute('data-al-line')]));
+const line = await a.page.$$eval('.alloy-sortable li[data-al-key]', (rows) => rows.map((r) => [r.textContent.includes('e2e-Beta'), r.getAttribute('data-tm-drop')]));
 const beta = line.findIndex(([b]) => b);
 check(line[beta][1] === 'after' || line[beta + 1]?.[1] === 'before', 'the drop line is below Beta');
 await a.page.keyboard.press('Space');

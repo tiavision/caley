@@ -50,7 +50,7 @@ test('an attachment opens it with the file set; after an import it closes and re
   await settle();
   const input = dialog.querySelector<HTMLInputElement>('input[type=file]')!;
   expect(dialog.open).toBe(true);
-  expect(dialog.querySelector('small[data-truncate]')!.textContent).toBe('invite.ics');
+  expect(dialog.querySelector('small[data-tm-truncate]')!.textContent).toBe('invite.ics');
   expect(input.required).toBe(false);                        // the file comes with the draft, not the input
   dialog.querySelector('form')!.requestSubmit();
   await settle();
@@ -63,7 +63,7 @@ test('an attachment opens it with the file set; after an import it closes and re
   await settle();
   expect(dialog.open).toBe(true);
   expect(dialog.querySelector('[role=status]')!.textContent!.trim()).toBe('');   // the live region stays, empty
-  expect(dialog.querySelector('small[data-truncate]')).toBeNull();
+  expect(dialog.querySelector('small[data-tm-truncate]')).toBeNull();
   expect(input.required).toBe(true);
   expect(dialog.querySelector<HTMLSelectElement>('select')!.value).toBe('acc\0/cal/work/');
   await new Promise((resolve) => setTimeout(resolve, 1600));
@@ -74,6 +74,6 @@ test('an attachment opens it with the file set; after an import it closes and re
   await settle();
   root.querySelector<HTMLButtonElement>('#attachment')!.click();
   await settle();
-  expect(dialog.querySelector('small[data-truncate]')!.textContent).toBe('invite.ics');
+  expect(dialog.querySelector('small[data-tm-truncate]')!.textContent).toBe('invite.ics');
   expect(input.required).toBe(false);
 });

@@ -11,38 +11,38 @@
      Open it with showModal('thread-dialog'). -->
 <template data-sn-props="{ nodes: ThreadNode[]; eventGroups: MessageEventGroupJson[]; loading: boolean; current: ThreadRef | null; links: boolean }"
           data-sn-emits="{ 'thread-message': ThreadNode; 'event-open': EventJson }">
-  <dialog id="thread-dialog" closedby="any" data-layout="stack" style="--tm-dialog-width: 40rem">
+  <dialog id="thread-dialog" closedby="any" data-tm-layout="stack" style="--tm-dialog-width: 40rem">
     <header>
       <h2 data-sn-text="m.mail_threadsHeading()"></h2>
       <button type="button" commandfor="thread-dialog" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
     </header>
     <!-- the wrapper scrolls, so a short thread does not get a minimum height and long ones keep full-height rows -->
-    <div data-scroll="y">
+    <div data-tm-scroll="y">
       <template data-sn-if="loading">
         <p aria-busy="true" data-sn-text="m.weekly_loading()"></p>
       </template>
       <template data-sn-else>
-        <ul class="thread-tree" data-layout="stack" data-gap="xs" data-sn-attr="{'aria-label': m.mail_threadsHeading()}">
+        <ul class="thread-tree" data-tm-layout="stack" data-tm-gap="xs" data-sn-attr="{'aria-label': m.mail_threadsHeading()}">
           <template data-sn-for="r in threadRows(nodes, eventGroups, current)" data-sn-key="r.key">
             <li class="thread-row" data-sn-style="{'--thread-depth': r.depth}">
               <template data-sn-if="r.kind === 'message'">
-                <a data-variant="item" data-layout="row" data-gap="sm" data-wrap="none"
+                <a data-tm-variant="item" data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none"
                    data-sn-href="/mail/?account_id={r.node.account_id}&mailbox={r.node.mailbox}&uid={r.node.uid}"
                    data-sn-attr="{'aria-current': r.current ? 'true' : null}"
                    data-sn-on-click="!links && $event.preventDefault(); !links && closeDialog(); emit('thread-message', r.node)">
-                  <span class="thread-from" data-truncate data-sn-text="r.from || m.mail_unknownSender()"></span>
-                  <span data-truncate data-grow data-muted data-sn-text="r.node.subject || m.mail_noSubject()"></span>
-                  <small data-muted data-sn-text="r.date"></small>
+                  <span class="thread-from" data-tm-truncate data-sn-text="r.from || m.mail_unknownSender()"></span>
+                  <span data-tm-truncate data-tm-grow data-tm-muted data-sn-text="r.node.subject || m.mail_noSubject()"></span>
+                  <small data-tm-muted data-sn-text="r.date"></small>
                 </a>
               </template>
               <template data-sn-else>
-                <button type="button" data-variant="item" data-size="sm" data-layout="row" data-gap="sm" data-wrap="none" data-bar
+                <button type="button" data-tm-variant="item" data-tm-size="sm" data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none" data-tm-bar
                         data-sn-style="{'--tm-tone': r.event.color || null}"
                         data-sn-attr="{'aria-current': r.current ? 'true' : null}"
                         data-sn-on-click="closeDialog(); emit('event-open', r.event)">
-                  <span data-icon="calendar" aria-hidden="true"></span>
-                  <span data-truncate data-grow data-sn-text="r.event.summary || '—'"></span>
-                  <small data-muted data-sn-text="formatEventTime(r.event)"></small>
+                  <span data-tm-icon="calendar" aria-hidden="true"></span>
+                  <span data-tm-truncate data-tm-grow data-sn-text="r.event.summary || '—'"></span>
+                  <small data-tm-muted data-sn-text="formatEventTime(r.event)"></small>
                 </button>
               </template>
             </li>

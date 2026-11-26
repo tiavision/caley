@@ -47,7 +47,7 @@ test('helpers build the file to share', () => {
 test('with a pointer: the button opens the menu, whose items download or mail the file', async () => {
   const item = contactShare(contact);
   const { root, settle, log } = await show(false, item);
-  const button = root.querySelector<HTMLButtonElement>('button[data-icon="share-2"]')!;
+  const button = root.querySelector<HTMLButtonElement>('button[data-tm-icon="share-2"]')!;
   expect(button.getAttribute('popovertarget')).toBe('share-menu');
   expect(button.getAttribute('aria-label')).toBe('Share');
   const [download, email] = root.querySelectorAll<HTMLButtonElement>('#share-menu button');
@@ -67,7 +67,7 @@ test('on touch screens with Web Share: the file is ready before the tap, which o
   const item = contactShare(contact);
   const { root, settle, log } = await show(true, item);
   expect(log).toEqual([['prepare', 'Ada Lovelace.vcf']]);          // fetched ahead: the sheet opens only right after a tap
-  const button = root.querySelector<HTMLButtonElement>('button[data-icon="share-2"]')!;
+  const button = root.querySelector<HTMLButtonElement>('button[data-tm-icon="share-2"]')!;
   expect(button.hasAttribute('popovertarget')).toBe(false);
   button.click();
   await settle();
@@ -77,7 +77,7 @@ test('on touch screens with Web Share: the file is ready before the tap, which o
 
 test('a share sheet the browser refuses opens the menu instead: a tap always shows something', async () => {
   const { root, settle } = await show(true, { ...contactShare(contact), title: 'Refused' });
-  root.querySelector<HTMLButtonElement>('button[data-icon="share-2"]')!.click();
+  root.querySelector<HTMLButtonElement>('button[data-tm-icon="share-2"]')!.click();
   await settle();
   expect(root.querySelector('#share-menu')!.hasAttribute('data-popover-open')).toBe(true);   // showPopover() (src/test-dom.ts)
 });
