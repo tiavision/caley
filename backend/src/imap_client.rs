@@ -691,6 +691,7 @@ fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
 
     let mut attachments = Vec::new();
     let mut used_filenames = HashSet::new();
+    let mut next_fallback = 0;
     // `part_index` is the position among the root message's own parts (nested
     // messages' parts excluded), the numbering stored in `cached_attachments`
     // and read back by `email::attachments`.
@@ -723,6 +724,7 @@ fn extract_attachments(msg: &mail_parser::Message<'_>) -> Vec<AttachmentPart> {
             if is_calendar {
                 return Some(unique_fallback_filename(
                     &mut used_filenames,
+                    &mut next_fallback,
                     "noname",
                     "ics",
                 ));
@@ -778,23 +780,29 @@ fn is_calendar_content_type(content_type: &str) -> bool {
     )
 }
 
+/// `{stem}.{extension}`, or the first `{stem}-{n}.{extension}` not used yet. `next` is where the search
+/// goes on (kept by the caller across a message's parts), so thousands of unnamed parts are not each
+/// searched from 2 again.
 fn unique_fallback_filename(
     used_filenames: &mut std::collections::HashSet<String>,
+    next: &mut usize,
     stem: &str,
     extension: &str,
 ) -> String {
-    let first = format!("{stem}.{extension}");
-    if used_filenames.insert(first.clone()) {
-        return first;
+    if *next < 2 {
+        *next = 2;
+        let first = format!("{stem}.{extension}");
+        if used_filenames.insert(first.clone()) {
+            return first;
+        }
     }
-
-    for n in 2.. {
-        let candidate = format!("{stem}-{n}.{extension}");
+    loop {
+        let candidate = format!("{stem}-{next}.{extension}");
+        *next += 1;
         if used_filenames.insert(candidate.clone()) {
             return candidate;
         }
     }
-    unreachable!("unbounded filename suffix search must return")
 }
 
 fn strip_tags(html: &str) -> String {
@@ -1094,6 +1102,39 @@ pub(crate) mod tests {
             .filter_map(|att| att.filename.as_deref())
             .collect();
         assert_eq!(filenames, vec!["noname.ics", "noname-2.ics"]);
+    }
+
+    /// Thousands of unnamed calendar parts (a small mail from anyone) each get the next free name: the
+    /// search goes on where the last one ended, and skips names the mail uses itself.
+    #[test]
+    fn names_thousands_of_unnamed_calendar_parts_in_one_pass() {
+        let mut used = std::collections::HashSet::from(["noname-3.ics".to_owned()]);
+        let mut next = 0;
+        let names: Vec<String> = (0..4)
+            .map(|_| unique_fallback_filename(&mut used, &mut next, "noname", "ics"))
+            .collect();
+        assert_eq!(
+            names,
+            ["noname.ics", "noname-2.ics", "noname-4.ics", "noname-5.ics"]
+        );
+        assert_eq!(next, 6); // one step per name, not a search from 2 each time
+
+        let mut raw = String::from("Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n");
+        for _ in 0..5000 {
+            raw.push_str(
+                "--b\r\nContent-Type: text/calendar\r\n\r\nBEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n",
+            );
+        }
+        raw.push_str("--b--\r\n");
+        let (_, _, attachments) = parse_body_bytes(raw.as_bytes()).unwrap();
+        assert_eq!(attachments.len(), 5000);
+        assert_eq!(
+            attachments[4999].filename.as_deref(),
+            Some("noname-5000.ics")
+        );
+        let unique: std::collections::HashSet<_> =
+            attachments.iter().map(|a| &a.filename).collect();
+        assert_eq!(unique.len(), 5000);
     }
 
     /// Message with a forwarded message before an attachment: the parts of the

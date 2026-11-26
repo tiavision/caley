@@ -22,7 +22,7 @@ export function open(query: string, mapUrl: string | null | undefined, ctx: Call
     setTimeout(() => {
       window.removeEventListener('blur', onBlur);
       document.removeEventListener('visibilitychange', onVisibility);
-      if (!appOpened && !ctx.signal.aborted) window.open((mapUrl || DEFAULT_MAP_URL).replace('{q}', encoded), '_blank');
+      if (!appOpened && !ctx.signal.aborted) window.open((mapUrl || DEFAULT_MAP_URL).replace('{q}', encoded), '_blank', 'noopener,noreferrer');
       resolve();
     }, 500);
   });

@@ -93,7 +93,7 @@ pub(crate) struct SearchQuery {
     request_body(content = IcsFileForm, content_type = "multipart/form-data"),
     responses(
         (status = 200, body = Vec<ImportPreviewEvent>),
-        (status = 400, description = "no file, or no importable events in it (plain text)")
+        (status = 400, description = "no file, no importable events in it, or more than 1,000 events (plain text)")
     )
 )]
 pub async fn preview_ics_import(
@@ -152,7 +152,7 @@ fn refuse_split(events: &crate::caldav::generation::SplitCalendar) -> Option<Res
     request_body(content = ImportForm, content_type = "multipart/form-data"),
     responses(
         (status = 200, body = ImportResult),
-        (status = 400, description = "a required field is missing, or no events in the file (plain text)"),
+        (status = 400, description = "a required field is missing, no events in the file, or more than 1,000 events (plain text)"),
         (status = 404, description = "no such CalDAV account (plain text)"),
         (status = 502, description = "the CalDAV server refused to create the new calendar (plain text)")
     )

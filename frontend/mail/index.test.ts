@@ -94,7 +94,7 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
       composeKeys: async () => { composeKeysCalls++; return composeKeysResult; },
       autodiscover: async () => discovery,
       send: async (draft: { encrypt: boolean }) => { sent.push(draft); return null; },
-      forwardFiles: async () => ({ files: [], html: '' }),
+      forwardFiles: async (_msg: unknown, html: string) => ({ files: [], html }),
       // as the action: POST /pgp/key, then for a key change POST /pgp/key/accept with replace
       importKey: async (body: { fingerprint: string }, replace: boolean, ctx: { request: (url: string, init: object) => Promise<unknown> }) => {
         const stored = await ctx.request('/api/pgp/key', { method: 'POST', body });
@@ -611,6 +611,20 @@ test('reply opens the compose dialog with the quoted message, and sends it', asy
   root.querySelector<HTMLFormElement>('.compose-form')!.requestSubmit();
   await settle();
   expect(root.querySelector<HTMLDialogElement>('#email-compose')!.open).toBe(false);
+});
+
+test('the forward preview loads no remote image of a decrypted message (the consent given in the reader is not carried over); those of a plain message go through the proxy', async () => {
+  htmlBody = '<p>Secret</p><img src="https://img.example/a.png" alt="logo">';
+  for (const enc of [true, false]) {
+    decrypted = enc;
+    const { root, settle } = await show({ 'PATCH /api/email/message/flags': null });
+    rows(root)[2].click();
+    await settle();
+    rows(root)[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'f', bubbles: true }));   // the forward item's shortcut
+    await settle();
+    const imgs = [...root.querySelectorAll('#email-compose .compose-forward-preview img')].map((i) => i.getAttribute('src'));
+    expect(imgs).toEqual([enc ? null : '/api/email/proxy-image?v=0&url=https%3A%2F%2Fimg.example%2Fa.png']);
+  }
 });
 
 test('a reply to decrypted mail starts encrypted; without a key for a recipient it is not sent in clear: the lock is the user\'s choice, with a warning', async () => {
