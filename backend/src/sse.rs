@@ -81,6 +81,8 @@ pub enum SseMessage {
     SyncCompleted { account_id: String, mailbox: String },
     /// The PGP vault or its devices changed — client should re-fetch /api/pgp/vault
     VaultChanged,
+    /// The virtual folders changed (created, updated, deleted or reordered) — re-fetch /api/email/folders
+    FoldersChanged,
 }
 
 pub struct SseBroadcaster {
@@ -132,7 +134,7 @@ impl SseBroadcaster {
         description = "Server-sent events, each an `event:` name with a `data:` line. With data `1` \
 (re-fetch): `events_refetch` (/api/events), `calendars_changed` (/api/calendars), `contacts_refetch` \
 (/api/contacts), `accounts_changed` (the email accounts), `vault_changed` (/api/pgp/vault: the vault, its keys or its \
-devices, e.g. a pending device approved). With JSON data: \
+devices, e.g. a pending device approved), `folders_changed` (/api/email/folders). With JSON data: \
 `event_updated` `{account_id, uid, calendar_href, event?: EventJson}`, \
 `event_removed` `{account_id, uid, calendar_href}`, \
 `contact_updated` `{account_id, uid, addressbook_href, contact?: ContactJson}`, \
@@ -248,6 +250,9 @@ pub async fn events_stream(
             }
             Ok(SseMessage::VaultChanged) => {
                 Some(Event::default().event("vault_changed").data("1"))
+            }
+            Ok(SseMessage::FoldersChanged) => {
+                Some(Event::default().event("folders_changed").data("1"))
             }
             Err(_) => None,
         };

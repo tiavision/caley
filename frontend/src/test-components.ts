@@ -14,11 +14,15 @@ const library = import.meta.glob<string>('../node_modules/@tiavision/sinter-mail
 // renders nothing. jsdom lays nothing out and has no ResizeObserver, so <mail-width> reports a wide reader at once
 // (`mailWidth('narrow')`: a phone's).
 const libraryScripts = import.meta.glob(['../node_modules/@tiavision/sinter-mail/sinter/components/**/*.ts', '!**/mail-width.ts'], { eager: true });
+// alloy's components (<alloy-sortable>: the mail sidebar's folders) and their scripts, as sinter-mail's: the keyboard
+// moves need no layout, so they run as in the browser.
+const alloy = import.meta.glob<string>('../node_modules/@tiavision/alloy/sinter/components/**/*.html', { query: '?raw', import: 'default', eager: true });
+const alloyScripts = import.meta.glob('../node_modules/@tiavision/alloy/sinter/components/**/*.ts', { eager: true });
 const layouts = import.meta.glob<string>('./layouts/*.html', { query: '?raw', import: 'default', eager: true });
 
 const name = (path: string) => path.replace(/^.*\//, '').replace(/\.(html|ts)$/, '');
 
-export const components: Record<string, string> = Object.fromEntries([...Object.entries(library), ...Object.entries(html)].map(([p, t]) => [name(p), t]));
+export const components: Record<string, string> = Object.fromEntries([...Object.entries(library), ...Object.entries(alloy), ...Object.entries(html)].map(([p, t]) => [name(p), t]));
 export const scripts: Record<string, unknown> = Object.fromEntries(Object.entries(ts).map(([p, mod]) => [name(p), mod]));
 export const layoutFiles: Record<string, string> = Object.fromEntries(Object.entries(layouts).map(([p, t]) => [name(p), t]));
 
@@ -39,5 +43,5 @@ const lazyHelpers = {
 
 export const app = {
   components, layouts: layoutFiles, apis: apis(spec), lazyHelpers,
-  scripts: { ...Object.fromEntries(Object.entries(libraryScripts).map(([p, mod]) => [name(p), mod])), 'mail-width': mailWidth('wide') },
+  scripts: { ...Object.fromEntries([...Object.entries(libraryScripts), ...Object.entries(alloyScripts)].map(([p, mod]) => [name(p), mod])), 'mail-width': mailWidth('wide') },
 };

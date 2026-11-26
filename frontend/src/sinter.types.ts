@@ -49,6 +49,8 @@ export type {
 export type { ReaderBody } from './actions/mail.ts';
 // sinter-mail's tree (email.parse) and its options.
 export type { Body, Element, ParseOptions } from '@tiavision/sinter-mail';
+// alloy's events and words (<alloy-sortable>: the mail sidebar's virtual folders).
+export type { Move, SortableText } from '@tiavision/alloy';
 export type { ThreadNode as MailThreadNode } from './lib/mail.ts';
 
 // Calendar page and thread dialog.

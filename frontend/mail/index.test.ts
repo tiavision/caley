@@ -593,6 +593,60 @@ test('a failed folder removal brings it back', async () => {
   expect(folderItems(root)).toEqual(['followup-Folder']);
 });
 
+// The virtual folders in their order: alloy's <alloy-sortable> around them; a drop moves the row at once (the moved
+// folder's sort_order between its neighbours', the resource ordered by it) and sends the whole order.
+const threeFolders = ['A', 'B', 'C'].map((n, i) => ({ ...folderRow, folder_id: `f${n}`, display_name: `followup-${n}`, sort_order: i }));
+const handle = (root: HTMLElement, name: string) => root.querySelector<HTMLElement>(`button.al-handle[aria-label="${m.sort_handle({ name })}"]`)!;
+/** a keyboard press on a button: its click, with no pointer */
+const press = (el: HTMLElement) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 0 }));
+const key = (el: HTMLElement, k: string) => el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+const renumbered = (ids: string[]) => ({ folders: ids.map((id, i) => ({ ...threeFolders.find((f) => f.folder_id === id)!, sort_order: i })) });
+
+test('a virtual folder moved with the keyboard moves at once, and the new order is saved', async () => {
+  const { root, settle, requests } = await show({
+    'GET /api/email/folders': { folders: threeFolders },
+    'PUT /api/email/folders/order': renumbered(['fC', 'fA', 'fB']),
+  });
+  expect(folderItems(root)).toEqual(['followup-A', 'followup-B', 'followup-C']);
+  const h = handle(root, 'followup-C');
+  expect(h.getAttribute('aria-description')).toBe(m.sort_instructions());
+  h.focus();
+  press(h);
+  await settle();
+  expect(root.querySelector('.alloy-sortable [role="status"]')!.textContent).toBe(m.sort_lifted({ name: 'followup-C', position: 3, total: 3 }));
+  key(h, 'Home');
+  press(h);
+  await settle();
+  expect(folderItems(root)).toEqual(['followup-C', 'followup-A', 'followup-B']);
+  const put = requests.calls.find((c) => c.method === 'PUT' && c.path === '/api/email/folders/order')!;
+  expect(put.body).toEqual({ folder_ids: ['fC', 'fA', 'fB'] });
+  expect(root.querySelector('.mail-sidebar [role="alert"]')).toBeNull();
+});
+
+test('a folder order the server refuses goes back, with a note', async () => {
+  const { root, settle } = await show({
+    'GET /api/email/folders': { folders: threeFolders },
+    'PUT /api/email/folders/order': { status: 500, body: 'database error' },
+  });
+  const h = handle(root, 'followup-A');
+  press(h);
+  await settle();
+  key(h, 'ArrowDown');
+  press(h);
+  await settle();
+  expect(folderItems(root)).toEqual(['followup-A', 'followup-B', 'followup-C']);
+  expect(root.querySelector('.mail-sidebar [role="alert"]')!.textContent).toBe(m.mail_folderOrderFailed());
+});
+
+test('folders_changed (another tab reordered them) reloads the folders in their new order', async () => {
+  let folders = threeFolders;
+  const { root, settle, stream } = await show({ 'GET /api/email/folders': () => ({ folders }) });
+  folders = renumbered(['fB', 'fC', 'fA']).folders;
+  stream.emit('folders_changed', 1);
+  await settle();
+  expect(folderItems(root)).toEqual(['followup-B', 'followup-C', 'followup-A']);
+});
+
 test('reply opens the compose dialog with the quoted message, and sends it', async () => {
   const { root, settle } = await show();
   rows(root)[2].click();

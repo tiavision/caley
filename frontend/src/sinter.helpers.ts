@@ -85,6 +85,11 @@ export { fingerprintText, keyState, keyStateLabel, keyChanges } from './lib/pgp-
 // the tree <mail-body> renders (no iframe, nothing to sanitize; built by its script builder).
 export * as email from '@tiavision/sinter-mail';
 
+// alloy (tiavision/alloy, checked out beside caley: file:../../alloy): the helpers of its components' events, e.g. alloy.between(folders, mv, 'sort_order'), the sort key that
+// puts a moved folder in its new place (the mail sidebar's <alloy-sortable>).
+export * as alloy from '@tiavision/alloy';
+export { sortText } from './lib/sort-text.ts';
+
 // Mail pages (mail/index.html, mail/view/index.html, src/components/mail-*.html).
 export {
   currentView, folderView, mailboxView, sameView, folderName, viewTitle, badgeCount, mailboxKey, sidebarSections, mailTitle,

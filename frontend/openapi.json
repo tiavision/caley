@@ -863,6 +863,39 @@
         }
       }
     },
+    "/email/folders/order": {
+      "put": {
+        "summary": "Reorders the virtual folders (`sort_order` 0, 1, … in the order given) and answers the folders as\n`GET /email/folders` does.",
+        "operationId": "reorder_virtual_folders",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VirtualFoldersOrder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualFoldersResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "an id is not one of the user's folders, or is listed twice (plain text)"
+          },
+          "500": {
+            "description": "database error"
+          }
+        }
+      }
+    },
     "/email/identities": {
       "get": {
         "summary": "The sender identities of all accounts.",
@@ -2396,7 +2429,7 @@
         "operationId": "events_stream",
         "responses": {
           "200": {
-            "description": "Server-sent events, each an `event:` name with a `data:` line. With data `1` (re-fetch): `events_refetch` (/api/events), `calendars_changed` (/api/calendars), `contacts_refetch` (/api/contacts), `accounts_changed` (the email accounts), `vault_changed` (/api/pgp/vault: the vault, its keys or its devices, e.g. a pending device approved). With JSON data: `event_updated` `{account_id, uid, calendar_href, event?: EventJson}`, `event_removed` `{account_id, uid, calendar_href}`, `contact_updated` `{account_id, uid, addressbook_href, contact?: ContactJson}`, `contact_removed` `{account_id, uid, addressbook_href}`, `emails_refetch` `{account_id, mailbox}`, `email_updated` `{account_id, uid: number, mailbox, flags: string[]}`, `email_removed` `{account_id, uid: number, mailbox}`, `new_email` `{account_id, uid: number, mailbox, from: string|null, subject: string|null}`, `mailboxes_changed` `{account_id}`, `sync_started` and `sync_completed` `{account_id, mailbox}`.",
+            "description": "Server-sent events, each an `event:` name with a `data:` line. With data `1` (re-fetch): `events_refetch` (/api/events), `calendars_changed` (/api/calendars), `contacts_refetch` (/api/contacts), `accounts_changed` (the email accounts), `vault_changed` (/api/pgp/vault: the vault, its keys or its devices, e.g. a pending device approved), `folders_changed` (/api/email/folders). With JSON data: `event_updated` `{account_id, uid, calendar_href, event?: EventJson}`, `event_removed` `{account_id, uid, calendar_href}`, `contact_updated` `{account_id, uid, addressbook_href, contact?: ContactJson}`, `contact_removed` `{account_id, uid, addressbook_href}`, `emails_refetch` `{account_id, mailbox}`, `email_updated` `{account_id, uid: number, mailbox, flags: string[]}`, `email_removed` `{account_id, uid: number, mailbox}`, `new_email` `{account_id, uid: number, mailbox, from: string|null, subject: string|null}`, `mailboxes_changed` `{account_id}`, `sync_started` and `sync_completed` `{account_id, mailbox}`.",
             "content": {
               "text/event-stream": {
                 "schema": {
@@ -6101,6 +6134,22 @@
         "properties": {
           "folder_id": {
             "type": "string"
+          }
+        }
+      },
+      "VirtualFoldersOrder": {
+        "type": "object",
+        "description": "The order of the virtual folders: their ids, first to last.",
+        "required": [
+          "folder_ids"
+        ],
+        "properties": {
+          "folder_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "the user's folders in their new order; folders left out follow in their current order"
           }
         }
       },

@@ -91,6 +91,8 @@
            pageValue: /** @type {number|null} */ (1),
            trash: { account_id: '', mailbox: '', choice: '30', custom: /** @type {number|null} */ (30), error: '', busy: false },
            hit: /** @type {Message|null} */ (null),
+           folderMove: /** @type {Move|null} */ (null),
+           folderOrderError: '',
          }"
          data-sn-let="{
            search: mailSearch(searchBox, $url.q, $url.sender, $url.after, $url.before, !!$url.unread),
@@ -153,6 +155,8 @@
                   then="$url.uid = null"></sn-event>
         <sn-event name="email_removed" resource="unread" op="refresh"></sn-event>
         <sn-event name="accounts_changed" resource="accounts" op="refresh"></sn-event>
+        <!-- another tab (or device) created, changed, deleted or reordered a virtual folder -->
+        <sn-event name="folders_changed" resource="folders" op="refresh"></sn-event>
         <sn-event name="accounts_changed" resource="mailboxes" op="refresh"></sn-event>
         <sn-event name="calendars_changed" resource="caldavAccounts" op="refresh"></sn-event>
         <sn-event name="mailboxes_changed" resource="mailboxes" op="refresh" type="AccountEvent"></sn-event>
@@ -164,6 +168,13 @@
       <template data-sn-if="$meta.unread.loadedAt"><email-notifier></email-notifier></template>
       <!-- Hidden or left: an encrypted message's body is dropped (wiped), and what was decrypted with it (#wipe). -->
       <span hidden id="wipe" data-sn-call="mail.wipe()"></span>
+      <!-- The order after a drop: the moved folder's sort_order set between its new neighbours' at once (the resource
+           keeps `order="sort_order"`, so the row moves; a failed request drops the change and it goes back), the whole
+           order sent; the answer's folders (renumbered) are written through. -->
+      <span hidden id="folders-order" data-sn-put="/email/folders/order" data-sn-when="folderMove"
+            data-sn-body="{ folder_ids: alloy.keysAfter(folders, folderMove, (f) => f.folder_id) }"
+            data-sn-optimistic="merge(folders.find((f) => f.folder_id === folderMove.key), { sort_order: alloy.between(folders, folderMove, 'sort_order') })"
+            data-sn-then="folderOrderError = ''" data-sn-catch="folderOrderError = m.mail_folderOrderFailed()"></span>
       <email-hidden-watch data-sn-on-page-hidden="body && body.encrypted && run('wipe'); wiped = body && body.encrypted ? body.key : wiped"></email-hidden-watch>
 
       <!-- sidebarW, listW: the widths of the folder and message columns, set with the two <email-split>s (persisted). -->
@@ -181,8 +192,12 @@
               <div class="section-header" data-layout="row" data-gap="xs" data-wrap="none">
                 <span data-caption data-truncate data-grow data-sn-text="m.mail_virtualFolders()"></span>
               </div>
-              <template data-sn-for="f in folders">
-                <div data-layout="row" data-gap="none" data-wrap="none" data-sn-let="{ n: unread?.folders?.[f.folder_id] ?? 0 }">
+              <!-- The folders in their order (sort_order, the resource's `order`), reordered by dragging a handle or with the
+                   keyboard (alloy's <alloy-sortable>): a drop sets folderMove and runs #folders-order (above, beside #wipe). -->
+              <alloy-sortable data-sn-with="{ items: folders, keyOf: (f) => f.folder_id, nameOf: (f) => f.display_name, label: m.mail_virtualFolders(), quiet: true, text: sortText() }"
+                              data-sn-on-move="folderMove = $event.detail; run('folders-order')">
+                <div slot="item" data-layout="row" data-gap="none" data-wrap="none" data-grow
+                     data-sn-let="{ f: /** @type {VirtualFolder} */ ($slot.item), n: unread?.folders?.[$slot.item.folder_id] ?? 0 }">
                   <button type="button" class="sidebar-item" data-variant="item" data-size="sm" data-layout="row" data-gap="sm" data-wrap="none" data-grow
                           data-sn-attr="{'aria-current': cur.folder_id === f.folder_id ? 'true' : null}"
                           data-sn-on-click="navigate(viewHref(folderView(f.folder_id))); sidebarOpen = false; emit('mail-view')">
@@ -200,7 +215,8 @@
                                         urlLags(view, urlView($url.folder, $url.account_id, $url.mailbox)) && navigate(viewHref(view), { replace: true })"
                           data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
                 </div>
-              </template>
+              </alloy-sortable>
+              <template data-sn-if="folderOrderError"><p role="alert" data-tone="danger" data-pad="xs" data-sn-text="folderOrderError"></p></template>
             </div>
           </template>
 

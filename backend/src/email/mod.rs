@@ -897,7 +897,12 @@ pub async fn list_virtual_folders(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> impl IntoResponse {
-    match email_db::list_virtual_folders(&state.db, &user.user_id).await {
+    folders_response(&state, &user.user_id).await
+}
+
+/// The user's virtual folders as `GET /email/folders` answers them.
+async fn folders_response(state: &AppState, user_id: &str) -> axum::response::Response {
+    match email_db::list_virtual_folders(&state.db, user_id).await {
         Ok(folders) => {
             let folders = folders
                 .into_iter()
@@ -921,6 +926,45 @@ pub async fn list_virtual_folders(
         }
         Err(e) => {
             eprintln!("[email] list_virtual_folders error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
+        }
+    }
+}
+
+/// The order of the virtual folders: their ids, first to last.
+#[derive(Deserialize, ToSchema)]
+pub struct VirtualFoldersOrder {
+    /// the user's folders in their new order; folders left out follow in their current order
+    pub folder_ids: Vec<String>,
+}
+
+/// Reorders the virtual folders (`sort_order` 0, 1, … in the order given) and answers the folders as
+/// `GET /email/folders` does.
+#[utoipa::path(
+    put,
+    path = "/email/folders/order",
+    request_body = VirtualFoldersOrder,
+    responses(
+        (status = 200, body = VirtualFoldersResponse),
+        (status = 404, description = "an id is not one of the user's folders, or is listed twice (plain text)"),
+        (status = 500, description = "database error")
+    )
+)]
+pub async fn reorder_virtual_folders(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(body): Json<VirtualFoldersOrder>,
+) -> impl IntoResponse {
+    match email_db::reorder_virtual_folders(&state.db, &user.user_id, &body.folder_ids).await {
+        Ok(Ok(())) => {
+            state
+                .sse_broadcaster
+                .send(&user.user_id, crate::sse::SseMessage::FoldersChanged);
+            folders_response(&state, &user.user_id).await
+        }
+        Ok(Err(_)) => (StatusCode::NOT_FOUND, "not found").into_response(),
+        Err(e) => {
+            eprintln!("[email] reorder_virtual_folders error: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response()
         }
     }
@@ -1023,7 +1067,12 @@ pub async fn save_virtual_folder(
         }
     };
     match result {
-        Ok(()) => Json(VirtualFolderSaved { folder_id }).into_response(),
+        Ok(()) => {
+            state
+                .sse_broadcaster
+                .send(&user.user_id, crate::sse::SseMessage::FoldersChanged);
+            Json(VirtualFolderSaved { folder_id }).into_response()
+        }
         Err(e) if e.to_string() == "not found" => {
             (StatusCode::NOT_FOUND, "not found").into_response()
         }
@@ -1055,6 +1104,9 @@ pub async fn delete_virtual_folder(
         eprintln!("[email] delete_virtual_folder error: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "database error").into_response();
     }
+    state
+        .sse_broadcaster
+        .send(&user.user_id, crate::sse::SseMessage::FoldersChanged);
     StatusCode::NO_CONTENT.into_response()
 }
 
@@ -1067,6 +1119,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(trigger_mailbox_sync))
         .routes(routes!(get_unread_counts))
         .routes(routes!(list_virtual_folders))
+        .routes(routes!(reorder_virtual_folders))
         .routes(routes!(save_virtual_folder, delete_virtual_folder))
         .routes(routes!(list_identities))
         .routes(routes!(save_identity, delete_identity))

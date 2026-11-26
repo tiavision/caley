@@ -361,6 +361,12 @@ fn cases() -> Vec<Case> {
             ]),
         ),
         case("GET", "/api/email/folders", Payload::None),
+        // Alice's folder in Mallory's order: a 404, nothing reordered
+        case(
+            "PUT",
+            "/api/email/folders/order",
+            Payload::Json(json!({ "folder_ids": [A_FOLDER] })),
+        ),
         case(
             "POST",
             "/api/email/folder",

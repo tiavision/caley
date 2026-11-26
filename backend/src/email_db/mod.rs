@@ -10,7 +10,7 @@ pub(crate) mod messages_db;
 pub use folders_db::{
     add_image_blacklist, add_image_origin, create_virtual_folder, delete_virtual_folder,
     get_image_blacklist, get_image_whitelist, is_origin_whitelisted, list_virtual_folders,
-    remove_image_blacklist, remove_image_origin, update_virtual_folder,
+    remove_image_blacklist, remove_image_origin, reorder_virtual_folders, update_virtual_folder,
 };
 pub use messages_db::{
     AttachmentRow, MessageBodyRow, MessageHeader, MessageRow, PageCursor, PageDirection,
