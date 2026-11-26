@@ -275,7 +275,7 @@ test('imports an ICS file into the remembered calendar, after a preview', async 
   storage.setItem('sn:event-default-calendar', JSON.stringify({ defaultCal: 'acc\0/cal/private/' }));
   const { root, requests, settle } = await show({
     'GET /api/caldav/accounts': { accounts: [account({ calendars: [cal('/cal/work/', 'Work'), cal('/cal/private/', 'Private')] })] },
-    'POST /api/import/preview': [{ uid: 'e1', summary: 'Standup', dtstart: '2026-11-09T09:00', dtend: '2026-11-09T09:15', is_all_day: false, location: 'Room 1' }],
+    'POST /api/import/preview': [{ uid: 'e1', summary: 'Standup', dtstart: '2026-11-09T09:00', dtend: '2026-11-09T09:15', is_all_day: false, location: 'Room 1', replaces: false }],
     'POST /api/import': { account_id: 'acc', calendar_href: '/cal/work/', imported: 1, errors: 0 },
   });
   button(root, m.cal_import()).click();

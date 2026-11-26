@@ -40,13 +40,21 @@ pub(crate) struct ImportPreviewEvent {
     dtend: String,
     is_all_day: bool,
     location: String,
+    /// importing it into the target calendar replaces an event already there (the same UID)
+    replaces: bool,
 }
 
+/// An ICS file to preview, and optionally the calendar it would be imported into (`replaces` is then
+/// set for its events already there; without one, or for a new calendar, nothing replaces).
 #[derive(TryFromMultipart, ToSchema)]
 pub(crate) struct IcsFileForm {
     /// the ICS file (UTF-8)
     #[schema(value_type = String, format = Binary)]
     file: String,
+    /// the account of the target calendar
+    account_id: Option<String>,
+    /// the target calendar
+    calendar_href: Option<String>,
 }
 
 /// An ICS file to import into a calendar: an existing one (`calendar_href`) or a new one of the
@@ -94,35 +102,64 @@ pub(crate) struct SearchQuery {
     request_body(content = IcsFileForm, content_type = "multipart/form-data"),
     responses(
         (status = 200, body = Vec<ImportPreviewEvent>),
-        (status = 400, description = "no file, no importable events in it, or more than 1,000 events (plain text)")
+        (status = 400, description = "no file, no importable events in it, or more than 1,000 events (plain text)"),
+        (status = 404, description = "no such CalDAV account (plain text)")
     )
 )]
 pub async fn preview_ics_import(
-    State(_state): State<crate::oidc::AppState>,
-    _user: CurrentUser,
-    TypedMultipart(IcsFileForm { file: ics }): TypedMultipart<IcsFileForm>,
+    State(state): State<crate::oidc::AppState>,
+    user: CurrentUser,
+    TypedMultipart(IcsFileForm {
+        file: ics,
+        account_id,
+        calendar_href,
+    }): TypedMultipart<IcsFileForm>,
 ) -> Response {
+    let account_id = account_id.filter(|a| !a.is_empty());
+    let calendar_href = calendar_href.filter(|h| !h.is_empty());
+    // the target calendar, only one of the user's
+    let account = match &account_id {
+        Some(id) => match super::owned_account(&state, &user.user_id, id).await {
+            Ok(account) => Some(account),
+            Err(response) => return response,
+        },
+        None => None,
+    };
     let events = split_vcalendar_into_events(&ics);
     if let Some(refused) = refuse_split(&events) {
         return refused;
     }
 
-    let previews: Vec<ImportPreviewEvent> = events
-        .events()
-        .filter_map(|(_, wrapped_ical)| {
-            preview_events_from_raw_ical(&wrapped_ical)
-                .into_iter()
-                .next()
-                .map(|event| ImportPreviewEvent {
-                    uid: event.uid,
-                    summary: event.summary,
-                    dtstart: event.dtstart,
-                    dtend: event.dtend.unwrap_or_default(),
-                    is_all_day: event.is_all_day,
-                    location: event.location,
-                })
-        })
-        .collect();
+    let mut previews: Vec<ImportPreviewEvent> = Vec::new();
+    for (uid, wrapped_ical) in events.events() {
+        let Some(event) = preview_events_from_raw_ical(&wrapped_ical)
+            .into_iter()
+            .next()
+        else {
+            continue;
+        };
+        let replaces = match (&account, &calendar_href) {
+            (Some(account), Some(href)) => {
+                // the UID the import puts it under
+                db::has_cached_event(&state.db, account.id(), href, &uid)
+                    .await
+                    .unwrap_or_else(|e| {
+                        eprintln!("Database error: {e}");
+                        false
+                    })
+            }
+            _ => false,
+        };
+        previews.push(ImportPreviewEvent {
+            uid: event.uid,
+            summary: event.summary,
+            dtstart: event.dtstart,
+            dtend: event.dtend.unwrap_or_default(),
+            is_all_day: event.is_all_day,
+            location: event.location,
+            replaces,
+        });
+    }
 
     if previews.is_empty() {
         return (

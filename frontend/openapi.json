@@ -2473,6 +2473,9 @@
           },
           "400": {
             "description": "no file, no importable events in it, or more than 1,000 events (plain text)"
+          },
+          "404": {
+            "description": "no such CalDAV account (plain text)"
           }
         }
       }
@@ -4585,6 +4588,7 @@
       },
       "IcsFileForm": {
         "type": "object",
+        "description": "An ICS file to preview, and optionally the calendar it would be imported into (`replaces` is then\nset for its events already there; without one, or for a new calendar, nothing replaces).",
         "required": [
           "file"
         ],
@@ -4593,6 +4597,20 @@
             "type": "string",
             "format": "binary",
             "description": "the ICS file (UTF-8)"
+          },
+          "account_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the account of the target calendar"
+          },
+          "calendar_href": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the target calendar"
           }
         }
       },
@@ -4775,7 +4793,8 @@
           "dtstart",
           "dtend",
           "is_all_day",
-          "location"
+          "location",
+          "replaces"
         ],
         "properties": {
           "uid": {
@@ -4795,6 +4814,10 @@
           },
           "location": {
             "type": "string"
+          },
+          "replaces": {
+            "type": "boolean",
+            "description": "importing it into the target calendar replaces an event already there (the same UID)"
           }
         }
       },

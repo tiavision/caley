@@ -6,12 +6,14 @@
      type="CalDavAccountJson[]"), refetched on `calendars_changed`; the dialog refreshes it after an import.
      It emits `ics-imported` with the ImportResult (`calendar` is calendarValue() of where it went), e.g. for the
      remembered calendar: data-sn-on-ics-imported="$event.detail.errors === 0 && (defaultCal = $event.detail.calendar)".
+     The preview's rows (`rows`, dialog state) say which events replace one already in the chosen calendar (the
+     same UID: the import replaces it where it is); choosing another calendar previews again.
      It closes itself 1.5 s after an import without errors (<close-after>). The content (and `imp`) stays while the
      dialog is closed, so it fades out whole; closing resets the form, which empties the file input, the one control
      no binding sets. -->
 <template data-sn-props="" data-sn-emits="{ 'ics-import': ImportDraft; 'ics-imported': ImportResult }">
-  <div data-sn-state="{ imp: /** @type {ImportDraft|null} */ (null) }"
-       data-sn-on-ics-import="imp = $event.detail; openDialog('import-ics')">
+  <div data-sn-state="{ imp: /** @type {ImportDraft|null} */ (null), rows: /** @type {ImportPreviewRow[]} */ ([]) }"
+       data-sn-on-ics-import="imp = $event.detail; rows = []; openDialog('import-ics')">
     <slot></slot>
     <dialog id="import-ics" closedby="any" aria-labelledby="import-ics-title" data-sn-on-close="$el.querySelector('form')?.reset()">
       <header>
@@ -39,29 +41,30 @@
           <label>
             <span data-sn-text="m.cal_importFile()"></span>
             <input type="file" accept=".ics,.ical,text/calendar" data-sn-attr="{required: !imp.file}"
-                   data-sn-on-change="imp.file = $el.files?.[0] ?? null; imp.preview = []; imp.error = ''; imp.success = ''">
+                   data-sn-on-change="imp.file = $el.files?.[0] ?? null; rows = []; imp.error = ''; imp.success = ''">
           </label>
 
           <template data-sn-if="imp.file">
             <div data-layout="row" data-gap="sm" data-wrap="none">
               <small data-muted data-truncate data-grow data-sn-text="imp.file.name"></small>
-              <button type="button" data-variant="secondary" data-size="sm" data-sn-text="m.cal_importPreview()"
-                      data-sn-call="ics.preview(imp.file)" data-sn-concurrency="block"
-                      data-sn-on-click="imp.error = ''; imp.success = ''; imp.preview = []"
-                      data-sn-then="imp.preview = $result"
-                      data-sn-catch="imp.error = $error.status ? ($error.detail ?? m.cal_importPreviewError()) : m.cal_importPreviewError()"></button>
+              <button type="button" id="import-ics-preview" data-variant="secondary" data-size="sm" data-sn-text="m.cal_importPreview()"
+                      data-sn-call="ics.preview(imp.file, imp.target)" data-sn-concurrency="block"
+                      data-sn-on-click="imp.error = ''; imp.success = ''; rows = []"
+                      data-sn-then="rows = $result"
+                      data-sn-catch="rows = []; imp.error = $error.status ? ($error.detail ?? m.cal_importPreviewError()) : m.cal_importPreviewError()"></button>
             </div>
           </template>
 
-          <template data-sn-if="imp.preview.length > 0">
+          <template data-sn-if="rows.length > 0">
             <section data-layout="stack" data-gap="sm">
               <h3 data-sn-text="m.cal_importPreviewHeading()"></h3>
               <ul data-list>
-                <template data-sn-for="event in imp.preview" data-sn-key="event.uid">
+                <template data-sn-for="event in rows" data-sn-key="event.uid">
                   <li data-layout="stack" data-gap="none">
                     <strong data-sn-text="event.summary || m.cal_importUntitledEvent()"></strong>
                     <small data-muted data-sn-text="importEventDate(event)"></small>
                     <template data-sn-if="event.location"><small data-muted data-sn-text="event.location"></small></template>
+                    <template data-sn-if="event.replaces"><small data-tone="warning" data-sn-text="m.cal_importReplaces()"></small></template>
                   </li>
                 </template>
               </ul>
@@ -71,7 +74,7 @@
           <label>
             <span data-sn-text="m.cal_importCalendar()"></span>
             <select data-sn-model="imp.target"
-                    data-sn-on-change="imp.target === '__new__' && (imp.accountId = caldavAccounts[0]?.account_id ?? '')">
+                    data-sn-on-change="imp.target === '__new__' && (imp.accountId = caldavAccounts[0]?.account_id ?? ''); rows.length > 0 && run('import-ics-preview')">
               <template data-sn-for="account in caldavAccounts">
                 <optgroup data-sn-attr="{label: account.display_name}">
                   <template data-sn-for="cal in account.calendars" data-sn-key="cal.href">

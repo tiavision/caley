@@ -720,6 +720,25 @@ pub async fn get_event_href(
     .await?)
 }
 
+/// Whether `calendar_href` has the event `uid` cached (keyed as `get_event_href`, with or without an
+/// href): importing a file with that UID into the calendar replaces it.
+pub async fn has_cached_event(
+    pool: &SqlitePool,
+    account: CalDavAccountId<'_>,
+    calendar_href: &str,
+    uid: &str,
+) -> anyhow::Result<bool> {
+    Ok(sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM cached_events WHERE account_id = ? AND calendar_href = ? AND uid = ? LIMIT 1",
+    )
+    .bind(account.as_str())
+    .bind(calendar_href)
+    .bind(uid)
+    .fetch_optional(pool)
+    .await?
+    .is_some())
+}
+
 pub async fn delete_cached_event(
     pool: &SqlitePool,
     account: CalDavAccountId<'_>,

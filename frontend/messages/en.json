@@ -150,6 +150,7 @@
   "cal_importPreviewHeading": "Events to import",
   "cal_importPreviewError": "Preview failed",
   "cal_importUntitledEvent": "Untitled event",
+  "cal_importReplaces": "Replaces an existing event",
   "nav_search": "Search",
   "nav_contacts": "Contacts",
   "nav_calendar": "Calendar",

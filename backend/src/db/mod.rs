@@ -14,7 +14,7 @@ pub use calendar_db::{
     deactivate_calendar, delete_cached_event, delete_caldav_account, delete_calendar_cache,
     delete_event_by_href, ensure_fts_schema, get_cached_calendars, get_caldav_account,
     get_calendar_sync_state, get_deactivated_calendars, get_event_href, get_push_subscription,
-    get_raw_events, get_user_and_calendar_from_push_token, list_caldav_accounts,
+    get_raw_events, get_user_and_calendar_from_push_token, has_cached_event, list_caldav_accounts,
     remove_stale_calendars, replace_calendar_events, upsert_cached_calendar,
     upsert_cached_event_raw, upsert_caldav_account, upsert_push_subscription,
 };

@@ -495,6 +495,16 @@ fn cases() -> Vec<Case> {
             "/api/import/preview",
             Payload::Multipart(vec![("file", MALLORY_ICS.into())]),
         ),
+        // whether Alice's calendar has ev1 (the preview's `replaces`) is not Mallory's to learn
+        case(
+            "POST",
+            "/api/import/preview",
+            Payload::Multipart(vec![
+                ("file", MALLORY_ICS.into()),
+                ("account_id", A_CAL.into()),
+                ("calendar_href", "/cal/".into()),
+            ]),
+        ),
         case("POST", "/api/push/webhook?token=", Payload::None),
         case("POST", "/api/push/webhook?token=unknown", Payload::None),
         // ── contacts ──
@@ -1186,6 +1196,62 @@ fn handlers_never_skip_the_check() {
             );
         }
     }
+}
+
+/// The import preview says which events replace one in the target calendar: for Alice's own calendar; a
+/// target of Alice's named by Mallory is a 404, which tells her nothing of what is in it.
+#[tokio::test]
+async fn the_import_preview_tells_only_the_owner_what_it_replaces() {
+    let state = state().await;
+    seed(&state).await;
+    let app = router(&state);
+    let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+        BEGIN:VEVENT\r\nUID:ev1\r\nDTSTART:20260105T100000Z\r\nSUMMARY:Same UID\r\nEND:VEVENT\r\n\
+        BEGIN:VEVENT\r\nUID:ev2\r\nDTSTART:20260106T100000Z\r\nSUMMARY:New\r\nEND:VEVENT\r\n\
+        END:VCALENDAR\r\n";
+    let preview = |account: &str, calendar: &str| {
+        case(
+            "POST",
+            "/api/import/preview",
+            Payload::Multipart(vec![
+                ("file", ics.into()),
+                ("account_id", account.into()),
+                ("calendar_href", calendar.into()),
+            ]),
+        )
+    };
+    let replaces = |body: &str| -> Vec<(String, bool)> {
+        serde_json::from_str::<Value>(body)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| {
+                (
+                    e["uid"].as_str().unwrap().to_owned(),
+                    e["replaces"].as_bool().unwrap(),
+                )
+            })
+            .collect()
+    };
+    let (status, body) = call(&app, ALICE, &preview(A_CAL, "/cal/")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        replaces(&body),
+        [("ev1".into(), true), ("ev2".into(), false)]
+    );
+    // another calendar, a new one, or none: nothing replaces
+    for (account, calendar) in [(A_CAL, "/other/"), (A_CAL, ""), ("", "")] {
+        let (status, body) = call(&app, ALICE, &preview(account, calendar)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            replaces(&body),
+            [("ev1".into(), false), ("ev2".into(), false)]
+        );
+    }
+    let (status, body) = call(&app, MALLORY, &preview(A_CAL, "/cal/")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert!(!body.contains("ev1"), "{body}");
 }
 
 // ── the database's own guard, below the handlers ─────────────────────────────
