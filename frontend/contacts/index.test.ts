@@ -121,8 +121,8 @@ test('the detail dialog shows the contact; an address opens the map', async () =
   const dialog = await openDetail(r, 'Ada Lovelace');
   expect(dialog.querySelector('h2')!.textContent).toBe('Ada Lovelace');
   const values = [...dialog.querySelectorAll('dd')].map((d) => d.textContent!.replace(/\s+/g, ' ').trim());
-  // the organization is in the band under the avatar, labelled for screen readers
-  expect(dialog.querySelector('[data-tm-hero] p')!.textContent).toBe('Organization: Engines Ltd');
+  // the organization is under the name in the header, labelled for screen readers
+  expect(dialog.querySelector('header p')!.textContent).toBe('Organization: Engines Ltd');
   expect(values).toEqual(['Work ada@example.com', 'Mobile +44 1', 'Home 1 Main St London N1 UK']);
   expect([...dialog.querySelectorAll('dd a[rel] br')].map((br) => br.hidden)).toEqual([false, false, true]);
   const map = dialog.querySelector<HTMLAnchorElement>('dd a[rel]')!;

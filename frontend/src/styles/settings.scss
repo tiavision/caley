@@ -1,8 +1,8 @@
 // Settings page (settings/index.html).
 
 // temper's data-tm-layout="center" keeps at least md side padding; match the sm page padding of the other
-// pages so the nav toggle sits in the same place on phones.
+// pages so the nav toggle sits in the same place on phones. temper's --_px is the column's side padding: its width
+// and its whole-pixel centring are computed from it, so setting it (not padding-inline alone) keeps the column centred.
 .settings {
-  max-inline-size: calc(var(--tm-measure) + 2 * var(--tm-space-sm));
-  padding-inline: var(--tm-space-sm);
+  --_px: var(--tm-space-sm);
 }

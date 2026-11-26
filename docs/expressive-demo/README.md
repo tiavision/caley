@@ -60,6 +60,10 @@ title with the list and gives the cards more room.
 | Phone, light | ![](screenshots/contact-detail-before-phone-light.png) | ![](screenshots/contact-detail-after-phone-light.png) |
 | Phone, dark | ![](screenshots/contact-detail-before-phone-dark.png) | ![](screenshots/contact-detail-after-phone-dark.png) |
 
+The contact's identity in one header: the seeded avatar, the name as the dialog's one display moment and the
+organization under it, the actions at the end (on a phone, on their own row so the name keeps the width). A first
+version with a gradient band and a glowing avatar read as a social-profile template and was removed in the review.
+
 ### A rebrand is one number
 
 The same build with only `--tm-hue: 160` added (caley's is 280).
@@ -113,7 +117,19 @@ screenshots led, over five rounds, to:
 - the avatar seeds narrowed to ±50° and calmer in dark (no red or maroon);
 - the title aligned with the list.
 
+The sign-in page, the contact dialog and temper's own reference page for the module (`kitchen-sink/expressive.html`)
+went through the same review afterwards; temper's reference page now teaches the restraint (two worked examples, then
+each part with when to use it) instead of the template look.
+
 Out of scope and unchanged: the floating add button can cover the last card on a phone, as before.
+
+## The rest of caley is unchanged
+
+Calendar, mail (list and an open message), search and settings were compared pixel by pixel with `main`, light and
+dark, desktop and phone: identical, apart from settings on desktop, where temper's whole-pixel centring (already on
+temper's `main`) moves the column by half a pixel. That comparison also found that caley's `settings.scss` set the
+column's padding without temper's centring knowing, which would have put it 8px off centre with any newer temper; it
+now sets temper's side-padding variable instead.
 
 ## What changed in caley
 

@@ -146,8 +146,22 @@
 
       <dialog id="contact-detail" closedby="any" data-tm-elevation="floating"
               data-sn-let="{ c: contacts.find(x => sameContact(x, sel)) }">
-        <header>
-          <h2 data-tm-display="lg" data-sn-text="c?.fn_name || ''"></h2>
+        <!-- The header is the contact's identity in one place: the avatar, the name (the dialog's one display moment)
+             and the organization under it; the actions at the end. -->
+        <!-- a row that wraps: on a phone the actions take a row of their own under the identity, at its end, so the name
+             keeps the width (the identity grows, so on wider screens the actions sit at the end too) -->
+        <header data-tm-layout="row" data-tm-wrap="wrap" data-tm-justify="end" data-tm-gap="sm">
+          <div data-tm-layout="row" data-tm-gap="md" data-tm-wrap="none" data-tm-justify="start" data-tm-grow style="--tm-grow-basis: 15rem">
+            <template data-sn-if="c">
+              <person-avatar data-sn-with="{ name: c.fn_name, src: c.has_photo ? contactPhotoUrl(c) : null, size: 'xl' }"></person-avatar>
+            </template>
+            <div data-tm-layout="stack" data-tm-gap="xs" data-tm-grow>
+              <h2 data-tm-display="lg" data-sn-text="c?.fn_name || ''"></h2>
+              <template data-sn-if="c?.org">
+                <p data-tm-muted><span data-tm-sr-only data-sn-text="m.contacts_org() + ': '"></span><span data-sn-text="c?.org ?? ''"></span></p>
+              </template>
+            </div>
+          </div>
           <div data-tm-layout="row" data-tm-gap="xs" data-tm-wrap="none">
             <share-menu data-sn-with="{ item: c ? contactShare(c) : null }"></share-menu>
             <template data-sn-if="c">
@@ -160,15 +174,6 @@
         </header>
 
         <template data-sn-if="c">
-          <!-- the contact's band: the avatar on a gradient, the organization under it (with its label for screen readers) -->
-          <div data-tm-surface="gradient" data-tm-grain data-tm-hero data-tm-pad="lg">
-            <person-avatar data-sn-with="{ name: c.fn_name, src: c.has_photo ? contactPhotoUrl(c) : null, size: 'xl', halo: true }"></person-avatar>
-            <template data-sn-if="c.org">
-              <p data-tm-muted><span data-tm-sr-only data-sn-text="m.contacts_org() + ': '"></span><span data-sn-text="c.org"></span></p>
-            </template>
-          </div>
-
-          <!-- the organization is under the avatar, in the band above -->
           <dl data-tm-pairs>
             <template data-sn-if="c.emails.length">
               <dt data-sn-text="m.contacts_email()"></dt>
