@@ -682,13 +682,6 @@ export function matching(origins: string[], q: string): string[] {
   return q ? origins.filter((o) => o.includes(q)) : origins;
 }
 
-/** Is `node` the open message (same Message-ID, else the same place)? */
-export function isThreadCurrent(node: ThreadNode, msg: Message | null): boolean {
-  if (!msg) return false;
-  if (node.message_id && msg.message_id) return node.message_id === msg.message_id;
-  return isRef(node, msg);
-}
-
 // ── Compose ───────────────────────────────────────────────────────────────────
 
 export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward';
