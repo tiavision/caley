@@ -16,8 +16,8 @@ const library = import.meta.glob<string>('../node_modules/@tiavision/sinter-mail
 const libraryScripts = import.meta.glob(['../node_modules/@tiavision/sinter-mail/sinter/components/**/*.ts', '!**/mail-width.ts'], { eager: true });
 // alloy's components (<alloy-sortable>: the mail sidebar's folders) and their scripts, as sinter-mail's: the keyboard
 // moves need no layout, so they run as in the browser.
-const alloy = import.meta.glob<string>('../node_modules/@tiavision/alloy/sinter/components/**/*.html', { query: '?raw', import: 'default', eager: true });
-const alloyScripts = import.meta.glob('../node_modules/@tiavision/alloy/sinter/components/**/*.ts', { eager: true });
+const alloy = import.meta.glob<string>('../node_modules/@tiavision/sinter-alloy/sinter/components/**/*.html', { query: '?raw', import: 'default', eager: true });
+const alloyScripts = import.meta.glob('../node_modules/@tiavision/sinter-alloy/sinter/components/**/*.ts', { eager: true });
 const layouts = import.meta.glob<string>('./layouts/*.html', { query: '?raw', import: 'default', eager: true });
 
 const name = (path: string) => path.replace(/^.*\//, '').replace(/\.(html|ts)$/, '');
