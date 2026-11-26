@@ -159,6 +159,9 @@ function messageHeaderLines(message: ProtectedComposeMessage, date: string, mess
   return headers;
 }
 
+/** The outer Subject of an encrypted message (RFC 9788's placeholder); the real one is inside. */
+export const HIDDEN_SUBJECT = '[...]';
+
 function messageHeaders(headers: string[]): string {
   return `${headers.join('\r\n')}\r\n`;
 }
@@ -187,7 +190,19 @@ function autocryptHeader(message: ProtectedComposeMessage): string | null {
   return `Autocrypt: addr=${addr};\r\n keydata=${keydata}`;
 }
 
-async function innerEntity(message: ProtectedComposeMessage, signedProtectedHeaders: string | null = null): Promise<string> {
+/**
+ * `entity` (its first line its Content-Type) as the root of a payload with protected headers (the autocrypt
+ * protected-headers draft, `protected-headers="v1"`): the parameter on its Content-Type, the message's real header
+ * fields after it. Unchanged without `fields`.
+ */
+function withProtectedHeaders(entity: string, fields: string | null): string {
+  if (!fields) return entity;
+  const eol = entity.indexOf('\r\n');
+  return `${entity.slice(0, eol)};\r\n protected-headers="v1"\r\n${fields}${entity.slice(eol)}`;
+}
+
+/** The payload: the body (text, or text and HTML), with the attachments when there are any; its root carries `protectedHeaderFields`. */
+async function innerEntity(message: ProtectedComposeMessage, protectedHeaderFields: string | null = null): Promise<string> {
   const attachments = [...message.attachments];
 
   const textPart =
@@ -225,13 +240,11 @@ async function innerEntity(message: ProtectedComposeMessage, signedProtectedHead
   }
 
   if (attachments.length === 0) {
-    return bodyPart;
+    return withProtectedHeaders(bodyPart, protectedHeaderFields);
   }
 
   const mixedBoundary = boundary('mixed');
-  let entity = signedProtectedHeaders
-    ? `Content-Type: multipart/mixed; boundary="${mixedBoundary}";\r\n protected-headers="v1"\r\n${signedProtectedHeaders}\r\n\r\n`
-    : `Content-Type: multipart/mixed; boundary="${mixedBoundary}"\r\n\r\n`;
+  let entity = `Content-Type: multipart/mixed; boundary="${mixedBoundary}"\r\n\r\n`;
   entity += `--${mixedBoundary}\r\n${bodyPart}`;
   for (const attachment of attachments) {
     const filename = parameterValue('name', attachment.name);
@@ -243,20 +256,21 @@ async function innerEntity(message: ProtectedComposeMessage, signedProtectedHead
     entity += `${base64Lines(content)}\r\n`;
   }
   entity += `--${mixedBoundary}--\r\n`;
-  return entity;
+  return withProtectedHeaders(entity, protectedHeaderFields);
 }
 
 export async function buildProtectedMime(message: ProtectedComposeMessage): Promise<Uint8Array> {
-  const headerLines = messageHeaderLines(
-    message,
-    new Date().toUTCString(),
-    `<${crypto.randomUUID()}@caley.local>`,
-  );
-  const headers = messageHeaders(headerLines);
+  const date = new Date().toUTCString();
+  const messageId = `<${crypto.randomUUID()}@caley.local>`;
+  const headerLines = messageHeaderLines(message, date, messageId);
+  // An encrypted message keeps its real headers inside the ciphertext (the payload's root, protected-headers="v1"):
+  // outside, the Subject is "[...]", so a reply to or forward of a protected subject does not send it in clear.
+  // The transport needs the rest (From, To, Cc, Date, Message-ID, In-Reply-To, References); Bcc is never written.
+  const headers = messageHeaders(message.encrypt ? messageHeaderLines({ ...message, subject: HIDDEN_SUBJECT }, date, messageId) : headerLines);
   const hasAttachments = message.attachments.length > 0;
   const inner = await innerEntity(
     message,
-    message.sign && !message.encrypt && hasAttachments ? protectedHeaders(headerLines) : null,
+    message.encrypt || (message.sign && hasAttachments) ? protectedHeaders(headerLines) : null,
   );
 
   if (message.encrypt) {

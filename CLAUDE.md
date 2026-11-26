@@ -228,7 +228,7 @@ Email:
 - IMAP account setup with autodiscovery and SMTP settings; JMAP accounts (Stalwart, Fastmail, …) signed in with a password, an API token, a sign-in at the mail server (OAuth, with the server's client for Caley) or the user's OIDC sign-in.
 - Multiple email accounts and identities.
 - Mailbox browsing, unread counts, message pagination, search filters, threads, flag/read state, move/delete, attachments, export, and new-mail notifications.
-- SMTP compose/send, raw MIME send, and protected MIME generation for PGP flows.
+- SMTP compose/send, raw MIME send, and protected MIME generation for PGP flows (`buildProtectedMime`, `src/lib/pgp/compose.ts`). Every encrypted mail protects its headers: the outer `Subject:` is `[...]`, and the encrypted payload's root (text, `multipart/alternative` or `multipart/mixed`) carries `protected-headers="v1"` and the real Subject, From, To, Cc, Date, Message-ID, In-Reply-To and References (never Bcc), which Caley's reader shows from inside; a signed mail with attachments carries them too, a signed-only mail without keeps its clear subject. The Sent copy is the same message, so its list row (outer headers) reads `[...]`.
 - Remote image privacy controls through image origin allow/block lists and same-origin image proxying.
 - PGP-aware message display: encrypted/signed detection, decryption, signature verification, public key attachment handling, Autocrypt key discovery.
 
