@@ -915,6 +915,23 @@ test('the thread button opens the conversation; a message in it opens in the rea
   expect(root.querySelector('.reader .detail-subject')!.textContent).toBe('Second');
 });
 
+test('a sender name that holds an @ is listed with the real address, in the list and in the thread', async () => {
+  const spoof = '"ceo@bank.com" <evil@x>';
+  const { root, settle } = await show({
+    'GET /api/email/messages': { messages: [msg(1, 'Wire', { from: spoof, from_address: 'evil@x' }), msg(2, 'Hi', { from: '"Doe, Jane" <jane@x>' })], total: 2 },
+    'GET /api/email/thread': { messages: [
+      { uid: 1, account_id: 'work', mailbox: 'INBOX', message_id: '<1@x>', parent_message_id: null, from: spoof, subject: 'Wire', sent_at: 1, is_read: true },
+      { uid: 2, account_id: 'work', mailbox: 'INBOX', message_id: '<2@x>', parent_message_id: '<1@x>', from: 'Sender 2 <s2@x>', subject: 'Re: Wire', sent_at: 2, is_read: true },
+    ] },
+  });
+  expect(rows(root).map((r) => r.querySelector('.from')!.textContent)).toEqual(['ceo@bank.com <evil@x>', 'Doe, Jane']);
+  rows(root)[0].click();
+  await settle();
+  root.querySelector<HTMLButtonElement>('.reader button[data-icon="list-tree"]')!.click();
+  await settle();
+  expect(root.querySelector('#thread-dialog .thread-from')!.textContent).toBe('ceo@bank.com <evil@x>');
+});
+
 // Without a view in the URL, the message list shows the remembered one (its URL reads only the URL and the
 // remembered view, so sinter's early file can request it): the view the lists settle on is remembered and put
 // into the URL, a remembered one is requested at once, a gone one is replaced.

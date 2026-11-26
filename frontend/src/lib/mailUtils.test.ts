@@ -56,6 +56,13 @@ describe('senderName', () => {
     expect(senderName(null)).toBe('');
   });
 
+  it('shows a name that holds an @ with the real address', () => {
+    expect(senderName('"ceo@bank.com" <evil@x.example>')).toBe('ceo@bank.com <evil@x.example>');
+    expect(senderName('ceo@bank.com <evil@x.example>')).toBe('ceo@bank.com <evil@x.example>');
+    expect(senderName('"Support (help@bank.com)" <evil@x.example>')).toBe('Support (help@bank.com) <evil@x.example>');
+    expect(senderName('"" <jane@example.com>')).toBe('jane@example.com');
+  });
+
   it('falls back to the address for an empty quoted name', () => {
     expect(senderName('"" <jane@example.com>')).toBe('jane@example.com');
   });
