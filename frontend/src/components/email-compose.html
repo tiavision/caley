@@ -26,10 +26,10 @@
     <sn-resource name="pendingCompose" call="mail.pendingCompose()" when="pending && !!$meta.identities.loadedAt"
                  then="$result && (compose = sharedDraft($result, identities)); $result && openDialog('email-compose')"></sn-resource>
     <slot></slot>
-    <dialog id="email-compose" class="compose-dialog" data-layout="stack" data-gap="none" data-pad="none"
+    <dialog id="email-compose" class="compose-dialog" data-tm-layout="stack" data-tm-gap="none" data-tm-pad="none"
             data-sn-on-close="composeError = ''; sending = false; edited = false">
       <template data-sn-if="compose">
-        <div class="compose-inner" data-layout="stack" data-gap="none" data-grow
+        <div class="compose-inner" data-tm-layout="stack" data-tm-gap="none" data-tm-grow
              data-sn-on-input="edited = true" data-sn-on-change="edited = true"
              data-sn-let="{
                canEnc: canEncrypt(compose, identities, composeKeys),
@@ -38,71 +38,71 @@
                missing: compose.encrypt ? missingKeys(compose, identities, composeKeys) : [],
                hits: recipientHits(rcpt.token, contactAddresses(composeContacts ?? []), recipientAddrs ?? []),
              }">
-          <header class="compose-header" data-pad="sm">
+          <header class="compose-header" data-tm-pad="sm">
             <h2 data-sn-text="composeTitle(compose.mode)"></h2>
             <button type="button" commandfor="email-compose" command="close" data-sn-attr="{'aria-label': m.mail_close()}"></button>
           </header>
-          <form class="compose-form" data-layout="stack" data-gap="none" data-grow
+          <form class="compose-form" data-tm-layout="stack" data-tm-gap="none" data-tm-grow
                 data-sn-on-submit="sending = true; composeError = ''"
                 data-sn-call="mail.send(compose, identities, signing)"
                 data-sn-then="sending = false; closeDialog('email-compose')"
                 data-sn-catch="sending = false; composeError = loadErrorOr($error, $error.detail ?? m.mail_sendError())">
             <template data-sn-if="identities.length > 1">
-              <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+              <div class="compose-row" data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
                 <label class="compose-label" for="compose-from" data-sn-text="m.mail_composeFrom()"></label>
-                <select id="compose-from" class="compose-input" data-grow data-sn-model="compose.identity_id">
+                <select id="compose-from" class="compose-input" data-tm-grow data-sn-model="compose.identity_id">
                   <template data-sn-for="id in identities">
                     <option data-sn-attr="{value: id.identity_id, selected: id.identity_id === compose.identity_id}" data-sn-text="`${id.name} <${id.email}>`"></option>
                   </template>
                 </select>
               </div>
             </template>
-            <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+            <div class="compose-row" data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
               <label class="compose-label" for="compose-to" data-sn-text="m.mail_composeTo()"></label>
-              <div class="compose-input-wrap" data-combo data-grow>
+              <div class="compose-input-wrap" data-tm-combo data-tm-grow>
                 <input id="compose-to" class="compose-input" autocomplete="off" data-sn-model="compose.to" data-sn-options="compose-to-list"
                        data-sn-on-input="edited = true; rcpt = {field: 'to', token: recipientToken(compose.to)}" data-sn-debounce-input="200"
                        data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-sn-dismiss="rcpt = {field: '', token: ''}"
                        data-sn-attr="{placeholder: m.mail_composeToPlaceholder()}">
-                <div data-menu role="listbox" id="compose-to-list" data-sn-show="rcpt.field === 'to' && hits.length > 0">
+                <div data-tm-menu role="listbox" id="compose-to-list" data-sn-show="rcpt.field === 'to' && hits.length > 0">
                   <template data-sn-for="addr in hits" data-sn-key="addr">
                     <div role="option" tabindex="-1" data-sn-on-click="compose.to = withRecipient(compose.to, addr); rcpt = {field: '', token: ''}" data-sn-text="addr"></div>
                   </template>
                 </div>
               </div>
-              <button type="button" data-variant="ghost" data-size="sm" data-icon="lock" data-tooltip
+              <button type="button" data-tm-variant="ghost" data-tm-size="sm" data-tm-icon="lock" data-tm-tooltip
                       data-sn-attr="{disabled: (!canEnc && !compose.encrypt) || sending, 'aria-pressed': compose.encrypt ? 'true' : 'false', 'aria-label': m.pgp_composeEncrypt()}"
                       data-sn-on-click="compose.encrypt = !compose.encrypt"></button>
-              <button type="button" data-variant="ghost" data-size="sm" data-icon="signature" data-tooltip
+              <button type="button" data-tm-variant="ghost" data-tm-size="sm" data-tm-icon="signature" data-tm-tooltip
                       data-sn-attr="{disabled: !canSign(compose, identities, composeKeys) || sending, 'aria-pressed': signing ? 'true' : 'false', 'aria-label': m.pgp_composeSign()}"
                       data-sn-on-click="compose.signOptOut = signing; compose.sign = !signing"></button>
               <template data-sn-if="!compose.ccOpen">
-                <button type="button" class="nowrap" data-variant="ghost" data-size="sm" data-sn-on-click="compose.ccOpen = true" data-sn-text="m.mail_composeCcBcc()"></button>
+                <button type="button" class="nowrap" data-tm-variant="ghost" data-tm-size="sm" data-sn-on-click="compose.ccOpen = true" data-sn-text="m.mail_composeCcBcc()"></button>
               </template>
             </div>
             <template data-sn-if="compose.ccOpen">
-              <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+              <div class="compose-row" data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
                 <label class="compose-label" for="compose-cc" data-sn-text="m.mail_composeCc()"></label>
-                <div class="compose-input-wrap" data-combo data-grow>
+                <div class="compose-input-wrap" data-tm-combo data-tm-grow>
                   <input id="compose-cc" class="compose-input" autocomplete="off" data-sn-model="compose.cc" data-sn-options="compose-cc-list"
                          data-sn-on-input="edited = true; rcpt = {field: 'cc', token: recipientToken(compose.cc)}" data-sn-debounce-input="200"
                          data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-sn-dismiss="rcpt = {field: '', token: ''}"
                          data-sn-attr="{placeholder: m.mail_composeCcPlaceholder()}">
-                  <div data-menu role="listbox" id="compose-cc-list" data-sn-show="rcpt.field === 'cc' && hits.length > 0">
+                  <div data-tm-menu role="listbox" id="compose-cc-list" data-sn-show="rcpt.field === 'cc' && hits.length > 0">
                     <template data-sn-for="addr in hits" data-sn-key="addr">
                       <div role="option" tabindex="-1" data-sn-on-click="compose.cc = withRecipient(compose.cc, addr); rcpt = {field: '', token: ''}" data-sn-text="addr"></div>
                     </template>
                   </div>
                 </div>
               </div>
-              <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+              <div class="compose-row" data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
                 <label class="compose-label" for="compose-bcc" data-sn-text="m.mail_composeBcc()"></label>
-                <div class="compose-input-wrap" data-combo data-grow>
+                <div class="compose-input-wrap" data-tm-combo data-tm-grow>
                   <input id="compose-bcc" class="compose-input" autocomplete="off" data-sn-model="compose.bcc" data-sn-options="compose-bcc-list"
                          data-sn-on-input="edited = true; rcpt = {field: 'bcc', token: recipientToken(compose.bcc)}" data-sn-debounce-input="200"
                          data-sn-on-focusout="rcpt = {field: '', token: ''}" data-sn-on-sn-dismiss="rcpt = {field: '', token: ''}"
                          data-sn-attr="{placeholder: m.mail_composeBccPlaceholder()}">
-                  <div data-menu role="listbox" id="compose-bcc-list" data-sn-show="rcpt.field === 'bcc' && hits.length > 0">
+                  <div data-tm-menu role="listbox" id="compose-bcc-list" data-sn-show="rcpt.field === 'bcc' && hits.length > 0">
                     <template data-sn-for="addr in hits" data-sn-key="addr">
                       <div role="option" tabindex="-1" data-sn-on-click="compose.bcc = withRecipient(compose.bcc, addr); rcpt = {field: '', token: ''}" data-sn-text="addr"></div>
                     </template>
@@ -110,20 +110,20 @@
                 </div>
               </div>
             </template>
-            <div class="compose-row" data-layout="row" data-gap="sm" data-wrap="none">
+            <div class="compose-row" data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
               <label class="compose-label" for="compose-subject" data-sn-text="m.mail_composeSubject()"></label>
-              <input id="compose-subject" class="compose-input" data-grow data-sn-model="compose.subject">
+              <input id="compose-subject" class="compose-input" data-tm-grow data-sn-model="compose.subject">
             </div>
             <!-- Recipients with a key found in mail that waits to be accepted (a key that is not trusted is never
                  encrypted to): shown with its full fingerprint and user IDs, accepted only here or in Settings. A key
                  change replaces the key trusted for that address. -->
             <template data-sn-if="waiting.length > 0">
-              <div class="compose-keys" data-layout="stack" data-gap="sm" data-pad="sm">
+              <div class="compose-keys" data-tm-layout="stack" data-tm-gap="sm" data-tm-pad="sm">
                 <template data-sn-for="k in waiting" data-sn-key="k.fingerprint">
-                  <div data-callout data-tone="warning" data-layout="stack" data-gap="xs">
+                  <div data-tm-callout data-tm-tone="warning" data-tm-layout="stack" data-tm-gap="xs">
                     <p data-sn-text="k.change ? m.pgp_composeKeyChanged({ email: k.email }) : m.pgp_composeKeyWaiting({ email: k.email })"></p>
                     <pgp-key-facts data-sn-with="{ fingerprint: k.fingerprint, userIds: k.userIds }"></pgp-key-facts>
-                    <button type="button" data-variant="outline" data-size="sm" data-self="start" data-icon="shield-check"
+                    <button type="button" data-tm-variant="outline" data-tm-size="sm" data-tm-self="start" data-tm-icon="shield-check"
                             data-sn-post="/pgp/key/accept" data-sn-body="{ fingerprint: k.fingerprint, replace: k.change }"
                             data-sn-then="refresh(composeKeys)" data-sn-catch="composeError = m.pgp_keyAcceptError()"
                             data-sn-text="k.change ? m.pgp_acceptNewKey() : m.pgp_acceptKey()"></button>
@@ -131,7 +131,7 @@
                 </template>
               </div>
             </template>
-            <textarea class="compose-body" data-grow data-sn-model="compose.body"
+            <textarea class="compose-body" data-tm-grow data-sn-model="compose.body"
                       data-sn-attr="{rows: compose.forwardHtml ? 4 : 10, 'aria-label': m.mail_newMessage()}"></textarea>
             <template data-sn-if="compose.forwardHtml && compose.forwardRef">
               <div class="compose-forward-preview" data-sn-let="{ fwd: email.parse(compose.forwardHtml, bodyImages(compose.forwardRef, null, 0)) ?? null }">
@@ -139,12 +139,12 @@
               </div>
             </template>
             <template data-sn-if="compose.files.length > 0">
-              <ul class="compose-attachments" data-layout="row" data-gap="xs" data-pad="sm">
+              <ul class="compose-attachments" data-tm-layout="row" data-tm-gap="xs" data-tm-pad="sm">
                 <template data-sn-for="(file, i) in compose.files">
-                  <li class="mail-attachment-chip" data-icon="paperclip">
-                    <span class="mail-attachment-name" data-truncate data-sn-attr="{title: file.name}" data-sn-text="file.name"></span>
-                    <span data-muted data-sn-text="humanSize(file.size)"></span>
-                    <button type="button" class="mail-attachment-remove" data-variant="ghost" data-icon="x"
+                  <li class="mail-attachment-chip" data-tm-icon="paperclip">
+                    <span class="mail-attachment-name" data-tm-truncate data-sn-attr="{title: file.name}" data-sn-text="file.name"></span>
+                    <span data-tm-muted data-sn-text="humanSize(file.size)"></span>
+                    <button type="button" class="mail-attachment-remove" data-tm-variant="ghost" data-tm-icon="x"
                             data-sn-attr="{'aria-label': m.mail_removeAttachment()}" data-sn-on-click="compose.files.splice(i, 1)"></button>
                   </li>
                 </template>
@@ -155,21 +155,21 @@
                  quotes or forwards decrypted text says what that means. -->
             <div class="live-region" role="status">
               <template data-sn-if="missing.length > 0">
-                <p class="compose-error" data-callout data-tone="danger" data-sn-text="m.pgp_composeEncryptBlocked({ emails: missing.join(', ') })"></p>
+                <p class="compose-error" data-tm-callout data-tm-tone="danger" data-sn-text="m.pgp_composeEncryptBlocked({ emails: missing.join(', ') })"></p>
               </template>
               <template data-sn-if="compose.decrypted && !compose.encrypt">
-                <p class="compose-error" data-callout data-tone="warning" data-sn-text="m.pgp_composeDecryptedInClear()"></p>
+                <p class="compose-error" data-tm-callout data-tm-tone="warning" data-sn-text="m.pgp_composeDecryptedInClear()"></p>
               </template>
             </div>
             <template data-sn-if="composeError">
-              <p class="compose-error" data-tone="danger" role="alert" data-sn-text="composeError"></p>
+              <p class="compose-error" data-tm-tone="danger" role="alert" data-sn-text="composeError"></p>
             </template>
-            <footer class="compose-footer" data-layout="row" data-gap="sm" data-justify="between" data-pad="sm">
-              <button type="button" data-variant="ghost" data-icon="paperclip"
+            <footer class="compose-footer" data-tm-layout="row" data-tm-gap="sm" data-tm-justify="between" data-tm-pad="sm">
+              <button type="button" data-tm-variant="ghost" data-tm-icon="paperclip"
                       data-sn-on-click="$el.closest('dialog')?.querySelector(/** @type {'input'} */ ('.compose-files input'))?.click()" data-sn-text="m.mail_attach()"></button>
-              <div data-layout="row" data-gap="sm">
-                <button type="button" data-variant="secondary" commandfor="email-compose" command="close" data-sn-text="m.mail_discard()"></button>
-                <button type="submit" data-icon="send" data-sn-attr="{disabled: sending, 'aria-busy': sending ? 'true' : null}"
+              <div data-tm-layout="row" data-tm-gap="sm">
+                <button type="button" data-tm-variant="secondary" commandfor="email-compose" command="close" data-sn-text="m.mail_discard()"></button>
+                <button type="submit" data-tm-icon="send" data-sn-attr="{disabled: sending, 'aria-busy': sending ? 'true' : null}"
                         data-sn-text="sending ? m.mail_sending() : m.mail_send()"></button>
               </div>
             </footer>

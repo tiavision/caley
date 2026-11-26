@@ -5,7 +5,7 @@
   </head>
   <!-- One message in its own window (?account_id=&mailbox=&uid=, from the reader's pop-out button and new-mail
        notifications): the reader of /mail/ (<email-reader>) without the list. -->
-  <body data-shell="fixed"
+  <body data-tm-shell="fixed"
         data-sn-state="{
           reader: { ref: urlRef($url.account_id, $url.mailbox, $url.uid), shown: false },
           wiped: '',
@@ -37,7 +37,7 @@
     <!-- Hidden or left: an encrypted message's body is dropped (wiped), and what was decrypted with it (#wipe). -->
     <span hidden id="wipe" data-sn-call="mail.wipe()"></span>
     <email-hidden-watch data-sn-on-page-hidden="body && body.encrypted && run('wipe'); wiped = body && body.encrypted ? body.key : wiped"></email-hidden-watch>
-    <main data-layout="stack" data-gap="none"
+    <main data-tm-layout="stack" data-tm-gap="none"
           data-sn-let="{
              ownThread: !threadRef || threadRef.current,
              threadNodes: ownThread ? (thread ?? []) : (otherThread ?? []),
@@ -55,15 +55,15 @@
       <email-compose>
       <email-origins>
       <import-dialog>
-      <div class="mail-layout standalone" data-density="compact" data-grow>
-        <section class="message-detail standalone" data-layout="stack" data-gap="none" tabindex="-1" autofocus
+      <div class="mail-layout standalone" data-tm-density="compact" data-tm-grow>
+        <section class="message-detail standalone" data-tm-layout="stack" data-tm-gap="none" tabindex="-1" autofocus
                  data-sn-attr="{'aria-label': m.nav_mail()}"
                  data-sn-on-keydown-pageup="$el.scrollTo({top: scrollTopFor($event.key, $el)})"
                  data-sn-on-keydown-pagedown="$el.scrollTo({top: scrollTopFor($event.key, $el)})"
                  data-sn-on-keydown-home="$el.scrollTo({top: scrollTopFor($event.key, $el)})"
                  data-sn-on-keydown-end="$el.scrollTo({top: scrollTopFor($event.key, $el)})">
           <email-reader data-sn-with="{ open, defaultCal }" data-sn-early="off">
-            <p slot="idle" class="detail-status" data-muted data-sn-text="m.mail_messageUnavailable()"></p>
+            <p slot="idle" class="detail-status" data-tm-muted data-sn-text="m.mail_messageUnavailable()"></p>
           </email-reader>
         </section>
       </div>

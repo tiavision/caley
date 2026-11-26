@@ -2,13 +2,13 @@
      reader's key import, compose's waiting keys): its full fingerprint, in groups of four, and its user IDs.
        <pgp-key-facts data-sn-with="{ fingerprint, userIds }"></pgp-key-facts> -->
 <template data-sn-props="{ fingerprint: string; userIds: string[] }">
-  <dl class="key-facts" data-pairs>
+  <dl class="key-facts" data-tm-pairs>
     <dt data-sn-text="m.pgp_fingerprint()"></dt>
     <dd><code class="key-fingerprint" data-sn-text="fingerprintText(fingerprint)"></code></dd>
     <dt data-sn-text="m.pgp_keyUserIds()"></dt>
     <dd>
       <template data-sn-for="uid in userIds" data-sn-key="uid"><div data-sn-text="uid"></div></template>
-      <template data-sn-else><span data-muted data-sn-text="m.pgp_noKeyEmail()"></span></template>
+      <template data-sn-else><span data-tm-muted data-sn-text="m.pgp_noKeyEmail()"></span></template>
     </dd>
   </dl>
 </template>

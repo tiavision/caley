@@ -188,7 +188,7 @@ $phone: 639px;
   border-block-end: 1px solid var(--tm-border);
   padding-inline-start: calc(var(--tm-space-md) - 3px);
 
-  // The data-bar marks only the selected and the marked rows (below); unread rows have their dot and bold text.
+  // The data-tm-bar marks only the selected and the marked rows (below); unread rows have their dot and bold text.
   &:not([aria-current], [aria-pressed='true']) {
     border-inline-start-color: transparent;
   }
@@ -197,7 +197,7 @@ $phone: 639px;
     background: var(--tm-fill);
   }
 
-  // The selected and the marked rows show their data-bar in the accent color.
+  // The selected and the marked rows show their data-tm-bar in the accent color.
   &:is([aria-current], [aria-pressed='true']) {
     border-inline-start-color: var(--tm-accent);
   }
@@ -411,7 +411,7 @@ $phone: 639px;
   line-height: 1.5;
   overflow: hidden;
 
-  > [data-truncate] {
+  > [data-tm-truncate] {
     flex: 0 1 auto;
     min-inline-size: 0;
   }
@@ -657,7 +657,7 @@ $phone: 639px;
   // The overlay's z-index counts only inside <main>'s stacking context (its view-transition-name, app.scss), which
   // is below the rail's (z-index: 1 there, for its tooltips): while the overlay is open, the rail goes back below
   // <main>, so the overlay covers it as a whole-window reader.
-  body[data-shell]:has(.message-detail.is-open) > nav[data-rail] {
+  body[data-tm-shell]:has(.message-detail.is-open) > nav[data-tm-rail] {
     z-index: auto;
   }
 

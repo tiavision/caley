@@ -43,7 +43,7 @@ document.addEventListener('keydown', clickShortcut);
  * that does not swap). Its transition comes back once the next page is in (`sn-page`).
  */
 function closeDrawer(): void {
-  const rail = document.querySelector<HTMLElement>('body[data-shell] > nav[data-rail][popover]');
+  const rail = document.querySelector<HTMLElement>('body[data-tm-shell] > nav[data-tm-rail][popover]');
   if (!rail?.matches(':popover-open')) return;
   rail.style.transition = 'none';
   rail.hidePopover();
@@ -55,7 +55,7 @@ window.addEventListener('pageswap', closeDrawer);
   if (to && new URL(to).pathname !== location.pathname) closeDrawer();
 });
 document.addEventListener('sn-page', () => {
-  document.querySelector<HTMLElement>('body[data-shell] > nav[data-rail]')?.style.removeProperty('transition');
+  document.querySelector<HTMLElement>('body[data-tm-shell] > nav[data-tm-rail]')?.style.removeProperty('transition');
 });
 
 /**

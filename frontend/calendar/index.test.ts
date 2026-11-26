@@ -159,7 +159,7 @@ test('leaving the page is refused while the open event form has been edited, wit
   const { root, settle, flush } = await show();
   const leave = async () => {
     const click = new MouseEvent('click', { bubbles: true, cancelable: true });
-    root.querySelector('nav[data-rail] a[href$="/mail/"]')!.dispatchEvent(click);
+    root.querySelector('nav[data-tm-rail] a[href$="/mail/"]')!.dispatchEvent(click);
     await settle();
     return click.defaultPrevented;
   };
@@ -202,7 +202,7 @@ test('an event from a mail opens its conversation', async () => {
   });
   root.querySelector<HTMLButtonElement>('.week .event-trigger')!.click();
   await settle();
-  root.querySelector<HTMLButtonElement>('#event-detail button[data-icon="list-tree"]')!.click();
+  root.querySelector<HTMLButtonElement>('#event-detail button[data-tm-icon="list-tree"]')!.click();
   await settle();
   await flush();
   const dialog = root.querySelector<HTMLDialogElement>('#thread-dialog')!;

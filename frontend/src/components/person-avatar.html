@@ -1,0 +1,11 @@
+<!--
+  person-avatar: temper's round avatar (data-tm-avatar) for a person: the photo when there is one, else up to two
+  initials on one of temper's twelve seeded gradients (data-tm-seed, expressive.css), chosen from the name, so a
+  person keeps their colour on every page.
+  <person-avatar data-sn-with="{ name: c.fn_name, src: c.has_photo ? contactPhotoUrl(c) : null, size: 'lg' }"></person-avatar>
+  `size`: temper's data-tm-size (sm, md, lg), or xl (4.5rem, a profile header); `halo`: temper's glow. Hidden from
+  screen readers: the name it pictures is beside it.
+-->
+<template data-sn-props="{ name: string; src?: string | null; size?: 'sm' | 'md' | 'lg' | 'xl'; halo?: boolean }"><span data-tm-avatar aria-hidden="true"
+  data-sn-attr="{ 'data-tm-seed': avatarSeed(name), 'data-tm-size': size && size !== 'xl' ? size : null, 'data-tm-halo': halo ? '' : null }"
+  data-sn-style="{ '--tm-avatar-size': size === 'xl' ? '4.5rem' : null }"><template data-sn-if="src"><img alt="" loading="lazy" decoding="async" data-sn-attr="{ src }"></template><template data-sn-else><span data-sn-text="initials(name)"></span></template></span></template>

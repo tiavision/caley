@@ -1,7 +1,7 @@
 // Contacts page (contacts/index.html).
 
 // The bar while a list already shown reloads: over the toolbar's bottom edge, so nothing moves (the toolbar is
-// sticky, temper's data-sticky, which positions it).
+// sticky, temper's data-tm-sticky, which positions it).
 .contacts-progress {
   position: absolute;
   inset-inline: 0;

@@ -58,12 +58,12 @@ a.mail-attachment-chip:hover {
 // <main> (later in the page) painted over everything in the rail: the collapsed rail's tooltips (its links' ::after)
 // were hidden behind the content. The rail (sticky, so positioned) goes above it; on phones it is a popover drawer in
 // the top layer anyway.
-body[data-shell] > nav[data-rail] {
+body[data-tm-shell] > nav[data-tm-rail] {
   view-transition-name: nav-rail;
   z-index: 1;
 }
 
-body[data-shell] > main {
+body[data-tm-shell] > main {
   view-transition-name: page;
 }
 
@@ -107,7 +107,7 @@ body[data-shell] > main {
   }
 }
 
-[data-rail]:has([data-rail-collapse]:checked) .nav-brand {
+[data-tm-rail]:has([data-tm-rail-collapse]:checked) .nav-brand {
   justify-content: center;
   padding-inline: 0;
 }
@@ -117,12 +117,12 @@ body[data-shell] > main {
 // next to it keeps its width; the toggle is hidden there, it could not expand it. These are temper's collapsed-rail
 // rules (app.css, feedback.css for the tooltips) under that condition, so temper check's TM208 on the badge is expected.
 @media (width >= 48rem) and (height < 30rem) {
-  [data-rail] {
+  [data-tm-rail] {
     --_w: var(--tm-rail-width-collapsed, calc(var(--tm-control-h) + 2 * var(--tm-space-sm) + 1px));
 
-    :where(a, button) > span:not([data-badge]),
-    [data-rail-label],
-    [data-rail-collapse] {
+    :where(a, button) > span:not([data-tm-badge]),
+    [data-tm-rail-label],
+    [data-tm-rail-collapse] {
       display: none;
     }
 
@@ -132,8 +132,8 @@ body[data-shell] > main {
       gap: var(--tm-space-xs);
     }
 
-    :where(a, button):has(> [data-badge]) { position: relative; }
-    :where(a, button) > [data-badge] {
+    :where(a, button):has(> [data-tm-badge]) { position: relative; }
+    :where(a, button) > [data-tm-badge] {
       position: absolute;
       inset-block-start: 0.3rem;
       inset-inline-end: 0.3rem;
@@ -144,7 +144,7 @@ body[data-shell] > main {
       font-size: 0;
     }
 
-    [data-tooltip]::after { display: inline; }
+    [data-tm-tooltip]::after { display: inline; }
 
     .nav-brand {
       justify-content: center;

@@ -4,36 +4,36 @@
      New-mail notifications: <email-notifier> (src/components/email-notifier.ts) shows the `new_email` events of the
      rail's own <sn-sync>; a page's <sn-sync> for the same URL shares its connection. /mail/ shows its own notifications. -->
 <template data-sn-props="{ here: string }">
-  <nav data-rail popover id="nav" data-sn-permanent="rail" data-sn-attr="{'aria-label': m.nav_label()}" data-sn-state="{ collapsed: false }">
+  <nav data-tm-rail popover id="nav" data-sn-permanent="rail" data-sn-attr="{'aria-label': m.nav_label()}" data-sn-state="{ collapsed: false }">
     <sn-resource name="notifications" call="notify.status()"></sn-resource>
     <sn-sync src="/events/stream"></sn-sync>
     <header>
       <a href="/" class="nav-brand" data-sn-attr="{'aria-label': m.app_brand()}">
         <img src="/icons/favicon-48x48.png" alt="">
-        <span data-rail-label data-sn-text="m.app_brand()"></span>
+        <span data-tm-rail-label data-sn-text="m.app_brand()"></span>
       </a>
-      <input type="checkbox" data-rail-collapse data-sn-attr="{'aria-label': m.nav_collapse()}"
+      <input type="checkbox" data-tm-rail-collapse data-sn-attr="{'aria-label': m.nav_collapse()}"
              data-sn-model="collapsed" data-sn-persist="nav-collapsed">
     </header>
-    <a href="/mail/" data-icon="mail" data-sn-attr="{'aria-current': here === '/mail/' ? 'page' : null, 'data-tooltip': m.nav_mail()}"><span data-sn-text="m.nav_mail()"></span></a>
-    <a href="/calendar/" data-icon="calendar" data-sn-attr="{'aria-current': here === '/calendar/' ? 'page' : null, 'data-tooltip': m.nav_calendar()}"><span data-sn-text="m.nav_calendar()"></span></a>
-    <a href="/contacts/" data-icon="users" data-sn-attr="{'aria-current': here === '/contacts/' ? 'page' : null, 'data-tooltip': m.nav_contacts()}"><span data-sn-text="m.nav_contacts()"></span></a>
-    <a href="/search/" data-icon="search" data-sn-attr="{'aria-current': here === '/search/' ? 'page' : null, 'data-tooltip': m.nav_search()}"><span data-sn-text="m.nav_search()"></span></a>
+    <a href="/mail/" data-tm-icon="mail" data-sn-attr="{'aria-current': here === '/mail/' ? 'page' : null, 'data-tm-tooltip': m.nav_mail()}"><span data-sn-text="m.nav_mail()"></span></a>
+    <a href="/calendar/" data-tm-icon="calendar" data-sn-attr="{'aria-current': here === '/calendar/' ? 'page' : null, 'data-tm-tooltip': m.nav_calendar()}"><span data-sn-text="m.nav_calendar()"></span></a>
+    <a href="/contacts/" data-tm-icon="users" data-sn-attr="{'aria-current': here === '/contacts/' ? 'page' : null, 'data-tm-tooltip': m.nav_contacts()}"><span data-sn-text="m.nav_contacts()"></span></a>
+    <a href="/search/" data-tm-icon="search" data-sn-attr="{'aria-current': here === '/search/' ? 'page' : null, 'data-tm-tooltip': m.nav_search()}"><span data-sn-text="m.nav_search()"></span></a>
     <footer>
       <template data-sn-if="user?.display_name">
-        <span data-caption data-rail-label data-truncate data-sn-text="user.display_name"></span>
+        <span data-tm-caption data-tm-rail-label data-tm-truncate data-sn-text="user.display_name"></span>
       </template>
       <template data-sn-if="notifications?.supported">
-        <button type="button" data-icon="bell"
+        <button type="button" data-tm-icon="bell"
                 data-sn-call="notify.toggle(notifications)" data-sn-then="upsert(notifications, $result)"
                 data-sn-attr="{
                   disabled: notifications.permission === 'denied',
                   'aria-pressed': notifications.enabled ? 'true' : 'false',
-                  'data-tooltip': notifications.permission === 'denied' ? m.mail_notificationsBlocked() : m.mail_notifications(),
+                  'data-tm-tooltip': notifications.permission === 'denied' ? m.mail_notificationsBlocked() : m.mail_notifications(),
                 }"><span data-sn-text="m.mail_notifications()"></span></button>
       </template>
-      <a href="/settings/" data-icon="settings" data-sn-attr="{'aria-current': here === '/settings/' ? 'page' : null, 'data-tooltip': m.nav_settings()}"><span data-sn-text="m.nav_settings()"></span></a>
-      <a href="/logout" data-icon="log-out" data-sn-attr="{'data-tooltip': m.nav_logout()}"><span data-sn-text="m.nav_logout()"></span></a>
+      <a href="/settings/" data-tm-icon="settings" data-sn-attr="{'aria-current': here === '/settings/' ? 'page' : null, 'data-tm-tooltip': m.nav_settings()}"><span data-sn-text="m.nav_settings()"></span></a>
+      <a href="/logout" data-tm-icon="log-out" data-sn-attr="{'data-tm-tooltip': m.nav_logout()}"><span data-sn-text="m.nav_logout()"></span></a>
     </footer>
     <template data-sn-if="notifications?.enabled && here !== '/mail/'">
       <email-notifier></email-notifier>

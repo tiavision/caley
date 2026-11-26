@@ -112,7 +112,7 @@ test('shows the first inbox with its unread count, then opens a message in the r
   const marks = () => requests.calls.filter((c) => c.method === 'PATCH').map((c) => c.body);
   expect(subjects(root)).toEqual(['Third', 'Second', 'First']);
   expect(root.querySelector('.message-list-header h2')!.textContent).toBe('Inbox');
-  expect(root.querySelector('.sidebar-item[aria-current] [data-badge]')!.textContent).toBe('1');
+  expect(root.querySelector('.sidebar-item[aria-current] [data-tm-badge]')!.textContent).toBe('1');
   expect(rows(root)[0].classList.contains('unread')).toBe(true);
 
   rows(root)[0].click();
@@ -128,7 +128,7 @@ test('shows the first inbox with its unread count, then opens a message in the r
   expect(rows(root)[0].getAttribute('aria-current')).toBe('true');
   expect(marks()).toEqual([{ account_id: 'work', mailbox: 'INBOX', uid: 3, flags: ['\\Seen'], set: true }]);
 
-  expect(root.querySelector('[id^="message-actions-"] button[data-icon="mail"] > span')!.textContent).toBe(m.mail_markUnread());   // the reader shows it read
+  expect(root.querySelector('[id^="message-actions-"] button[data-tm-icon="mail"] > span')!.textContent).toBe(m.mail_markUnread());   // the reader shows it read
   rows(root)[1].click();                                          // a read message is not marked
   await settle();
   expect(marks()).toHaveLength(1);
@@ -142,7 +142,7 @@ test('searches the folder with filters, and pages by cursor', async () => {
       return q.get('direction') === 'forward' && q.get('cursor_rowid') ? { messages: [], total: 3 } : { messages: inbox, total: 3 };
     },
   });
-  const search = root.querySelector<HTMLInputElement>('.message-list-header [data-field] > input[type=search]')!;
+  const search = root.querySelector<HTMLInputElement>('.message-list-header [data-tm-field] > input[type=search]')!;
   search.value = 'sec';
   search.dispatchEvent(new Event('input', { bubbles: true }));
   await advance(300);
@@ -160,7 +160,7 @@ test('a search page offers the next one only when the server says there are more
   let more = false;
   const { root, settle, advance } = await show({ 'GET /api/email/search': () => ({ messages: page, has_more: more }) });
   const next = () => root.querySelector<HTMLButtonElement>(`.pagination-bar button[aria-label="${m.mail_nextPageAria()}"]`)!;
-  const search = root.querySelector<HTMLInputElement>('.message-list-header [data-field] > input[type=search]')!;
+  const search = root.querySelector<HTMLInputElement>('.message-list-header [data-tm-field] > input[type=search]')!;
   search.value = 'hit';
   search.dispatchEvent(new Event('input', { bubbles: true }));
   await advance(300);
@@ -187,7 +187,7 @@ test('marks rows with Ctrl and Shift, and runs a bulk action in one request; the
   expect(rows(root).filter((x) => x.getAttribute('aria-pressed') === 'true')).toHaveLength(3);
   expect(root.querySelector('.message-detail h2')!.textContent).toBe('3 messages selected');
 
-  root.querySelector<HTMLButtonElement>('.bulk-menu button[data-icon="mail"]')!.click();
+  root.querySelector<HTMLButtonElement>('.bulk-menu button[data-tm-icon="mail"]')!.click();
   await settle();
   expect(requests.calls.at(-1)).toMatchObject({ method: 'PATCH', path: '/api/email/messages/flags' });
   expect(requests.calls.at(-1)!.body).toEqual({ messages: [ref(3), ref(2), ref(1)], flags: ['\\Seen'], set: false });
@@ -203,7 +203,7 @@ test('a bulk archive moves each message to its account\'s archive; the failed on
   r[0].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
   r[2].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
   await settle();
-  root.querySelector<HTMLButtonElement>('.bulk-menu button[data-icon="archive"]')!.click();
+  root.querySelector<HTMLButtonElement>('.bulk-menu button[data-tm-icon="archive"]')!.click();
   await settle();
   expect(requests.calls.at(-1)).toMatchObject({ method: 'POST', path: '/api/email/messages/move' });
   expect(requests.calls.at(-1)!.body).toEqual({ messages: [{ ...ref(3), dest_mailbox: 'Archive' }, { ...ref(1), dest_mailbox: 'Archive' }] });
@@ -217,7 +217,7 @@ test('a bulk delete that fails keeps every message marked, with the error', asyn
   r[0].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
   r[1].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
   await settle();
-  root.querySelector<HTMLButtonElement>('.bulk-menu button[data-icon="trash-2"]')!.click();
+  root.querySelector<HTMLButtonElement>('.bulk-menu button[data-tm-icon="trash-2"]')!.click();
   await settle();
   expect(requests.calls.at(-1)!.body).toEqual({ messages: [ref(3), ref(2)] });
   expect(rows(root).filter((x) => x.getAttribute('aria-pressed') === 'true')).toHaveLength(2);
@@ -265,10 +265,10 @@ test('the reader\'s star and read toggles stay on success; the list follows the 
   await settle();
   expect(rows(root)[1].querySelector('.flag-star')).not.toBeNull();
 
-  root.querySelector<HTMLButtonElement>('[id^="message-actions-"] button[data-icon="mail"]')!.click();
+  root.querySelector<HTMLButtonElement>('[id^="message-actions-"] button[data-tm-icon="mail"]')!.click();
   await settle();
   expect(patched()).toEqual({ account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Seen'], set: false });
-  expect(root.querySelector('[id^="message-actions-"] button[data-icon="mail"] > span')!.textContent).toBe(m.mail_markRead());
+  expect(root.querySelector('[id^="message-actions-"] button[data-tm-icon="mail"] > span')!.textContent).toBe(m.mail_markRead());
   stream.emit('email_updated', { account_id: 'work', mailbox: 'INBOX', uid: 2, flags: ['\\Flagged'] });
   await settle();
   expect(rows(root)[1].classList.contains('unread')).toBe(true);
@@ -290,11 +290,11 @@ test('selection mode (the Select button): taps mark rows without opening them, t
   const marked = () => rows(root).filter((x) => x.getAttribute('aria-pressed') === 'true').map((x) => x.querySelector('.subject')!.textContent);
   const detailOpen = () => root.querySelector('.message-detail')!.classList.contains('is-open');
   expect(root.querySelector('.selection-bar')).toBeNull();
-  root.querySelector<HTMLButtonElement>('.message-list-header button[data-icon="list-checks"]')!.click();
+  root.querySelector<HTMLButtonElement>('.message-list-header button[data-tm-icon="list-checks"]')!.click();
   await settle();
   expect(root.querySelector('.selection-row [role=status]')!.textContent).toBe(m.mail_selectPrompt());
   expect(root.querySelector('.pagination-bar')).toBeNull();
-  expect(root.querySelector<HTMLButtonElement>('.selection-bar button[data-icon="mail-open"]')!.disabled).toBe(true);
+  expect(root.querySelector<HTMLButtonElement>('.selection-bar button[data-tm-icon="mail-open"]')!.disabled).toBe(true);
 
   rows(root)[0].click();
   rows(root)[2].click();
@@ -302,16 +302,16 @@ test('selection mode (the Select button): taps mark rows without opening them, t
   expect(marked()).toEqual(['Third', 'First']);
   expect(opened).toEqual([]);
   expect(detailOpen()).toBe(false);                                // the list stays in view while marking
-  expect(root.querySelectorAll('.message-row [data-icon="square-check"]')).toHaveLength(2);
+  expect(root.querySelectorAll('.message-row [data-tm-icon="square-check"]')).toHaveLength(2);
   expect(root.querySelector('.selection-row [role=status]')!.textContent).toBe('2 messages selected');
   rows(root)[2].click();                                           // a second tap unmarks
   await settle();
   expect(marked()).toEqual(['Third']);
-  root.querySelector<HTMLButtonElement>('.selection-row button[data-icon="check-check"]')!.click();
+  root.querySelector<HTMLButtonElement>('.selection-row button[data-tm-icon="check-check"]')!.click();
   await settle();
   expect(marked()).toEqual(['Third', 'Second', 'First']);
 
-  root.querySelector<HTMLButtonElement>('.selection-bar button[data-icon="mail-open"]')!.click();
+  root.querySelector<HTMLButtonElement>('.selection-bar button[data-tm-icon="mail-open"]')!.click();
   await settle();
   expect(requests.calls.at(-1)).toMatchObject({ method: 'PATCH', path: '/api/email/messages/flags' });
   expect(requests.calls.at(-1)!.body).toEqual({ messages: [ref(3), ref(2), ref(1)], flags: ['\\Seen'], set: true });
@@ -327,25 +327,25 @@ test('selection mode: More shows the whole bulk menu, its back arrow returns to 
   const { root, settle } = await show({ 'POST /api/email/messages/delete': { failed: [ref(2)] } });
   const marked = () => rows(root).filter((x) => x.getAttribute('aria-pressed') === 'true').map((x) => x.querySelector('.subject')!.textContent);
   const detailOpen = () => root.querySelector('.message-detail')!.classList.contains('is-open');
-  root.querySelector<HTMLButtonElement>('.message-list-header button[data-icon="list-checks"]')!.click();
+  root.querySelector<HTMLButtonElement>('.message-list-header button[data-tm-icon="list-checks"]')!.click();
   await settle();
   rows(root)[0].click();
   rows(root)[1].click();
   await settle();
-  root.querySelector<HTMLButtonElement>('.selection-bar button[data-icon="ellipsis"]')!.click();
+  root.querySelector<HTMLButtonElement>('.selection-bar button[data-tm-icon="ellipsis"]')!.click();
   await settle();
   expect(detailOpen()).toBe(true);
   expect(root.querySelector('.message-detail h2')!.textContent).toBe('2 messages selected');
-  root.querySelector<HTMLButtonElement>('.message-detail .detail-header button[data-icon="arrow-left"]')!.click();
+  root.querySelector<HTMLButtonElement>('.message-detail .detail-header button[data-tm-icon="arrow-left"]')!.click();
   await settle();
   expect(detailOpen()).toBe(false);
   expect(marked()).toEqual(['Third', 'Second']);
 
-  root.querySelector<HTMLButtonElement>('.selection-bar button[data-icon="trash-2"]')!.click();
+  root.querySelector<HTMLButtonElement>('.selection-bar button[data-tm-icon="trash-2"]')!.click();
   await settle();
   expect(marked()).toEqual(['Second']);
   expect(root.querySelector('.selection-bar [role=alert]')!.textContent).toBe(m.mail_bulkActionError());
-  root.querySelector<HTMLButtonElement>('.selection-row button[data-icon="x"]')!.click();   // Cancel
+  root.querySelector<HTMLButtonElement>('.selection-row button[data-tm-icon="x"]')!.click();   // Cancel
   await settle();
   expect(marked()).toEqual([]);
   expect(root.querySelector('.selection-row')).toBeNull();
@@ -451,7 +451,7 @@ test('the folder dialog creates a folder and saves an edited one, each with one 
   expect(await save('followup-New')).toEqual({ folder_id: null, display_name: 'followup-New', rules: [{ account_id: null, mailbox_pattern: null }], only_flagged: false, only_attachments: false });
   expect(root.querySelector<HTMLDialogElement>('#email-folder')!.open).toBe(false);
 
-  root.querySelector<HTMLButtonElement>('button[data-icon="pencil"]')!.click();
+  root.querySelector<HTMLButtonElement>('button[data-tm-icon="pencil"]')!.click();
   await settle();
   expect(await save('followup-Renamed')).toMatchObject({ folder_id: 'f1', display_name: 'followup-Renamed' });
   expect(requests.calls.some((c) => c.method === 'PUT')).toBe(false);
@@ -505,7 +505,7 @@ test('an HTML body is part of the page (sinter-mail): its images through the pro
     '/api/email/proxy-image?account_id=work&mailbox=INBOX&uid=3&cid=part1%40x',
   ]);
   const notice = root.querySelector('.reader .images-notice')!;
-  notice.querySelector<HTMLButtonElement>('[data-join] > button')!.click();
+  notice.querySelector<HTMLButtonElement>('[data-tm-join] > button')!.click();
   await settle();
   expect(requests.calls.filter((c) => c.method === 'POST' && c.path === '/api/email/image-origins').map((c) => c.body)).toEqual([{ origin: 'https://img.example' }]);
   expect(srcs()[0]).toBe('/api/email/proxy-image?v=1&url=https%3A%2F%2Fimg.example%2Fa.png');
@@ -541,7 +541,7 @@ test('the body\'s parts in order: a signed part marked, an encrypted part from i
   rows(root)[0].click();
   await settle();
   const parts = () => [...root.querySelectorAll('.reader .mail-part')];
-  expect(parts().map((p) => p.querySelector('[data-badge]')?.textContent ?? '')).toEqual([m.pgp_badgeSignedPart(), '']);
+  expect(parts().map((p) => p.querySelector('[data-tm-badge]')?.textContent ?? '')).toEqual([m.pgp_badgeSignedPart(), '']);
   expect(parts()[0].querySelector('.body-text')!.textContent).toBe('My own words');
   expect(parts()[0].textContent).not.toContain(m.pgp_unlockToRead());   // a text part is only its text
   expect(parts()[1].textContent).toContain(m.pgp_encryptedPart());
@@ -580,7 +580,7 @@ test('removing the open virtual folder drops it and goes back to the inbox', asy
   [...root.querySelectorAll<HTMLButtonElement>('.sidebar-item')].find((b) => b.textContent!.includes('followup-Folder'))!.click();
   await settle();
   expect(root.querySelector('.message-list-header h2')!.textContent).toBe('followup-Folder');
-  root.querySelector<HTMLButtonElement>(`button[aria-label="${m.mail_removeAttachment()}"][data-icon="x"]`)!.click();
+  root.querySelector<HTMLButtonElement>(`button[aria-label="${m.mail_removeAttachment()}"][data-tm-icon="x"]`)!.click();
   await settle();
   expect(folderItems(root)).toEqual([]);
   expect(root.querySelector('.message-list-header h2')!.textContent).toBe('Inbox');
@@ -588,7 +588,7 @@ test('removing the open virtual folder drops it and goes back to the inbox', asy
 
 test('a failed folder removal brings it back', async () => {
   const { root, settle } = await show({ 'GET /api/email/folders': { folders: [folderRow] }, 'DELETE /api/email/folder': { status: 500 } });
-  root.querySelector<HTMLButtonElement>(`button[aria-label="${m.mail_removeAttachment()}"][data-icon="x"]`)!.click();
+  root.querySelector<HTMLButtonElement>(`button[aria-label="${m.mail_removeAttachment()}"][data-tm-icon="x"]`)!.click();
   await settle();
   expect(folderItems(root)).toEqual(['followup-Folder']);
 });
@@ -643,7 +643,7 @@ test('a message verified for another sender than the server\'s From shows the ch
   rows(root)[2].click();
   await settle();
   const meta = root.querySelector('.detail-meta')!;
-  expect(meta.querySelector('.meta-line [data-truncate]')!.textContent).toBe('Alice <alice@x>');
+  expect(meta.querySelector('.meta-line [data-tm-truncate]')!.textContent).toBe('Alice <alice@x>');
   expect(root.querySelector('.detail-body')!.textContent).toContain(m.pgp_badgeFromDiffers());
   meta.querySelector<HTMLButtonElement>('.meta-primary')!.click();
   await settle();
@@ -742,7 +742,7 @@ test('leaving the page is refused while the open draft has been edited, with a n
   const dialog = root.querySelector<HTMLDialogElement>('#email-compose')!;
   const leave = async () => {
     const click = new MouseEvent('click', { bubbles: true, cancelable: true });
-    root.querySelector('nav[data-rail] a[href$="/calendar/"]')!.dispatchEvent(click);
+    root.querySelector('nav[data-tm-rail] a[href$="/calendar/"]')!.dispatchEvent(click);
     await settle();
     return click.defaultPrevented;
   };
@@ -808,7 +808,7 @@ test('a calendar attachment opens the import dialog with its draft', async () =>
   root.querySelector<HTMLButtonElement>('.attachments button')!.click();
   await settle();
   expect(root.querySelector('.mail-attachment-chip')!.getAttribute('href')).toBe('/api/email/attachment?account_id=work&mailbox=INBOX&uid=1&filename=invite.ics');
-  root.querySelector<HTMLButtonElement>('.attachments button[data-icon="calendar-plus"]')!.click();
+  root.querySelector<HTMLButtonElement>('.attachments button[data-tm-icon="calendar-plus"]')!.click();
   await settle();
   expect(root.querySelector<HTMLDialogElement>('#import-ics')!.open).toBe(true);
 });
@@ -822,7 +822,7 @@ test('the thread button opens the conversation; a message in it opens in the rea
   });
   rows(root)[2].click();
   await settle();
-  root.querySelector<HTMLButtonElement>('.reader button[data-icon="list-tree"]')!.click();
+  root.querySelector<HTMLButtonElement>('.reader button[data-tm-icon="list-tree"]')!.click();
   await settle();
   const dialog = root.querySelector<HTMLDialogElement>('#thread-dialog')!;
   expect(dialog.open).toBe(true);
@@ -903,7 +903,7 @@ test('a message and a mailbox are history entries: Back returns to the message, 
 
 test('the search and its filters are in the URL; another mailbox drops them', async () => {
   const { root, settle, advance, url, requests } = await show({ 'GET /api/email/search': { messages: [msg(2, 'Second')] } });
-  const search = root.querySelector<HTMLInputElement>('.message-list-header [data-field] > input[type=search]')!;
+  const search = root.querySelector<HTMLInputElement>('.message-list-header [data-tm-field] > input[type=search]')!;
   search.value = 'sec';
   search.dispatchEvent(new Event('input', { bubbles: true }));
   await advance(300);

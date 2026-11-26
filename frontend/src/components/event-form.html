@@ -29,23 +29,23 @@
       </header>
 
       <template data-sn-if="eventError">
-        <div data-callout data-tone="danger" role="alert" data-sn-text="eventError"></div>
+        <div data-tm-callout data-tm-tone="danger" role="alert" data-sn-text="eventError"></div>
       </template>
 
       <template data-sn-if="draft">
-        <form data-layout="stack" data-gap="md"
+        <form data-tm-layout="stack" data-tm-gap="md"
               data-sn-post="/event" data-sn-encoding="form" data-sn-body="eventFormBody(draft)"
               data-sn-then="draft.mode === 'create' && emit('calendar-chosen', draft.cal); closeDialog(); emit('event-saved', draft)"
               data-sn-catch="eventError = $error.detail ?? m.event_error()">
           <label>
             <span data-sn-text="m.event_summary()"></span>
-            <div data-combo data-sn-let="{ hints: summaryHints ? summarySuggestions(draft.summary, $locale, $now) : [] }">
+            <div data-tm-combo data-sn-let="{ hints: summaryHints ? summarySuggestions(draft.summary, $locale, $now) : [] }">
               <input type="text" required autofocus data-sn-model="draft.summary" data-sn-options="event-summary-suggestions"
                      data-sn-attr="{'aria-expanded': hints.length > 0 ? 'true' : 'false'}"
                      data-sn-on-input="edited = true; summaryHints = true"
                      data-sn-on-sn-dismiss="summaryHints = false"
                      data-sn-on-blur="summaryHints = false">
-              <div data-menu role="listbox" id="event-summary-suggestions" data-sn-show="hints.length > 0">
+              <div data-tm-menu role="listbox" id="event-summary-suggestions" data-sn-show="hints.length > 0">
                 <template data-sn-for="(s, i) in hints" data-sn-key="i">
                   <div role="option" tabindex="-1" data-sn-text="s.label"
                        data-sn-on-click="draft = applySummarySuggestion(draft, s); summaryHints = false"></div>
@@ -54,18 +54,18 @@
             </div>
           </label>
 
-          <div data-layout="row" data-gap="md" data-align="end">
-            <label data-grow>
+          <div data-tm-layout="row" data-tm-gap="md" data-tm-align="end">
+            <label data-tm-grow>
               <span data-sn-text="m.event_date()"></span>
               <input type="date" required data-sn-model="draft.date">
             </label>
-            <label data-layout="row" data-gap="sm" data-wrap="none">
+            <label data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
               <input type="checkbox" role="switch" data-sn-model="draft.is_all_day">
               <span data-sn-text="m.event_allDay()"></span>
             </label>
           </div>
           <template data-sn-if="!draft.is_all_day">
-            <div data-layout="grid" data-gap="sm" style="--tm-min: 9rem">
+            <div data-tm-layout="grid" data-tm-gap="sm" style="--tm-min: 9rem">
               <label>
                 <span data-sn-text="m.event_startTime()"></span>
                 <input type="time" data-sn-model="draft.start_time"
@@ -88,10 +88,10 @@
             <textarea rows="3" data-sn-model="draft.description"></textarea>
           </label>
 
-          <fieldset data-layout="stack" data-gap="sm">
+          <fieldset data-tm-layout="stack" data-tm-gap="sm">
             <legend data-sn-text="m.event_reminder()"></legend>
             <template data-sn-for="(alarm, i) in draft.alarms">
-              <div data-layout="row" data-gap="sm">
+              <div data-tm-layout="row" data-tm-gap="sm">
                 <template data-sn-if="alarm.direction !== 'absolute'">
                   <input type="number" min="1" class="event-num" data-sn-attr="{'aria-label': m.event_reminder()}" data-sn-model="draft.alarms[i].value">
                   <select class="event-unit" data-sn-attr="{'aria-label': m.event_reminder()}" data-sn-model="draft.alarms[i].unit">
@@ -101,46 +101,46 @@
                   </select>
                 </template>
                 <template data-sn-else>
-                  <input type="datetime-local" data-grow data-sn-attr="{'aria-label': m.event_reminder()}" data-sn-model="draft.alarms[i].datetime">
+                  <input type="datetime-local" data-tm-grow data-sn-attr="{'aria-label': m.event_reminder()}" data-sn-model="draft.alarms[i].datetime">
                 </template>
-                <select data-grow data-sn-attr="{'aria-label': m.event_reminder()}" data-sn-model="draft.alarms[i].direction">
+                <select data-tm-grow data-sn-attr="{'aria-label': m.event_reminder()}" data-sn-model="draft.alarms[i].direction">
                   <option value="before-start" data-sn-text="m.event_reminderBeforeStart()"></option>
                   <option value="before-end" data-sn-text="m.event_reminderBeforeEnd()"></option>
                   <option value="after-start" data-sn-text="m.event_reminderAfterStart()"></option>
                   <option value="after-end" data-sn-text="m.event_reminderAfterEnd()"></option>
                   <option value="absolute" data-sn-text="m.event_reminderAtTime()"></option>
                 </select>
-                <button type="button" data-variant="ghost" data-icon="x" data-sn-attr="{'aria-label': m.event_reminderRemove()}"
+                <button type="button" data-tm-variant="ghost" data-tm-icon="x" data-sn-attr="{'aria-label': m.event_reminderRemove()}"
                         data-sn-on-click="draft.alarms.splice(i, 1)"></button>
               </div>
             </template>
-            <button type="button" data-variant="secondary" data-size="sm" data-icon="plus" data-self="start"
+            <button type="button" data-tm-variant="secondary" data-tm-size="sm" data-tm-icon="plus" data-tm-self="start"
                     data-sn-on-click="draft.alarms.push(newAlarm())" data-sn-text="m.event_reminderAdd()"></button>
           </fieldset>
 
-          <fieldset data-layout="stack" data-gap="sm">
+          <fieldset data-tm-layout="stack" data-tm-gap="sm">
             <legend data-sn-text="m.event_attendees()"></legend>
             <template data-sn-for="(att, i) in draft.attendees">
-              <div data-layout="row" data-gap="sm" style="--tm-grow-basis: 6rem"
+              <div data-tm-layout="row" data-tm-gap="sm" style="--tm-grow-basis: 6rem"
                    data-sn-let="{ hits: attendeeRow === i ? attendeeSuggestions(attendeeContacts, attendeeQuery) : [] }">
-                <div data-combo data-grow>
+                <div data-tm-combo data-tm-grow>
                   <input type="text" data-sn-options data-sn-model="draft.attendees[i].cn"
                          data-sn-attr="{placeholder: m.event_attendeeName(), 'aria-label': m.event_attendeeName(), 'aria-expanded': hits.length > 0 ? 'true' : 'false'}"
                          data-sn-on-input="edited = true; attendeeRow = i; attendeeQuery = $el.value"
                          data-sn-on-sn-dismiss="attendeeRow = -1" data-sn-on-blur="attendeeRow = -1">
-                  <div data-menu role="listbox" data-sn-show="hits.length > 0">
+                  <div data-tm-menu role="listbox" data-sn-show="hits.length > 0">
                     <template data-sn-for="(s, j) in hits" data-sn-key="j">
                       <div role="option" tabindex="-1" data-sn-text="attendeeLabel(s)"
                            data-sn-on-click="draft.attendees[i].cn = s.cn; draft.attendees[i].email = s.email; attendeeRow = -1"></div>
                     </template>
                   </div>
                 </div>
-                <div data-combo data-grow class="event-attendee-email">
+                <div data-tm-combo data-tm-grow class="event-attendee-email">
                   <input type="email" data-sn-options data-sn-model="draft.attendees[i].email"
                          data-sn-attr="{placeholder: m.event_attendeeEmail(), 'aria-label': m.event_attendeeEmail(), 'aria-expanded': hits.length > 0 ? 'true' : 'false'}"
                          data-sn-on-input="edited = true; attendeeRow = i; attendeeQuery = $el.value"
                          data-sn-on-sn-dismiss="attendeeRow = -1" data-sn-on-blur="attendeeRow = -1">
-                  <div data-menu role="listbox" data-sn-show="hits.length > 0">
+                  <div data-tm-menu role="listbox" data-sn-show="hits.length > 0">
                     <template data-sn-for="(s, j) in hits" data-sn-key="j">
                       <div role="option" tabindex="-1" data-sn-text="attendeeLabel(s)"
                            data-sn-on-click="draft.attendees[i].cn = s.cn; draft.attendees[i].email = s.email; attendeeRow = -1"></div>
@@ -153,11 +153,11 @@
                   <option value="DECLINED" data-sn-text="m.event_attendeeStatusDeclined()"></option>
                   <option value="TENTATIVE" data-sn-text="m.event_attendeeStatusTentative()"></option>
                 </select>
-                <button type="button" data-variant="ghost" data-icon="x" data-sn-attr="{'aria-label': m.event_attendeeRemove()}"
+                <button type="button" data-tm-variant="ghost" data-tm-icon="x" data-sn-attr="{'aria-label': m.event_attendeeRemove()}"
                         data-sn-on-click="draft.attendees.splice(i, 1); attendeeRow = -1"></button>
               </div>
             </template>
-            <button type="button" data-variant="secondary" data-size="sm" data-icon="plus" data-self="start"
+            <button type="button" data-tm-variant="secondary" data-tm-size="sm" data-tm-icon="plus" data-tm-self="start"
                     data-sn-on-click="draft.attendees.push(newAttendee())" data-sn-text="m.event_attendeeAdd()"></button>
           </fieldset>
 
@@ -175,14 +175,14 @@
             </label>
           </template>
           <template data-sn-else>
-            <small data-muted data-sn-text="m.event_repeatInstanceNote()"></small>
+            <small data-tm-muted data-sn-text="m.event_repeatInstanceNote()"></small>
           </template>
 
           <template data-sn-if="draft.rec.freq">
-            <div data-layout="stack" data-gap="md">
+            <div data-tm-layout="stack" data-tm-gap="md">
               <fieldset>
                 <legend data-sn-text="m.event_repeatEvery()"></legend>
-                <div data-layout="row" data-gap="sm" data-wrap="none">
+                <div data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
                   <input type="number" min="1" class="event-num" data-sn-attr="{'aria-label': m.event_repeatEvery()}" data-sn-model="draft.rec.interval">
                   <span data-sn-text="intervalUnit(draft.rec.freq)"></span>
                 </div>
@@ -191,9 +191,9 @@
               <template data-sn-if="draft.rec.freq === 'WEEKLY'">
                 <fieldset>
                   <legend data-sn-text="m.event_repeatOn()"></legend>
-                  <div data-layout="row" data-gap="xs">
+                  <div data-tm-layout="row" data-tm-gap="xs">
                     <template data-sn-for="d in weekdays()" data-sn-key="d.code">
-                      <button type="button" data-variant="outline" data-size="sm"
+                      <button type="button" data-tm-variant="outline" data-tm-size="sm"
                               data-sn-attr="{'aria-pressed': draft.rec.by_day.includes(d.code) ? 'true' : 'false'}"
                               data-sn-on-click="draft.rec.by_day = toggled(draft.rec.by_day, d.code)"
                               data-sn-text="d.label"></button>
@@ -205,12 +205,12 @@
               <template data-sn-if="draft.rec.freq === 'MONTHLY'">
                 <fieldset>
                   <legend data-sn-text="m.event_repeatOn()"></legend>
-                  <div data-layout="row" data-gap="sm">
+                  <div data-tm-layout="row" data-tm-gap="sm">
                     <label><input type="radio" name="monthly_mode" value="by_day" data-sn-model="draft.rec.monthly_mode"> <span data-sn-text="m.event_monthlyByDay()"></span></label>
                     <input type="number" min="1" max="31" class="event-num" data-sn-model="draft.rec.monthday"
                            data-sn-attr="{'aria-label': m.event_monthlyByDay(), disabled: draft.rec.monthly_mode !== 'by_day'}">
                   </div>
-                  <div data-layout="row" data-gap="sm">
+                  <div data-tm-layout="row" data-tm-gap="sm">
                     <label><input type="radio" name="monthly_mode" value="by_setpos" data-sn-model="draft.rec.monthly_mode"> <span data-sn-text="m.event_monthlyByPos()"></span></label>
                     <select data-sn-model="draft.rec.setpos"
                             data-sn-attr="{'aria-label': m.event_monthlyByPos(), disabled: draft.rec.monthly_mode !== 'by_setpos'}">
@@ -233,15 +233,15 @@
               <fieldset>
                 <legend data-sn-text="m.event_repeatEnd()"></legend>
                 <label><input type="radio" name="rrule_end_type" value="never" data-sn-model="draft.rec.end_type"> <span data-sn-text="m.event_repeatEndNever()"></span></label>
-                <div data-layout="row" data-gap="sm">
+                <div data-tm-layout="row" data-tm-gap="sm">
                   <label><input type="radio" name="rrule_end_type" value="count" data-sn-model="draft.rec.end_type"> <span data-sn-text="m.event_repeatEndAfter()"></span></label>
                   <input type="number" min="1" class="event-num" data-sn-model="draft.rec.count"
                          data-sn-attr="{'aria-label': m.event_repeatEndAfterN(), disabled: draft.rec.end_type !== 'count'}">
                   <span data-sn-text="m.event_repeatEndAfterN()"></span>
                 </div>
-                <div data-layout="row" data-gap="sm">
+                <div data-tm-layout="row" data-tm-gap="sm">
                   <label><input type="radio" name="rrule_end_type" value="until" data-sn-model="draft.rec.end_type"> <span data-sn-text="m.event_repeatEndOn()"></span></label>
-                  <input type="date" data-grow data-sn-model="draft.rec.until"
+                  <input type="date" data-tm-grow data-sn-model="draft.rec.until"
                          data-sn-attr="{'aria-label': m.event_repeatEndOn(), disabled: draft.rec.end_type !== 'until'}">
                 </div>
               </fieldset>
@@ -262,17 +262,17 @@
             </select>
           </label>
 
-          <footer data-layout="row" data-gap="sm">
+          <footer data-tm-layout="row" data-tm-gap="sm">
             <template data-sn-if="draft.mode === 'edit'">
-              <button type="button" data-variant="ghost" data-tone="danger" data-icon="trash-2"
+              <button type="button" data-tm-variant="ghost" data-tm-tone="danger" data-tm-icon="trash-2"
                       data-sn-delete="/event?account_id={draft.cal.split('\0')[0]}&uid={draft.uid}&calendar_href={draft.cal.split('\0')[1]}&scope={draft.scope === 'this_instance' && draft.original_dtstart ? 'this_instance' : null}&original_dtstart={draft.scope === 'this_instance' && draft.original_dtstart ? draft.original_dtstart : null}&tz={draft.scope === 'this_instance' && draft.original_dtstart ? draft.original_tz : null}"
                       data-sn-confirm="m.event_deleteConfirm()"
                       data-sn-then="closeDialog('event-form'); emit('event-deleted', draft)"
                       data-sn-catch="eventError = $error.detail ?? m.event_error()"
                       data-sn-text="m.event_delete()"></button>
-              <span data-grow></span>
+              <span data-tm-grow></span>
             </template>
-            <button type="button" data-variant="ghost" commandfor="event-form" command="close" data-sn-text="m.event_cancel()"></button>
+            <button type="button" data-tm-variant="ghost" commandfor="event-form" command="close" data-sn-text="m.event_cancel()"></button>
             <button type="submit" data-sn-text="m.event_save()"></button>
           </footer>
         </form>

@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en" data-pt-pairing="editorial">
+<html lang="en" data-tm-pairing="editorial">
   <head>
     <app-head></app-head>
   </head>
-  <body data-pt-surface="mesh" data-pt-grain data-sn-state="{ error: '', saving: false }">
+  <body data-tm-surface="mesh" data-tm-grain data-sn-state="{ error: '', saving: false }">
     <!-- Signed out, /api/user answers 401, which src/sinter.config.ts turns into `null` on this page. Signed in, the
          server redirects `/` before this page is sent; on the Vite dev server, which cannot, `then` goes to the calendar. -->
     <sn-resource name="user" src="/user"
@@ -11,43 +11,43 @@
     <sn-resource name="authConfig" src="/auth/config"></sn-resource>
 
     <!-- The language picker in the page's corner; the column below is the logo, the name, the sign-in card and what
-         Caley does. The page wears patina (../patina): a mesh with grain, the name in the editorial display face, the
+         Caley does. The page wears temper's expressive.css: a mesh with grain, the name in the editorial display face, the
          card in glass, the features in a bento grid. -->
-    <header class="login-lang" data-layout="row" data-gap="sm" data-wrap="none" data-justify="end" data-pad="md">
-      <span data-icon="globe" data-muted></span>
+    <header class="login-lang" data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none" data-tm-justify="end" data-tm-pad="md">
+      <span data-tm-icon="globe" data-tm-muted></span>
       <!-- each language is its own page: choosing one goes there (src/islands/common.ts) -->
-      <select data-size="sm" data-sn-attr="{'aria-label': m.settings_language()}" data-locale-switch>
+      <select data-tm-size="sm" data-sn-attr="{'aria-label': m.settings_language()}" data-locale-switch>
         <option data-sn-attr="{ value: localeUrl('en'), selected: $locale === 'en' }">English</option>
         <option data-sn-attr="{ value: localeUrl('de'), selected: $locale === 'de' }">Deutsch</option>
       </select>
     </header>
 
-    <main class="login" data-layout="center" data-gap="xl" data-pad="lg" style="--tm-measure: 56rem"
+    <main class="login" data-tm-layout="center" data-tm-gap="xl" data-tm-pad="lg" style="--tm-measure: 56rem"
           data-sn-let="{ ready: ($meta.user.loadedAt || $meta.user.error) && !user && ($meta.authConfig.loadedAt || $meta.authConfig.error) }">
-      <div data-pt-hero>
+      <div data-tm-hero>
         <img src="/icons/favicon-128x128.png" alt="" width="72" height="72">
-        <h1 data-pt-display="hero" data-pt-ink="gradient" data-sn-text="m.app_brand()"></h1>
-        <p data-muted data-sn-text="m.login_tagline()"></p>
+        <h1 data-tm-display="hero" data-tm-ink="gradient" data-sn-text="m.app_brand()"></h1>
+        <p data-tm-muted data-sn-text="m.login_tagline()"></p>
 
-        <div data-layout="center" style="--tm-measure: 24rem">
-          <article data-pt-surface="glass" data-pt-elevation="floating" data-layout="stack" data-gap="lg" data-pad="lg">
+        <div data-tm-layout="center" style="--tm-measure: 24rem">
+          <article data-tm-surface="glass" data-tm-elevation="floating" data-tm-layout="stack" data-tm-gap="lg" data-tm-pad="lg">
             <template data-sn-if="ready">
               <!-- The demo (DEMO_MODE) signs in without credentials, as its fixed user (backend/src/local_auth.rs). -->
               <template data-sn-if="authConfig.demo_mode">
-                <form data-layout="stack" data-gap="md"
+                <form data-tm-layout="stack" data-tm-gap="md"
                       data-sn-post="site:/auth/login" data-sn-encoding="form"
                       data-sn-on-submit="saving = true; error = ''"
                       data-sn-then="navigate(pagePath($result.redirect || '/calendar/'), { replace: true })"
                       data-sn-catch="saving = false; error = $error.detail ?? m.login_error()">
                   <template data-sn-if="error">
-                    <p data-callout data-tone="danger" role="alert" data-sn-text="error"></p>
+                    <p data-tm-callout data-tm-tone="danger" role="alert" data-sn-text="error"></p>
                   </template>
-                  <button type="submit" data-pt-halo data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.login_demo()"></button>
+                  <button type="submit" data-tm-halo data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.login_demo()"></button>
                 </form>
               </template>
 
               <template data-sn-if="authConfig.oidc_enabled">
-                <a href="/auth/oidc" role="button" data-pt-halo data-sn-text="m.login_oidc_button()"></a>
+                <a href="/auth/oidc" role="button" data-tm-halo data-sn-text="m.login_oidc_button()"></a>
               </template>
             </template>
             <template data-sn-else>
@@ -58,28 +58,28 @@
       </div>
 
       <!-- What Caley does: four tiles, the calendar's wide, each icon on a seeded gradient -->
-      <section data-layout="stack" data-gap="md">
-        <h2 data-sr-only data-sn-text="m.login_features()"></h2>
-        <ul data-layout="grid" data-pt-bento data-gap="md" style="--tm-min: 12rem; --pt-row: 9rem">
-          <li data-pt-surface="glass" data-pt-span="wide" data-layout="stack" data-gap="sm" data-pad="lg">
-            <span data-avatar data-pt-seed="4" data-size="lg" aria-hidden="true"><span data-icon="calendar"></span></span>
+      <section data-tm-layout="stack" data-tm-gap="md">
+        <h2 data-tm-sr-only data-sn-text="m.login_features()"></h2>
+        <ul data-tm-layout="grid" data-tm-bento data-tm-gap="md" style="--tm-min: 12rem; --tm-bento-row: 9rem">
+          <li data-tm-surface="glass" data-tm-span="wide" data-tm-layout="stack" data-tm-gap="sm" data-tm-pad="lg">
+            <span data-tm-avatar data-tm-seed="4" data-tm-size="lg" aria-hidden="true"><span data-tm-icon="calendar"></span></span>
             <h3 data-sn-text="m.login_feature_calendar()"></h3>
-            <p data-muted data-sn-text="m.login_feature_calendar_text()"></p>
+            <p data-tm-muted data-sn-text="m.login_feature_calendar_text()"></p>
           </li>
-          <li data-pt-surface="glass" data-layout="stack" data-gap="sm" data-pad="lg">
-            <span data-avatar data-pt-seed="7" data-size="lg" aria-hidden="true"><span data-icon="users"></span></span>
+          <li data-tm-surface="glass" data-tm-layout="stack" data-tm-gap="sm" data-tm-pad="lg">
+            <span data-tm-avatar data-tm-seed="7" data-tm-size="lg" aria-hidden="true"><span data-tm-icon="users"></span></span>
             <h3 data-sn-text="m.login_feature_contacts()"></h3>
-            <p data-muted data-sn-text="m.login_feature_contacts_text()"></p>
+            <p data-tm-muted data-sn-text="m.login_feature_contacts_text()"></p>
           </li>
-          <li data-pt-surface="glass" data-layout="stack" data-gap="sm" data-pad="lg">
-            <span data-avatar data-pt-seed="1" data-size="lg" aria-hidden="true"><span data-icon="mail"></span></span>
+          <li data-tm-surface="glass" data-tm-layout="stack" data-tm-gap="sm" data-tm-pad="lg">
+            <span data-tm-avatar data-tm-seed="1" data-tm-size="lg" aria-hidden="true"><span data-tm-icon="mail"></span></span>
             <h3 data-sn-text="m.login_feature_mail()"></h3>
-            <p data-muted data-sn-text="m.login_feature_mail_text()"></p>
+            <p data-tm-muted data-sn-text="m.login_feature_mail_text()"></p>
           </li>
-          <li data-pt-surface="glass" data-pt-span="wide" data-layout="stack" data-gap="sm" data-pad="lg">
-            <span data-avatar data-pt-seed="10" data-size="lg" aria-hidden="true"><span data-icon="lock"></span></span>
+          <li data-tm-surface="glass" data-tm-span="wide" data-tm-layout="stack" data-tm-gap="sm" data-tm-pad="lg">
+            <span data-tm-avatar data-tm-seed="10" data-tm-size="lg" aria-hidden="true"><span data-tm-icon="lock"></span></span>
             <h3 data-sn-text="m.login_feature_privacy()"></h3>
-            <p data-muted data-sn-text="m.login_feature_privacy_text()"></p>
+            <p data-tm-muted data-sn-text="m.login_feature_privacy_text()"></p>
           </li>
         </ul>
       </section>

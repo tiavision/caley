@@ -20,18 +20,18 @@
       </header>
       <div class="live-region" role="status">
         <template data-sn-if="imp?.success">
-          <div data-callout data-tone="success" data-sn-text="imp.success"></div>
+          <div data-tm-callout data-tm-tone="success" data-sn-text="imp.success"></div>
         </template>
       </div>
       <template data-sn-if="imp">
         <template data-sn-if="imp.error">
-          <div data-callout data-tone="danger" role="alert" data-sn-text="imp.error"></div>
+          <div data-tm-callout data-tm-tone="danger" role="alert" data-sn-text="imp.error"></div>
         </template>
         <template data-sn-if="imp.done">
           <close-after data-sn-with="{ ms: 1500 }"></close-after>
         </template>
 
-        <form data-layout="stack" data-gap="md"
+        <form data-tm-layout="stack" data-tm-gap="md"
               data-sn-call="ics.run(imp)"
               data-sn-on-submit="imp.error = ''; imp.success = ''"
               data-sn-then="imp.success = importSummary($result); imp.done = $result.errors === 0; emit('ics-imported', $result); refresh(caldavAccounts)"
@@ -43,9 +43,9 @@
           </label>
 
           <template data-sn-if="imp.file">
-            <div data-layout="row" data-gap="sm" data-wrap="none">
-              <small data-muted data-truncate data-grow data-sn-text="imp.file.name"></small>
-              <button type="button" data-variant="secondary" data-size="sm" data-sn-text="m.cal_importPreview()"
+            <div data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
+              <small data-tm-muted data-tm-truncate data-tm-grow data-sn-text="imp.file.name"></small>
+              <button type="button" data-tm-variant="secondary" data-tm-size="sm" data-sn-text="m.cal_importPreview()"
                       data-sn-call="ics.preview(imp.file)" data-sn-concurrency="block"
                       data-sn-on-click="imp.error = ''; imp.success = ''; imp.preview = []"
                       data-sn-then="imp.preview = $result"
@@ -54,14 +54,14 @@
           </template>
 
           <template data-sn-if="imp.preview.length > 0">
-            <section data-layout="stack" data-gap="sm">
+            <section data-tm-layout="stack" data-tm-gap="sm">
               <h3 data-sn-text="m.cal_importPreviewHeading()"></h3>
-              <ul data-list>
+              <ul data-tm-list>
                 <template data-sn-for="event in imp.preview" data-sn-key="event.uid">
-                  <li data-layout="stack" data-gap="none">
+                  <li data-tm-layout="stack" data-tm-gap="none">
                     <strong data-sn-text="event.summary || m.cal_importUntitledEvent()"></strong>
-                    <small data-muted data-sn-text="importEventDate(event)"></small>
-                    <template data-sn-if="event.location"><small data-muted data-sn-text="event.location"></small></template>
+                    <small data-tm-muted data-sn-text="importEventDate(event)"></small>
+                    <template data-sn-if="event.location"><small data-tm-muted data-sn-text="event.location"></small></template>
                   </li>
                 </template>
               </ul>
@@ -102,7 +102,7 @@
           </template>
 
           <footer>
-            <button type="button" data-variant="ghost" commandfor="import-ics" command="close" data-sn-text="m.event_cancel()"></button>
+            <button type="button" data-tm-variant="ghost" commandfor="import-ics" command="close" data-sn-text="m.event_cancel()"></button>
             <button type="submit" data-sn-text="m.cal_importSubmit()"></button>
           </footer>
         </form>
