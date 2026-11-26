@@ -30,9 +30,11 @@ DEMO_MODE backend: 1280 × 800 and 390 × 844, light and dark, reduced motion.
 | Phone, light | ![](screenshots/login-before-phone-light.png) | ![](screenshots/login-after-phone-light.png) |
 | Phone, dark | ![](screenshots/login-before-phone-dark.png) | ![](screenshots/login-after-phone-dark.png) |
 
-A mesh background with grain, the name in Fraunces (the `editorial` pairing) with gradient ink, the sign-in card in
-glass with a floating shadow and a haloed button, and what Caley does as a bento grid of glass tiles, each icon on a
-seeded gradient.
+Caley's lockup as in the rail, the tagline as the page's one display moment (Fraunces, the `editorial` pairing, at
+weight 500), the sign-in button on its own, and what Caley does as a plain row of four (a list on a phone), under a
+wash of the brand colour at the top. A first version (full-page mesh with grain, a gradient-ink "Caley", a glass
+card around the button, a bento of glass feature tiles) read as a generic landing page and was reworked in a design
+review.
 
 ### Contacts overview
 

@@ -7,7 +7,8 @@ body:has(> main.login) {
   min-block-size: 100dvh;
 }
 
+// centred in the rest of the screen, a little above the middle: the eye reads the optical centre higher
 main.login {
-  align-content: center;
-  padding-block-end: 8dvh;
+  justify-content: center;
+  padding-block-end: 4dvh;
 }

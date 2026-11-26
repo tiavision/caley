@@ -3,16 +3,16 @@
   <head>
     <app-head></app-head>
   </head>
-  <body data-tm-surface="mesh" data-tm-grain data-sn-state="{ error: '', saving: false }">
+  <body data-tm-surface="wash" data-sn-state="{ error: '', saving: false }">
     <!-- Signed out, /api/user answers 401, which src/sinter.config.ts turns into `null` on this page. Signed in, the
          server redirects `/` before this page is sent; on the Vite dev server, which cannot, `then` goes to the calendar. -->
     <sn-resource name="user" src="/user"
                  then="$result && navigate(pagePath('/calendar/'), { replace: true })"></sn-resource>
     <sn-resource name="authConfig" src="/auth/config"></sn-resource>
 
-    <!-- The language picker in the page's corner; the column below is the logo, the name, the sign-in card and what
-         Caley does. The page wears temper's expressive.css: a mesh with grain, the name in the editorial display face, the
-         card in glass, the features in a bento grid. -->
+    <!-- The language picker in the page's corner; the column below is Caley's lockup (as in the rail), the tagline,
+         the sign-in button and what Caley does. temper's expressive.css gives it a wash of the brand colour at the top,
+         as the app's pages have, and one display moment: the tagline in the editorial face. -->
     <header class="login-lang" data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none" data-tm-justify="end" data-tm-pad="md">
       <span data-tm-icon="globe" data-tm-muted></span>
       <!-- each language is its own page: choosing one goes there (src/islands/common.ts) -->
@@ -24,62 +24,73 @@
 
     <main class="login" data-tm-layout="center" data-tm-gap="xl" data-tm-pad="lg" style="--tm-measure: 56rem"
           data-sn-let="{ ready: ($meta.user.loadedAt || $meta.user.error) && !user && ($meta.authConfig.loadedAt || $meta.authConfig.error) }">
-      <div data-tm-hero>
-        <img src="/icons/favicon-128x128.png" alt="" width="72" height="72">
-        <h1 data-tm-display="hero" data-tm-ink="gradient" data-sn-text="m.app_brand()"></h1>
-        <p data-tm-muted data-sn-text="m.login_tagline()"></p>
+      <div data-tm-hero data-tm-pad="none" data-tm-layout="stack" data-tm-gap="xl" data-tm-align="center">
+        <div data-tm-layout="stack" data-tm-gap="lg" data-tm-align="center">
+          <div data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none" data-tm-justify="center">
+            <img src="/icons/favicon-128x128.png" alt="" width="40" height="40">
+            <h1 data-sn-text="m.app_brand()"></h1>
+          </div>
+          <p data-tm-display="xl" data-sn-text="m.login_tagline()"></p>
+        </div>
 
-        <div data-tm-layout="center" style="--tm-measure: 24rem">
-          <article data-tm-surface="glass" data-tm-elevation="floating" data-tm-layout="stack" data-tm-gap="lg" data-tm-pad="lg">
-            <template data-sn-if="ready">
-              <!-- The demo (DEMO_MODE) signs in without credentials, as its fixed user (backend/src/local_auth.rs). -->
-              <template data-sn-if="authConfig.demo_mode">
-                <form data-tm-layout="stack" data-tm-gap="md"
-                      data-sn-post="site:/auth/login" data-sn-encoding="form"
-                      data-sn-on-submit="saving = true; error = ''"
-                      data-sn-then="navigate(pagePath($result.redirect || '/calendar/'), { replace: true })"
-                      data-sn-catch="saving = false; error = $error.detail ?? m.login_error()">
-                  <template data-sn-if="error">
-                    <p data-tm-callout data-tm-tone="danger" role="alert" data-sn-text="error"></p>
-                  </template>
-                  <button type="submit" data-tm-halo data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.login_demo()"></button>
-                </form>
-              </template>
+        <div data-tm-layout="center" data-tm-pad="none" style="--tm-measure: 20rem">
+          <template data-sn-if="ready">
+            <!-- The demo (DEMO_MODE) signs in without credentials, as its fixed user (backend/src/local_auth.rs). -->
+            <template data-sn-if="authConfig.demo_mode">
+              <form data-tm-layout="stack" data-tm-gap="md"
+                    data-sn-post="site:/auth/login" data-sn-encoding="form"
+                    data-sn-on-submit="saving = true; error = ''"
+                    data-sn-then="navigate(pagePath($result.redirect || '/calendar/'), { replace: true })"
+                    data-sn-catch="saving = false; error = $error.detail ?? m.login_error()">
+                <template data-sn-if="error">
+                  <p data-tm-callout data-tm-tone="danger" role="alert" data-sn-text="error"></p>
+                </template>
+                <button type="submit" data-tm-size="lg" data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.login_demo()"></button>
+              </form>
+            </template>
 
-              <template data-sn-if="authConfig.oidc_enabled">
-                <a href="/auth/oidc" role="button" data-tm-halo data-sn-text="m.login_oidc_button()"></a>
-              </template>
+            <template data-sn-if="authConfig.oidc_enabled">
+              <a href="/auth/oidc" role="button" data-tm-size="lg" data-sn-text="m.login_oidc_button()"></a>
             </template>
-            <template data-sn-else>
-              <p aria-busy="true" data-sn-text="m.nav_loading()"></p>
-            </template>
-          </article>
+          </template>
+          <template data-sn-else>
+            <p aria-busy="true" data-sn-text="m.nav_loading()"></p>
+          </template>
         </div>
       </div>
 
-      <!-- What Caley does: four tiles, the calendar's wide, each icon on a seeded gradient -->
-      <section data-tm-layout="stack" data-tm-gap="md">
+      <!-- What Caley does: four plain columns (10.5rem: four fit in 56rem; a compact list on a phone), an icon in the
+           accent, a title, one line -->
+      <section>
         <h2 data-tm-sr-only data-sn-text="m.login_features()"></h2>
-        <ul data-tm-layout="grid" data-tm-bento data-tm-gap="md" style="--tm-min: 12rem; --tm-bento-row: 9rem">
-          <li data-tm-surface="glass" data-tm-span="wide" data-tm-layout="stack" data-tm-gap="sm" data-tm-pad="lg">
-            <span data-tm-avatar data-tm-seed="4" data-tm-size="lg" aria-hidden="true"><span data-tm-icon="calendar"></span></span>
-            <h3 data-sn-text="m.login_feature_calendar()"></h3>
-            <p data-tm-muted data-sn-text="m.login_feature_calendar_text()"></p>
+        <ul data-tm-layout="grid" data-tm-gap="lg" style="--tm-min: 10.5rem">
+          <li data-tm-layout="stack" data-tm-gap="xs">
+            <div data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
+              <span data-tm-icon="calendar" data-tm-tone="accent" aria-hidden="true"></span>
+              <strong data-sn-text="m.login_feature_calendar()"></strong>
+            </div>
+            <small data-tm-muted data-sn-text="m.login_feature_calendar_text()"></small>
           </li>
-          <li data-tm-surface="glass" data-tm-layout="stack" data-tm-gap="sm" data-tm-pad="lg">
-            <span data-tm-avatar data-tm-seed="7" data-tm-size="lg" aria-hidden="true"><span data-tm-icon="users"></span></span>
-            <h3 data-sn-text="m.login_feature_contacts()"></h3>
-            <p data-tm-muted data-sn-text="m.login_feature_contacts_text()"></p>
+          <li data-tm-layout="stack" data-tm-gap="xs">
+            <div data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
+              <span data-tm-icon="users" data-tm-tone="accent" aria-hidden="true"></span>
+              <strong data-sn-text="m.login_feature_contacts()"></strong>
+            </div>
+            <small data-tm-muted data-sn-text="m.login_feature_contacts_text()"></small>
           </li>
-          <li data-tm-surface="glass" data-tm-layout="stack" data-tm-gap="sm" data-tm-pad="lg">
-            <span data-tm-avatar data-tm-seed="1" data-tm-size="lg" aria-hidden="true"><span data-tm-icon="mail"></span></span>
-            <h3 data-sn-text="m.login_feature_mail()"></h3>
-            <p data-tm-muted data-sn-text="m.login_feature_mail_text()"></p>
+          <li data-tm-layout="stack" data-tm-gap="xs">
+            <div data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
+              <span data-tm-icon="mail" data-tm-tone="accent" aria-hidden="true"></span>
+              <strong data-sn-text="m.login_feature_mail()"></strong>
+            </div>
+            <small data-tm-muted data-sn-text="m.login_feature_mail_text()"></small>
           </li>
-          <li data-tm-surface="glass" data-tm-span="wide" data-tm-layout="stack" data-tm-gap="sm" data-tm-pad="lg">
-            <span data-tm-avatar data-tm-seed="10" data-tm-size="lg" aria-hidden="true"><span data-tm-icon="lock"></span></span>
-            <h3 data-sn-text="m.login_feature_privacy()"></h3>
-            <p data-tm-muted data-sn-text="m.login_feature_privacy_text()"></p>
+          <li data-tm-layout="stack" data-tm-gap="xs">
+            <div data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none">
+              <span data-tm-icon="lock" data-tm-tone="accent" aria-hidden="true"></span>
+              <strong data-sn-text="m.login_feature_privacy()"></strong>
+            </div>
+            <small data-tm-muted data-sn-text="m.login_feature_privacy_text()"></small>
           </li>
         </ul>
       </section>
