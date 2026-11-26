@@ -63,6 +63,9 @@ describe('vocabulary and CSS agree', () => {
 });
 
 describe('names stay clear of temper', () => {
+  test('every attribute is in the data-pt-* namespace', () => {
+    expect(Object.keys(vocab.attributes).filter((n) => !n.startsWith('data-pt-'))).toEqual([]);
+  });
   test('no patina name or value is one temper check would report', async () => {
     const { checkMarkup } = await import(require.resolve('@tiaforge-ui/temper/check'));
     const attrs = Object.entries<any>(vocab.attributes).map(([n, s]) => (s.boolean ? n : `${n}="${Object.keys(s.values)[0]}"`));

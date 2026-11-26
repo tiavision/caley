@@ -2,7 +2,8 @@
 //
 // temper's checker takes a vocabulary as `ctx.vocab`, so patina does not parse markup itself: it runs temper's
 // checkMarkup with patina's vocab.json and keeps the findings about patina's attributes (bad values, booleans,
-// typos of a patina name, a missing companion attribute, the wrong element or parent), renumbered TM1xx → PT1xx.
+// a missing companion attribute, the wrong element or parent), renumbered TM1xx → PT1xx; and since every patina
+// attribute is in the data-pt-* namespace, any data-pt-* name the vocabulary does not list is an error (PT104).
 // temper's other rules (labels, structure) are temper check's job and are dropped here, so the two checkers never
 // report one thing twice. CSS: --pt-* tokens must be patina's, and the derived ones are not set by the app.
 import { readFileSync } from 'node:fs';
@@ -32,18 +33,22 @@ const mentions = (message) => NAMES.some((n) => new RegExp(`(^|[^\\w-])${n}(?![\
 export function checkMarkupText(text, file = '<input>') {
   const out = [];
   for (const d of checkMarkup(text, file, { vocab: VOCAB, modules: null, lint: false })) {
-    if (!VOCAB_CODES.has(d.code)) continue;
-    if (d.code === 'TM104') {
-      // an attribute patina does not know that looks like one of its names; temper's own and sinter's are not typos
-      const name = /^(data-[\w-]+) is not/.exec(d.message)?.[1];
-      if (!name || name in TEMPER.attributes) continue;
-      out.push({ ...d, code: 'PT104', message: d.message.replace('is not a temper attribute', 'is not a patina attribute') });
-      continue;
-    }
+    // unknown names are found below: every data-pt-* name is patina's, so it is known or an error, not a guess
+    if (!VOCAB_CODES.has(d.code) || d.code === 'TM104') continue;
     if (!mentions(d.message)) continue;
     out.push({ ...d, code: d.code.replace('TM', 'PT') });
   }
-  return out;
+  // data-pt-* is patina's namespace: a name in it that vocab.json does not list is an error (also as a key of
+  // sinter's data-sn-attr). Comments are blanked first, keeping positions.
+  const t = text.replace(/<!--[^]*?-->/g, (c) => c.replace(/[^\n]/g, ' '));
+  for (const m of t.matchAll(/(?<![\w-])(data-pt-[a-z0-9-]*)/g)) {
+    if (m[1] in VOCAB.attributes) continue;
+    const g = closest(m[1], NAMES, 3);
+    const lines = t.slice(0, m.index).split('\n');
+    out.push({ file, line: lines.length, col: lines.at(-1).length + 1, severity: 'error', code: 'PT104',
+      message: `${m[1]} is not a patina attribute.${g ? ` Did you mean ${g}?` : ''} (data-pt-* is patina's namespace)` });
+  }
+  return out.sort((x, y) => x.line - y.line || x.col - y.col);
 }
 
 /** Checks CSS text: --pt-* tokens. */

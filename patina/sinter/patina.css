@@ -14,7 +14,7 @@
 
 /* ───────────── tokens ───────────── */
 @layer pt.base {
-  /* :where(): data-pairing on <html> itself must win over these defaults */
+  /* :where(): data-pt-pairing on <html> itself must win over these defaults */
   :where(:root) {
     --pt-font-display: var(--tm-font-sans);
     --pt-display-weight: 700;
@@ -45,12 +45,12 @@
   }
 
   /* font pairings: the display face, its weight and tracking (the faces come from Fontsource packages the app imports) */
-  :where([data-pairing="editorial"]) {
+  :where([data-pt-pairing="editorial"]) {
     --pt-font-display: "Fraunces Variable", "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
     --pt-display-weight: 600;
     --pt-display-tracking: -0.02em;
   }
-  :where([data-pairing="grotesk"]) {
+  :where([data-pt-pairing="grotesk"]) {
     --pt-font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", var(--tm-font-sans);
     --pt-display-weight: 700;
     --pt-display-tracking: -0.04em;
@@ -59,22 +59,22 @@
 
 /* ───────────── surfaces ───────────── */
 @layer pt.surface {
-  :where([data-surface]) {
+  :where([data-pt-surface]) {
     --_pt-noise: ;
     background-color: var(--tm-bg);
   }
   /* a surface inside the page is a panel: temper's large radius (the page itself, body and main, stays square) */
-  :where([data-surface]:not(html, body, main)) { border-radius: var(--tm-radius-lg, 0.75rem); }
-  :where([data-surface="gradient"]) {
+  :where([data-pt-surface]:not(html, body, main)) { border-radius: var(--tm-radius-lg, 0.75rem); }
+  :where([data-pt-surface="gradient"]) {
     background-image: var(--_pt-noise) linear-gradient(135deg, var(--pt-tint-1), var(--pt-tint-2) 55%, var(--pt-tint-3));
   }
-  :where([data-surface="mesh"]) {
+  :where([data-pt-surface="mesh"]) {
     background-image: var(--_pt-noise)
       radial-gradient(60% 70% at 8% 0%, var(--pt-tint-1), transparent 70%),
       radial-gradient(55% 60% at 95% 10%, var(--pt-tint-3), transparent 70%),
       radial-gradient(70% 70% at 60% 105%, var(--pt-tint-2), transparent 70%);
   }
-  :where([data-surface="glass"]) {
+  :where([data-pt-surface="glass"]) {
     background-color: var(--pt-glass);
     background-image: var(--_pt-noise) none;
     -webkit-backdrop-filter: blur(var(--pt-blur)) saturate(1.5);
@@ -83,34 +83,34 @@
     box-shadow: inset 0 1px 0 var(--_pt-rim);
   }
   /* temper's article and dialog have a border of their own; on glass the rim replaces it */
-  :where(article, dialog)[data-surface="glass"] { border-color: var(--_pt-rim); }
+  :where(article, dialog)[data-pt-surface="glass"] { border-color: var(--_pt-rim); }
 
   /* grain: a noise layer on top of the surface's own layers (or alone on a plain element) */
-  :where([data-grain]) {
+  :where([data-pt-grain]) {
     --_pt-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),;
   }
-  :where([data-grain]:not([data-surface])) {
+  :where([data-pt-grain]:not([data-pt-surface])) {
     background-image: var(--_pt-noise) none;
   }
 
   /* elevation: tinted shadows; a clickable raised card lifts on hover */
-  :where([data-elevation="raised"]) { box-shadow: var(--pt-shadow-raised); }
-  :where([data-elevation="floating"]) { box-shadow: var(--pt-shadow-floating); }
-  :where([data-elevation="raised"]:has([data-stretch])) {
+  :where([data-pt-elevation="raised"]) { box-shadow: var(--pt-shadow-raised); }
+  :where([data-pt-elevation="floating"]) { box-shadow: var(--pt-shadow-floating); }
+  :where([data-pt-elevation="raised"]:has([data-stretch])) {
     transition: box-shadow var(--tm-duration, 150ms) var(--tm-ease, ease), translate var(--tm-duration, 150ms) var(--tm-ease, ease);
   }
-  :where([data-elevation="raised"]:has([data-stretch]):hover) { box-shadow: var(--pt-shadow-floating); }
+  :where([data-pt-elevation="raised"]:has([data-stretch]):hover) { box-shadow: var(--pt-shadow-floating); }
   @media (prefers-reduced-motion: no-preference) {
-    :where([data-elevation="raised"]:has([data-stretch]):hover) { translate: 0 -2px; }
+    :where([data-pt-elevation="raised"]:has([data-stretch]):hover) { translate: 0 -2px; }
   }
 
   /* halo: the accent's glow, added to whatever shadow the element has */
-  :where([data-halo]) { box-shadow: 0 0 0 1px var(--pt-glow), 0 8px 32px -6px var(--pt-glow); }
-  :where([data-halo][data-elevation="raised"]) { box-shadow: var(--pt-shadow-raised), 0 10px 36px -8px var(--pt-glow); }
-  :where([data-halo][data-elevation="floating"]) { box-shadow: var(--pt-shadow-floating), 0 18px 56px -12px var(--pt-glow); }
+  :where([data-pt-halo]) { box-shadow: 0 0 0 1px var(--pt-glow), 0 8px 32px -6px var(--pt-glow); }
+  :where([data-pt-halo][data-pt-elevation="raised"]) { box-shadow: var(--pt-shadow-raised), 0 10px 36px -8px var(--pt-glow); }
+  :where([data-pt-halo][data-pt-elevation="floating"]) { box-shadow: var(--pt-shadow-floating), 0 18px 56px -12px var(--pt-glow); }
 
   /* seeds: twelve hues around the brand hue, 15° apart; a gradient fill and an ink that keeps AA on both its ends */
-  :where([data-seed]) {
+  :where([data-pt-seed]) {
     --_pt-sh: calc(var(--_pt-h) + (var(--_pt-seed, 0) - 5.5) * 15);
     --_pt-seed-a: light-dark(oklch(0.9 calc(var(--_pt-c) * 0.42) var(--_pt-sh)), oklch(0.46 calc(var(--_pt-c) * 0.62) var(--_pt-sh)));
     --_pt-seed-b: light-dark(oklch(0.8 calc(var(--_pt-c) * 0.62) calc(var(--_pt-sh) + 35)), oklch(0.34 calc(var(--_pt-c) * 0.7) calc(var(--_pt-sh) + 35)));
@@ -119,25 +119,25 @@
     background-image: linear-gradient(140deg, var(--_pt-seed-a), var(--_pt-seed-b));
     color: var(--_pt-seed-ink);
   }
-  :where([data-seed="0"]) { --_pt-seed: 0; }
-  :where([data-seed="1"]) { --_pt-seed: 1; }
-  :where([data-seed="2"]) { --_pt-seed: 2; }
-  :where([data-seed="3"]) { --_pt-seed: 3; }
-  :where([data-seed="4"]) { --_pt-seed: 4; }
-  :where([data-seed="5"]) { --_pt-seed: 5; }
-  :where([data-seed="6"]) { --_pt-seed: 6; }
-  :where([data-seed="7"]) { --_pt-seed: 7; }
-  :where([data-seed="8"]) { --_pt-seed: 8; }
-  :where([data-seed="9"]) { --_pt-seed: 9; }
-  :where([data-seed="10"]) { --_pt-seed: 10; }
-  :where([data-seed="11"]) { --_pt-seed: 11; }
+  :where([data-pt-seed="0"]) { --_pt-seed: 0; }
+  :where([data-pt-seed="1"]) { --_pt-seed: 1; }
+  :where([data-pt-seed="2"]) { --_pt-seed: 2; }
+  :where([data-pt-seed="3"]) { --_pt-seed: 3; }
+  :where([data-pt-seed="4"]) { --_pt-seed: 4; }
+  :where([data-pt-seed="5"]) { --_pt-seed: 5; }
+  :where([data-pt-seed="6"]) { --_pt-seed: 6; }
+  :where([data-pt-seed="7"]) { --_pt-seed: 7; }
+  :where([data-pt-seed="8"]) { --_pt-seed: 8; }
+  :where([data-pt-seed="9"]) { --_pt-seed: 9; }
+  :where([data-pt-seed="10"]) { --_pt-seed: 10; }
+  :where([data-pt-seed="11"]) { --_pt-seed: 11; }
   /* temper's data-avatar sets its colours from its tone; a seed is a fill of its own */
-  :where([data-avatar][data-seed]) { font-weight: 650; }
+  :where([data-avatar][data-pt-seed]) { font-weight: 650; }
 }
 
 /* ───────────── type ───────────── */
 @layer pt.type {
-  :where([data-display], [data-figure]) {
+  :where([data-pt-display], [data-pt-figure]) {
     font-family: var(--pt-font-display);
     font-weight: var(--pt-display-weight);
     letter-spacing: var(--pt-display-tracking);
@@ -145,16 +145,16 @@
     line-height: 1.05;
     text-wrap: balance;
   }
-  :where([data-display="hero"]) { font-size: clamp(2.75rem, 1.4rem + 5.2vw, 5.5rem); line-height: 0.98; }
-  :where([data-display="xl"]) { font-size: clamp(2.25rem, 1.6rem + 2.6vw, 3.5rem); }
-  :where([data-display="lg"]) { font-size: clamp(1.75rem, 1.4rem + 1.4vw, 2.5rem); }
-  :where([data-figure]) {
+  :where([data-pt-display="hero"]) { font-size: clamp(2.75rem, 1.4rem + 5.2vw, 5.5rem); line-height: 0.98; }
+  :where([data-pt-display="xl"]) { font-size: clamp(2.25rem, 1.6rem + 2.6vw, 3.5rem); }
+  :where([data-pt-display="lg"]) { font-size: clamp(1.75rem, 1.4rem + 1.4vw, 2.5rem); }
+  :where([data-pt-figure]) {
     font-size: clamp(2rem, 1.5rem + 1.8vw, 3rem);
     font-variant-numeric: tabular-nums lining-nums;
     line-height: 1;
   }
 
-  :where([data-ink="gradient"]) {
+  :where([data-pt-ink="gradient"]) {
     color: var(--pt-ink-1);
     background-image: linear-gradient(100deg, var(--pt-ink-1), var(--pt-ink-2));
     -webkit-background-clip: text;
@@ -168,7 +168,7 @@
 
 /* ───────────── layouts ───────────── */
 @layer pt.layout {
-  :where([data-hero]) {
+  :where([data-pt-hero]) {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -177,62 +177,62 @@
     text-wrap: balance;
   }
   /* its padding grows with the screen; temper's data-pad sets a fixed one instead (a band in a dialog) */
-  :where([data-hero]:not([data-pad])) {
+  :where([data-pt-hero]:not([data-pad])) {
     padding-block: clamp(var(--tm-space-xl), 5vw, calc(var(--tm-space-xl) * 2.5));
     padding-inline: var(--tm-space-md);
   }
-  :where([data-hero]) > :where(p) { max-inline-size: 36rem; font-size: var(--tm-text-lg); }
+  :where([data-pt-hero]) > :where(p) { max-inline-size: 36rem; font-size: var(--tm-text-lg); }
 
   /* bento: temper's grid (columns at least --tm-min wide) with rows, dense filling and spans */
-  :where([data-bento]) {
+  :where([data-pt-bento]) {
     container-type: inline-size;
     grid-auto-rows: minmax(var(--pt-row), auto);
     grid-auto-flow: row dense;
   }
-  :where([data-bento]) > * { min-inline-size: 0; }
+  :where([data-pt-bento]) > * { min-inline-size: 0; }
   @container (min-width: 32rem) {
-    :where([data-bento]) > :where([data-span="wide"]) { grid-column: span 2; }
-    :where([data-bento]) > :where([data-span="tall"]) { grid-row: span 2; }
-    :where([data-bento]) > :where([data-span="large"]) { grid-column: span 2; grid-row: span 2; }
+    :where([data-pt-bento]) > :where([data-pt-span="wide"]) { grid-column: span 2; }
+    :where([data-pt-bento]) > :where([data-pt-span="tall"]) { grid-row: span 2; }
+    :where([data-pt-bento]) > :where([data-pt-span="large"]) { grid-column: span 2; grid-row: span 2; }
   }
-  :where([data-bento]) > :where([data-span="full"]) { grid-column: 1 / -1; }
+  :where([data-pt-bento]) > :where([data-pt-span="full"]) { grid-column: 1 / -1; }
 }
 
 /* ───────────── preferences ───────────── */
 @layer pt.surface {
   @media (prefers-reduced-transparency: reduce) {
-    :where([data-surface="glass"]) {
+    :where([data-pt-surface="glass"]) {
       background-color: var(--tm-surface-raised);
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
     }
   }
   @media (prefers-contrast: more) {
-    :where([data-surface]) {
+    :where([data-pt-surface]) {
       --_pt-noise: ;
       background-color: var(--tm-surface);
       background-image: none;
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
     }
-    :where([data-surface="glass"]) { border-color: var(--tm-border-strong); }
-    :where([data-grain]) { --_pt-noise: ; }
-    :where([data-grain]:not([data-surface])) { background-image: none; }
-    :where([data-halo]) { box-shadow: 0 0 0 2px var(--tm-accent); }
+    :where([data-pt-surface="glass"]) { border-color: var(--tm-border-strong); }
+    :where([data-pt-grain]) { --_pt-noise: ; }
+    :where([data-pt-grain]:not([data-pt-surface])) { background-image: none; }
+    :where([data-pt-halo]) { box-shadow: 0 0 0 2px var(--tm-accent); }
   }
   @media (forced-colors: active) {
-    :where([data-surface], [data-grain]) { background-image: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+    :where([data-pt-surface], [data-pt-grain]) { background-image: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
   }
 }
 @layer pt.type {
   @media (prefers-contrast: more) {
-    :where([data-ink="gradient"]) {
+    :where([data-pt-ink="gradient"]) {
       background-image: none;
       -webkit-text-fill-color: currentColor;
       color: var(--tm-text);
     }
   }
   @media (forced-colors: active) {
-    :where([data-ink="gradient"]) { background-image: none; -webkit-text-fill-color: currentColor; }
+    :where([data-pt-ink="gradient"]) { background-image: none; -webkit-text-fill-color: currentColor; }
   }
 }

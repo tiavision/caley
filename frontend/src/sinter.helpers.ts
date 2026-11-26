@@ -7,7 +7,7 @@
 // pagePath('/calendar/'): a page URL in this page's language, for navigate() (the build localizes only the links in the markup)
 export { pagePath } from './lib/locale-path.ts';
 
-// patina (../patina): patina.seed(name) and patina.initials(name), for data-seed in the app's own markup.
+// patina (../patina): patina.seed(name) and patina.initials(name), for data-pt-seed in the app's own markup.
 export * as patina from '@tiaforge-ui/patina';
 
 export {

@@ -9,29 +9,33 @@ const codes = (html: string) => checkMarkupText(html, 'x.html').map((d: { code: 
 
 describe('markup', () => {
   test('valid patina markup has no findings', () => {
-    expect(codes(`<body data-surface="mesh" data-grain data-pairing="editorial">
-      <h1 data-display="hero" data-ink="gradient">A</h1>
-      <div data-layout="grid" data-bento><article data-span="wide" data-elevation="raised" data-halo>x</article></div>
-      <span data-avatar data-seed="11">AB</span><data data-figure value="3">3</data><header data-hero></header></body>`)).toEqual([]);
+    expect(codes(`<body data-pt-surface="mesh" data-pt-grain data-pt-pairing="editorial">
+      <h1 data-pt-display="hero" data-pt-ink="gradient">A</h1>
+      <div data-layout="grid" data-pt-bento><article data-pt-span="wide" data-pt-elevation="raised" data-pt-halo>x</article></div>
+      <span data-avatar data-pt-seed="11">AB</span><data data-pt-figure value="3">3</data><header data-pt-hero></header></body>`)).toEqual([]);
   });
   test('a value patina does not have', () => {
-    const [d] = checkMarkupText('<div data-surface="frosted"></div>', 'x.html');
+    const [d] = checkMarkupText('<div data-pt-surface="frosted"></div>', 'x.html');
     expect(d.code).toBe('PT101');
     expect(d.message).toContain('glass, gradient, mesh');
   });
-  test('a value on a boolean', () => expect(codes('<div data-grain="yes"></div>')).toEqual(['PT102']));
-  test('a typo of a patina name', () => {
-    const [d] = checkMarkupText('<div data-surfase="glass"></div>', 'x.html');
+  test('a value on a boolean', () => expect(codes('<div data-pt-grain="yes"></div>')).toEqual(['PT102']));
+  test('a data-pt-* name patina does not have', () => {
+    const [d] = checkMarkupText('<div data-pt-surfase="glass"></div>', 'x.html');
     expect(d.code).toBe('PT104');
-    expect(d.message).toContain('data-surface');
+    expect(d.message).toContain('data-pt-surface');
   });
-  test('bento needs temper\'s grid', () => expect(codes('<div data-bento></div>')).toEqual(['PT107']));
-  test('a span outside a bento', () => expect(codes('<div data-layout="row"><p data-span="wide"></p></div>')).toEqual(['PT109']));
-  test('display type on the wrong element', () => expect(codes('<ul data-display="xl"></ul>')).toEqual(['PT108']));
-  test('values bound by sinter are checked too', () => expect(codes(`<span data-sn-attr="{ 'data-seed': on ? '12' : '1' }"></span>`)).toEqual(['PT101']));
+  test('bento needs temper\'s grid', () => expect(codes('<div data-pt-bento></div>')).toEqual(['PT107']));
+  test('a span outside a bento', () => expect(codes('<div data-layout="row"><p data-pt-span="wide"></p></div>')).toEqual(['PT109']));
+  test('display type on the wrong element', () => expect(codes('<ul data-pt-display="xl"></ul>')).toEqual(['PT108']));
+  test('values bound by sinter are checked too', () => expect(codes(`<span data-sn-attr="{ 'data-pt-seed': on ? '12' : '1' }"></span>`)).toEqual(['PT101']));
   test('temper\'s attributes and rules are left to temper check', () => {
     expect(codes('<button data-icon="x"></button><div data-gap="huge" data-layout="row"></div><div data-tone="danger"></div>')).toEqual([]);
   });
+});
+
+test('an unknown data-pt-* name, even far from any patina name, also as a data-sn-attr key', () => {
+  expect(codes(`<div data-pt-sparkle></div><p data-sn-attr="{ 'data-pt-glow': '' }"></p><!-- data-pt-x in a comment -->`)).toEqual(['PT104', 'PT104']);
 });
 
 describe('CSS', () => {

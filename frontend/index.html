@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en" data-pairing="editorial">
+<html lang="en" data-pt-pairing="editorial">
   <head>
     <app-head></app-head>
   </head>
-  <body data-surface="mesh" data-grain data-sn-state="{ error: '', saving: false }">
+  <body data-pt-surface="mesh" data-pt-grain data-sn-state="{ error: '', saving: false }">
     <!-- Signed out, /api/user answers 401, which src/sinter.config.ts turns into `null` on this page. Signed in, the
          server redirects `/` before this page is sent; on the Vite dev server, which cannot, `then` goes to the calendar. -->
     <sn-resource name="user" src="/user"
@@ -24,13 +24,13 @@
 
     <main class="login" data-layout="center" data-gap="xl" data-pad="lg" style="--tm-measure: 56rem"
           data-sn-let="{ ready: ($meta.user.loadedAt || $meta.user.error) && !user && ($meta.authConfig.loadedAt || $meta.authConfig.error) }">
-      <div data-hero>
+      <div data-pt-hero>
         <img src="/icons/favicon-128x128.png" alt="" width="72" height="72">
-        <h1 data-display="hero" data-ink="gradient" data-sn-text="m.app_brand()"></h1>
+        <h1 data-pt-display="hero" data-pt-ink="gradient" data-sn-text="m.app_brand()"></h1>
         <p data-muted data-sn-text="m.login_tagline()"></p>
 
         <div data-layout="center" style="--tm-measure: 24rem">
-          <article data-surface="glass" data-elevation="floating" data-layout="stack" data-gap="lg" data-pad="lg">
+          <article data-pt-surface="glass" data-pt-elevation="floating" data-layout="stack" data-gap="lg" data-pad="lg">
             <template data-sn-if="ready">
               <!-- The demo (DEMO_MODE) signs in without credentials, as its fixed user (backend/src/local_auth.rs). -->
               <template data-sn-if="authConfig.demo_mode">
@@ -42,12 +42,12 @@
                   <template data-sn-if="error">
                     <p data-callout data-tone="danger" role="alert" data-sn-text="error"></p>
                   </template>
-                  <button type="submit" data-halo data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.login_demo()"></button>
+                  <button type="submit" data-pt-halo data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.login_demo()"></button>
                 </form>
               </template>
 
               <template data-sn-if="authConfig.oidc_enabled">
-                <a href="/auth/oidc" role="button" data-halo data-sn-text="m.login_oidc_button()"></a>
+                <a href="/auth/oidc" role="button" data-pt-halo data-sn-text="m.login_oidc_button()"></a>
               </template>
             </template>
             <template data-sn-else>
@@ -60,24 +60,24 @@
       <!-- What Caley does: four tiles, the calendar's wide, each icon on a seeded gradient -->
       <section data-layout="stack" data-gap="md">
         <h2 data-sr-only data-sn-text="m.login_features()"></h2>
-        <ul data-layout="grid" data-bento data-gap="md" style="--tm-min: 12rem; --pt-row: 9rem">
-          <li data-surface="glass" data-span="wide" data-layout="stack" data-gap="sm" data-pad="lg">
-            <span data-avatar data-seed="4" data-size="lg" aria-hidden="true"><span data-icon="calendar"></span></span>
+        <ul data-layout="grid" data-pt-bento data-gap="md" style="--tm-min: 12rem; --pt-row: 9rem">
+          <li data-pt-surface="glass" data-pt-span="wide" data-layout="stack" data-gap="sm" data-pad="lg">
+            <span data-avatar data-pt-seed="4" data-size="lg" aria-hidden="true"><span data-icon="calendar"></span></span>
             <h3 data-sn-text="m.login_feature_calendar()"></h3>
             <p data-muted data-sn-text="m.login_feature_calendar_text()"></p>
           </li>
-          <li data-surface="glass" data-layout="stack" data-gap="sm" data-pad="lg">
-            <span data-avatar data-seed="7" data-size="lg" aria-hidden="true"><span data-icon="users"></span></span>
+          <li data-pt-surface="glass" data-layout="stack" data-gap="sm" data-pad="lg">
+            <span data-avatar data-pt-seed="7" data-size="lg" aria-hidden="true"><span data-icon="users"></span></span>
             <h3 data-sn-text="m.login_feature_contacts()"></h3>
             <p data-muted data-sn-text="m.login_feature_contacts_text()"></p>
           </li>
-          <li data-surface="glass" data-layout="stack" data-gap="sm" data-pad="lg">
-            <span data-avatar data-seed="1" data-size="lg" aria-hidden="true"><span data-icon="mail"></span></span>
+          <li data-pt-surface="glass" data-layout="stack" data-gap="sm" data-pad="lg">
+            <span data-avatar data-pt-seed="1" data-size="lg" aria-hidden="true"><span data-icon="mail"></span></span>
             <h3 data-sn-text="m.login_feature_mail()"></h3>
             <p data-muted data-sn-text="m.login_feature_mail_text()"></p>
           </li>
-          <li data-surface="glass" data-span="wide" data-layout="stack" data-gap="sm" data-pad="lg">
-            <span data-avatar data-seed="10" data-size="lg" aria-hidden="true"><span data-icon="lock"></span></span>
+          <li data-pt-surface="glass" data-pt-span="wide" data-layout="stack" data-gap="sm" data-pad="lg">
+            <span data-avatar data-pt-seed="10" data-size="lg" aria-hidden="true"><span data-icon="lock"></span></span>
             <h3 data-sn-text="m.login_feature_privacy()"></h3>
             <p data-muted data-sn-text="m.login_feature_privacy_text()"></p>
           </li>

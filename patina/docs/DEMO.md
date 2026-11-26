@@ -36,7 +36,7 @@ seeded gradient.
 | Phone, light | ![](screenshots/contacts-before-phone-light.png) | ![](screenshots/contacts-after-phone-light.png) |
 | Phone, dark | ![](screenshots/contacts-before-phone-dark.png) | ![](screenshots/contacts-after-phone-dark.png) |
 
-A mesh masthead with the page's title (it had no `h1` before) and the counts as stat tiles (`data-figure`), a glass
+A mesh masthead with the page's title (it had no `h1` before) and the counts as stat tiles (`data-pt-figure`), a glass
 toolbar that stays at the top while the list scrolls under it, the letters in display type, raised cards that lift
 on hover, and `<pt-avatar>`: two initials on the name's seeded gradient, so each person keeps a colour.
 
@@ -63,22 +63,22 @@ temper's own accent all follow.
 
 ## The vocabulary I settled on
 
-Twelve attributes, all in [`vocab.json`](../vocab.json) (temper's format), all checked.
+Twelve attributes, all in patina's own `data-pt-*` namespace, all in [`vocab.json`](../vocab.json) (temper's format), all checked.
 
 | Attribute | Values | |
 |---|---|---|
-| `data-surface` | glass, gradient, mesh | The background as a material. Panels (not body/main) get temper's large radius. |
-| `data-grain` | (boolean) | Film grain over any surface. |
-| `data-elevation` | raised, floating | Brand-tinted shadows; a raised card with a `data-stretch` control lifts on hover. |
-| `data-halo` | (boolean) | A soft accent glow. |
-| `data-display` | hero, xl, lg | Display type: fluid sizes, tight tracking, balanced lines, the pairing's face. |
-| `data-ink` | gradient | Gradient text for display sizes. |
-| `data-figure` | (boolean) | A big tabular number (stat tiles), labelled with temper's `data-caption`. |
-| `data-hero` | (boolean) | A centered hero column whose padding grows with the screen. |
-| `data-bento` | (boolean) | With temper's `data-layout="grid"`: row height, dense flow, spans. |
-| `data-span` | wide, tall, large, full | A bento tile's size (from a 32rem grid up). |
-| `data-pairing` | editorial, grotesk | Fraunces or Bricolage Grotesque for display, self-hosted through Fontsource. |
-| `data-seed` | 0 … 11 | Twelve gradient fills (and inks) spread ±82.5° around the brand hue. |
+| `data-pt-surface` | glass, gradient, mesh | The background as a material. Panels (not body/main) get temper's large radius. |
+| `data-pt-grain` | (boolean) | Film grain over any surface. |
+| `data-pt-elevation` | raised, floating | Brand-tinted shadows; a raised card with a `data-stretch` control lifts on hover. |
+| `data-pt-halo` | (boolean) | A soft accent glow. |
+| `data-pt-display` | hero, xl, lg | Display type: fluid sizes, tight tracking, balanced lines, the pairing's face. |
+| `data-pt-ink` | gradient | Gradient text for display sizes. |
+| `data-pt-figure` | (boolean) | A big tabular number (stat tiles), labelled with temper's `data-caption`. |
+| `data-pt-hero` | (boolean) | A centered hero column whose padding grows with the screen. |
+| `data-pt-bento` | (boolean) | With temper's `data-layout="grid"`: row height, dense flow, spans. |
+| `data-pt-span` | wide, tall, large, full | A bento tile's size (from a 32rem grid up). |
+| `data-pt-pairing` | editorial, grotesk | Fraunces or Bricolage Grotesque for display, self-hosted through Fontsource. |
+| `data-pt-seed` | 0 … 11 | Twelve gradient fills (and inks) spread ±82.5° around the brand hue. |
 
 One component, `<pt-avatar>` (name, photo, size, halo), and two helpers, `patina.seed(name)` and
 `patina.initials(name)`. Five input tokens (`--pt-font-display`, `--pt-display-weight`, `--pt-display-tracking`,
@@ -88,8 +88,8 @@ How it keeps the ecosystem's grain:
 
 - **Checked vocabulary.** `patina check` (CLI, `@tiaforge-ui/patina/check`, and a Vite plugin) runs temper's own
   checker with patina's `vocab.json` as `ctx.vocab`, keeps the findings about patina's attributes and renumbers them
-  PT1xx (bad value, boolean with a value, typo, missing companion such as `data-bento` without
-  `data-layout="grid"`, wrong element, `data-span` outside a bento, `patina.css` not imported), plus PT2xx for
+  PT1xx (bad value, boolean with a value, typo, missing companion such as `data-pt-bento` without
+  `data-layout="grid"`, wrong element, `data-pt-span` outside a bento, `patina.css` not imported), plus PT2xx for
   `--pt-*` tokens. temper's own rules stay with `temper check`, so nothing is reported twice. caley's build runs
   both: `temper check: 0 error(s), 2 warning(s)` (the same two as before) and `patina check: 0 error(s), 0 warning(s)`.
 - **Its own layers.** `@layer tm, pt;` puts patina after temper whatever the import order; every rule is in
@@ -116,13 +116,16 @@ loaded only by the sign-in and contacts pages.
 ## What I cut, and why
 
 - **`data-surface="grain"`.** Grain is a texture over a material, not a material, so it became the boolean
-  `data-grain` that combines with any surface (and the page background).
+  `data-pt-grain` that combines with any surface (and the page background).
 - **`data-layout="bento"`.** temper owns `data-layout` and its fixed values; temper check rejects `bento` (TM101).
-  patina refines temper's grid instead: `data-layout="grid" data-bento`, which also keeps temper's `data-gap` and
+  patina refines temper's grid instead: `data-layout="grid" data-pt-bento`, which also keeps temper's `data-gap` and
   `--tm-min` working.
-- **A glow attribute named `data-glow`.** One edit from temper's `data-grow`, which temper check would report as a
-  typo. It is `data-halo`; a test keeps every patina name out of temper's typo distance.
-- **A stat-tile component.** Markup is enough: a glass tile with `dt data-caption` and `dd data-figure`. A component
+- **Unprefixed names** (`data-surface`, `data-glow`, …), the first version. They shared temper's namespace: a name one
+  edit from temper's (`data-glow` ↔ `data-grow`) was reported by temper check as a typo, and nothing told a reader
+  which library an attribute belongs to. Every patina attribute is now `data-pt-*` (as sinter's are `data-sn-*`), so
+  none can collide with temper's, and the checker reports every unknown `data-pt-*` name as an error instead of
+  guessing typos.
+- **A stat-tile component.** Markup is enough: a glass tile with `dt data-caption` and `dd data-pt-figure`. A component
   would only hide a `dl`.
 - **Scroll-reveal animations** (`animation-timeline: view()`). They start content hidden, which breaks "everything in
   the first frame", and add motion that reduced-motion users must opt out of.
@@ -139,9 +142,10 @@ Found while building this; neither repository was changed.
 
 ### temper
 
-1. **Extension vocabularies in `temper check`.** temper check knows only its own attributes, so another package's
-   attribute that happens to be near a temper name (`data-glow` ↔ `data-grow`) is reported as a typo (TM104), and a
-   package cannot add a value to one of temper's attributes (`data-layout="bento"`). An option such as
+1. **Extension vocabularies in `temper check`.** temper check knows only its own attributes. It skips `data-sn-*`
+   (sinter's) when it looks for typos, but not another library's prefix, so `data-pt-*` names are safe today only
+   because they are far from temper's; and a package cannot add a value to one of temper's attributes
+   (`data-layout="bento"`). An option such as
    `temper({ vocabularies: ['@tiaforge-ui/patina/vocab.json'] })` would let one checker run (and prune, and feed the
    editor's `html-custom-data.json`) over both, and make patina's separate checker unnecessary.
 2. **`checkStyles` hard-codes `--tm-`.** A `prefix` in the vocabulary would let it check `--pt-*` tokens too; patina
@@ -163,7 +167,7 @@ Found while building this; neither repository was changed.
    passes sinter-mail's and now patina's components as if they were the app's.
 3. **Fonts per page.** `fonts.preload` names faces for the whole build; the display face should be preloaded only
    where a pairing is used. It works because only the two pages import Fraunces, but an attribute-level hook
-   (`data-pairing` → its faces) would be clearer.
+   (`data-pt-pairing` → its faces) would be clearer.
 4. **Global CSS from a library.** A library can ship scoped component styles (`sinter-lib` layer) but its global
    attribute CSS is a separate import the app must remember (`patina.css`, like sinter-mail's `mail.css`). A
    `"sinter": { "styles": "./patina.css" }` entry that the plugin injects for every configured library would remove

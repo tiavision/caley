@@ -5,14 +5,14 @@ An expressive surface layer for [temper](https://github.com/tiaforge/temper) app
 *voice*: materials, brand-tinted depth, display type, hero and bento layouts, seeded colour.
 
 ```html
-<body data-surface="mesh" data-grain data-pairing="editorial">
-  <header data-hero>
-    <h1 data-display="hero" data-ink="gradient">Caley</h1>
+<body data-pt-surface="mesh" data-pt-grain data-pt-pairing="editorial">
+  <header data-pt-hero>
+    <h1 data-pt-display="hero" data-pt-ink="gradient">Caley</h1>
     <p data-muted>Calendar, contacts and mail on your own servers.</p>
-    <article data-surface="glass" data-elevation="floating" data-pad="lg"><button data-halo>Enter</button></article>
+    <article data-pt-surface="glass" data-pt-elevation="floating" data-pad="lg"><button data-pt-halo>Enter</button></article>
   </header>
-  <ul data-layout="grid" data-bento data-gap="md">
-    <li data-surface="glass" data-span="wide">…</li>
+  <ul data-layout="grid" data-pt-bento data-gap="md">
+    <li data-pt-surface="glass" data-pt-span="wide">…</li>
   </ul>
   <pt-avatar data-sn-with="{ name: c.fn_name, src: c.photo }"></pt-avatar>
 </body>
@@ -20,7 +20,7 @@ An expressive surface layer for [temper](https://github.com/tiaforge/temper) app
 
 It keeps temper's grain:
 
-- **A fixed vocabulary.** Twelve `data-*` attributes with fixed values, listed in [vocab.json](vocab.json) (temper's
+- **A fixed vocabulary in its own namespace.** Twelve `data-pt-*` attributes with fixed values, listed in [vocab.json](vocab.json) (temper's
   format) and checked by `patina check`, which is temper's own checker run with patina's vocabulary.
 - **Its own cascade layers.** Every rule is in `@layer pt.*`, after temper's `tm.*` layers, every selector in
   `:where()`. The app's own CSS always wins without `!important`; the app needs no CSS of its own for anything
@@ -41,8 +41,8 @@ It keeps temper's grain:
 ```sh
 npm install @tiaforge-ui/patina
 # a display face for a pairing, if you use one:
-npm install @fontsource-variable/fraunces          # data-pairing="editorial"
-npm install @fontsource-variable/bricolage-grotesque  # data-pairing="grotesk"
+npm install @fontsource-variable/fraunces          # data-pt-pairing="editorial"
+npm install @fontsource-variable/bricolage-grotesque  # data-pt-pairing="grotesk"
 ```
 
 Needs sinter 0.22 and temper 0.4 or later.
@@ -79,18 +79,18 @@ export type { AvatarSize } from '@tiaforge-ui/patina';
 
 | Attribute | Values | What it does |
 |---|---|---|
-| `data-surface` | glass, gradient, mesh | The background as a material. A surface other than `body`/`main` gets temper's large radius. |
-| `data-grain` | (boolean) | Faint film grain over the background (an inline SVG image: the CSP needs `img-src data:`). |
-| `data-elevation` | raised, floating | Shadows tinted with the brand hue. A raised card with a `data-stretch` control lifts on hover. |
-| `data-halo` | (boolean) | A soft glow of the accent around the element. |
-| `data-display` | hero, xl, lg | Display type: the pairing's display face, fluid size, tight tracking, balanced lines. |
-| `data-ink` | gradient | Brand-gradient text (with `data-display` or `data-figure`). |
-| `data-figure` | (boolean) | A big tabular number for stat tiles; pair it with temper's `data-caption`. |
-| `data-hero` | (boolean) | A centered hero column with padding that grows with the screen (`data-pad` fixes it). |
-| `data-bento` | (boolean) | With `data-layout="grid"`: rows of `--pt-row`, dense filling, tiles sized by `data-span`. |
-| `data-span` | wide, tall, large, full | A bento tile's size (from a 32rem wide grid up; below, one cell). |
-| `data-pairing` | editorial, grotesk | The display face: Fraunces or Bricolage Grotesque, with its weight and tracking. |
-| `data-seed` | 0 … 11 | A gradient fill and ink from one of twelve hues around the brand hue (avatars, icon tiles). |
+| `data-pt-surface` | glass, gradient, mesh | The background as a material. A surface other than `body`/`main` gets temper's large radius. |
+| `data-pt-grain` | (boolean) | Faint film grain over the background (an inline SVG image: the CSP needs `img-src data:`). |
+| `data-pt-elevation` | raised, floating | Shadows tinted with the brand hue. A raised card with a `data-stretch` control lifts on hover. |
+| `data-pt-halo` | (boolean) | A soft glow of the accent around the element. |
+| `data-pt-display` | hero, xl, lg | Display type: the pairing's display face, fluid size, tight tracking, balanced lines. |
+| `data-pt-ink` | gradient | Brand-gradient text (with `data-pt-display` or `data-pt-figure`). |
+| `data-pt-figure` | (boolean) | A big tabular number for stat tiles; pair it with temper's `data-caption`. |
+| `data-pt-hero` | (boolean) | A centered hero column with padding that grows with the screen (`data-pad` fixes it). |
+| `data-pt-bento` | (boolean) | With `data-layout="grid"`: rows of `--pt-row`, dense filling, tiles sized by `data-pt-span`. |
+| `data-pt-span` | wide, tall, large, full | A bento tile's size (from a 32rem wide grid up; below, one cell). |
+| `data-pt-pairing` | editorial, grotesk | The display face: Fraunces or Bricolage Grotesque, with its weight and tracking. |
+| `data-pt-seed` | 0 … 11 | A gradient fill and ink from one of twelve hues around the brand hue (avatars, icon tiles). |
 
 Tokens to set: `--pt-font-display`, `--pt-display-weight`, `--pt-display-tracking`, `--pt-blur`, `--pt-row`. Derived
 (read, never set): `--pt-tint-1…3`, `--pt-glass`, `--pt-ink-1…2`, `--pt-glow`, `--pt-shadow-raised`,
@@ -114,17 +114,17 @@ npx patina check src index.html   # or the Vite plugin
 
 | Code | |
 |---|---|
-| PT101 | A value patina does not have (`data-surface="frosted"`), with the allowed values. |
+| PT101 | A value patina does not have (`data-pt-surface="frosted"`), with the allowed values. |
 | PT102 | A value on a boolean attribute. |
-| PT104 | A typo of a patina attribute (`data-surfase`). |
-| PT107 | A companion attribute is missing (`data-bento` without `data-layout="grid"`). |
-| PT108 | An attribute on an element it does nothing on (`data-display` on a `<ul>`). |
-| PT109 | A `data-span` outside a bento grid. |
+| PT104 | A `data-pt-*` name patina does not have (`data-pt-surfase`), with the nearest one. |
+| PT107 | A companion attribute is missing (`data-pt-bento` without `data-layout="grid"`). |
+| PT108 | An attribute on an element it does nothing on (`data-pt-display` on a `<ul>`). |
+| PT109 | A `data-pt-span` outside a bento grid. |
 | PT110 | patina attributes are used but `patina.css` is not imported. |
 | PT201–203 | An unknown `--pt-*` token, a `--pt-` name of your own, or a derived token set by the app. |
 
 temper's own rules (labels, structure) stay with `temper check`, so the two never report one thing twice. Values
-bound by sinter (`data-sn-attr="{ 'data-seed': … }"`) are checked like static ones.
+bound by sinter (`data-sn-attr="{ 'data-pt-seed': … }"`) are checked like static ones.
 
 ## Limits
 

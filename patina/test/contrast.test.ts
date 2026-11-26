@@ -46,7 +46,7 @@ function measure(input: { pairs: Array<[string, string[]]>; seeds: number }) {
   }
   for (let s = 0; s < input.seeds; s++) {
     const el = document.createElement('span');
-    el.dataset.seed = String(s);
+    el.dataset.ptSeed = String(s);
     document.body.append(el);
     const ink = paint([resolve('--_pt-seed-ink', el)]);
     for (const stop of ['--_pt-seed-a', '--_pt-seed-b']) out.push({ pair: `seed ${s} ink on ${stop}`, ratio: ratio(ink, paint([resolve(stop, el)])) });
@@ -88,7 +88,7 @@ describe.skipIf(!playwright)('contrast', () => {
   test('prefers-contrast: more and reduced transparency fall back to plain surfaces', async () => {
     const page = await browser.newPage();
     await page.setContent(`<!doctype html><style>${temperCss}</style><style>${patinaCss}</style>
-      <body><div id="mesh" data-surface="mesh" data-grain></div><div id="glass" data-surface="glass"></div><h1 id="ink" data-display="hero" data-ink="gradient">A</h1></body>`);
+      <body><div id="mesh" data-pt-surface="mesh" data-pt-grain></div><div id="glass" data-pt-surface="glass"></div><h1 id="ink" data-pt-display="hero" data-pt-ink="gradient">A</h1></body>`);
     const read = () => page.evaluate(() => {
       const cs = (id: string) => getComputedStyle(document.getElementById(id)!);
       return { mesh: cs('mesh').backgroundImage, glass: cs('glass').backdropFilter, glassBg: cs('glass').backgroundColor, ink: cs('ink').webkitTextFillColor, inkBg: cs('ink').backgroundImage };

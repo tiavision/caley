@@ -1,10 +1,10 @@
 // patina's helpers, under one namespace. An app re-exports the package as a namespace
 // (`export * as patina from '@tiaforge-ui/patina'` in its src/sinter.helpers.ts) and calls `patina.seed(name)` and
-// `patina.initials(name)` in markup, for its own markup with data-seed. Pure and cheap: they render in the early
+// `patina.initials(name)` in markup, for its own markup with data-pt-seed. Pure and cheap: they render in the early
 // script and fold at build time. <pt-avatar> writes the same two out in its lets (a library's components cannot
 // call the library's helpers); test/helpers.test.ts keeps them in step.
 
-/** The data-seed ('0'–'11') for a name: FNV-1a over its code points, so a name keeps its colour everywhere. */
+/** The data-pt-seed ('0'–'11') for a name: FNV-1a over its code points, so a name keeps its colour everywhere. */
 export function seed(name: string | null | undefined): string {
   const key = (name ?? '').trim().toLowerCase();
   return String([...key].reduce((h, ch) => Math.imul(h ^ (ch.codePointAt(0) ?? 0), 16777619) >>> 0, 2166136261) % 12);

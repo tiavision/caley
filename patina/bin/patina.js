@@ -6,7 +6,7 @@ import { check } from '../lib/check.js';
 
 const USAGE = `Usage: patina check [--warnings-as-errors] [paths...]
 
-Checks patina attributes (data-surface, data-display, data-bento, …) in HTML/Svelte/Astro/Vue/JSX files and
+Checks patina attributes (data-pt-surface, data-pt-display, data-pt-bento, …) in HTML/Svelte/Astro/Vue/JSX files and
 --pt-* tokens in CSS, against patina's vocab.json. temper's own rules stay with temper check.`;
 
 const argv = process.argv.slice(2);

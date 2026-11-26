@@ -34,7 +34,7 @@ describe('<pt-avatar>', () => {
     const r = await render(page, { components: { 'pt-avatar': avatar }, types: 'export type AvatarSize = "sm" | "md" | "lg" | "xl";' } as never);
     await r.settle();
     const spans = [...r.root.querySelectorAll('[data-avatar]')];
-    expect(spans.map((s) => s.getAttribute('data-seed'))).toEqual(NAMES.map(patina.seed));
+    expect(spans.map((s) => s.getAttribute('data-pt-seed'))).toEqual(NAMES.map(patina.seed));
     expect(spans.map((s) => s.textContent)).toEqual(NAMES.map(patina.initials));
     expect(spans.every((s) => s.getAttribute('aria-hidden') === 'true')).toBe(true);
   });
@@ -45,7 +45,7 @@ describe('<pt-avatar>', () => {
     const [a, b] = r.root.querySelectorAll<HTMLElement>('[data-avatar]');
     expect(a.querySelector('img')?.getAttribute('src')).toBe('/a.jpg');
     expect(a.getAttribute('data-size')).toBe('lg');
-    expect(a.hasAttribute('data-halo')).toBe(true);
+    expect(a.hasAttribute('data-pt-halo')).toBe(true);
     expect(b.hasAttribute('data-size')).toBe(false);
     expect(b.style.getPropertyValue('--tm-avatar-size')).toBe('4.5rem');
     expect(b.textContent).toBe('A');

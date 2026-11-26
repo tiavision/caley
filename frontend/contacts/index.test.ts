@@ -75,7 +75,7 @@ test('lists the contacts by letter, with avatar, first email and phone, org', as
   const [first, second] = root.querySelectorAll('main article');
   // patina's <pt-avatar>: two initials on the name's seeded gradient
   expect(first!.querySelector('[data-avatar]')!.textContent!.trim()).toBe('AL');
-  expect(first!.querySelector('[data-avatar]')!.getAttribute('data-seed')).toBe(helpers.patina.seed('Ada Lovelace'));
+  expect(first!.querySelector('[data-avatar]')!.getAttribute('data-pt-seed')).toBe(helpers.patina.seed('Ada Lovelace'));
   expect(first!.querySelector('a[href="mailto:ada@example.com"]')).not.toBeNull();
   expect(first!.querySelector('a[href="tel:+44 1"]')).not.toBeNull();
   expect(first!.querySelector('small[data-muted]')!.textContent).toBe('Engines Ltd');
@@ -86,7 +86,7 @@ test('lists the contacts by letter, with avatar, first email and phone, org', as
 test('the masthead counts people, organizations and address books', async () => {
   const { root } = await show();
   expect(root.querySelector('main h1')!.textContent).toBe('Contacts');
-  const stats = [...root.querySelectorAll('main header dl > div')].map((d) => [d.querySelector('dt')!.textContent, d.querySelector('dd[data-figure]')!.textContent]);
+  const stats = [...root.querySelectorAll('main header dl > div')].map((d) => [d.querySelector('dt')!.textContent, d.querySelector('dd[data-pt-figure]')!.textContent]);
   expect(stats).toEqual([['People', '3'], ['Organizations', '1'], ['Address books', '1']]);
 });
 
@@ -122,7 +122,7 @@ test('the detail dialog shows the contact; an address opens the map', async () =
   expect(dialog.querySelector('h2')!.textContent).toBe('Ada Lovelace');
   const values = [...dialog.querySelectorAll('dd')].map((d) => d.textContent!.replace(/\s+/g, ' ').trim());
   // the organization is in the band under the avatar, labelled for screen readers
-  expect(dialog.querySelector('[data-hero] p')!.textContent).toBe('Organization: Engines Ltd');
+  expect(dialog.querySelector('[data-pt-hero] p')!.textContent).toBe('Organization: Engines Ltd');
   expect(values).toEqual(['Work ada@example.com', 'Mobile +44 1', 'Home 1 Main St London N1 UK']);
   expect([...dialog.querySelectorAll('dd a[rel] br')].map((br) => br.hidden)).toEqual([false, false, true]);
   const map = dialog.querySelector<HTMLAnchorElement>('dd a[rel]')!;
