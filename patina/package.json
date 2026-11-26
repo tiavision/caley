@@ -1,0 +1,73 @@
+{
+  "name": "@tiaforge-ui/patina",
+  "version": "0.1.0",
+  "description": "An expressive surface layer for temper apps: glass, gradient and mesh surfaces, brand-tinted elevation, display type, hero and bento layouts, seeded avatars. A checked vocabulary of data-* attributes, CSS in its own @layer, colour from temper's --tm-hue/--tm-chroma.",
+  "license": "MIT",
+  "author": "Tia Heinrich",
+  "type": "module",
+  "sideEffects": [
+    "*.css"
+  ],
+  "sinter": "./sinter",
+  "exports": {
+    ".": "./sinter/index.ts",
+    "./patina.css": "./sinter/patina.css",
+    "./vocab.json": "./vocab.json",
+    "./check": {
+      "types": "./lib/check.d.ts",
+      "default": "./lib/check.js"
+    },
+    "./vite": {
+      "types": "./lib/vite.d.ts",
+      "default": "./lib/vite.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "patina": "bin/patina.js"
+  },
+  "files": [
+    "sinter",
+    "!sinter/sinter.components.d.ts",
+    "lib",
+    "bin",
+    "vocab.json",
+    "docs",
+    "llms.txt",
+    "README.md"
+  ],
+  "keywords": [
+    "sinter",
+    "temper",
+    "css",
+    "oklch",
+    "design-system",
+    "glassmorphism",
+    "bento"
+  ],
+  "scripts": {
+    "check": "sinter check --strict && node bin/patina.js check fixtures --warnings-as-errors",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@tiaforge-ui/sinter": ">=0.22.0 <1",
+    "@tiaforge-ui/temper": ">=0.4.0 <1"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@tiaforge-ui/sinter": "0.22.1",
+    "@tiaforge-ui/temper": "0.4.1",
+    "@types/node": "22.20.7",
+    "jsdom": "31.0.1",
+    "playwright": "1.63.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.5",
+    "vitest": "5.1.0"
+  }
+}

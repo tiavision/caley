@@ -52,3 +52,25 @@ jobs:
       - run: npm test
       # sinter check (strict) and temper check run in the build
       - run: npm run build
+
+  # patina (../patina), the expressive layer over temper: its vocabulary, checker, avatar and the contrast of its
+  # surfaces at every hue (Chromium through Playwright)
+  patina:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: patina
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: patina/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run typecheck
+      # includes sinter check --strict and patina check over the fixtures
+      - run: npm test

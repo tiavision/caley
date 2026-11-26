@@ -10,6 +10,7 @@ The repository is a monorepo of independent packages (frontend, backend, and the
 
 - **`backend/`** — Rust 2024 Axum binary. Handles auth, CalDAV/CardDAV/IMAP/SMTP/JMAP clients, SQLite persistence, encryption, sync tasks, SSE, and static frontend serving.
 - **`frontend/`** — Vite static multi-page app: HTML pages compiled by sinter (`@tiaforge-ui/sinter`), temper CSS (`@tiaforge-ui/temper`, `data-*` attributes) + Sass for app-specific rules, sinter's messages (the inlang project, read by the content module `src/sinter.content.ts`) for i18n.
+- **`patina/`** — `@tiaforge-ui/patina`, an expressive surface layer over temper (glass/gradient/mesh surfaces, display type, bento, `<pt-avatar>`), kept as a standalone sinter component library (its own package.json, tests and checker, as if in its own repository). The frontend links it (`file:../patina`); the sign-in page and the contacts page use it. See `patina/README.md` and `patina/docs/DEMO.md`.
 - **`native/`** — Tauri 2 app shell (Android first, also desktop; iOS possible): a server picker that opens a Caley server's own pages in the app's webview. See Native App.
 
 There is no root-level package manager or Cargo workspace.

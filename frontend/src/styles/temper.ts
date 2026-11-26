@@ -5,6 +5,8 @@ import '@tiaforge-ui/temper/menu.css';
 import '@tiaforge-ui/temper/feedback.css';
 import '@tiaforge-ui/temper/forms.css';
 import 'virtual:temper-icons.css';
+// patina (../patina): the expressive layer over temper (surfaces, display type, bento), in its own @layer after temper's.
+import '@tiaforge-ui/patina/patina.css';
 // The UI font (--tm-font-sans in app.scss), from npm: Vite bundles its files into the hashed assets.
 import '@fontsource-variable/figtree';
 import './app.scss';

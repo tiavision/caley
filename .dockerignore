@@ -8,3 +8,5 @@ yaak/
 **/.env
 **/.env.*
 **/*.md
+patina/node_modules/
+

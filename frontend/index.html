@@ -1,16 +1,18 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-pairing="editorial">
   <head>
     <app-head></app-head>
   </head>
-  <body data-sn-state="{ error: '', saving: false }">
+  <body data-surface="mesh" data-grain data-sn-state="{ error: '', saving: false }">
     <!-- Signed out, /api/user answers 401, which src/sinter.config.ts turns into `null` on this page. Signed in, the
          server redirects `/` before this page is sent; on the Vite dev server, which cannot, `then` goes to the calendar. -->
     <sn-resource name="user" src="/user"
                  then="$result && navigate(pagePath('/calendar/'), { replace: true })"></sn-resource>
     <sn-resource name="authConfig" src="/auth/config"></sn-resource>
 
-    <!-- The language picker in the page's corner; the column below is the logo, the name and the sign-in card. -->
+    <!-- The language picker in the page's corner; the column below is the logo, the name, the sign-in card and what
+         Caley does. The page wears patina (../patina): a mesh with grain, the name in the editorial display face, the
+         card in glass, the features in a bento grid. -->
     <header class="login-lang" data-layout="row" data-gap="sm" data-wrap="none" data-justify="end" data-pad="md">
       <span data-icon="globe" data-muted></span>
       <!-- each language is its own page: choosing one goes there (src/islands/common.ts) -->
@@ -20,40 +22,67 @@
       </select>
     </header>
 
-    <main class="login" data-layout="center" data-pad="lg" style="--tm-measure: 24rem"
+    <main class="login" data-layout="center" data-gap="xl" data-pad="lg" style="--tm-measure: 56rem"
           data-sn-let="{ ready: ($meta.user.loadedAt || $meta.user.error) && !user && ($meta.authConfig.loadedAt || $meta.authConfig.error) }">
-      <div data-layout="stack" data-gap="xl">
-        <div class="login-brand" data-layout="stack" data-gap="sm">
-          <img src="/icons/favicon-128x128.png" alt="" width="72" height="72">
-          <h1 data-sn-text="m.app_brand()"></h1>
-          <p data-muted data-sn-text="m.login_tagline()"></p>
+      <div data-hero>
+        <img src="/icons/favicon-128x128.png" alt="" width="72" height="72">
+        <h1 data-display="hero" data-ink="gradient" data-sn-text="m.app_brand()"></h1>
+        <p data-muted data-sn-text="m.login_tagline()"></p>
+
+        <div data-layout="center" style="--tm-measure: 24rem">
+          <article data-surface="glass" data-elevation="floating" data-layout="stack" data-gap="lg" data-pad="lg">
+            <template data-sn-if="ready">
+              <!-- The demo (DEMO_MODE) signs in without credentials, as its fixed user (backend/src/local_auth.rs). -->
+              <template data-sn-if="authConfig.demo_mode">
+                <form data-layout="stack" data-gap="md"
+                      data-sn-post="site:/auth/login" data-sn-encoding="form"
+                      data-sn-on-submit="saving = true; error = ''"
+                      data-sn-then="navigate(pagePath($result.redirect || '/calendar/'), { replace: true })"
+                      data-sn-catch="saving = false; error = $error.detail ?? m.login_error()">
+                  <template data-sn-if="error">
+                    <p data-callout data-tone="danger" role="alert" data-sn-text="error"></p>
+                  </template>
+                  <button type="submit" data-halo data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.login_demo()"></button>
+                </form>
+              </template>
+
+              <template data-sn-if="authConfig.oidc_enabled">
+                <a href="/auth/oidc" role="button" data-halo data-sn-text="m.login_oidc_button()"></a>
+              </template>
+            </template>
+            <template data-sn-else>
+              <p aria-busy="true" data-sn-text="m.nav_loading()"></p>
+            </template>
+          </article>
         </div>
-
-        <article data-layout="stack" data-gap="lg" data-pad="lg">
-          <template data-sn-if="ready">
-            <!-- The demo (DEMO_MODE) signs in without credentials, as its fixed user (backend/src/local_auth.rs). -->
-            <template data-sn-if="authConfig.demo_mode">
-              <form data-layout="stack" data-gap="md"
-                    data-sn-post="site:/auth/login" data-sn-encoding="form"
-                    data-sn-on-submit="saving = true; error = ''"
-                    data-sn-then="navigate(pagePath($result.redirect || '/calendar/'), { replace: true })"
-                    data-sn-catch="saving = false; error = $error.detail ?? m.login_error()">
-                <template data-sn-if="error">
-                  <p data-callout data-tone="danger" role="alert" data-sn-text="error"></p>
-                </template>
-                <button type="submit" data-sn-attr="{disabled: saving, 'aria-busy': saving ? 'true' : null}" data-sn-text="m.login_demo()"></button>
-              </form>
-            </template>
-
-            <template data-sn-if="authConfig.oidc_enabled">
-              <a href="/auth/oidc" role="button" data-sn-text="m.login_oidc_button()"></a>
-            </template>
-          </template>
-          <template data-sn-else>
-            <p aria-busy="true" data-sn-text="m.nav_loading()"></p>
-          </template>
-        </article>
       </div>
+
+      <!-- What Caley does: four tiles, the calendar's wide, each icon on a seeded gradient -->
+      <section data-layout="stack" data-gap="md">
+        <h2 data-sr-only data-sn-text="m.login_features()"></h2>
+        <ul data-layout="grid" data-bento data-gap="md" style="--tm-min: 12rem; --pt-row: 9rem">
+          <li data-surface="glass" data-span="wide" data-layout="stack" data-gap="sm" data-pad="lg">
+            <span data-avatar data-seed="4" data-size="lg" aria-hidden="true"><span data-icon="calendar"></span></span>
+            <h3 data-sn-text="m.login_feature_calendar()"></h3>
+            <p data-muted data-sn-text="m.login_feature_calendar_text()"></p>
+          </li>
+          <li data-surface="glass" data-layout="stack" data-gap="sm" data-pad="lg">
+            <span data-avatar data-seed="7" data-size="lg" aria-hidden="true"><span data-icon="users"></span></span>
+            <h3 data-sn-text="m.login_feature_contacts()"></h3>
+            <p data-muted data-sn-text="m.login_feature_contacts_text()"></p>
+          </li>
+          <li data-surface="glass" data-layout="stack" data-gap="sm" data-pad="lg">
+            <span data-avatar data-seed="1" data-size="lg" aria-hidden="true"><span data-icon="mail"></span></span>
+            <h3 data-sn-text="m.login_feature_mail()"></h3>
+            <p data-muted data-sn-text="m.login_feature_mail_text()"></p>
+          </li>
+          <li data-surface="glass" data-span="wide" data-layout="stack" data-gap="sm" data-pad="lg">
+            <span data-avatar data-seed="10" data-size="lg" aria-hidden="true"><span data-icon="lock"></span></span>
+            <h3 data-sn-text="m.login_feature_privacy()"></h3>
+            <p data-muted data-sn-text="m.login_feature_privacy_text()"></p>
+          </li>
+        </ul>
+      </section>
     </main>
     <script type="module" src="/src/main/login.ts"></script>
   </body>

@@ -14,6 +14,8 @@ RUN target/x86_64-unknown-linux-musl/release/caley --openapi > /app/openapi.json
 FROM node:26-bookworm AS frontend-build
 
 WORKDIR /app/frontend
+# patina (../patina) is a local file dependency of the frontend: it must be there before npm ci links it.
+COPY patina/ /app/patina/
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./

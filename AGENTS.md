@@ -7,6 +7,8 @@ Two-package monorepo with no root-level tooling:
 - **`backend/`** — Rust 2024 Axum binary. Handles auth, CalDAV/CardDAV/IMAP/SMTP clients, SQLite persistence, encryption, background sync, SSE, WebAuthn/OpenPGP endpoints, and static frontend serving.
 - **`frontend/`** — Vite static multi-page app of sinter-compiled HTML pages (`@tiaforge-ui/sinter`). temper CSS (`@tiaforge-ui/temper`, `data-*` attributes) + Sass for app-specific rules, TypeScript strict mode, i18n via `@inlang/paraglide-js`.
 
+- **`patina/`** — `@tiaforge-ui/patina`, an expressive surface layer over temper, kept as a standalone sinter component library; the frontend links it (`file:../patina`). See `patina/README.md`.
+
 There is no root `package.json`, Cargo workspace, or shared command runner. Work inside the package directory.
 
 ## App Capabilities

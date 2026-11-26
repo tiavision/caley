@@ -7,9 +7,9 @@ import { MailWidthComponent } from '../node_modules/@tiavision/sinter-mail/sinte
 // ResizeObserver); a test that needs one passes it: render(page, { ...app, scripts: { 'close-after': scripts['close-after'] } }).
 const html = import.meta.glob<string>('./components/*.html', { query: '?raw', import: 'default', eager: true });
 const ts = import.meta.glob(['./components/*.ts', '!./components/*.test.ts'], { eager: true });
-// sinter-mail's components (<mail-body> and its internal ones), which the build takes from sinter({ libraries }):
+// sinter-mail's components (<mail-body> and its internal ones) and patina's (<pt-avatar>), which the build takes from sinter({ libraries }):
 // render() has no option for a component library, so they are passed as components of the app.
-const library = import.meta.glob<string>('../node_modules/@tiavision/sinter-mail/sinter/components/**/*.html', { query: '?raw', import: 'default', eager: true });
+const library = import.meta.glob<string>(['../node_modules/@tiavision/sinter-mail/sinter/components/**/*.html', '../node_modules/@tiaforge-ui/patina/sinter/components/*.html'], { query: '?raw', import: 'default', eager: true });
 // and their scripts: <mail-body> renders a body from data through its script builder (mail-view.ts), without which it
 // renders nothing. jsdom lays nothing out and has no ResizeObserver, so <mail-width> reports a wide reader at once
 // (`mailWidth('narrow')`: a phone's).

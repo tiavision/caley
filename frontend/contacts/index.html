@@ -2,7 +2,10 @@
 <!-- sel: the contact the detail dialog shows (looked up in `contacts`, so it follows server events);
      draft: the form dialog's ContactDraft (src/lib/contacts.ts); hiddenBooks: addressbookKey()s filtered out.
      Shortcuts: c = new contact, e = edit the open contact (data-shortcut on those buttons).
-     `contact-saved` {detail: the contact}: the form saved it, the detail dialog shows it. -->
+     `contact-saved` {detail: the contact}: the form saved it, the detail dialog shows it.
+     The page wears patina (../patina): a mesh masthead with the counts in glass tiles, a glass toolbar that stays at the
+     top, the letters in the editorial display face, raised cards with seeded avatars (<pt-avatar>), and a gradient
+     band in the detail dialog. -->
 <app-layout data-sn-with="{ here: '/contacts/', title: 'Caley - Contacts' }"
             data-sn-state="{
               q: '',
@@ -27,7 +30,7 @@
     <sn-event name="contacts_refetch" resource="contacts" op="refresh"></sn-event>
     <sn-event name="contacts_refetch" resource="addressbooks" op="refresh"></sn-event>
   </sn-sync>
-  <main data-gutter data-sn-on-contact-saved="sel = $event.detail; openDialog('contact-detail')">
+  <main data-gutter data-pairing="editorial" data-sn-on-contact-saved="sel = $event.detail; openDialog('contact-detail')">
     <div data-density="compact"
          data-sn-let="{
            shown: filterContacts(contacts, addressbooks, hiddenBooks, q),
@@ -38,7 +41,29 @@
            },
          }">
       <div class="contacts-page" data-layout="stack" data-gap="md" data-pad="sm">
-        <div class="contacts-toolbar" data-layout="row" data-gap="sm">
+        <!-- The masthead: the page's name and its counts (the counts once the list has loaded). -->
+        <header data-surface="mesh" data-grain data-layout="row" data-justify="between" data-align="end" data-gap="lg" data-pad="lg">
+          <h1 data-display="xl" data-ink="gradient" data-sn-text="m.nav_contacts()"></h1>
+          <template data-sn-if="contacts.length > 0">
+            <dl data-layout="grid" data-bento data-gap="sm" data-grow style="--tm-min: 8rem; --pt-row: 5.5rem; --tm-grow-basis: 18rem"
+                data-sn-attr="{ 'aria-label': m.contacts_stats() }">
+              <div data-surface="glass" data-layout="stack" data-gap="xs" data-pad="md">
+                <dt data-caption data-sn-text="m.contacts_stat_people()"></dt>
+                <dd data-figure data-sn-text="number(contacts.length)"></dd>
+              </div>
+              <div data-surface="glass" data-layout="stack" data-gap="xs" data-pad="md">
+                <dt data-caption data-sn-text="m.contacts_stat_orgs()"></dt>
+                <dd data-figure data-sn-text="number(organizationCount(contacts))"></dd>
+              </div>
+              <div data-surface="glass" data-layout="stack" data-gap="xs" data-pad="md">
+                <dt data-caption data-sn-text="m.contacts_stat_books()"></dt>
+                <dd data-figure data-sn-text="number(addressbooks.length)"></dd>
+              </div>
+            </dl>
+          </template>
+        </header>
+
+        <div class="contacts-toolbar" data-surface="glass" data-sticky="top" data-layout="row" data-gap="sm" data-pad="xs">
           <nav-toggle></nav-toggle>
           <div data-field data-grow style="--tm-grow-basis: 12rem">
             <span data-icon="search" aria-hidden="true"></span>
@@ -84,14 +109,11 @@
 
         <template data-sn-for="g in groupByLetter(shown)" data-sn-key="g.letter">
           <section data-layout="stack" data-gap="sm">
-            <h2 data-caption data-sn-text="g.letter"></h2>
+            <h2 data-display="lg" data-ink="gradient" data-sn-text="g.letter"></h2>
             <div data-layout="grid" data-gap="sm" style="--tm-min: 10rem">
               <template data-sn-for="c in g.items" data-sn-key="contactKey(c)">
-                <article data-layout="stack" data-gap="xs" data-align="center">
-                  <span data-avatar>
-                    <template data-sn-if="c.has_photo"><img alt="" loading="lazy" decoding="async" data-sn-attr="{src: contactPhotoUrl(c)}"></template>
-                    <template data-sn-else><span data-sn-text="contactInitial(c)"></span></template>
-                  </span>
+                <article data-elevation="raised" data-layout="stack" data-gap="xs" data-align="center">
+                  <pt-avatar data-sn-with="{ name: c.fn_name, src: c.has_photo ? contactPhotoUrl(c) : null, size: 'lg' }"></pt-avatar>
                   <button type="button" data-stretch data-variant="link" data-truncate
                           commandfor="contact-detail" command="show-modal" data-sn-on-click="sel = c"><strong data-sn-text="c.fn_name || '—'"></strong></button>
                   <template data-sn-if="c.emails[0]">
@@ -121,10 +143,10 @@
               commandfor="contact-form" command="show-modal"
               data-sn-on-click="draft = newDraft(addressbooks); formError = ''"></button>
 
-      <dialog id="contact-detail" closedby="any"
+      <dialog id="contact-detail" closedby="any" data-elevation="floating"
               data-sn-let="{ c: contacts.find(x => sameContact(x, sel)) }">
         <header>
-          <h2 data-sn-text="c?.fn_name || ''"></h2>
+          <h2 data-display="lg" data-sn-text="c?.fn_name || ''"></h2>
           <div data-layout="row" data-gap="xs" data-wrap="none">
             <share-menu data-sn-with="{ item: c ? contactShare(c) : null }"></share-menu>
             <template data-sn-if="c">
@@ -137,17 +159,16 @@
         </header>
 
         <template data-sn-if="c">
-          <span data-avatar data-self="center" style="--tm-avatar-size: 4rem">
-            <template data-sn-if="c.has_photo"><img alt="" data-sn-attr="{src: contactPhotoUrl(c)}"></template>
-            <template data-sn-else><span data-sn-text="contactInitial(c)"></span></template>
-          </span>
-
-          <dl data-pairs>
+          <!-- the contact's band: the avatar on a gradient, the organization under it (with its label for screen readers) -->
+          <div data-surface="gradient" data-grain data-hero data-pad="lg">
+            <pt-avatar data-sn-with="{ name: c.fn_name, src: c.has_photo ? contactPhotoUrl(c) : null, size: 'xl', halo: true }"></pt-avatar>
             <template data-sn-if="c.org">
-              <dt data-sn-text="m.contacts_org()"></dt>
-              <dd data-sn-text="c.org"></dd>
+              <p data-muted><span data-sr-only data-sn-text="m.contacts_org() + ': '"></span><span data-sn-text="c.org"></span></p>
             </template>
+          </div>
 
+          <!-- the organization is under the avatar, in the band above -->
+          <dl data-pairs>
             <template data-sn-if="c.emails.length">
               <dt data-sn-text="m.contacts_email()"></dt>
               <dd data-layout="stack" data-gap="xs">

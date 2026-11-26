@@ -61,6 +61,11 @@ export function addressbookName(addressbooks: readonly AddressbookJson[], c: Con
 }
 
 /** Avatar letter. */
+/** How many organizations the contacts name (each once, ignoring case and spaces around it). */
+export function organizationCount(contacts: readonly ContactJson[]): number {
+  return new Set(contacts.map((c) => c.org?.trim().toLowerCase()).filter((o) => o)).size;
+}
+
 export function contactInitial(c: ContactJson): string {
   return (c.fn_name[0] ?? '?').toUpperCase();
 }

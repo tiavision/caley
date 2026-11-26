@@ -1,0 +1,22 @@
+<!--
+  pt-avatar: temper's round avatar with a seeded gradient. Public.
+  <pt-avatar data-sn-with="{ name: c.fn_name, src: c.has_photo ? photoUrl(c) : null }"></pt-avatar>
+  The photo when there is one, else up to two initials on one of patina's twelve seeded gradients (data-seed, from
+  the name: a person keeps their colour on every page). `size` is temper's data-size (sm, md, lg; xl is 4.5rem, for
+  a profile header); `halo` adds patina's glow. The root is temper's <span data-avatar>, hidden from screen readers:
+  an avatar stands beside the name it pictures, which is read there.
+  Why a component: the seed is a hash of the name and the fallback needs a branch, which markup alone cannot write
+  once for every page. The two lets are patina.seed and patina.initials (sinter.helpers.ts) written out: a library's
+  components cannot call the library's helpers, which the app names (test/helpers.test.ts keeps the two in step).
+-->
+<template data-sn-props="{ name: string; src?: string | null; size?: AvatarSize; halo?: boolean }"><span data-avatar aria-hidden="true"
+  data-sn-let="{
+    key: (name ?? '').trim().toLowerCase(),
+    words: (name ?? '').trim().split(/\s+/u).map((w) => w.replace(/^[^\p{L}\p{N}]+/u, '')).filter((w) => w.length > 0),
+  }"
+  data-sn-attr="{
+    'data-seed': String([...key].reduce((h, ch) => Math.imul(h ^ (ch.codePointAt(0) ?? 0), 16777619) >>> 0, 2166136261) % 12),
+    'data-size': size && size !== 'xl' ? size : null,
+    'data-halo': halo ? '' : null,
+  }"
+  data-sn-style="{ '--tm-avatar-size': size === 'xl' ? '4.5rem' : null }"><template data-sn-if="src"><img alt="" loading="lazy" decoding="async" data-sn-attr="{ src }"></template><template data-sn-else><span data-sn-text="words.length ? ([...words[0]][0] + (words.length > 1 ? [...words[words.length - 1]][0] : '')).toUpperCase() : '?'"></span></template></span></template>

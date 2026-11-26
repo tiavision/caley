@@ -1,0 +1,238 @@
+/* patina — an expressive surface layer over temper.
+   temper makes semantic HTML look finished; patina gives it a voice: materials (glass, gradient, mesh, grain),
+   brand-tinted elevation and glow, display type and font pairings, hero and bento layouts, seeded colour.
+   Rules, as temper's: attributes with fixed values (vocab.json, checked by `patina check`), no classes, no outer
+   margins, every selector in :where() inside @layer pt.*, so the app's own CSS always wins without !important.
+   All colour comes from temper's --tm-hue and --tm-chroma in OKLCH: a rebrand is still two numbers. Text keeps
+   temper's colours, and every surface stays in the lightness band where they meet WCAG AA (test/contrast.test.ts
+   checks it at every hue). prefers-contrast: more and forced colours fall back to temper's plain surfaces;
+   prefers-reduced-transparency makes glass opaque; prefers-reduced-motion stops the hover lift. No script. */
+
+/* temper's layers first, patina's after them: patina refines temper, the app's unlayered CSS wins over both. */
+@layer tm, pt;
+@layer pt.base, pt.surface, pt.type, pt.layout;
+
+/* ───────────── tokens ───────────── */
+@layer pt.base {
+  /* :where(): data-pairing on <html> itself must win over these defaults */
+  :where(:root) {
+    --pt-font-display: var(--tm-font-sans);
+    --pt-display-weight: 700;
+    --pt-display-tracking: -0.035em;
+    --pt-blur: 18px;
+    --pt-row: 7rem;
+
+    /* surface tints: light 0.958–0.966, dark 0.235–0.26 lightness, so temper's text and muted text keep AA on them */
+    --_pt-c: var(--tm-chroma, 0.19);
+    --_pt-h: var(--tm-hue, 255);
+    --_pt-tc: min(var(--_pt-c), 0.2); /* surfaces stay calm however loud the brand is */
+    --pt-tint-1: light-dark(oklch(0.96 calc(var(--_pt-tc) * 0.36) calc(var(--_pt-h) - 40)), oklch(0.255 calc(var(--_pt-c) * 0.42) calc(var(--_pt-h) - 40)));
+    --pt-tint-2: light-dark(oklch(0.958 calc(var(--_pt-tc) * 0.4) var(--_pt-h)), oklch(0.26 calc(var(--_pt-c) * 0.5) var(--_pt-h)));
+    --pt-tint-3: light-dark(oklch(0.966 calc(var(--_pt-tc) * 0.34) calc(var(--_pt-h) + 50)), oklch(0.245 calc(var(--_pt-c) * 0.4) calc(var(--_pt-h) + 50)));
+    --pt-glass: light-dark(oklch(1 0 0 / 0.72), oklch(0.2 calc(var(--_pt-c) * 0.08) var(--_pt-h) / 0.62));
+    --_pt-rim: light-dark(oklch(1 0 0 / 0.75), oklch(1 0 0 / 0.09));
+
+    /* gradient ink: dark enough on light surfaces, light enough on dark ones */
+    --pt-ink-1: light-dark(oklch(0.42 calc(var(--_pt-c) * 1.05) calc(var(--_pt-h) - 30)), oklch(0.82 calc(var(--_pt-c) * 0.6) calc(var(--_pt-h) - 30)));
+    --pt-ink-2: light-dark(oklch(0.43 calc(var(--_pt-c) * 1.05) calc(var(--_pt-h) + 40)), oklch(0.84 calc(var(--_pt-c) * 0.6) calc(var(--_pt-h) + 40)));
+
+    /* brand-tinted shadows and the halo */
+    --_pt-shade: light-dark(oklch(0.32 calc(var(--_pt-c) * 0.45) var(--_pt-h) / 0.14), oklch(0.05 0.01 var(--_pt-h) / 0.6));
+    --_pt-shade-far: light-dark(oklch(0.32 calc(var(--_pt-c) * 0.6) var(--_pt-h) / 0.2), oklch(0.03 0.01 var(--_pt-h) / 0.7));
+    --pt-shadow-raised: 0 1px 2px var(--_pt-shade), 0 6px 18px -8px var(--_pt-shade-far), inset 0 1px 0 var(--_pt-rim);
+    --pt-shadow-floating: 0 2px 6px var(--_pt-shade), 0 28px 64px -18px var(--_pt-shade-far), inset 0 1px 0 var(--_pt-rim);
+    --pt-glow: light-dark(oklch(0.62 calc(var(--_pt-c) * 0.9) var(--_pt-h) / 0.35), oklch(0.66 calc(var(--_pt-c) * 0.9) var(--_pt-h) / 0.4));
+  }
+
+  /* font pairings: the display face, its weight and tracking (the faces come from Fontsource packages the app imports) */
+  :where([data-pairing="editorial"]) {
+    --pt-font-display: "Fraunces Variable", "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --pt-display-weight: 600;
+    --pt-display-tracking: -0.02em;
+  }
+  :where([data-pairing="grotesk"]) {
+    --pt-font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", var(--tm-font-sans);
+    --pt-display-weight: 700;
+    --pt-display-tracking: -0.04em;
+  }
+}
+
+/* ───────────── surfaces ───────────── */
+@layer pt.surface {
+  :where([data-surface]) {
+    --_pt-noise: ;
+    background-color: var(--tm-bg);
+  }
+  /* a surface inside the page is a panel: temper's large radius (the page itself, body and main, stays square) */
+  :where([data-surface]:not(html, body, main)) { border-radius: var(--tm-radius-lg, 0.75rem); }
+  :where([data-surface="gradient"]) {
+    background-image: var(--_pt-noise) linear-gradient(135deg, var(--pt-tint-1), var(--pt-tint-2) 55%, var(--pt-tint-3));
+  }
+  :where([data-surface="mesh"]) {
+    background-image: var(--_pt-noise)
+      radial-gradient(60% 70% at 8% 0%, var(--pt-tint-1), transparent 70%),
+      radial-gradient(55% 60% at 95% 10%, var(--pt-tint-3), transparent 70%),
+      radial-gradient(70% 70% at 60% 105%, var(--pt-tint-2), transparent 70%);
+  }
+  :where([data-surface="glass"]) {
+    background-color: var(--pt-glass);
+    background-image: var(--_pt-noise) none;
+    -webkit-backdrop-filter: blur(var(--pt-blur)) saturate(1.5);
+    backdrop-filter: blur(var(--pt-blur)) saturate(1.5);
+    border: 1px solid var(--_pt-rim);
+    box-shadow: inset 0 1px 0 var(--_pt-rim);
+  }
+  /* temper's article and dialog have a border of their own; on glass the rim replaces it */
+  :where(article, dialog)[data-surface="glass"] { border-color: var(--_pt-rim); }
+
+  /* grain: a noise layer on top of the surface's own layers (or alone on a plain element) */
+  :where([data-grain]) {
+    --_pt-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),;
+  }
+  :where([data-grain]:not([data-surface])) {
+    background-image: var(--_pt-noise) none;
+  }
+
+  /* elevation: tinted shadows; a clickable raised card lifts on hover */
+  :where([data-elevation="raised"]) { box-shadow: var(--pt-shadow-raised); }
+  :where([data-elevation="floating"]) { box-shadow: var(--pt-shadow-floating); }
+  :where([data-elevation="raised"]:has([data-stretch])) {
+    transition: box-shadow var(--tm-duration, 150ms) var(--tm-ease, ease), translate var(--tm-duration, 150ms) var(--tm-ease, ease);
+  }
+  :where([data-elevation="raised"]:has([data-stretch]):hover) { box-shadow: var(--pt-shadow-floating); }
+  @media (prefers-reduced-motion: no-preference) {
+    :where([data-elevation="raised"]:has([data-stretch]):hover) { translate: 0 -2px; }
+  }
+
+  /* halo: the accent's glow, added to whatever shadow the element has */
+  :where([data-halo]) { box-shadow: 0 0 0 1px var(--pt-glow), 0 8px 32px -6px var(--pt-glow); }
+  :where([data-halo][data-elevation="raised"]) { box-shadow: var(--pt-shadow-raised), 0 10px 36px -8px var(--pt-glow); }
+  :where([data-halo][data-elevation="floating"]) { box-shadow: var(--pt-shadow-floating), 0 18px 56px -12px var(--pt-glow); }
+
+  /* seeds: twelve hues around the brand hue, 15° apart; a gradient fill and an ink that keeps AA on both its ends */
+  :where([data-seed]) {
+    --_pt-sh: calc(var(--_pt-h) + (var(--_pt-seed, 0) - 5.5) * 15);
+    --_pt-seed-a: light-dark(oklch(0.9 calc(var(--_pt-c) * 0.42) var(--_pt-sh)), oklch(0.46 calc(var(--_pt-c) * 0.62) var(--_pt-sh)));
+    --_pt-seed-b: light-dark(oklch(0.8 calc(var(--_pt-c) * 0.62) calc(var(--_pt-sh) + 35)), oklch(0.34 calc(var(--_pt-c) * 0.7) calc(var(--_pt-sh) + 35)));
+    --_pt-seed-ink: light-dark(oklch(0.3 calc(var(--_pt-c) * 0.55) var(--_pt-sh)), oklch(0.96 calc(var(--_pt-c) * 0.15) var(--_pt-sh)));
+    background-color: var(--_pt-seed-b);
+    background-image: linear-gradient(140deg, var(--_pt-seed-a), var(--_pt-seed-b));
+    color: var(--_pt-seed-ink);
+  }
+  :where([data-seed="0"]) { --_pt-seed: 0; }
+  :where([data-seed="1"]) { --_pt-seed: 1; }
+  :where([data-seed="2"]) { --_pt-seed: 2; }
+  :where([data-seed="3"]) { --_pt-seed: 3; }
+  :where([data-seed="4"]) { --_pt-seed: 4; }
+  :where([data-seed="5"]) { --_pt-seed: 5; }
+  :where([data-seed="6"]) { --_pt-seed: 6; }
+  :where([data-seed="7"]) { --_pt-seed: 7; }
+  :where([data-seed="8"]) { --_pt-seed: 8; }
+  :where([data-seed="9"]) { --_pt-seed: 9; }
+  :where([data-seed="10"]) { --_pt-seed: 10; }
+  :where([data-seed="11"]) { --_pt-seed: 11; }
+  /* temper's data-avatar sets its colours from its tone; a seed is a fill of its own */
+  :where([data-avatar][data-seed]) { font-weight: 650; }
+}
+
+/* ───────────── type ───────────── */
+@layer pt.type {
+  :where([data-display], [data-figure]) {
+    font-family: var(--pt-font-display);
+    font-weight: var(--pt-display-weight);
+    letter-spacing: var(--pt-display-tracking);
+    font-optical-sizing: auto;
+    line-height: 1.05;
+    text-wrap: balance;
+  }
+  :where([data-display="hero"]) { font-size: clamp(2.75rem, 1.4rem + 5.2vw, 5.5rem); line-height: 0.98; }
+  :where([data-display="xl"]) { font-size: clamp(2.25rem, 1.6rem + 2.6vw, 3.5rem); }
+  :where([data-display="lg"]) { font-size: clamp(1.75rem, 1.4rem + 1.4vw, 2.5rem); }
+  :where([data-figure]) {
+    font-size: clamp(2rem, 1.5rem + 1.8vw, 3rem);
+    font-variant-numeric: tabular-nums lining-nums;
+    line-height: 1;
+  }
+
+  :where([data-ink="gradient"]) {
+    color: var(--pt-ink-1);
+    background-image: linear-gradient(100deg, var(--pt-ink-1), var(--pt-ink-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    /* the clip box ends at the line box: room for descenders and the italic overhang */
+    padding-block-end: 0.08em;
+    padding-inline-end: 0.04em;
+  }
+}
+
+/* ───────────── layouts ───────────── */
+@layer pt.layout {
+  :where([data-hero]) {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--tm-space-lg);
+    text-align: center;
+    text-wrap: balance;
+  }
+  /* its padding grows with the screen; temper's data-pad sets a fixed one instead (a band in a dialog) */
+  :where([data-hero]:not([data-pad])) {
+    padding-block: clamp(var(--tm-space-xl), 5vw, calc(var(--tm-space-xl) * 2.5));
+    padding-inline: var(--tm-space-md);
+  }
+  :where([data-hero]) > :where(p) { max-inline-size: 36rem; font-size: var(--tm-text-lg); }
+
+  /* bento: temper's grid (columns at least --tm-min wide) with rows, dense filling and spans */
+  :where([data-bento]) {
+    container-type: inline-size;
+    grid-auto-rows: minmax(var(--pt-row), auto);
+    grid-auto-flow: row dense;
+  }
+  :where([data-bento]) > * { min-inline-size: 0; }
+  @container (min-width: 32rem) {
+    :where([data-bento]) > :where([data-span="wide"]) { grid-column: span 2; }
+    :where([data-bento]) > :where([data-span="tall"]) { grid-row: span 2; }
+    :where([data-bento]) > :where([data-span="large"]) { grid-column: span 2; grid-row: span 2; }
+  }
+  :where([data-bento]) > :where([data-span="full"]) { grid-column: 1 / -1; }
+}
+
+/* ───────────── preferences ───────────── */
+@layer pt.surface {
+  @media (prefers-reduced-transparency: reduce) {
+    :where([data-surface="glass"]) {
+      background-color: var(--tm-surface-raised);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+  @media (prefers-contrast: more) {
+    :where([data-surface]) {
+      --_pt-noise: ;
+      background-color: var(--tm-surface);
+      background-image: none;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+    :where([data-surface="glass"]) { border-color: var(--tm-border-strong); }
+    :where([data-grain]) { --_pt-noise: ; }
+    :where([data-grain]:not([data-surface])) { background-image: none; }
+    :where([data-halo]) { box-shadow: 0 0 0 2px var(--tm-accent); }
+  }
+  @media (forced-colors: active) {
+    :where([data-surface], [data-grain]) { background-image: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+  }
+}
+@layer pt.type {
+  @media (prefers-contrast: more) {
+    :where([data-ink="gradient"]) {
+      background-image: none;
+      -webkit-text-fill-color: currentColor;
+      color: var(--tm-text);
+    }
+  }
+  @media (forced-colors: active) {
+    :where([data-ink="gradient"]) { background-image: none; -webkit-text-fill-color: currentColor; }
+  }
+}
