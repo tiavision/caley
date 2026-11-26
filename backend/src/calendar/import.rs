@@ -8,6 +8,7 @@ use chrono::NaiveDate;
 use serde::Deserialize;
 
 use crate::caldav::generation::MAX_IMPORT_EVENTS;
+use crate::caldav::generation::without_server_scheduling;
 use crate::caldav::{CalDavClient, preview_events_from_raw_ical, split_vcalendar_into_events};
 use crate::db;
 use crate::email_db;
@@ -226,11 +227,18 @@ pub async fn import_ics(
     let mut imported = 0usize;
     let mut errors = 0usize;
 
+    // a file from anyone: the server sends no invitation or reply for it in the user's name
+    let mut no_scheduling = header::HeaderMap::new();
+    no_scheduling.insert("schedule-reply", header::HeaderValue::from_static("F"));
     for (uid, wrapped_ical) in events.events() {
+        let wrapped_ical = without_server_scheduling(&wrapped_ical);
         // an event already in the calendar is replaced where it is
         let event_href =
             super::events::resolve_event_href(&state, account.id(), &calendar_href, &uid).await;
-        match client.put_event(&event_href, &wrapped_ical).await {
+        match client
+            .put_event_with(&event_href, &wrapped_ical, no_scheduling.clone())
+            .await
+        {
             Ok(_) => {
                 if let Err(e) = db::upsert_cached_event_raw(
                     &state.db,

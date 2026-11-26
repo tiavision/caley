@@ -655,6 +655,73 @@ fn fold_lines(ical: &str) -> String {
     out
 }
 
+/// The parts of a property line's name and parameters split at `;` outside quotes, and the rest from the
+/// first `:` outside quotes (the value with its `:`); `None` for a line without value.
+fn split_property(line: &str) -> Option<(Vec<&str>, &str)> {
+    let mut quoted = false;
+    let mut parts = Vec::new();
+    let mut start = 0;
+    for (i, c) in line.char_indices() {
+        match c {
+            '"' => quoted = !quoted,
+            ';' if !quoted => {
+                parts.push(&line[start..i]);
+                start = i + 1;
+            }
+            ':' if !quoted => {
+                parts.push(&line[start..i]);
+                return Some((parts, &line[i..]));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// `ical` with `SCHEDULE-AGENT=CLIENT` on every ORGANIZER and ATTENDEE of its VEVENTs (RFC 6638 §7.1: the
+/// server sends no invitation, update or reply for them), replacing a SCHEDULE-AGENT there; the lines are
+/// unfolded and folded again at 75 octets. For imported files: an event the user creates or edits in the
+/// app is not changed.
+pub fn without_server_scheduling(ical: &str) -> String {
+    let mut out = String::with_capacity(ical.len() + 64);
+    let mut components: Vec<String> = Vec::new();
+    for line in unfold(ical) {
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(name) = line.strip_prefix("BEGIN:") {
+            components.push(name.trim().to_ascii_uppercase());
+        } else if line.starts_with("END:") {
+            components.pop();
+        }
+        let in_event = components.last().is_some_and(|c| c == "VEVENT");
+        let rewritten = match split_property(&line) {
+            Some((parts, value))
+                if in_event
+                    && (parts[0].eq_ignore_ascii_case("ORGANIZER")
+                        || parts[0].eq_ignore_ascii_case("ATTENDEE")) =>
+            {
+                let mut head: Vec<&str> = parts
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(i, p)| {
+                        *i == 0
+                            || !p.split_once('=').is_some_and(|(k, _)| {
+                                k.trim().eq_ignore_ascii_case("SCHEDULE-AGENT")
+                            })
+                    })
+                    .map(|(_, p)| p)
+                    .collect();
+                head.push("SCHEDULE-AGENT=CLIENT");
+                format!("{}{value}", head.join(";"))
+            }
+            _ => line,
+        };
+        out.push_str(&fold_lines(&rewritten));
+    }
+    out
+}
+
 /// Extract the property name from an unfolded iCal line (part before first `:` or `;`).
 fn prop_name(line: &str) -> &str {
     let c = line.find(':').unwrap_or(line.len());
@@ -1122,6 +1189,56 @@ mod split_tests {
         }
         many.push_str("END:VCALENDAR\n");
         assert!(split_vcalendar_into_events(&many).too_many);
+    }
+
+    /// Every ORGANIZER and ATTENDEE of the events gets SCHEDULE-AGENT=CLIENT (an existing one replaced),
+    /// folded and quoted ones included; nothing else changes, and the lines are folded again.
+    #[test]
+    fn imported_attendees_are_not_scheduled_by_the_server() {
+        let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:a\r\nDTSTART:20261124T080000Z\r\n\
+            DESCRIPTION:ATTENDEE;X=1:not a property\\, \"quoted\r\n\
+            ORGANIZER;CN=\"Boss: The; Big\";schedule-agent=SERVER:mailto:boss@example\r\n \
+            .com\r\n\
+            ATTENDEE;CN=\"Doe\r\n ; Jane: CEO\";SCHEDULE-AGENT=NONE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;ROLE=REQ-PA\r\n\
+            \x20RTICIPANT:mailto:jane.doe.with.a.long.address@example.com\r\n\
+            attendee:mailto:plain@example.com\r\n\
+            BEGIN:VALARM\r\nACTION:EMAIL\r\nATTENDEE:mailto:me@example.com\r\nEND:VALARM\r\n\
+            END:VEVENT\r\nEND:VCALENDAR\r\n";
+        let out = without_server_scheduling(ics);
+        for line in out.split("\r\n") {
+            assert!(line.len() <= 75, "{line:?}");
+        }
+        let lines = unfold(&out);
+        let find = |prefix: &str| -> Vec<&str> {
+            lines
+                .iter()
+                .filter(|l| l.to_ascii_uppercase().starts_with(prefix))
+                .map(String::as_str)
+                .collect()
+        };
+        assert_eq!(
+            find("ORGANIZER"),
+            ["ORGANIZER;CN=\"Boss: The; Big\";SCHEDULE-AGENT=CLIENT:mailto:boss@example.com"]
+        );
+        assert_eq!(
+            find("ATTENDEE"),
+            [
+                "ATTENDEE;CN=\"Doe; Jane: CEO\";PARTSTAT=NEEDS-ACTION;RSVP=TRUE;ROLE=REQ-PARTICIPANT;SCHEDULE-AGENT=CLIENT:mailto:jane.doe.with.a.long.address@example.com",
+                "attendee;SCHEDULE-AGENT=CLIENT:mailto:plain@example.com",
+                // the alarm's recipient is no scheduling
+                "ATTENDEE:mailto:me@example.com",
+            ]
+        );
+        assert_eq!(
+            find("DESCRIPTION"),
+            ["DESCRIPTION:ATTENDEE;X=1:not a property\\, \"quoted"]
+        );
+
+        // still read as before (the reader knows upper-case ATTENDEE only)
+        let event = &crate::caldav::preview_events_from_raw_ical(&out)[0];
+        let emails: Vec<&str> = event.attendees.iter().map(|a| a.email.as_str()).collect();
+        assert_eq!(emails, ["jane.doe.with.a.long.address@example.com"]);
+        assert_eq!(event.attendees[0].cn, "Doe; Jane: CEO");
     }
 
     /// A large calendar-level part is not copied into every event, and the events are bounded.
