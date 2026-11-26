@@ -5,10 +5,10 @@ brand-tinted depth, display type, hero and bento layouts, seeded colour. This de
 most visible screens: the sign-in page, the contacts overview and a contact's detail dialog. Pages that use none of
 its attributes render as before.
 
-**Where it lives.** The module is on temper's branch
-[`claude/data-tm-prefix`](https://github.com/tiaforge/temper/tree/claude/data-tm-prefix), together with the rename
-of every temper attribute to `data-tm-*`. caley installs temper from that branch (a git dependency; temper builds
-its CSS in `prepare`) until it is released as 0.5, then goes back to a version range.
+**Where it lives.** The module is on temper's `main` (merged in
+[tiaforge/temper#15](https://github.com/tiaforge/temper/pull/15)), together with the rename of every temper attribute
+to `data-tm-*`. caley installs temper from `main` (a git dependency; temper builds its CSS in `prepare`; the lockfile
+pins the commit) until it is released as 0.5, then goes back to a version range.
 
 **How it got there.** It started as a separate sinter library in this repository (`patina`, attributes
 `data-pt-*`). Nearly everything it needed from temper (extension vocabularies for the checker, a second token
