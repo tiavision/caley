@@ -10,6 +10,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Caley",
         "width": 1280,
         "height": 860,

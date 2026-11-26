@@ -50,8 +50,9 @@ function save(list) {
 
 function open(origin) {
   save([{ origin }, ...servers().filter((s) => s.origin !== origin)]);
-  // the server sends the visitor on to their language and to the sign-in or the page they used last
-  location.assign(`${origin}/`);
+  // the server sends the visitor on to their language and to the sign-in or the page they used last; the
+  // app's bridge goes with it (start.js)
+  openServer(origin);
 }
 
 // the saved servers as rows to open (host, then the whole address) and the form to add one: open on its

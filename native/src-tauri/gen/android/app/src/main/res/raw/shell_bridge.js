@@ -6,11 +6,14 @@
 // - saving `<a download>` links to blob:/data: URLs the page made (to Downloads; links to the server's URLs
 //   are Android's download manager's, ShellBridge.kt's download listener),
 // - Caley's mail notification switch, reported to the app, which registers the server for push (Push.kt),
+// - links that open a window on another site (every link in a mail is target="_blank") and `window.open` there:
+//   the phone's browser, not this webview,
 // - WebAuthn (`navigator.credentials.create/get` with `publicKey`, the PRF extension included): the app is
 //   the authenticator (Authenticator.kt, keys in the Android Keystore behind the screen lock), since the
 //   WebView offers no passkeys for a server the app cannot name in advance. Android 11+ (`__WEBAUTHN__`).
-// `__PERMISSION__` is the notification permission when the page starts (ShellBridge.kt writes it in), since
-// `Notification.permission` must be answered at once.
+// Only the server the picker opened gets this script and answers (ShellBridge.kt). `__PERMISSION__` is the
+// notification permission when the page starts (ShellBridge.kt writes it in), since `Notification.permission`
+// must be answered at once.
 (() => {
   const shell = window.caleyShell;
   if (!shell || location.hostname === 'tauri.localhost' || window.__caleyShell) return;
@@ -149,6 +152,34 @@
       )
       .catch(() => {});
   });
+
+  // a window on another site (a link with a target, `window.open`): the phone's browser. The webview opens no
+  // windows of its own, so such a link would replace the server's page; links in this window stay in it.
+  const elsewhere = (href) => {
+    try {
+      const url = new URL(href, location.href);
+      return (url.protocol === 'https:' || url.protocol === 'http:') && url.origin !== location.origin ? url.href : null;
+    } catch {
+      return null;
+    }
+  };
+  window.addEventListener('click', (event) => {
+    const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+    if (!link || event.defaultPrevented || typeof link.href !== 'string') return;
+    const target = link.target.toLowerCase();
+    if (!target || target === '_self' || target === '_top' || target === '_parent') return;
+    const url = elsewhere(link.href);
+    if (!url) return;
+    event.preventDefault();
+    send({ type: 'open', url });
+  });
+  const open = window.open;
+  window.open = function (url, ...rest) {
+    const away = url == null || url === '' ? null : elsewhere(String(url));
+    if (!away) return open.call(this, url, ...rest);
+    send({ type: 'open', url: away });
+    return null;
+  };
 
   if (__WEBAUTHN__) {
     // BufferSource ⇄ base64url, the form the app takes and gives

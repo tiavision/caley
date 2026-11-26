@@ -173,17 +173,75 @@ fn permission(
     }
 }
 
+/// The window, from its config (`create: false` there: made here, with what the config cannot give it). On
+/// desktop a window a server's page opens on another site (a link in a mail: `target="_blank"`) is the
+/// system's browser instead; one on the page's own origin (the standalone message view) is the webview's.
+/// The page's origin is the one the webview last navigated to. Android opens no windows (its links with a
+/// target go to the browser from res/raw/shell_bridge.js).
+fn main_window(app: &tauri::App) -> tauri::Result<()> {
+    let Some(config) = app.config().app.windows.iter().find(|w| w.label == "main").cloned() else {
+        return Ok(());
+    };
+    let builder = tauri::WebviewWindowBuilder::from_config(app, &config)?;
+    #[cfg(desktop)]
+    let builder = {
+        use std::sync::{Arc, Mutex, PoisonError};
+        use tauri::webview::NewWindowResponse;
+
+        let page = Arc::new(Mutex::new(None::<url::Origin>));
+        let navigated = Arc::clone(&page);
+        builder
+            .on_navigation(move |url| {
+                *navigated.lock().unwrap_or_else(PoisonError::into_inner) = Some(url.origin());
+                true
+            })
+            .on_new_window(move |url, _| {
+                let same_origin = page.lock().unwrap_or_else(PoisonError::into_inner).as_ref() == Some(&url.origin());
+                if matches!(url.scheme(), "http" | "https") && !same_origin {
+                    open_in_browser(&url);
+                    NewWindowResponse::Deny
+                } else {
+                    NewWindowResponse::Allow
+                }
+            })
+    };
+    builder.build()?;
+    Ok(())
+}
+
+/// Desktop: `url` in the system's browser, its own program per system given the URL as its one argument
+/// (no shell reads it).
+#[cfg(desktop)]
+fn open_in_browser(url: &url::Url) {
+    use std::process::Command;
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("rundll32");
+        command.arg("url.dll,FileProtocolHandler");
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = Command::new("open");
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let mut command = Command::new("xdg-open");
+    if let Ok(mut child) = command.arg(url.as_str()).spawn() {
+        std::thread::spawn(move || child.wait());
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(desktop)]
     let builder = builder.on_permission_request(permission);
     builder
-        .setup(|_app| {
+        .setup(|app| {
+            main_window(app)?;
             #[cfg(desktop)]
             {
-                add_menu(_app)?;
-                show_window(_app)?;
+                add_menu(app)?;
+                show_window(app)?;
             }
             Ok(())
         })

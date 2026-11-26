@@ -1,6 +1,7 @@
 package app.caley
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.webkit.WebView
@@ -14,17 +15,27 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     // started by a pushed notification's tap: its page, once a server page has loaded (pageOpened)
-    pendingOpen = intent.getStringExtra(Push.EXTRA_OPEN)
+    pendingOpen = toOpen(intent)
   }
 
   private var webView: WebView? = null
   private var pendingOpen: String? = null
 
+  // the page a pushed notification's tap asks for (Push.kt): only one on a server the app knows, since any
+  // app may start this activity with any extras
+  private fun toOpen(intent: Intent): String? = intent.getStringExtra(Push.EXTRA_OPEN)?.let { ShellBridge.serverUrl(this, it) }
+
+  // a server's page, the bridge bound to that server first (it may be another one of the servers registered)
+  private fun open(webView: WebView, url: String) {
+    bridge?.bind(ShellBridge.originOf(Uri.parse(url)))
+    webView.loadUrl(url)
+  }
+
   /** A server's page loaded (the bridge's hello): the page a pushed notification asked for, if one waits. */
   fun pageOpened() {
     val url = pendingOpen ?: return
     pendingOpen = null
-    webView?.loadUrl(url)
+    webView?.let { open(it, url) }
   }
 
   // Android draws apps edge to edge (enforced for targetSdk 35+), but Caley's pages do not keep clear of
@@ -64,9 +75,9 @@ class MainActivity : TauriActivity() {
     bridge?.opened(intent)
     // a pushed notification's tap: its page now, or once the webview (made after the activity, when Android
     // recreated it) has a server page
-    intent.getStringExtra(Push.EXTRA_OPEN)?.let { url ->
+    toOpen(intent)?.let { url ->
       val view = webView
-      if (view != null && view.url?.startsWith("http://tauri.localhost") == false) view.loadUrl(url) else pendingOpen = url
+      if (view != null && view.url?.startsWith(PICKER) == false) open(view, url) else pendingOpen = url
     }
   }
 
