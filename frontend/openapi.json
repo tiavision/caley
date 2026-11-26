@@ -2432,7 +2432,7 @@
             }
           },
           "400": {
-            "description": "a required field is missing, or no events in the file (plain text)"
+            "description": "a required field is missing, no events in the file, or more than 1,000 events (plain text)"
           },
           "404": {
             "description": "no such CalDAV account (plain text)"
@@ -2470,7 +2470,7 @@
             }
           },
           "400": {
-            "description": "no file, or no importable events in it (plain text)"
+            "description": "no file, no importable events in it, or more than 1,000 events (plain text)"
           }
         }
       }

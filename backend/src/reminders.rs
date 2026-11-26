@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
+use futures_util::StreamExt;
 use sqlx::Row;
 
 use crate::caldav::{Alarm, CalDavClient, Event};
@@ -22,6 +23,16 @@ const GRACE: i64 = 10 * 60;
 const AHEAD_DAYS: i64 = 15;
 /// How long a sent reminder is remembered.
 const KEEP: i64 = 3 * 24 * 60 * 60;
+/// How many alarms of one calendar object (occurrence × alarm) go out in a tick: an object from outside
+/// may hold thousands due at once (RDATEs a second apart, each with its alarms).
+const MAX_PER_OBJECT: usize = 20;
+/// How many reminders one user gets in a tick; the rest go out with the next ticks.
+const MAX_PER_USER: usize = 100;
+/// How many users' reminders are sent at once.
+const USERS_AT_ONCE: usize = 8;
+/// How long one user's reminders may take in a tick, so a slow push service cannot hold the next tick
+/// back past the grace period; what was not sent goes out with the next tick.
+const USER_BUDGET: Duration = Duration::from_secs(45);
 
 /// Starts the minute task. Each tick runs as a task of its own, so one that panics is logged and the
 /// next minute's still runs.
@@ -74,36 +85,77 @@ pub(crate) async fn tick(
         today - chrono::TimeDelta::days(2),
         today + chrono::TimeDelta::days(AHEAD_DAYS),
     );
-    let mut sent = 0;
-    for (user_id, timezones) in users {
-        let timezones: Vec<(String, chrono_tz::Tz)> = timezones
-            .into_iter()
-            .filter_map(|name| name.parse().ok().map(|tz| (name, tz)))
-            .collect();
-        for (account_id, calendar_href, raw_ical) in
-            active_events(db, key, &user_id, start, end).await?
-        {
-            for (key, name, payload, fire) in due(
-                &account_id,
-                &calendar_href,
-                &raw_ical,
-                &timezones,
-                (start, end),
-                now,
-            ) {
-                let new = sqlx::query(
-                    "INSERT OR IGNORE INTO sent_reminders(user_id, key, fire_at) VALUES(?, ?, ?)",
-                )
-                .bind(&user_id)
-                .bind(&key)
-                .bind(fire)
-                .execute(db)
-                .await?
-                .rows_affected()
-                    == 1;
-                if new && notifier.send(&user_id, Some(&name), &payload).await > 0 {
-                    sent += 1;
+    // each user apart and several at once, so one user's flood of reminders or slow push service
+    // does not hold up the others'
+    let sent = futures_util::stream::iter(users)
+        .map(|(user_id, timezones)| async move {
+            let run = user_tick(db, key, notifier, &user_id, timezones, (start, end), now);
+            match tokio::time::timeout(USER_BUDGET, run).await {
+                Ok(Ok(sent)) => sent,
+                Ok(Err(e)) => {
+                    eprintln!("[reminders] {e}");
+                    0
                 }
+                Err(_) => {
+                    eprintln!("[reminders] a user's reminders took too long; the rest next minute");
+                    0
+                }
+            }
+        })
+        .buffer_unordered(USERS_AT_ONCE)
+        .fold(0, |total, sent| async move { total + sent })
+        .await;
+    Ok(sent)
+}
+
+/// One user's reminders due at `now`: at most `MAX_PER_USER` a tick (the rest with the next one, while
+/// they are within the grace period); returns how many went to at least one device.
+async fn user_tick(
+    db: &Db,
+    key: &[u8; 32],
+    notifier: &Notifier,
+    user_id: &str,
+    timezones: BTreeSet<String>,
+    (start, end): (NaiveDate, NaiveDate),
+    now: i64,
+) -> anyhow::Result<usize> {
+    let timezones: Vec<(String, chrono_tz::Tz)> = timezones
+        .into_iter()
+        .filter_map(|name| name.parse().ok().map(|tz| (name, tz)))
+        .collect();
+    let (mut sent, mut tried) = (0, 0);
+    for (account_id, calendar_href, raw_ical) in active_events(db, key, user_id, start, end).await?
+    {
+        for (key, name, payload, fire) in due(
+            &account_id,
+            &calendar_href,
+            &raw_ical,
+            &timezones,
+            (start, end),
+            now,
+        ) {
+            let new = sqlx::query(
+                "INSERT OR IGNORE INTO sent_reminders(user_id, key, fire_at) VALUES(?, ?, ?)",
+            )
+            .bind(user_id)
+            .bind(&key)
+            .bind(fire)
+            .execute(db)
+            .await?
+            .rows_affected()
+                == 1;
+            if !new {
+                continue;
+            }
+            if notifier.send(user_id, Some(&name), &payload).await > 0 {
+                sent += 1;
+            }
+            tried += 1;
+            if tried >= MAX_PER_USER {
+                eprintln!(
+                    "[reminders] {MAX_PER_USER} reminders for one user in a tick; the rest next minute"
+                );
+                return Ok(sent);
             }
         }
     }
@@ -128,8 +180,10 @@ fn due(
         #[cfg(test)]
         assert!(!raw_ical.contains("X-CALEY-TEST-PANIC"), "a test's panic");
         let mut out = Vec::new();
+        let mut alarms_due = 0;
         for event in CalDavClient::events_from_raw_ical(raw_ical, start, end) {
             for (i, alarm) in event.alarms.iter().enumerate() {
+                let before = out.len();
                 for (name, tz) in timezones {
                     let Some(fire) = fire_at(&event, alarm, tz) else {
                         continue;
@@ -142,6 +196,13 @@ fn due(
                         event.uid, event.dtstart
                     );
                     out.push((key, name.clone(), payload(&event, tz, fire), fire));
+                }
+                // an object from outside (an invite) may carry any number of occurrences at once
+                if out.len() > before {
+                    alarms_due += 1;
+                    if alarms_due >= MAX_PER_OBJECT {
+                        return out;
+                    }
                 }
             }
         }
@@ -434,6 +495,31 @@ mod tests {
             "not twice"
         );
         assert!(rx.try_recv().is_err());
+    }
+
+    /// An object with hundreds of occurrences due in the same minute (RDATEs a second apart) gives a
+    /// bounded number of reminders, not one push per occurrence, alarm and timezone.
+    #[test]
+    fn one_object_gives_a_bounded_number_of_reminders() {
+        let now = utc("2026-06-01 08:00");
+        let rdates: String = (1..300)
+            .map(|s| format!("RDATE:20260601T08{:02}{:02}Z\r\n", 15 + s / 60, s % 60))
+            .collect();
+        let alarms = "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\n".repeat(3);
+        let raw = format!(
+            "{ICAL}BEGIN:VEVENT\r\nUID:many\r\nSUMMARY:x\r\nDTSTART:20260601T081500Z\r\n{rdates}{alarms}END:VEVENT\r\nEND:VCALENDAR\r\n"
+        );
+        let timezones: Vec<(String, chrono_tz::Tz)> = ["Europe/Berlin", "America/New_York"]
+            .iter()
+            .map(|name| (name.to_string(), name.parse().unwrap()))
+            .collect();
+        let day = chrono::NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let window = (
+            day - chrono::TimeDelta::days(2),
+            day + chrono::TimeDelta::days(15),
+        );
+        let all = due("acc", "/cal/", &raw, &timezones, window, now + 5 * 60);
+        assert_eq!(all.len(), MAX_PER_OBJECT * timezones.len());
     }
 
     /// An event that panics (or once panicked) the expansion costs only its own reminders: the same

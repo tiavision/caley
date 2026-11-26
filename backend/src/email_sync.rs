@@ -14,6 +14,39 @@ use crate::search::SearchMode;
 use crate::sse::{SseBroadcaster, SseMessage};
 use crate::sync::{TaskEntry, TaskMap};
 
+/// How many message sources one IMAP fetch asks for at most.
+const BODY_BATCH_MESSAGES: usize = 50;
+/// How many bytes of message sources one IMAP fetch asks for at most (by the sizes the server gave): its
+/// answers are held in memory, parsed, until they are stored. A message larger than this is fetched alone.
+const BODY_BATCH_BYTES: u64 = 32 * 1024 * 1024;
+
+/// The messages (UID, size) in fetches of at most `max_messages` and `max_bytes` each, in their order. A
+/// message of unknown size counts as `max_bytes`: it is fetched alone, as one larger than that is.
+fn body_batches(
+    messages: &[(u32, Option<u64>)],
+    max_messages: usize,
+    max_bytes: u64,
+) -> Vec<Vec<u32>> {
+    let mut batches: Vec<Vec<u32>> = Vec::new();
+    let mut bytes = 0u64;
+    for &(uid, size) in messages {
+        let size = size.unwrap_or(max_bytes);
+        match batches.last_mut() {
+            Some(batch)
+                if batch.len() < max_messages && bytes.saturating_add(size) <= max_bytes =>
+            {
+                batch.push(uid);
+                bytes += size;
+            }
+            _ => {
+                batches.push(vec![uid]);
+                bytes = size;
+            }
+        }
+    }
+    batches
+}
+
 pub enum EmailSyncTrigger {
     Full,
     Mailbox(String),
@@ -580,19 +613,17 @@ impl EmailSyncManager {
             }
         }
 
-        // Fetch bodies + attachments eagerly for any cached messages missing them
-        let missing_body_uids =
-            email_db::get_cached_uids_missing_body(&self.db, account_id, mailbox).await?;
-        let uids_to_fetch: Vec<u32> = new_uids
-            .into_iter()
-            .chain(missing_body_uids)
-            .filter(|uid| !unstored.contains(uid))
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
+        // Fetch bodies + attachments eagerly for any cached messages missing them (the new ones among them),
+        // a bounded number of bytes at a time: a fetch's answers are held in memory until they are stored
+        let missing: Vec<(u32, Option<u64>)> =
+            email_db::get_cached_uids_missing_body(&self.db, account_id, mailbox)
+                .await?
+                .into_iter()
+                .filter(|(uid, _)| !unstored.contains(uid))
+                .collect();
 
-        for chunk in uids_to_fetch.chunks(50) {
-            let bodies = match imap_client::fetch_bodies(session, chunk).await {
+        for batch in body_batches(&missing, BODY_BATCH_MESSAGES, BODY_BATCH_BYTES) {
+            let bodies = match imap_client::fetch_bodies(session, &batch).await {
                 Ok(b) => b,
                 Err(e) => {
                     eprintln!("[email_sync] fetch_bodies error for {mailbox}: {e}");
@@ -829,6 +860,48 @@ pub fn eml_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bodies are fetched a bounded number of bytes at a time, not only a bounded number of messages:
+    /// fifty maximum-size mails are fifty fetches, not one held in memory whole.
+    #[test]
+    fn body_fetches_are_bounded_by_bytes() {
+        let mb = 1024 * 1024;
+        // small mails: by count
+        let small: Vec<(u32, Option<u64>)> = (1..=120).map(|uid| (uid, Some(10_000))).collect();
+        let batches = body_batches(&small, 50, 32 * mb);
+        assert_eq!(
+            batches.iter().map(Vec::len).collect::<Vec<_>>(),
+            [50, 50, 20]
+        );
+        // large mails: by bytes; one above the limit, or of unknown size, alone
+        let large = [
+            (1, Some(20 * mb)),
+            (2, Some(12 * mb)),
+            (3, Some(1)),
+            (4, Some(50 * mb)),
+            (5, Some(1)),
+            (6, None),
+            (7, Some(1)),
+            (8, Some(u64::MAX)),
+            (9, Some(1)),
+        ];
+        assert_eq!(
+            body_batches(&large, 50, 32 * mb),
+            [
+                vec![1, 2],
+                vec![3],
+                vec![4],
+                vec![5],
+                vec![6],
+                vec![7],
+                vec![8],
+                vec![9]
+            ]
+        );
+        let fifty_big: Vec<(u32, Option<u64>)> = (1..=50).map(|uid| (uid, Some(25 * mb))).collect();
+        assert_eq!(body_batches(&fifty_big, 50, 32 * mb).len(), 50);
+        assert!(body_batches(&[], 50, 32 * mb).is_empty());
+    }
 
     #[test]
     fn flag_comparison_ignores_order_and_duplicates() {

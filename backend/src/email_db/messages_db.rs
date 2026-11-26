@@ -415,19 +415,31 @@ pub async fn get_cached_uids_sent_before(
     Ok(rows.iter().map(|r| r.get::<i64, _>(0) as u32).collect())
 }
 
+/// The cached messages of a mailbox whose source is not stored yet, newest first, each with the size the
+/// server gave for it (RFC822.SIZE; none: unknown).
 pub async fn get_cached_uids_missing_body(
     pool: &SqlitePool,
     account_id: &str,
     mailbox: &str,
-) -> Result<Vec<u32>> {
+) -> Result<Vec<(u32, Option<u64>)>> {
     let rows = sqlx::query(
-        "SELECT uid FROM cached_messages WHERE account_id = ? AND mailbox = ? AND body_idx IS NULL",
+        "SELECT uid, size FROM cached_messages
+          WHERE account_id = ? AND mailbox = ? AND body_idx IS NULL ORDER BY uid DESC",
     )
     .bind(account_id)
     .bind(mailbox)
     .fetch_all(pool)
     .await?;
-    Ok(rows.iter().map(|r| r.get::<i64, _>(0) as u32).collect())
+    Ok(rows
+        .iter()
+        .map(|r| {
+            let size: Option<i64> = r.get(1);
+            (
+                r.get::<i64, _>(0) as u32,
+                size.and_then(|s| u64::try_from(s).ok()),
+            )
+        })
+        .collect())
 }
 
 // ── Attachments ───────────────────────────────────────────────────────────────
