@@ -7,7 +7,8 @@ pub fn generate_new_uid() -> String {
     Uuid::new_v4().to_string()
 }
 
-/// At most this many events in one imported file (a larger one is refused).
+/// At most this many events (VEVENTs, overrides of a recurring event counted each) in one imported
+/// file (a larger one is refused).
 pub const MAX_IMPORT_EVENTS: usize = 1000;
 /// A VTIMEZONE larger than this is not carried into the events (real ones are a few KB).
 const MAX_VTIMEZONE_BYTES: usize = 16 * 1024;
@@ -17,34 +18,40 @@ const MAX_EVENT_TIMEZONES: usize = 4;
 const MAX_CALENDAR_LINES: usize = 8;
 const MAX_CALENDAR_LINE_BYTES: usize = 256;
 
-/// A VCALENDAR file split into its events, each wrapped on demand (`events`), so a file is held once.
+/// A VCALENDAR file split into its calendar objects, each wrapped on demand (`events`), so a file is
+/// held once.
 pub struct SplitCalendar {
     /// Calendar-level property lines (not VERSION, PRODID or METHOD: a stored object has no METHOD).
     header: String,
     /// (TZID, the VTIMEZONE's lines).
     timezones: Vec<(String, String)>,
-    /// The VEVENT blocks, CRLF-joined.
-    blocks: Vec<String>,
-    /// More than MAX_IMPORT_EVENTS events: only the first are in `blocks`.
+    /// One per calendar object: its UID (`None`: a VEVENT without one, an object of its own) and its
+    /// VEVENT blocks, CRLF-joined: a recurring event's master first, then its overrides (RECURRENCE-ID).
+    objects: Vec<(Option<String>, Vec<String>)>,
+    /// More than MAX_IMPORT_EVENTS events: only the first are in `objects`.
     pub too_many: bool,
+}
+
+/// A VEVENT block's UID, `None` when it has none.
+fn block_uid(block: &str) -> Option<String> {
+    unfold(block)
+        .iter()
+        .find_map(|l| l.strip_prefix("UID:").map(|u| u.trim().to_string()))
+        .filter(|u| !u.is_empty())
 }
 
 impl SplitCalendar {
     pub fn is_empty(&self) -> bool {
-        self.blocks.is_empty()
+        self.objects.is_empty()
     }
 
-    /// Each event's (uid, VCALENDAR): the event, the calendar-level lines and the VTIMEZONEs its TZIDs
-    /// name. An event without UID gets a new one.
+    /// Each calendar object's (uid, VCALENDAR): its VEVENTs (all of one UID: a recurring event with its
+    /// overrides is one object), the calendar-level lines and the VTIMEZONEs their TZIDs name. An event
+    /// without UID gets a new one.
     pub fn events(&self) -> impl Iterator<Item = (String, String)> + '_ {
-        self.blocks.iter().map(|block| {
-            let unfolded = unfold(block);
-            let uid = unfolded
-                .iter()
-                .find_map(|l| l.strip_prefix("UID:"))
-                .map(|u| u.trim().to_string())
-                .filter(|u| !u.is_empty())
-                .unwrap_or_else(generate_new_uid);
+        self.objects.iter().map(|(uid, blocks)| {
+            let uid = uid.clone().unwrap_or_else(generate_new_uid);
+            let unfolded: Vec<String> = blocks.iter().flat_map(|b| unfold(b)).collect();
             let mut tzids: Vec<&str> = Vec::new();
             for line in &unfolded {
                 for tzid in line_tzids(line) {
@@ -63,7 +70,7 @@ impl SplitCalendar {
             {
                 wrapped.push_str(vtimezone);
             }
-            wrapped.push_str(block);
+            wrapped.push_str(&blocks.join("\r\n"));
             wrapped.push_str("\r\nEND:VCALENDAR\r\n");
             (uid, wrapped)
         })
@@ -101,17 +108,21 @@ fn line_tzids(line: &str) -> impl Iterator<Item = &str> {
     })
 }
 
-/// Split a multi-VEVENT VCALENDAR blob into its events (`SplitCalendar::events`), at most
-/// MAX_IMPORT_EVENTS. Each keeps only what it needs: the VTIMEZONEs its TZIDs name, and a few
-/// calendar-level lines; other components (VTODO, …) and METHOD are left out.
+/// Split a multi-VEVENT VCALENDAR blob into its calendar objects (`SplitCalendar::events`): the
+/// VEVENTs of one UID together, at most MAX_IMPORT_EVENTS VEVENTs. Each keeps only what it needs: the
+/// VTIMEZONEs its TZIDs name, and a few calendar-level lines; other components (VTODO, …) and METHOD
+/// are left out.
 pub fn split_vcalendar_into_events(ical_content: &str) -> SplitCalendar {
     let normalised = ical_content.replace("\r\n", "\n");
     let mut split = SplitCalendar {
         header: String::new(),
         timezones: Vec::new(),
-        blocks: Vec::new(),
+        objects: Vec::new(),
         too_many: false,
     };
+    let mut events = 0usize;
+    // the object of each UID seen
+    let mut by_uid: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut header_lines = 0;
     // the top-level component being read (other than VCALENDAR), and how deep inside it
     let mut component: Option<(String, Vec<&str>)> = None;
@@ -129,8 +140,29 @@ pub fn split_vcalendar_into_events(ical_content: &str) -> SplitCalendar {
                     let (name, lines) = (name.clone(), std::mem::take(lines));
                     component = None;
                     match name.as_str() {
-                        "VEVENT" if split.blocks.len() < MAX_IMPORT_EVENTS => {
-                            split.blocks.push(lines.join("\r\n"));
+                        "VEVENT" if events < MAX_IMPORT_EVENTS => {
+                            events += 1;
+                            let block = lines.join("\r\n");
+                            let uid = block_uid(&block);
+                            match uid.as_ref().and_then(|u| by_uid.get(u)) {
+                                Some(&i) => {
+                                    let blocks = &mut split.objects[i].1;
+                                    let is_master = !unfold(&block)
+                                        .iter()
+                                        .any(|l| l.starts_with("RECURRENCE-ID"));
+                                    if is_master {
+                                        blocks.insert(0, block);
+                                    } else {
+                                        blocks.push(block);
+                                    }
+                                }
+                                None => {
+                                    if let Some(uid) = &uid {
+                                        by_uid.insert(uid.clone(), split.objects.len());
+                                    }
+                                    split.objects.push((uid, vec![block]));
+                                }
+                            }
                         }
                         "VEVENT" => split.too_many = true,
                         "VTIMEZONE" => {
@@ -1032,6 +1064,64 @@ mod split_tests {
         let b = crate::caldav::preview_events_from_raw_ical(&events[1].1);
         assert_eq!(b[0].dtstart, "2026-11-24T08:00:00+01:00");
         assert_eq!(b[0].dtend.as_deref(), Some("2026-11-24T09:00:00+01:00"));
+    }
+
+    /// A recurring event and its overrides (one UID) are one object, the master first, wherever the file
+    /// has them; events without UID are objects of their own.
+    #[test]
+    fn the_events_of_one_uid_are_one_object() {
+        let ics = "BEGIN:VCALENDAR\nVERSION:2.0\n\
+             BEGIN:VEVENT\nUID:r\nRECURRENCE-ID:20261201T080000Z\nDTSTART:20261201T100000Z\nSUMMARY:Moved\nEND:VEVENT\n\
+             BEGIN:VEVENT\nUID:x\nDTSTART:20261124T080000Z\nEND:VEVENT\n\
+             BEGIN:VEVENT\nUID:r\nDTSTART:20261124T080000Z\nRRULE:FREQ=WEEKLY\nSUMMARY:Weekly\nEND:VEVENT\n\
+             BEGIN:VEVENT\nUID:r\nRECURRENCE-ID:20261208T080000Z\nDTSTART:20261208T090000Z\nSUMMARY:Later\nEND:VEVENT\n\
+             BEGIN:VEVENT\nDTSTART:20261124T080000Z\nEND:VEVENT\n\
+             BEGIN:VEVENT\nDTSTART:20261125T080000Z\nEND:VEVENT\nEND:VCALENDAR\n";
+        let split = split_vcalendar_into_events(ics);
+        let objects: Vec<(String, String)> = split.events().collect();
+        assert_eq!(objects.len(), 4);
+        assert_eq!(objects[0].0, "r");
+        assert_eq!(objects[1].0, "x");
+        assert_ne!(objects[2].0, objects[3].0, "no UID: a new one each");
+        let r = &objects[0].1;
+        assert_eq!(r.matches("BEGIN:VEVENT").count(), 3);
+        let weekly = r.find("SUMMARY:Weekly").unwrap();
+        assert!(weekly < r.find("SUMMARY:Moved").unwrap(), "master first");
+        assert!(r.find("SUMMARY:Moved").unwrap() < r.find("SUMMARY:Later").unwrap());
+        // the object reads as the recurring event with its overrides
+        let events = crate::caldav::CalDavClient::events_from_raw_ical(
+            r,
+            NaiveDate::from_ymd_opt(2026, 11, 24).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 12, 8).unwrap(),
+        );
+        let mut starts: Vec<(String, String)> =
+            events.into_iter().map(|e| (e.dtstart, e.summary)).collect();
+        starts.sort();
+        assert_eq!(
+            starts,
+            [
+                ("2026-11-24T08:00:00Z".to_string(), "Weekly".to_string()),
+                ("2026-12-01T10:00:00Z".to_string(), "Moved".to_string()),
+                ("2026-12-08T09:00:00Z".to_string(), "Later".to_string()),
+            ]
+        );
+        let preview = crate::caldav::preview_events_from_raw_ical(r);
+        assert_eq!(preview.len(), 1);
+        assert_eq!(preview[0].summary, "Weekly");
+
+        // the limit counts events, overrides each
+        let mut many = String::from(
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:m\nDTSTART:20261124T080000Z\nRRULE:FREQ=DAILY\nEND:VEVENT\n",
+        );
+        for i in 1..=MAX_IMPORT_EVENTS {
+            many.push_str(&format!(
+                "BEGIN:VEVENT\nUID:m\nRECURRENCE-ID:{}\nDTSTART:20261124T080000Z\nEND:VEVENT\n",
+                (NaiveDate::from_ymd_opt(2026, 11, 24).unwrap() + TimeDelta::days(i as i64))
+                    .format("%Y%m%dT080000Z")
+            ));
+        }
+        many.push_str("END:VCALENDAR\n");
+        assert!(split_vcalendar_into_events(&many).too_many);
     }
 
     /// A large calendar-level part is not copied into every event, and the events are bounded.

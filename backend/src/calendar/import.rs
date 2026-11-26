@@ -24,13 +24,13 @@ pub(crate) struct ImportResult {
     /// the calendar the events went to (a new one for `new_calendar_name`)
     account_id: String,
     calendar_href: String,
-    /// events written to the calendar
+    /// events written to the calendar (a recurring event with its overrides is one)
     imported: usize,
     /// events the CalDAV server refused
     errors: usize,
 }
 
-/// An event of an ICS file, before the import.
+/// An event of an ICS file, before the import (a recurring event with its overrides is one).
 #[derive(serde::Serialize, ToSchema)]
 pub(crate) struct ImportPreviewEvent {
     uid: String,

@@ -4768,7 +4768,7 @@
       },
       "ImportPreviewEvent": {
         "type": "object",
-        "description": "An event of an ICS file, before the import.",
+        "description": "An event of an ICS file, before the import (a recurring event with its overrides is one).",
         "required": [
           "uid",
           "summary",
@@ -4816,7 +4816,7 @@
           },
           "imported": {
             "type": "integer",
-            "description": "events written to the calendar",
+            "description": "events written to the calendar (a recurring event with its overrides is one)",
             "minimum": 0
           },
           "errors": {
