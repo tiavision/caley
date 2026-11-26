@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
@@ -505,19 +506,7 @@ pub async fn export_account(
         let sync_writer = SyncIoBridge::new(writer);
         let gz = GzEncoder::new(sync_writer, Compression::default());
         let mut tar = tar::Builder::new(gz);
-
-        for (mailbox, uid, path) in &files {
-            let entry_name = format!("{}/{}.eml", mailbox, uid);
-            if let Ok(compressed) = std::fs::read(&path) {
-                if let Ok(bytes) = decompress_eml(&compressed) {
-                    let mut header = tar::Header::new_gnu();
-                    header.set_size(bytes.len() as u64);
-                    header.set_mode(0o644);
-                    header.set_cksum();
-                    let _ = tar.append_data(&mut header, &entry_name, bytes.as_slice());
-                }
-            }
-        }
+        write_export(&mut tar, &files);
         let _ = tar.finish();
     });
 
@@ -533,6 +522,73 @@ pub async fn export_account(
         )
         .body(Body::from_stream(stream))
         .unwrap()
+}
+
+/// A mailbox's directory in the export: its name split on `/`, without empty, `.` and `..` components, `\` and
+/// control characters as `_`; `_` when nothing is left. A mailbox name is the server's (or, shared, someone
+/// else's): no entry may leave the archive's directory, whatever a tool does with a long name.
+fn export_dir(mailbox: &str) -> String {
+    let parts: Vec<String> = mailbox
+        .split('/')
+        .filter(|part| !matches!(*part, "" | "." | ".."))
+        .map(|part| {
+            part.chars()
+                .map(|c| if c == '\\' || c.is_control() { '_' } else { c })
+                .collect()
+        })
+        .collect();
+    if parts.is_empty() {
+        "_".to_owned()
+    } else {
+        parts.join("/")
+    }
+}
+
+/// The export's entry names, one per message: `{export_dir(mailbox)}/{uid}.eml`. Mailboxes whose directories are
+/// the same share it; a name taken already gets `-2`, `-3`, … (`{uid}-2.eml`).
+fn export_entry_names<'a>(messages: impl IntoIterator<Item = (&'a str, i64)>) -> Vec<String> {
+    let mut taken = HashSet::new();
+    messages
+        .into_iter()
+        .map(|(mailbox, uid)| {
+            let dir = export_dir(mailbox);
+            let mut name = format!("{dir}/{uid}.eml");
+            let mut n = 1;
+            while !taken.insert(name.clone()) {
+                n += 1;
+                name = format!("{dir}/{uid}-{n}.eml");
+            }
+            name
+        })
+        .collect()
+}
+
+/// Appends each cached message (mailbox, UID, its `.eml` file) to the archive; one that cannot be read is left out,
+/// one that cannot be appended is logged.
+fn write_export<W: std::io::Write>(
+    tar: &mut tar::Builder<W>,
+    files: &[(String, i64, std::path::PathBuf)],
+) {
+    let names = export_entry_names(
+        files
+            .iter()
+            .map(|(mailbox, uid, _)| (mailbox.as_str(), *uid)),
+    );
+    for ((_, _, path), name) in files.iter().zip(names) {
+        let Ok(compressed) = std::fs::read(path) else {
+            continue;
+        };
+        let Ok(bytes) = decompress_eml(&compressed) else {
+            continue;
+        };
+        let mut header = tar::Header::new_gnu();
+        header.set_size(bytes.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        if let Err(e) = tar.append_data(&mut header, &name, bytes.as_slice()) {
+            eprintln!("[email] export: {name} left out: {e}");
+        }
+    }
 }
 
 fn transparent_pixel() -> Response {
@@ -1084,6 +1140,98 @@ mod tests {
         let url = |path: &str| url::Url::parse(&format!("http://{addr}{path}")).unwrap();
         assert!(fetch_image(&client, url("/streamed")).await.is_none());
         assert!(fetch_image(&client, url("/fits")).await.is_some());
+    }
+
+    #[test]
+    fn export_directories_never_leave_the_archive() {
+        use super::export_dir;
+        assert_eq!(export_dir("INBOX"), "INBOX");
+        assert_eq!(export_dir("Archive/2024"), "Archive/2024");
+        assert_eq!(export_dir("/etc/cron.d"), "etc/cron.d");
+        assert_eq!(export_dir("../../x"), "x");
+        assert_eq!(export_dir("a/./../b//c/"), "a/b/c");
+        assert_eq!(export_dir("C:\\x\u{1}y\n"), "C:_x_y_");
+        assert_eq!(export_dir(""), "_");
+        assert_eq!(export_dir("/../."), "_");
+    }
+
+    /// Hostile mailbox names, the long one included (tar checks only a long name's first 100 bytes for `..`), make
+    /// entries inside the archive; mailboxes that end up the same share a directory, and no message is lost.
+    #[test]
+    fn the_export_holds_every_message_under_a_safe_path() {
+        let dir = std::env::temp_dir().join(format!("caley-export-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let long = format!("{}/../../x", "a".repeat(100));
+        let mailboxes = [
+            "INBOX",
+            "/abs",
+            "abs",
+            "../../etc",
+            "a/../b",
+            "x\\y",
+            "ctl\u{1}",
+            "",
+            long.as_str(),
+        ];
+        let files: Vec<(String, i64, std::path::PathBuf)> = mailboxes
+            .iter()
+            .enumerate()
+            .map(|(i, mailbox)| {
+                let path = dir.join(format!("{i}.eml.zst"));
+                let raw = format!("Subject: {i}\r\n\r\nbody");
+                std::fs::write(&path, zstd::encode_all(raw.as_bytes(), 3).unwrap()).unwrap();
+                (mailbox.to_string(), 7, path)
+            })
+            .collect();
+
+        let mut tar = tar::Builder::new(Vec::new());
+        super::write_export(&mut tar, &files);
+        let archive = tar.into_inner().unwrap();
+
+        let mut read = tar::Archive::new(archive.as_slice());
+        let mut entries: Vec<(String, String)> = read
+            .entries()
+            .unwrap()
+            .map(|entry| {
+                let mut entry = entry.unwrap();
+                let path = entry.path().unwrap().to_string_lossy().into_owned();
+                let mut body = String::new();
+                std::io::Read::read_to_string(&mut entry, &mut body).unwrap();
+                (path, body)
+            })
+            .collect();
+        for (path, _) in &entries {
+            let p = std::path::Path::new(path);
+            assert!(
+                p.is_relative()
+                    && p.components()
+                        .all(|c| matches!(c, std::path::Component::Normal(_))),
+                "{path}"
+            );
+        }
+        entries.sort();
+        let x = format!("{}/x", "a".repeat(100));
+        let mut want = vec![
+            ("INBOX/7.eml".to_string(), "0"),
+            ("abs/7.eml".to_string(), "1"),
+            ("abs/7-2.eml".to_string(), "2"),
+            ("etc/7.eml".to_string(), "3"),
+            ("a/b/7.eml".to_string(), "4"),
+            ("x_y/7.eml".to_string(), "5"),
+            ("ctl_/7.eml".to_string(), "6"),
+            ("_/7.eml".to_string(), "7"),
+            (format!("{x}/7.eml"), "8"),
+        ];
+        want.sort();
+        assert_eq!(entries.len(), want.len());
+        for ((path, body), (want_path, i)) in entries.iter().zip(&want) {
+            assert_eq!(path, want_path);
+            assert!(
+                body.starts_with(&format!("Subject: {i}\r\n")),
+                "{path}: {body}"
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
