@@ -1039,6 +1039,7 @@
           {
             "name": "origin",
             "in": "query",
+            "description": "the origin as listed (an http(s) URL is taken as its origin, as when it was added)",
             "required": true,
             "schema": {
               "type": "string"
@@ -1133,6 +1134,7 @@
           {
             "name": "origin",
             "in": "query",
+            "description": "the origin as listed (an http(s) URL is taken as its origin, as when it was added)",
             "required": true,
             "schema": {
               "type": "string"
@@ -4693,13 +4695,13 @@
         "properties": {
           "origin": {
             "type": "string",
-            "description": "an http(s) URL; stored as its `scheme://host`"
+            "description": "an http(s) URL; stored as its origin, `scheme://host[:port]` (the default port left out)"
           }
         }
       },
       "ImageOrigins": {
         "type": "object",
-        "description": "A list of image origins (`scheme://host`): the allowed ones or the ignored ones.",
+        "description": "A list of image origins (`scheme://host[:port]`): the allowed ones or the ignored ones.",
         "required": [
           "origins"
         ],

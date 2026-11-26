@@ -167,10 +167,9 @@ pub async fn proxy_image(
         return transparent_pixel();
     }
 
-    let Some(host) = parsed.host_str() else {
+    let Some(origin) = image_origin(&parsed) else {
         return transparent_pixel();
     };
-    let origin = format!("{}://{}", parsed.scheme(), host);
 
     match email_db::is_origin_whitelisted(&state.db, &user.user_id, &origin).await {
         Ok(true) => {}
@@ -558,7 +557,20 @@ fn transparent_pixel() -> Response {
 
 // ── Image origin whitelist API ────────────────────────────────────────────────
 
-/// A list of image origins (`scheme://host`): the allowed ones or the ignored ones.
+/// The key of the image origin lists: an http(s) URL's origin, `scheme://host[:port]` with the default port left out,
+/// as a browser's `URL.origin` writes it (sinter-mail's `images.origins`). Allowing `https://h` allows no other port.
+/// None for another scheme or no host.
+fn image_origin(url: &url::Url) -> Option<String> {
+    (matches!(url.scheme(), "http" | "https") && url.host().is_some())
+        .then(|| url.origin().ascii_serialization())
+}
+
+/// `image_origin` of a URL given as text.
+fn parse_image_origin(text: &str) -> Option<String> {
+    image_origin(&url::Url::parse(text).ok()?)
+}
+
+/// A list of image origins (`scheme://host[:port]`): the allowed ones or the ignored ones.
 #[derive(serde::Serialize, ToSchema)]
 pub struct ImageOrigins {
     pub origins: Vec<String>,
@@ -588,7 +600,7 @@ pub async fn list_image_origins(
 
 #[derive(Deserialize, ToSchema)]
 pub struct ImageOriginBody {
-    /// an http(s) URL; stored as its `scheme://host`
+    /// an http(s) URL; stored as its origin, `scheme://host[:port]` (the default port left out)
     pub origin: String,
 }
 
@@ -608,15 +620,8 @@ pub async fn add_image_origin(
     user: CurrentUser,
     Json(body): Json<ImageOriginBody>,
 ) -> impl IntoResponse {
-    // Validate that the origin is a well-formed http(s) origin
-    match url::Url::parse(&body.origin) {
-        Ok(u) if matches!(u.scheme(), "http" | "https") && u.host().is_some() => {}
-        _ => return (StatusCode::BAD_REQUEST, "invalid origin").into_response(),
-    }
-    // Normalise to scheme://host (strip path/query)
-    let origin = {
-        let u = url::Url::parse(&body.origin).unwrap();
-        format!("{}://{}", u.scheme(), u.host_str().unwrap_or(""))
+    let Some(origin) = parse_image_origin(&body.origin) else {
+        return (StatusCode::BAD_REQUEST, "invalid origin").into_response();
     };
 
     match email_db::add_image_origin(&state.db, &user.user_id, &origin).await {
@@ -631,7 +636,15 @@ pub async fn add_image_origin(
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ImageOriginQuery {
+    /// the origin as listed (an http(s) URL is taken as its origin, as when it was added)
     pub origin: String,
+}
+
+impl ImageOriginQuery {
+    /// The list key to remove: the origin of the URL given, else the text as it is (a row stored otherwise).
+    fn key(&self) -> String {
+        parse_image_origin(&self.origin).unwrap_or_else(|| self.origin.clone())
+    }
 }
 
 #[utoipa::path(
@@ -648,7 +661,7 @@ pub async fn remove_image_origin(
     user: CurrentUser,
     Query(q): Query<ImageOriginQuery>,
 ) -> impl IntoResponse {
-    match email_db::remove_image_origin(&state.db, &user.user_id, &q.origin).await {
+    match email_db::remove_image_origin(&state.db, &user.user_id, &q.key()).await {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             eprintln!("[email] remove_image_origin error: {e}");
@@ -697,13 +710,8 @@ pub async fn add_image_blacklist_origin(
     user: CurrentUser,
     Json(body): Json<ImageOriginBody>,
 ) -> impl IntoResponse {
-    match url::Url::parse(&body.origin) {
-        Ok(u) if matches!(u.scheme(), "http" | "https") && u.host().is_some() => {}
-        _ => return (StatusCode::BAD_REQUEST, "invalid origin").into_response(),
-    }
-    let origin = {
-        let u = url::Url::parse(&body.origin).unwrap();
-        format!("{}://{}", u.scheme(), u.host_str().unwrap_or(""))
+    let Some(origin) = parse_image_origin(&body.origin) else {
+        return (StatusCode::BAD_REQUEST, "invalid origin").into_response();
     };
 
     match email_db::add_image_blacklist(&state.db, &user.user_id, &origin).await {
@@ -729,7 +737,7 @@ pub async fn remove_image_blacklist_origin(
     user: CurrentUser,
     Query(q): Query<ImageOriginQuery>,
 ) -> impl IntoResponse {
-    match email_db::remove_image_blacklist(&state.db, &user.user_id, &q.origin).await {
+    match email_db::remove_image_blacklist(&state.db, &user.user_id, &q.key()).await {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             eprintln!("[email] remove_image_blacklist_origin error: {e}");
@@ -773,6 +781,126 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         addr
+    }
+
+    #[test]
+    fn image_origins_keep_a_port_other_than_the_default() {
+        use super::parse_image_origin as origin;
+        assert_eq!(
+            origin("https://h.example/a.png?x").as_deref(),
+            Some("https://h.example")
+        );
+        assert_eq!(
+            origin("https://H.Example:443/").as_deref(),
+            Some("https://h.example")
+        );
+        assert_eq!(
+            origin("https://h.example:8443/a.png").as_deref(),
+            Some("https://h.example:8443")
+        );
+        assert_eq!(
+            origin("http://h.example:80/").as_deref(),
+            Some("http://h.example")
+        );
+        assert_eq!(
+            origin("http://[::1]:8080/").as_deref(),
+            Some("http://[::1]:8080")
+        );
+        // as a browser's URL.origin writes it (sinter-mail's images.origins): punycode
+        assert_eq!(
+            origin("https://bücher.example/").as_deref(),
+            Some("https://xn--bcher-kva.example")
+        );
+        assert_eq!(origin("data:image/png;base64,AA"), None);
+        assert_eq!(origin("ftp://h.example/"), None);
+        assert_eq!(origin("not a url"), None);
+    }
+
+    /// Allowing `https://h` allows `https://h` only: not its other ports; adding, checking and removing all use the
+    /// same key, the block list too.
+    #[tokio::test]
+    async fn an_allowed_origin_is_one_port() {
+        use crate::email_db;
+        use crate::jmap::api_tests::{USER, app_state};
+        use axum::extract::{Json, Query, State};
+        use axum::response::IntoResponse;
+        let state = app_state().await;
+        let user = || crate::oidc::CurrentUser {
+            user_id: USER.into(),
+            display_name: None,
+        };
+        let body = |origin: &str| {
+            Json(super::ImageOriginBody {
+                origin: origin.into(),
+            })
+        };
+        let allowed = |url: &str| {
+            let state = state.clone();
+            let key = super::parse_image_origin(url).unwrap();
+            async move {
+                email_db::is_origin_whitelisted(&state.db, USER, &key)
+                    .await
+                    .unwrap()
+            }
+        };
+        let r = super::add_image_origin(State(state.clone()), user(), body("https://h.example/x"))
+            .await
+            .into_response();
+        assert_eq!(r.status(), axum::http::StatusCode::NO_CONTENT);
+        assert!(allowed("https://h.example/a.png").await);
+        assert!(!allowed("https://h.example:8443/a.png").await);
+
+        let _ =
+            super::add_image_origin(State(state.clone()), user(), body("https://h.example:8443"))
+                .await
+                .into_response();
+        assert_eq!(
+            email_db::get_image_whitelist(&state.db, USER)
+                .await
+                .unwrap(),
+            ["https://h.example", "https://h.example:8443"]
+        );
+        // removed by a URL of it, as it was added
+        let _ = super::remove_image_origin(
+            State(state.clone()),
+            user(),
+            Query(super::ImageOriginQuery {
+                origin: "https://h.example:8443/".into(),
+            }),
+        )
+        .await
+        .into_response();
+        assert!(!allowed("https://h.example:8443/a.png").await);
+        assert!(allowed("https://h.example/a.png").await);
+
+        let _ = super::add_image_blacklist_origin(
+            State(state.clone()),
+            user(),
+            body("https://i.example:81/p"),
+        )
+        .await
+        .into_response();
+        assert_eq!(
+            email_db::get_image_blacklist(&state.db, USER)
+                .await
+                .unwrap(),
+            ["https://i.example:81"]
+        );
+        let _ = super::remove_image_blacklist_origin(
+            State(state.clone()),
+            user(),
+            Query(super::ImageOriginQuery {
+                origin: "https://i.example:81".into(),
+            }),
+        )
+        .await
+        .into_response();
+        assert!(
+            email_db::get_image_blacklist(&state.db, USER)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     /// The image client's policy (`image_client` is it with `PublicOnly`, which would not reach 127.0.0.1).
