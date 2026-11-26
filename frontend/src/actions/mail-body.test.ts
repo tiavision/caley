@@ -30,7 +30,7 @@ function message(): Uint8Array {
 
 const meta = {
   uid: 7, account_id: 'work', mailbox: 'INBOX', rowid: 7, message_id: null, thread_id: null, from: 'Ada <ada@example.com>',
-  to: ['me@example.com'], cc: [], subject: 'Report', sent_at: 1, flags: [], has_attachments: true, body_cached: true,
+  from_address: 'ada@example.com', to: ['me@example.com'], cc: [], subject: 'Report', sent_at: 1, flags: [], has_attachments: true, body_cached: true,
   is_read: true, is_flagged: false, is_encrypted: false, is_signed: false, attachments: [],
 } as unknown as Message;
 

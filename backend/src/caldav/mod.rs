@@ -11,6 +11,9 @@ pub(crate) mod parsing;
 pub mod types;
 pub(crate) mod windows_tz;
 
+#[cfg(test)]
+mod limits_tests;
+
 pub use generation::{
     add_exdate, add_recurrence_override, generate_ical_event, generate_new_uid,
     split_vcalendar_into_events, update_vcalendar_event,
@@ -18,6 +21,39 @@ pub use generation::{
 pub use parsing::preview_events_from_raw_ical;
 pub(crate) use parsing::{extract_ctag_and_token, extract_hrefs, resolve_url, unescape_ical_text};
 pub use types::{Alarm, Attendee, Calendar, Event, PartStat, RecurrenceInfo, SyncResult};
+
+/// The resource name (one path segment, without extension) Caley gives a new calendar object or
+/// contact: its UID when that is a conservative name (letters, digits, `-`, `_`, `@`, `.` not first, at
+/// most 128), else the SHA-256 of the UID in hex. A UID from a file or an invite cannot name another
+/// path (`..`, `/`, `?`, `#`, `%`); the same UID always names the same resource. The UID inside the
+/// object stays as it is.
+pub fn resource_name(uid: &str) -> String {
+    let plain = !uid.is_empty()
+        && uid.len() <= 128
+        && !uid.starts_with('.')
+        && uid
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'@' | b'.'));
+    if plain {
+        uid.to_owned()
+    } else {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(uid.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+}
+
+/// Where a new calendar object with `uid` goes in `calendar_href` (an existing one keeps the href the
+/// server gave it: `cached_events.href`).
+pub fn new_event_href(calendar_href: &str, uid: &str) -> String {
+    format!(
+        "{}/{}.ics",
+        calendar_href.trim_end_matches('/'),
+        resource_name(uid)
+    )
+}
 
 /// URL path segment for a new calendar: the lowercased name with non-alphanumerics
 /// replaced by `-`, plus a random suffix so repeated names don't collide.
@@ -315,17 +351,12 @@ impl CalDavClient {
         bail!("too many redirects for REPORT")
     }
 
-    pub async fn put_event(
-        &self,
-        calendar_href: &str,
-        uid: &str,
-        ical_data: &str,
-    ) -> anyhow::Result<()> {
+    /// PUTs the calendar object at `event_href` (`new_event_href`, or the href it has).
+    pub async fn put_event(&self, event_href: &str, ical_data: &str) -> anyhow::Result<()> {
         if self.demo_mode {
             return Ok(());
         }
-        let url = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
-        let mut url = url;
+        let mut url = event_href.to_owned();
         for _ in 0..5 {
             let mut headers = HeaderMap::new();
             headers.insert(
@@ -360,12 +391,11 @@ impl CalDavClient {
         bail!("too many redirects for PUT")
     }
 
-    pub async fn delete_event(&self, calendar_href: &str, uid: &str) -> anyhow::Result<()> {
+    pub async fn delete_event(&self, event_href: &str) -> anyhow::Result<()> {
         if self.demo_mode {
             return Ok(());
         }
-        let url = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
-        let mut url = url;
+        let mut url = event_href.to_owned();
         for _ in 0..5 {
             let resp = self
                 .client
@@ -391,9 +421,8 @@ impl CalDavClient {
         bail!("too many redirects for DELETE")
     }
 
-    pub async fn get_event(&self, calendar_href: &str, uid: &str) -> anyhow::Result<String> {
-        let url = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
-        let mut url = url;
+    pub async fn get_event(&self, event_href: &str) -> anyhow::Result<String> {
+        let mut url = event_href.to_owned();
         for _ in 0..5 {
             let resp = self
                 .client
@@ -650,10 +679,47 @@ mod demo_tests {
             .expect("demo create_calendar must succeed without MKCALENDAR");
         assert!(href.starts_with("/calendars/demo/side-project-"), "{href}");
         assert!(href.ends_with('/'));
+        let event = new_event_href(&href, "uid-1");
         client
-            .put_event(&href, "uid-1", "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
+            .put_event(&event, "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
             .await
             .unwrap();
-        client.delete_event(&href, "uid-1").await.unwrap();
+        client.delete_event(&event).await.unwrap();
+    }
+
+    /// A UID names one resource in the calendar and nothing else.
+    #[test]
+    fn resource_names_stay_in_the_collection() {
+        let cal = "https://dav.example/remote.php/dav/calendars/alice/personal/";
+        assert_eq!(
+            new_event_href(cal, "040000008200E00074C5B7101A82E008@example.com"),
+            "https://dav.example/remote.php/dav/calendars/alice/personal/040000008200E00074C5B7101A82E008@example.com.ics"
+        );
+        for uid in [
+            "../other/victim",
+            "../../../files/alice/Documents/report.docx?",
+            "x#frag",
+            "%2e%2e/%2e%2e/files/alice/a.txt?",
+            "..",
+            ".hidden",
+            "a b",
+            "caf\u{e9}",
+            "",
+        ] {
+            let href = new_event_href(cal, uid);
+            let url = reqwest::Url::parse(&href).unwrap();
+            assert_eq!(url.query(), None, "{uid:?}");
+            assert_eq!(url.fragment(), None, "{uid:?}");
+            let name = url
+                .path()
+                .strip_prefix("/remote.php/dav/calendars/alice/personal/")
+                .unwrap();
+            assert!(
+                !name.contains('/') && !name.contains('%'),
+                "{uid:?}: {name}"
+            );
+            assert_eq!(name.len(), 64 + 4, "{uid:?}");
+            assert_eq!(href, new_event_href(cal, uid), "stable");
+        }
     }
 }

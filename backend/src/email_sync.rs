@@ -12,6 +12,7 @@ use crate::imap_client;
 use crate::oidc_tokens::OidcTokens;
 use crate::search::SearchMode;
 use crate::sse::{SseBroadcaster, SseMessage};
+use crate::sync::{TaskEntry, TaskMap};
 
 pub enum EmailSyncTrigger {
     Full,
@@ -26,7 +27,7 @@ pub struct EmailSyncManager {
     pub(crate) search_mode: SearchMode,
     pub(crate) data_dir: PathBuf,
     /// keyed by account_id
-    tasks: Mutex<HashMap<String, mpsc::UnboundedSender<EmailSyncTrigger>>>,
+    tasks: TaskMap<EmailSyncTrigger>,
     /// persistent IDLE connections (JMAP: push streams), one per account — keyed by account_id
     idle_tasks: Mutex<HashMap<String, JoinHandle<()>>>,
     demo_mode: bool,
@@ -91,13 +92,19 @@ impl EmailSyncManager {
             return;
         }
         let (tx, rx) = mpsc::unbounded_channel();
+        let weak = tx.downgrade();
         tasks.insert(account_id.to_owned(), tx);
         drop(tasks);
 
         let mgr = Arc::clone(self);
         let aid = account_id.to_owned();
         tokio::spawn(async move {
-            mgr.run_account_loop(aid, rx).await;
+            let _entry = TaskEntry {
+                tasks: &mgr.tasks,
+                id: aid.clone(),
+                tx: weak,
+            };
+            Arc::clone(&mgr).run_account_loop(aid, rx).await;
         });
 
         self.ensure_idle_for(account_id);
@@ -199,9 +206,6 @@ impl EmailSyncManager {
                 }
             }
         }
-
-        let mut tasks = self.tasks.lock().unwrap();
-        tasks.remove(&account_id);
     }
 
     /// An account and its user.
@@ -552,11 +556,18 @@ impl EmailSyncManager {
 
         // New on server — fetch headers
         let new_uids: Vec<u32> = server_uids.difference(&cached_uids).copied().collect();
+        let mut unstored: HashSet<u32> = HashSet::new();
         if !new_uids.is_empty() {
             let headers = imap_client::fetch_headers(session, &new_uids).await?;
             for h in &headers {
-                self.store_header(account_id, user_id, mailbox, h, notify_new_inbox_mail)
-                    .await?;
+                // one message that cannot be stored is tried again with the next sync, the others still stored
+                if let Err(e) = self
+                    .store_header(account_id, user_id, mailbox, h, notify_new_inbox_mail)
+                    .await
+                {
+                    eprintln!("[email_sync] {mailbox} UID {} not stored: {e}", h.uid);
+                    unstored.insert(h.uid as u32);
+                }
             }
             if !headers.is_empty() {
                 self.broadcaster.send(
@@ -575,6 +586,7 @@ impl EmailSyncManager {
         let uids_to_fetch: Vec<u32> = new_uids
             .into_iter()
             .chain(missing_body_uids)
+            .filter(|uid| !unstored.contains(uid))
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
@@ -593,7 +605,8 @@ impl EmailSyncManager {
         Ok(())
     }
 
-    /// Caches a message's header row and addresses; `new_email` reports it when `notify` and it is unread.
+    /// Caches a message's header row and addresses (both or neither); `new_email` reports it when `notify`
+    /// and it is unread.
     pub(crate) async fn store_header(
         &self,
         account_id: &str,
@@ -615,8 +628,9 @@ impl EmailSyncManager {
             .as_deref()
             .and_then(|json| serde_json::from_str::<Vec<String>>(json).ok())
             .map(|addrs| self.search_mode.normalize_text(&addrs.join(" ")));
+        let mut tx = self.db.begin().await?;
         email_db::upsert_message_header(
-            &self.db,
+            &mut *tx,
             account_id,
             mailbox,
             h,
@@ -626,7 +640,7 @@ impl EmailSyncManager {
         )
         .await?;
         email_db::replace_message_addresses(
-            &self.db,
+            &mut tx,
             account_id,
             mailbox,
             h.uid,
@@ -635,6 +649,7 @@ impl EmailSyncManager {
             &h.cc_emails,
         )
         .await?;
+        tx.commit().await?;
         if notify && !h.flags.as_deref().unwrap_or_default().contains("\\Seen") {
             self.broadcaster.send(
                 user_id,

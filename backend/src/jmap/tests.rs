@@ -1205,3 +1205,114 @@ async fn a_state_of_another_server_lists_everything_again() {
         Some("not-a-state-of-this-server")
     );
 }
+
+// ── Hostile mail ─────────────────────────────────────────────────────────────
+
+fn mail_to_many(subject: &str, n: usize) -> Vec<u8> {
+    let to: Vec<String> = (0..n).map(|i| format!("a{i}@b.c")).collect();
+    format!(
+        "From: evil@example.org\r\nTo: {}\r\nCc: a1@b.c, a1@b.c\r\nSubject: {subject}\r\nMessage-ID: <{subject}@example.org>\r\n\
+         Date: Tue, 24 Nov 2026 10:00:00 +0000\r\nMIME-Version: 1.0\r\nContent-Type: text/plain\r\n\r\nhi\r\n",
+        to.join(",\r\n ")
+    )
+    .into_bytes()
+}
+
+async fn rows(env: &Env, sql: &'static str) -> i64 {
+    sqlx::query_scalar(sql)
+        .bind(ACC)
+        .fetch_one(&env.db)
+        .await
+        .unwrap()
+}
+
+/// A mail to thousands of addresses (more than one INSERT may bind) is stored once, with a bounded number of
+/// address rows, and the mail after it arrives.
+#[tokio::test]
+async fn a_mail_to_thousands_syncs() {
+    let env = env().await;
+    let inbox = env.fake.mailbox_id("inbox");
+    env.fake
+        .deliver(&[&inbox], &mail("before", "a@example.org"), &[]);
+    env.sync().await;
+    env.fake
+        .deliver(&[&inbox], &mail_to_many("many", 7000), &[]);
+    env.sync().await;
+    env.fake
+        .deliver(&[&inbox], &mail("after", "a@example.org"), &[]);
+    for _ in 0..3 {
+        env.sync().await;
+    }
+    let cached = env.cached("INBOX").await;
+    assert_eq!(subjects(&cached), ["before", "many", "after"]);
+    assert_eq!(cached.iter().map(|c| c.0).collect::<Vec<_>>(), [1, 2, 3]);
+    let addresses = rows(
+        &env,
+        "SELECT COUNT(*) FROM message_addresses WHERE account_id = ? AND uid = 2",
+    )
+    .await;
+    assert_eq!(
+        addresses as usize,
+        email_db::messages_db::MAX_MESSAGE_ADDRESSES
+    );
+    let cc = rows(
+        &env,
+        "SELECT COUNT(*) FROM message_addresses WHERE account_id = ? AND field = 'cc'",
+    )
+    .await;
+    assert_eq!(cc, 0, "past the cap");
+    assert_eq!(
+        rows(
+            &env,
+            "SELECT COUNT(*) FROM jmap_messages WHERE account_id = ?"
+        )
+        .await,
+        3
+    );
+}
+
+/// An email that cannot be stored is skipped: the sync's state advances, the mail after it arrives, nothing of
+/// it is left, and its UID is not used up, however often the sync runs.
+#[tokio::test]
+async fn an_email_that_cannot_be_stored_does_not_stop_the_sync() {
+    let env = env().await;
+    sqlx::query(
+        "CREATE TRIGGER refuse BEFORE INSERT ON message_addresses WHEN NEW.addr = 'evil@example.org'
+         BEGIN SELECT RAISE(ABORT, 'refused'); END",
+    )
+    .execute(&env.db)
+    .await
+    .unwrap();
+    let inbox = env.fake.mailbox_id("inbox");
+    env.fake
+        .deliver(&[&inbox], &mail("before", "a@example.org"), &[]);
+    env.sync().await;
+    env.fake
+        .deliver(&[&inbox], &mail("poison", "evil@example.org"), &[]);
+    for _ in 0..3 {
+        env.sync().await;
+    }
+    env.fake
+        .deliver(&[&inbox], &mail("after", "a@example.org"), &[]);
+    env.sync().await;
+    env.sync().await;
+    let cached = env.cached("INBOX").await;
+    assert_eq!(subjects(&cached), ["before", "after"]);
+    assert_eq!(cached.iter().map(|c| c.0).collect::<Vec<_>>(), [1, 2]);
+    assert_eq!(
+        rows(
+            &env,
+            "SELECT COUNT(*) FROM cached_messages WHERE account_id = ?"
+        )
+        .await,
+        2
+    );
+    assert_eq!(
+        rows(
+            &env,
+            "SELECT COUNT(*) FROM jmap_messages WHERE account_id = ?"
+        )
+        .await,
+        2
+    );
+}

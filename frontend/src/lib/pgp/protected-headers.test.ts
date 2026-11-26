@@ -150,10 +150,13 @@ describe('"verified" is shown beside the sender the signature was checked for', 
     expect(msg.summary.signed).toBe('all');
     expect(msg.sources.from).toBe('protected');
     expect(checkedSender(msg)!.address).toBe('alice@example.com');
-    // the server reports the outer From: "verified" never stands alone beside it
-    expect(senderDiffers(msg, 'Mallory <mallory@evil.example>')).toBe(true);
-    expect(messageBadges(msg, 'Mallory <mallory@evil.example>')).toEqual(['verified', 'from_differs']);
-    expect(messageBadges(msg, 'Alice <alice@example.com>')).toEqual(['verified']);
+    // the server reports the outer From's address: "verified" never stands alone beside it
+    expect(senderDiffers(msg, 'mallory@evil.example')).toBe(true);
+    expect(messageBadges(msg, 'mallory@evil.example')).toEqual(['verified', 'from_differs']);
+    expect(messageBadges(msg, 'alice@example.com')).toEqual(['verified']);
+    // the server's address, never one parsed from a display name; no single sender matches no checked one
+    expect(messageBadges(msg, '"<alice@example.com>" <mallory@evil.example>')).toEqual(['verified', 'from_differs']);
+    expect(messageBadges(msg, null)).toEqual(['verified', 'from_differs']);
   });
 
   it('the same From outside and in: verified, no warning', async () => {

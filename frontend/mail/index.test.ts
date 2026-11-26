@@ -14,7 +14,7 @@ import '../src/test-dom.ts';                 // jsdom: dialogs, popovers, comman
 const user = { display_name: 'Demo User', has_settings: true, has_caldav: true, oidc_enabled: false, map_url: '', oidc_signed_in: false };
 const msg = (uid: number, subject: string, extra: Partial<Message> = {}): Message => ({
   uid, account_id: 'work', mailbox: 'INBOX', rowid: uid, message_id: `<${uid}@x>`, thread_id: null, from: `Sender ${uid} <s${uid}@x>`,
-  to: ['me@x'], cc: [], subject, sent_at: 1_700_000_000 + uid, flags: ['\\Seen'], has_attachments: false, body_cached: true,
+  from_address: `s${uid}@x`, to: ['me@x'], cc: [], subject, sent_at: 1_700_000_000 + uid, flags: ['\\Seen'], has_attachments: false, body_cached: true,
   body_text: `body ${uid}`, body_html: null, autocrypt_headers: [], is_read: true, is_flagged: false, is_encrypted: false,
   is_signed: false, attachments: [], ...extra,
 });
@@ -95,6 +95,11 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
       autodiscover: async () => discovery,
       send: async (draft: { encrypt: boolean }) => { sent.push(draft); return null; },
       forwardFiles: async () => ({ files: [], html: '' }),
+      // as the action: POST /pgp/key, then for a key change POST /pgp/key/accept with replace
+      importKey: async (body: { fingerprint: string }, replace: boolean, ctx: { request: (url: string, init: object) => Promise<unknown> }) => {
+        const stored = await ctx.request('/api/pgp/key', { method: 'POST', body });
+        return replace ? ctx.request('/api/pgp/key/accept', { method: 'POST', body: { fingerprint: body.fingerprint, replace: true } }) : stored;
+      },
       popout: () => {}, unlock: async () => true, icsFile: async (_m: unknown, filename: string) => new File(['x'], filename),
       pendingCompose: () => { pendingCalls++; const p = pending; pending = null; return p; },
     },
@@ -657,7 +662,7 @@ test('importing an attached public key shows its fingerprint and user IDs first;
   bodyExtra = { importable: { 'key.asc': {
     body: { fingerprint: 'ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234', email: '', armored: 'K', is_own: false, source: 'message_attachment' },
     facts: { fingerprint: 'ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234', userIds: ['Someone <other@x>', 'Someone <third@x>'], emails: ['other@x', 'third@x'] },
-    sender: 's1@x', claimsAddress: false,
+    sender: 's1@x', claimsAddress: false, changes: [],
   } } };
   const { root, settle, requests } = await show({
     'GET /api/email/messages': { messages: withKey, total: 1 },
@@ -694,7 +699,7 @@ test('an attached key that names the sender is offered for the sender\'s address
   const withKey = [msg(1, 'Key', { attachments: [{ filename: 'key.asc', content_type: 'application/pgp-keys', size: 900, content_id: null }], has_attachments: true })];
   bodyExtra = { importable: { 'key.asc': {
     body: { fingerprint: 'AB12', email: 's1@x', armored: 'K', is_own: false, source: 'message_attachment' },
-    facts: { fingerprint: 'AB12', userIds: ['Sender 1 <s1@x>'], emails: ['s1@x'] }, sender: 's1@x', claimsAddress: true,
+    facts: { fingerprint: 'AB12', userIds: ['Sender 1 <s1@x>'], emails: ['s1@x'] }, sender: 's1@x', claimsAddress: true, changes: [],
   } } };
   const { root, settle } = await show({ 'GET /api/email/messages': { messages: withKey, total: 1 } });
   rows(root)[0].click();
@@ -706,6 +711,68 @@ test('an attached key that names the sender is offered for the sender\'s address
   const dialog = root.querySelector<HTMLDialogElement>('#email-key-import')!;
   expect(dialog.textContent).toContain(m.pgp_importForSender({ email: 's1@x' }));
   expect(dialog.querySelector('select')).toBeNull();
+});
+
+async function openKeyImport(candidate: object, routes: Record<string, RouteResponse> = {}) {
+  const withKey = [msg(1, 'Key', { attachments: [{ filename: 'key.asc', content_type: 'application/pgp-keys', size: 900, content_id: null }], has_attachments: true })];
+  bodyExtra = { importable: { 'key.asc': candidate } };
+  const shown = await show({ 'GET /api/email/messages': { messages: withKey, total: 1 }, ...routes });
+  rows(shown.root)[0].click();
+  await shown.settle();
+  shown.root.querySelector<HTMLButtonElement>('.attachments button[aria-expanded]')!.click();
+  await shown.settle();
+  shown.root.querySelector<HTMLButtonElement>(`.attachments button[aria-label="${m.pgp_importPublicKeyButton()}"]`)!.click();
+  await shown.settle();
+  return { ...shown, dialog: shown.root.querySelector<HTMLDialogElement>('#email-key-import')! };
+}
+
+test('importing a key for an address another trusted key is stored for warns of the key change, and replaces that key as accepting one does', async () => {
+  const { dialog, settle, requests } = await openKeyImport({
+    body: { fingerprint: 'AB12', email: 's1@x', armored: 'K', is_own: false, source: 'message_attachment' },
+    facts: { fingerprint: 'AB12', userIds: ['Sender 1 <s1@x>'], emails: ['s1@x'] }, sender: 's1@x', claimsAddress: true, changes: ['s1@x'],
+  }, {
+    'POST /api/pgp/key': (call) => ({ ...(call.body as object), trust: 'trusted' }),
+    'POST /api/pgp/key/accept': (call) => { bodyExtra = {}; return { fingerprint: (call.body as { fingerprint: string }).fingerprint, email: 's1@x', armored: 'K', is_own: false, source: 'message_attachment', trust: 'trusted' }; },
+  });
+  expect(dialog.textContent).toContain(m.pgp_acceptChangeHint({ email: 's1@x' }));
+  const store = [...dialog.querySelectorAll('button')].find((b) => b.textContent === m.pgp_acceptNewKey())!;
+  store.click();
+  await settle();
+  const posts = requests.calls.filter((c) => c.method === 'POST' && c.path.startsWith('/api/pgp/key'));
+  expect(posts.map((c) => [c.path, c.body])).toEqual([
+    ['/api/pgp/key', { fingerprint: 'AB12', email: 's1@x', armored: 'K', is_own: false, source: 'message_attachment' }],
+    ['/api/pgp/key/accept', { fingerprint: 'AB12', replace: true }],
+  ]);
+  expect(dialog.open).toBe(false);
+});
+
+test('a key change only for the address chosen: no warning for another of the key\'s addresses, and no replacing', async () => {
+  const { dialog, settle, requests } = await openKeyImport({
+    body: { fingerprint: 'AB12', email: '', armored: 'K', is_own: false, source: 'message_attachment' },
+    facts: { fingerprint: 'AB12', userIds: ['A <a@x>', 'B <b@x>'], emails: ['a@x', 'b@x'] }, sender: 's1@x', claimsAddress: false, changes: ['a@x'],
+  }, { 'POST /api/pgp/key': (call) => { bodyExtra = {}; return { ...(call.body as object), trust: 'trusted' }; } });
+  const select = dialog.querySelector('select')!;
+  select.value = 'a@x';
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  expect(dialog.textContent).toContain(m.pgp_acceptChangeHint({ email: 'a@x' }));
+  select.value = 'b@x';
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  expect(dialog.textContent).not.toContain(m.pgp_acceptChangeHint({ email: 'b@x' }));
+  [...dialog.querySelectorAll('button')].find((b) => b.textContent === m.pgp_trustImportButton())!.click();
+  await settle();
+  expect(requests.calls.filter((c) => c.method === 'POST' && c.path.startsWith('/api/pgp/key')).map((c) => c.path)).toEqual(['/api/pgp/key']);
+});
+
+test('a message without a single sender address offers a key for no sender: the user picks one of the key\'s addresses', async () => {
+  const { dialog } = await openKeyImport({
+    body: { fingerprint: 'AB12', email: '', armored: 'K', is_own: false, source: 'message_attachment' },
+    facts: { fingerprint: 'AB12', userIds: ['CEO <ceo@bank.example>'], emails: ['ceo@bank.example'] }, sender: '', claimsAddress: false, changes: [],
+  });
+  expect(dialog.textContent).toContain(m.pgp_keyNoSender({ emails: 'ceo@bank.example' }));
+  expect(dialog.textContent).not.toContain(m.pgp_importForSender({ email: 'ceo@bank.example' }));
+  expect(dialog.querySelector('select')).not.toBeNull();
 });
 
 test('compose shows a recipient\'s key found in mail with its full fingerprint and user IDs, and accepts it only on request', async () => {

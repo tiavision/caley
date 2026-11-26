@@ -90,8 +90,8 @@ impl SearchFilters {
 
 // ── Message operations ────────────────────────────────────────────────────────
 
-pub async fn upsert_message_header(
-    pool: &SqlitePool,
+pub async fn upsert_message_header<'e>(
+    db: impl sqlx::Executor<'e, Database = Sqlite>,
     account_id: &str,
     mailbox: &str,
     h: &MessageHeader,
@@ -145,14 +145,21 @@ pub async fn upsert_message_header(
     .bind(from_idx)
     .bind(to_idx)
     .bind(is_unread)
-    .execute(pool)
+    .execute(db)
     .await?;
     Ok(())
 }
 
-/// Replaces the normalized address rows for one message.
+/// At most this many address rows per message (sender first, then To, then Cc): what search and
+/// suggestions read; the message's own address columns keep them all.
+pub const MAX_MESSAGE_ADDRESSES: usize = 1000;
+/// Rows per INSERT (5 binds each, well under SQLite's variable limit).
+const ADDRESS_ROWS_PER_INSERT: usize = 200;
+
+/// Replaces the normalized address rows for one message: each address once per field, at most
+/// MAX_MESSAGE_ADDRESSES.
 pub async fn replace_message_addresses(
-    pool: &SqlitePool,
+    conn: &mut sqlx::SqliteConnection,
     account_id: &str,
     mailbox: &str,
     uid: i64,
@@ -160,34 +167,35 @@ pub async fn replace_message_addresses(
     to_emails: &[String],
     cc_emails: &[String],
 ) -> Result<()> {
-    let mut tx = pool.begin().await?;
     sqlx::query("DELETE FROM message_addresses WHERE account_id = ? AND mailbox = ? AND uid = ?")
         .bind(account_id)
         .bind(mailbox)
         .bind(uid)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
 
+    let mut seen = std::collections::HashSet::new();
     let rows: Vec<(&str, &String)> = from_emails
         .iter()
         .map(|a| ("from", a))
         .chain(to_emails.iter().map(|a| ("to", a)))
         .chain(cc_emails.iter().map(|a| ("cc", a)))
+        .filter(|row| seen.insert(*row))
+        .take(MAX_MESSAGE_ADDRESSES)
         .collect();
-    if !rows.is_empty() {
+    for chunk in rows.chunks(ADDRESS_ROWS_PER_INSERT) {
         let mut qb = QueryBuilder::<Sqlite>::new(
             "INSERT INTO message_addresses (account_id, mailbox, uid, field, addr) ",
         );
-        qb.push_values(rows, |mut b, (field, addr)| {
+        qb.push_values(chunk, |mut b, &(field, addr)| {
             b.push_bind(account_id)
                 .push_bind(mailbox)
                 .push_bind(uid)
                 .push_bind(field)
                 .push_bind(addr);
         });
-        qb.build().execute(&mut *tx).await?;
+        qb.build().execute(&mut *conn).await?;
     }
-    tx.commit().await?;
     Ok(())
 }
 

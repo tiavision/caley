@@ -318,15 +318,22 @@ impl EmailSyncManager {
         for mailbox in want.iter().filter(|m| !have_names.contains(*m)) {
             let uid = jmap_db::next_uid(&self.db, account_id, mailbox).await?;
             let h = imap_client::header_from_bytes(uid, &header_bytes, &flags, email.size);
-            self.store_header(
-                account_id,
-                user_id,
-                mailbox,
-                &h,
-                notify && mailbox.eq_ignore_ascii_case("INBOX"),
-            )
-            .await?;
-            jmap_db::insert_jmap_message(
+            let notify = notify && mailbox.eq_ignore_ascii_case("INBOX");
+            // An email that cannot be stored is skipped (the sync's state still advances, and it is
+            // tried again when it changes or the account is listed again), nothing of it left: its UID
+            // given back when its row never was (`store_header` stores row and addresses or neither).
+            if let Err(e) = self
+                .store_header(account_id, user_id, mailbox, &h, notify)
+                .await
+            {
+                eprintln!(
+                    "[jmap] {account_id}: email {} not stored in {mailbox}: {e}",
+                    email.id
+                );
+                jmap_db::release_uid(&self.db, account_id, mailbox, uid).await?;
+                continue;
+            }
+            if let Err(e) = jmap_db::insert_jmap_message(
                 &self.db,
                 account_id,
                 mailbox,
@@ -334,7 +341,15 @@ impl EmailSyncManager {
                 &email.id,
                 &email.blob_id,
             )
-            .await?;
+            .await
+            {
+                eprintln!(
+                    "[jmap] {account_id}: email {} not stored in {mailbox}: {e}",
+                    email.id
+                );
+                let _ = email_db::delete_message(&self.db, account_id, mailbox, uid).await;
+                continue;
+            }
             added.insert((*mailbox).to_owned());
         }
         Ok(())

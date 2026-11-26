@@ -505,21 +505,35 @@ pub async fn delete_calendar_cache(
 
 fn ical_dt_to_date_str(s: &str) -> String {
     let date_part = s.split('T').next().unwrap_or(s).trim();
-    if date_part.len() >= 8 {
-        format!(
-            "{}-{}-{}",
-            &date_part[..4],
-            &date_part[4..6],
-            &date_part[6..8]
-        )
-    } else {
-        date_part.to_string()
+    // `get`, not slicing: a server's value may have a multibyte character there.
+    match (date_part.get(..4), date_part.get(4..6), date_part.get(6..8)) {
+        (Some(y), Some(m), Some(d)) => format!("{y}-{m}-{d}"),
+        _ => date_part.to_string(),
     }
 }
 
-fn extract_ical_metadata(
-    raw_ical: &str,
-) -> (String, String, String, String, String, String, bool, bool) {
+/// uid, summary, dtstart, dtend, description, location, all-day, recurring.
+type IcalMetadata = (String, String, String, String, String, String, bool, bool);
+
+/// The cached columns of a calendar object, `None` (logged) for one that cannot be read, so one bad
+/// object is skipped and the rest of its collection (and its sync token) still stored.
+fn object_metadata(href: &str, raw_ical: &str) -> Option<IcalMetadata> {
+    let read = || {
+        #[cfg(test)]
+        assert!(!raw_ical.contains("X-CALEY-TEST-PANIC"), "a test's panic");
+        extract_ical_metadata(raw_ical)
+    };
+    match std::panic::catch_unwind(read) {
+        Ok(m) if m.0.is_empty() => None,
+        Ok(m) => Some(m),
+        Err(_) => {
+            eprintln!("[sync] skipping calendar object {href}: it cannot be read");
+            None
+        }
+    }
+}
+
+fn extract_ical_metadata(raw_ical: &str) -> IcalMetadata {
     let calendar = match ical::IcalParser::new(raw_ical.as_bytes()).next() {
         Some(Ok(c)) => c,
         _ => {
@@ -621,11 +635,11 @@ pub async fn upsert_cached_event_raw(
     mode: &SearchMode,
 ) -> anyhow::Result<()> {
     let account_id = account.as_str();
-    let (uid, summary, dtstart, dtend, description, location, is_all_day, is_recurring) =
-        extract_ical_metadata(raw_ical);
-    if uid.is_empty() {
+    let Some((uid, summary, dtstart, dtend, description, location, is_all_day, is_recurring)) =
+        object_metadata(event_href, raw_ical)
+    else {
         return Ok(());
-    }
+    };
     let summary_idx = mode.normalize_text(&summary);
     let description_idx = mode.normalize_text(&description);
     let location_idx = mode.normalize_text(&location);
@@ -689,6 +703,23 @@ pub async fn delete_event_by_href(
     Ok(())
 }
 
+/// The href the server gave a cached calendar object, by its UID.
+pub async fn get_event_href(
+    pool: &SqlitePool,
+    account: CalDavAccountId<'_>,
+    calendar_href: &str,
+    uid: &str,
+) -> anyhow::Result<Option<String>> {
+    Ok(sqlx::query_scalar(
+        "SELECT href FROM cached_events WHERE account_id = ? AND calendar_href = ? AND uid = ? AND href <> ''",
+    )
+    .bind(account.as_str())
+    .bind(calendar_href)
+    .bind(uid)
+    .fetch_optional(pool)
+    .await?)
+}
+
 pub async fn delete_cached_event(
     pool: &SqlitePool,
     account: CalDavAccountId<'_>,
@@ -732,11 +763,11 @@ pub async fn apply_incremental_sync(
 
     let mut changed_result: Vec<EventRef> = Vec::new();
     for (href, etag, raw_ical) in changed {
-        let (uid, summary, dtstart, dtend, description, location, is_all_day, is_recurring) =
-            extract_ical_metadata(&raw_ical);
-        if uid.is_empty() {
+        let Some((uid, summary, dtstart, dtend, description, location, is_all_day, is_recurring)) =
+            object_metadata(&href, &raw_ical)
+        else {
             continue;
-        }
+        };
         let summary_idx = mode.normalize_text(&summary);
         let description_idx = mode.normalize_text(&description);
         let location_idx = mode.normalize_text(&location);
@@ -850,11 +881,11 @@ pub async fn replace_calendar_events(
         .await?;
 
     for (href, etag, raw_ical) in all_raw {
-        let (uid, summary, dtstart, dtend, description, location, is_all_day, is_recurring) =
-            extract_ical_metadata(&raw_ical);
-        if uid.is_empty() {
+        let Some((uid, summary, dtstart, dtend, description, location, is_all_day, is_recurring)) =
+            object_metadata(&href, &raw_ical)
+        else {
             continue;
-        }
+        };
         let summary_idx = mode.normalize_text(&summary);
         let description_idx = mode.normalize_text(&description);
         let location_idx = mode.normalize_text(&location);
@@ -1151,4 +1182,158 @@ pub async fn ensure_fts_schema(pool: &SqlitePool, mode: &SearchMode) -> anyhow::
 
     println!("[search] FTS rebuild complete.");
     Ok(())
+}
+
+#[cfg(test)]
+mod object_tests {
+    use super::*;
+
+    fn ics(uid: &str, body: &str) -> String {
+        format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:{uid}\r\nSUMMARY:S\r\n{body}END:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+    }
+
+    /// A database with a user's account (its id) and its calendar `/cal/`.
+    async fn calendar() -> (SqlitePool, String) {
+        let dir = std::env::temp_dir().join(format!("caley-objects-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::init_db(dir.join("t.db").to_str().unwrap())
+            .await
+            .unwrap();
+        crate::db::ensure_user(&db, "u@example", None)
+            .await
+            .unwrap();
+        let settings = crate::db::UserSettings {
+            caldav_base_url: "https://dav.example/".into(),
+            caldav_username: "u".into(),
+            caldav_password: "p".into(),
+        };
+        let acc = upsert_caldav_account(&db, "u@example", None, None, &settings, &[9; 32])
+            .await
+            .unwrap();
+        upsert_cached_calendar(&db, &acc, "/cal/", "Work", None)
+            .await
+            .unwrap();
+        (db, acc)
+    }
+
+    /// Dates with a multibyte character where the digits should be, and an object that cannot be
+    /// read at all: stored or skipped, the collection's others and its sync token stored.
+    #[tokio::test]
+    async fn bad_objects_do_not_stop_a_collection() {
+        let (db, acc) = calendar().await;
+        let mode = SearchMode::Default;
+        for (i, body) in [
+            "DTSTART:202\u{e9}1125T080000Z\r\n",
+            "DTSTART:20261125T080000Z\r\nDTEND:202\u{e9}xxxx\r\n",
+            "DTSTART:20261125T080000Z\r\nDUE:2026\u{1F600}11\r\n",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            upsert_cached_event_raw(
+                &db,
+                CalDavAccountId::internal(&acc),
+                "/cal/",
+                &format!("/cal/{i}.ics"),
+                "1",
+                &ics(&format!("m{i}"), body),
+                &mode,
+            )
+            .await
+            .unwrap();
+        }
+
+        let objects = vec![
+            (
+                "/cal/a.ics".into(),
+                "1".into(),
+                ics("a", "DTSTART:20261125T080000Z\r\nX-CALEY-TEST-PANIC:1\r\n"),
+            ),
+            (
+                "/cal/b.ics".into(),
+                "1".into(),
+                ics("b", "DTSTART:202\u{e9}1125T080000Z\r\n"),
+            ),
+            (
+                "/cal/c.ics".into(),
+                "1".into(),
+                ics("c", "DTSTART:20261125T080000Z\r\n"),
+            ),
+        ];
+        apply_incremental_sync(
+            &db,
+            &acc,
+            "/cal/",
+            objects.clone(),
+            vec![],
+            "token-2",
+            None,
+            &mode,
+        )
+        .await
+        .unwrap();
+        let uids: Vec<String> = sqlx::query_scalar(
+            "SELECT uid FROM cached_events WHERE uid IN ('a', 'b', 'c') ORDER BY uid",
+        )
+        .fetch_all(&db)
+        .await
+        .unwrap();
+        assert_eq!(uids, ["b", "c"]);
+        let token: Option<String> =
+            sqlx::query_scalar("SELECT sync_token FROM cached_calendars WHERE href = '/cal/'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(token.as_deref(), Some("token-2"));
+
+        replace_calendar_events(
+            &db,
+            &acc,
+            "/cal/",
+            objects,
+            Some("ctag-3"),
+            Some("token-3"),
+            &mode,
+        )
+        .await
+        .unwrap();
+        let n: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM cached_events WHERE calendar_href = '/cal/'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(n, 2);
+    }
+
+    /// An event the server named itself is addressed by that name (an edit or a re-import replaces it).
+    #[tokio::test]
+    async fn an_event_keeps_its_href() {
+        let (db, acc) = calendar().await;
+        let acc = CalDavAccountId::internal(&acc);
+        let href = "https://dav.example/cal/server-chose-this.ics";
+        upsert_cached_event_raw(
+            &db,
+            acc,
+            "/cal/",
+            href,
+            "1",
+            &ics("../x?", "DTSTART:20261125T080000Z\r\n"),
+            &SearchMode::Default,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            get_event_href(&db, acc, "/cal/", "../x?")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(href)
+        );
+        assert_eq!(
+            get_event_href(&db, acc, "/cal/", "other").await.unwrap(),
+            None
+        );
+    }
 }

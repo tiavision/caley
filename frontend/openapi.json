@@ -401,7 +401,7 @@
     },
     "/contact/photo": {
       "get": {
-        "summary": "The contact's embedded photo (raster images only, never SVG or a remote URL). With `v` the\ncurrent version it is cached for good, else revalidated by `ETag` (`If-None-Match` → 304).",
+        "summary": "The contact's embedded photo, if its bytes are a PNG, JPEG, GIF, WebP or AVIF: served as that type\n(never SVG, the declared type or a remote URL). With `v` the current version it is cached for good,\nelse revalidated by `ETag` (`If-None-Match` → 304).",
         "operationId": "get_contact_photo",
         "parameters": [
           {
@@ -440,7 +440,7 @@
         ],
         "responses": {
           "200": {
-            "description": "the photo, in its own image type",
+            "description": "the photo, as the image type its bytes are",
             "content": {
               "image/*": {
                 "schema": {
@@ -642,7 +642,7 @@
     },
     "/email/attachment": {
       "get": {
-        "summary": "An attachment of a cached message, with its declared content type. Content-Disposition is\n`inline` for previewable types (PDF, plain text, raster images, audio, video), else `attachment`.",
+        "summary": "An attachment of a cached message. Shown (`inline`) only as a PNG, JPEG, GIF, WebP or AVIF its bytes\nare, a PDF, UTF-8 plain text or one of a list of audio and video types, all but PDF sandboxed\n(`Content-Security-Policy: sandbox …`); anything else is `application/octet-stream`, `attachment`.",
         "operationId": "download_attachment",
         "parameters": [
           {
@@ -682,7 +682,7 @@
         ],
         "responses": {
           "200": {
-            "description": "the attachment's bytes, as its declared content type (`application/octet-stream` without one)",
+            "description": "the attachment's bytes: as the image type they are, `application/pdf`, `text/plain; charset=utf-8`, an audio or video type, else `application/octet-stream`",
             "content": {
               "application/octet-stream": {
                 "schema": {
@@ -1661,7 +1661,7 @@
     },
     "/email/proxy-image": {
       "get": {
-        "summary": "An image of a message: an inline part by Content-ID, or a remote image of a whitelisted origin.\nOnly PNG, JPEG, GIF, WebP and AVIF (sniffed from the bytes) are served; anything else, an\norigin not whitelisted, an unsafe address or a failed fetch is a 1×1 transparent GIF.",
+        "summary": "An image of a message: an inline part by Content-ID, or a remote image of a whitelisted origin.\nOnly PNG, JPEG, GIF, WebP and AVIF (sniffed from the bytes) are served; anything else, an\norigin not whitelisted, a non-public address, a redirect, more than 10 MiB or a failed fetch is a\n1×1 transparent GIF.",
         "operationId": "proxy_image",
         "parameters": [
           {
@@ -4881,6 +4881,7 @@
           "message_id",
           "thread_id",
           "from",
+          "from_address",
           "to",
           "cc",
           "reply_to",
@@ -4928,7 +4929,14 @@
               "string",
               "null"
             ],
-            "description": "the From header"
+            "description": "the From header, for display"
+          },
+          "from_address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the sender's address (lowercased): the From header's single mailbox, read from the cached source; null when\nFrom has no mailbox or more than one, or the source is not cached. What a sender's keys are bound to, never\n`from`. GET /email/message only; null in lists"
           },
           "to": {
             "type": "array",

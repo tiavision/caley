@@ -1,10 +1,5 @@
 import * as openpgp from 'openpgp';
 
-function bareAddress(value: string): string {
-  const match = /<([^<>]+)>/.exec(value);
-  return (match?.[1] ?? value).trim().toLowerCase();
-}
-
 function headerValues(raw: string, name: string): string[] {
   const headerBlock = raw.split(/\r?\n\r?\n/, 1)[0] ?? '';
   const unfolded = headerBlock.replace(/\r?\n[ \t]+/g, ' ');
@@ -20,8 +15,9 @@ function userEmails(key: openpgp.PublicKey): string[] {
     .filter((email): email is string => !!email);
 }
 
-export async function autocryptKeys(rawBytes: Uint8Array, from: string | null): Promise<openpgp.PublicKey[]> {
-  const sender = bareAddress(from ?? '');
+/** The keys the message's Autocrypt headers give for `sender` (the sender's address, Message.from_address). */
+export async function autocryptKeys(rawBytes: Uint8Array, sender: string | null): Promise<openpgp.PublicKey[]> {
+  sender = sender?.trim().toLowerCase() ?? '';
   if (!sender) return [];
   const raw = new TextDecoder().decode(rawBytes);
   const keys: openpgp.PublicKey[] = [];

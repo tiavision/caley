@@ -118,6 +118,20 @@ pub async fn next_uid(pool: &SqlitePool, account_id: &str, name: &str) -> Result
     }
 }
 
+/// Gives back `uid`, the last one `next_uid` handed out for the mailbox, when nothing was stored under it.
+pub async fn release_uid(pool: &SqlitePool, account_id: &str, name: &str, uid: u32) -> Result<()> {
+    sqlx::query(
+        "UPDATE jmap_mailboxes SET next_uid = ? WHERE account_id = ? AND name = ? AND next_uid = ?",
+    )
+    .bind(uid as i64)
+    .bind(account_id)
+    .bind(name)
+    .bind(uid as i64 + 1)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// The cached messages an email is: (mailbox, UID) for each mailbox it is in.
 pub async fn jmap_memberships(
     pool: &SqlitePool,

@@ -7,6 +7,7 @@ use axum_typed_multipart::{TryFromMultipart, TypedMultipart};
 use chrono::NaiveDate;
 use serde::Deserialize;
 
+use crate::caldav::generation::MAX_IMPORT_EVENTS;
 use crate::caldav::{CalDavClient, preview_events_from_raw_ical, split_vcalendar_into_events};
 use crate::db;
 use crate::email_db;
@@ -101,12 +102,12 @@ pub async fn preview_ics_import(
     TypedMultipart(IcsFileForm { file: ics }): TypedMultipart<IcsFileForm>,
 ) -> Response {
     let events = split_vcalendar_into_events(&ics);
-    if events.is_empty() {
-        return (StatusCode::BAD_REQUEST, "No events found in ICS file").into_response();
+    if let Some(refused) = refuse_split(&events) {
+        return refused;
     }
 
     let previews: Vec<ImportPreviewEvent> = events
-        .into_iter()
+        .events()
         .filter_map(|(_, wrapped_ical)| {
             preview_events_from_raw_ical(&wrapped_ical)
                 .into_iter()
@@ -131,6 +132,18 @@ pub async fn preview_ics_import(
     }
 
     Json(previews).into_response()
+}
+
+/// The 400 for a file without events, or with more than MAX_IMPORT_EVENTS.
+fn refuse_split(events: &crate::caldav::generation::SplitCalendar) -> Option<Response> {
+    if events.is_empty() {
+        return Some((StatusCode::BAD_REQUEST, "No events found in ICS file").into_response());
+    }
+    if events.too_many {
+        let text = format!("The ICS file has more than {MAX_IMPORT_EVENTS} events");
+        return Some((StatusCode::BAD_REQUEST, text).into_response());
+    }
+    None
 }
 
 #[utoipa::path(
@@ -172,8 +185,8 @@ pub async fn import_ics(
             .into_response();
     }
     let events = split_vcalendar_into_events(&ics);
-    if events.is_empty() {
-        return (StatusCode::BAD_REQUEST, "No events found in ICS file").into_response();
+    if let Some(refused) = refuse_split(&events) {
+        return refused;
     }
     // the message the events come from is linked to them (event-emails shows it): only one of the user's
     let email_account = match &email_account_id {
@@ -213,10 +226,12 @@ pub async fn import_ics(
     let mut imported = 0usize;
     let mut errors = 0usize;
 
-    for (uid, wrapped_ical) in events {
-        match client.put_event(&calendar_href, &uid, &wrapped_ical).await {
+    for (uid, wrapped_ical) in events.events() {
+        // an event already in the calendar is replaced where it is
+        let event_href =
+            super::events::resolve_event_href(&state, account.id(), &calendar_href, &uid).await;
+        match client.put_event(&event_href, &wrapped_ical).await {
             Ok(_) => {
-                let event_href = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
                 if let Err(e) = db::upsert_cached_event_raw(
                     &state.db,
                     account.id(),

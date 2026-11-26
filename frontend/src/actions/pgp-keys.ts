@@ -13,7 +13,7 @@ import { m } from '@tiaforge-ui/sinter/messages';
 export async function publicKey(armored: string): Promise<KeyCandidate> {
   const key = await parsePublicKey(armored);
   const facts = keyFacts(key);
-  return { body: { ...publicKeyBody(key, 'imported'), email: facts.emails[0] ?? '' }, facts, sender: '', claimsAddress: true };
+  return { body: { ...publicKeyBody(key, 'imported'), email: facts.emails[0] ?? '' }, facts, sender: '', claimsAddress: true, changes: [] };
 }
 
 /** What a stored key says of itself, for the dialog that accepts it; rejects a record whose armor is another key. */

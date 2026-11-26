@@ -1,5 +1,10 @@
 use anyhow::bail;
-use chrono::{FixedOffset, NaiveDate, NaiveDateTime, TimeDelta, TimeZone as _, Utc};
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
+
+use chrono::{
+    Datelike as _, Days, FixedOffset, NaiveDate, NaiveDateTime, TimeDelta, TimeZone as _, Utc,
+};
 use quick_xml::Reader;
 use quick_xml::events::Event as XmlEvent;
 use rrule::RRuleSet;
@@ -72,57 +77,152 @@ impl ResolvedTz {
     }
 }
 
-/// Resolve a raw ICS TZID string to a usable timezone, trying in order:
-/// 1. Direct IANA parse (the common case: Google/Apple/Thunderbird-style
-///    producers already use IANA names).
-/// 2. A Windows/CLDR timezone name table lookup (handles Outlook/Exchange
-///    TZIDs like "Eastern Standard Time").
-/// 3. The event's own embedded VTIMEZONE block, if any, evaluated for `at`.
-/// 4. Floating — the wall-clock time is preserved as-is.
-///
-/// `value_is_utc` reflects whether the raw date value carried a `Z` suffix;
-/// it decides between UTC and floating when no TZID resolves.
-fn resolve_tzid(
-    tzid: Option<&str>,
-    timezones: &[ical::parser::ical::component::IcalTimeZone],
-    at: NaiveDateTime,
-    value_is_utc: bool,
-) -> ResolvedTz {
-    let Some(tzid) = tzid else {
-        return if value_is_utc {
+/// Resolves the TZIDs of one calendar object, with the transitions of its VTIMEZONEs computed once per
+/// year (an Outlook VTIMEZONE's rules start in 1601, and an event may name it in thousands of EXDATEs).
+struct TzResolver<'a> {
+    timezones: &'a [ical::parser::ical::component::IcalTimeZone],
+    /// A VTIMEZONE's transitions (sorted) around one year, keyed by its index and the year; `None`
+    /// for one that cannot be used.
+    years: RefCell<HashMap<(usize, i32), Option<Vec<(NaiveDateTime, FixedOffset)>>>>,
+    /// Transition years computed by the rrule crate (rules not of the usual shape), bounded per object.
+    walks: Cell<usize>,
+    warned: RefCell<HashSet<String>>,
+}
+
+/// How many (VTIMEZONE, year) pairs of an unusual shape one object may have computed by the crate.
+const MAX_ZONE_WALKS: usize = 4;
+
+impl<'a> TzResolver<'a> {
+    fn new(timezones: &'a [ical::parser::ical::component::IcalTimeZone]) -> Self {
+        Self {
+            timezones,
+            years: RefCell::default(),
+            walks: Cell::new(0),
+            warned: RefCell::default(),
+        }
+    }
+
+    /// Resolve a raw ICS TZID string to a usable timezone, trying in order:
+    /// 1. Direct IANA parse (the common case: Google/Apple/Thunderbird-style
+    ///    producers already use IANA names).
+    /// 2. A Windows/CLDR timezone name table lookup (handles Outlook/Exchange
+    ///    TZIDs like "Eastern Standard Time").
+    /// 3. The event's own embedded VTIMEZONE block, if any, evaluated for `at`.
+    /// 4. Floating — the wall-clock time is preserved as-is.
+    ///
+    /// `value_is_utc` reflects whether the raw date value carried a `Z` suffix;
+    /// it decides between UTC and floating when no TZID resolves.
+    fn resolve(&self, tzid: Option<&str>, at: NaiveDateTime, value_is_utc: bool) -> ResolvedTz {
+        let Some(tzid) = tzid else {
+            return if value_is_utc {
+                ResolvedTz::Utc
+            } else {
+                ResolvedTz::Floating
+            };
+        };
+
+        if let Ok(tz) = tzid.parse::<chrono_tz::Tz>() {
+            return ResolvedTz::Named(tz);
+        }
+
+        if let Some(iana) = super::windows_tz::windows_to_iana(tzid) {
+            if let Ok(tz) = iana.parse::<chrono_tz::Tz>() {
+                return ResolvedTz::Named(tz);
+            }
+        }
+
+        if let Some(i) = self
+            .timezones
+            .iter()
+            .position(|vtz| vtimezone_tzid(vtz).as_deref() == Some(tzid))
+        {
+            if let Some(offset) = self.vtimezone_offset(i, at) {
+                return ResolvedTz::Fixed {
+                    offset,
+                    canonical: tzid.to_string(),
+                };
+            }
+        }
+
+        if self.warned.borrow_mut().insert(tzid.to_string()) {
+            eprintln!("caldav: unable to resolve TZID {tzid:?}, treating time as floating");
+        }
+        if value_is_utc {
             ResolvedTz::Utc
         } else {
             ResolvedTz::Floating
-        };
-    };
-
-    if let Ok(tz) = tzid.parse::<chrono_tz::Tz>() {
-        return ResolvedTz::Named(tz);
-    }
-
-    if let Some(iana) = super::windows_tz::windows_to_iana(tzid) {
-        if let Ok(tz) = iana.parse::<chrono_tz::Tz>() {
-            return ResolvedTz::Named(tz);
         }
     }
 
-    if let Some(vtz) = timezones
-        .iter()
-        .find(|vtz| vtimezone_tzid(vtz).as_deref() == Some(tzid))
-    {
-        if let Some(offset) = resolve_vtimezone_offset(vtz, at) {
-            return ResolvedTz::Fixed {
-                offset,
-                canonical: tzid.to_string(),
+    /// The UTC offset in effect at `at` (a naive local datetime in the VTIMEZONE's own wall clock):
+    /// whichever transition (across all STANDARD/DAYLIGHT rules) most recently took effect on or
+    /// before `at`, else the earliest one known.
+    fn vtimezone_offset(&self, index: usize, at: NaiveDateTime) -> Option<FixedOffset> {
+        let key = (index, at.year());
+        if !self.years.borrow().contains_key(&key) {
+            let transitions = self.transitions_around(&self.timezones[index], at.year());
+            self.years.borrow_mut().insert(key, transitions);
+        }
+        let years = self.years.borrow();
+        let transitions = years.get(&key)?.as_ref()?;
+        transitions
+            .iter()
+            .rev()
+            .find(|(t, _)| *t <= at)
+            .or(transitions.first())
+            .map(|(_, offset)| *offset)
+    }
+
+    /// The transitions of `vtz` from the start of `year - 1` to the end of `year + 1` (a transition
+    /// without RRULE wherever it is), sorted; `None` when the zone cannot be used.
+    fn transitions_around(
+        &self,
+        vtz: &ical::parser::ical::component::IcalTimeZone,
+        year: i32,
+    ) -> Option<Vec<(NaiveDateTime, FixedOffset)>> {
+        let from = NaiveDate::from_ymd_opt(year.checked_sub(1)?, 1, 1)?.and_hms_opt(0, 0, 0)?;
+        let to = NaiveDate::from_ymd_opt(year.checked_add(1)?, 12, 31)?.and_hms_opt(23, 59, 59)?;
+        let mut out = Vec::new();
+        for transition in &vtz.transitions {
+            let prop = |name: &str| {
+                transition
+                    .properties
+                    .iter()
+                    .find(|p| p.name == name)
+                    .and_then(|p| p.value.as_deref())
             };
+            let dtstart = parse_dtstart(prop("DTSTART")?)?;
+            let offset_to = parse_ical_utc_offset(prop("TZOFFSETTO")?)?;
+            let Some(rule) = prop("RRULE") else {
+                out.push((dtstart, offset_to));
+                continue;
+            };
+            // A rule of another frequency (an occurrence a second, …) makes the zone unusable.
+            if !rule.is_ascii() || rule_freq(rule).as_deref() != Some("YEARLY") {
+                return None;
+            }
+            let dates = match yearly_transitions(dtstart, rule, from, to) {
+                Some(dates) => dates,
+                None => {
+                    if self.walks.get() >= MAX_ZONE_WALKS {
+                        return None;
+                    }
+                    self.walks.set(self.walks.get() + 1);
+                    let start = fast_forward(dtstart, rule, from);
+                    let text =
+                        format!("DTSTART:{}Z\nRRULE:{rule}\n", start.format("%Y%m%dT%H%M%S"));
+                    let utc = |dt: NaiveDateTime| rrule::Tz::UTC.from_utc_datetime(&dt);
+                    match occurrences_between(&text, utc(from), utc(to), |_| true) {
+                        Some(dates) => dates.into_iter().map(|d| d.naive_utc()).collect(),
+                        // the crate refuses it (or panics on it): the transition happens once
+                        None => vec![dtstart],
+                    }
+                }
+            };
+            out.extend(dates.into_iter().map(|d| (d, offset_to)));
         }
-    }
-
-    eprintln!("caldav: unable to resolve TZID {tzid:?}, treating time as floating");
-    if value_is_utc {
-        ResolvedTz::Utc
-    } else {
-        ResolvedTz::Floating
+        out.sort_by_key(|(t, _)| *t);
+        Some(out)
     }
 }
 
@@ -133,76 +233,227 @@ fn vtimezone_tzid(vtz: &ical::parser::ical::component::IcalTimeZone) -> Option<S
         .and_then(|p| p.value.clone())
 }
 
-/// Compute the UTC offset in effect at `at` (a naive local datetime in the
-/// VTIMEZONE's own wall clock) from its STANDARD/DAYLIGHT transitions.
-/// Each transition has a DTSTART anchor and either recurs yearly via an
-/// RRULE (e.g. `FREQ=YEARLY;BYDAY=1SU;BYMONTH=11`) or occurs once. This
-/// picks whichever transition (across all STANDARD/DAYLIGHT rules) most
-/// recently took effect on or before `at`.
-fn resolve_vtimezone_offset(
-    vtz: &ical::parser::ical::component::IcalTimeZone,
-    at: NaiveDateTime,
-) -> Option<FixedOffset> {
-    let mut best: Option<(NaiveDateTime, FixedOffset)> = None;
-    let mut earliest: Option<(NaiveDateTime, FixedOffset)> = None;
+/// A rule's FREQ, upper case.
+fn rule_freq(rule: &str) -> Option<String> {
+    rule.split(';').find_map(|part| {
+        let (k, v) = part.split_once('=')?;
+        k.trim()
+            .eq_ignore_ascii_case("FREQ")
+            .then(|| v.trim().to_ascii_uppercase())
+    })
+}
 
-    for transition in &vtz.transitions {
-        let dtstart_raw = transition
-            .properties
-            .iter()
-            .find(|p| p.name == "DTSTART")
-            .and_then(|p| p.value.as_deref())?;
-        let transition_dtstart = parse_dtstart(dtstart_raw)?;
-        let offset_to_raw = transition
-            .properties
-            .iter()
-            .find(|p| p.name == "TZOFFSETTO")
-            .and_then(|p| p.value.as_deref())?;
-        let offset_to = parse_ical_utc_offset(offset_to_raw)?;
-        let rrule_val = transition
-            .properties
-            .iter()
-            .find(|p| p.name == "RRULE")
-            .and_then(|p| p.value.clone());
+/// A recurrence rule Caley expands: ASCII (the rrule crate panics slicing inside a multibyte
+/// character) and neither SECONDLY nor MINUTELY (no real event recurs that often, and expanding one
+/// is unbounded work); an event with any other rule shows once, at its DTSTART.
+fn usable_rule(rule: &str) -> bool {
+    rule.is_ascii() && !matches!(rule_freq(rule).as_deref(), Some("SECONDLY" | "MINUTELY"))
+}
 
-        let occurrences: Vec<NaiveDateTime> = match rrule_val {
-            Some(rrule_str) => {
-                let rrule_input = format!(
-                    "DTSTART:{}Z\nRRULE:{}\n",
-                    transition_dtstart.format("%Y%m%dT%H%M%S"),
-                    rrule_str
-                );
-                match rrule_input.parse::<RRuleSet>() {
-                    Ok(set) => {
-                        let window_start =
-                            rrule::Tz::UTC.from_utc_datetime(&(at - TimeDelta::days(370)));
-                        let window_end =
-                            rrule::Tz::UTC.from_utc_datetime(&(at + TimeDelta::days(370)));
-                        set.after(window_start)
-                            .before(window_end)
-                            .all(64)
-                            .dates
-                            .into_iter()
-                            .map(|dt| dt.naive_utc())
-                            .collect()
-                    }
-                    Err(_) => vec![transition_dtstart],
+/// The occurrences from `from` to `to` of a VTIMEZONE transition's yearly rule of the usual shape
+/// (`FREQ=YEARLY`, an optional `BYMONTH` and `BYDAY=<n><weekday>`, an optional `UNTIL`), computed
+/// directly; `None` for any other rule.
+pub(super) fn yearly_transitions(
+    dtstart: NaiveDateTime,
+    rule: &str,
+    from: NaiveDateTime,
+    to: NaiveDateTime,
+) -> Option<Vec<NaiveDateTime>> {
+    let mut month = dtstart.month();
+    let mut by_day: Option<(i32, chrono::Weekday)> = None;
+    let mut until: Option<NaiveDateTime> = None;
+    for part in rule.split(';').map(str::trim).filter(|p| !p.is_empty()) {
+        let (k, v) = part.split_once('=')?;
+        match k.to_ascii_uppercase().as_str() {
+            "FREQ" => {}
+            "INTERVAL" if v.trim() == "1" => {}
+            "BYMONTH" => month = v.trim().parse().ok().filter(|m| (1..=12).contains(m))?,
+            "BYDAY" => {
+                let v = v.trim();
+                let (n, wd) = v.split_at(v.len().checked_sub(2)?);
+                let n: i32 = n.trim_start_matches('+').parse().ok()?;
+                if n == 0 || !(-5..=5).contains(&n) {
+                    return None;
                 }
+                by_day = Some((n, weekday_from_ical(wd)?));
             }
-            None => vec![transition_dtstart],
-        };
-
-        for occ in occurrences {
-            if earliest.is_none_or(|(e, _)| occ < e) {
-                earliest = Some((occ, offset_to));
-            }
-            if occ <= at && best.is_none_or(|(b, _)| occ > b) {
-                best = Some((occ, offset_to));
-            }
+            "UNTIL" => until = Some(parse_dtstart(v.trim())?),
+            _ => return None,
         }
     }
+    let mut out = Vec::new();
+    for year in from.year()..=to.year() {
+        let day = match by_day {
+            Some((n, wd)) => nth_weekday(year, month, n, wd),
+            None => NaiveDate::from_ymd_opt(year, month, dtstart.day()),
+        };
+        let Some(at) = day.map(|d| d.and_time(dtstart.time())) else {
+            continue;
+        };
+        if at >= dtstart && at >= from && at <= to && until.is_none_or(|u| at <= u) {
+            out.push(at);
+        }
+    }
+    Some(out)
+}
 
-    best.or(earliest).map(|(_, offset)| offset)
+fn weekday_from_ical(s: &str) -> Option<chrono::Weekday> {
+    use chrono::Weekday::*;
+    Some(match s.to_ascii_uppercase().as_str() {
+        "MO" => Mon,
+        "TU" => Tue,
+        "WE" => Wed,
+        "TH" => Thu,
+        "FR" => Fri,
+        "SA" => Sat,
+        "SU" => Sun,
+        _ => return None,
+    })
+}
+
+/// The `n`th `weekday` of a month (`-1` the last), `None` when the month has no such day.
+fn nth_weekday(year: i32, month: u32, n: i32, weekday: chrono::Weekday) -> Option<NaiveDate> {
+    if n > 0 {
+        NaiveDate::from_weekday_of_month_opt(year, month, weekday, u8::try_from(n).ok()?)
+    } else {
+        let first_next = if month == 12 {
+            NaiveDate::from_ymd_opt(year.checked_add(1)?, 1, 1)?
+        } else {
+            NaiveDate::from_ymd_opt(year, month + 1, 1)?
+        };
+        let last = first_next.pred_opt()?;
+        let back = (7 + last.weekday().num_days_from_monday() - weekday.num_days_from_monday()) % 7;
+        let day = last.checked_sub_days(Days::new(u64::from(back)))?;
+        let day = day.checked_sub_days(Days::new(7 * u64::try_from(-n - 1).ok()?))?;
+        (day.month() == month).then_some(day)
+    }
+}
+
+/// At most this many occurrences of one event in one requested window.
+const MAX_OCCURRENCES: usize = 1000;
+/// At most this many occurrences are walked before the window (after `fast_forward`); a rule that
+/// needs more (a COUNT or UNTIL rule from far back, or BY parts that rarely match) shows nothing there.
+const WALK_BUDGET: usize = 20_000;
+/// At most this many RDATE and EXDATE values each per event; later ones are ignored.
+const MAX_DATES: usize = 5000;
+
+/// The occurrences of the recurrence set `text` (the rrule crate's input) from `from` to `to` that
+/// `keep` keeps, at most MAX_OCCURRENCES; `None` for a set the crate refuses or panics on.
+fn occurrences_between(
+    text: &str,
+    from: chrono::DateTime<rrule::Tz>,
+    to: chrono::DateTime<rrule::Tz>,
+    keep: impl Fn(&chrono::DateTime<rrule::Tz>) -> bool,
+) -> Option<Vec<chrono::DateTime<rrule::Tz>>> {
+    if !text.is_ascii() {
+        return None;
+    }
+    let walk = || {
+        let set = match text.parse::<RRuleSet>() {
+            Ok(set) => set.limit(),
+            Err(e) => {
+                eprintln!("Failed to parse RRuleSet: {e} - string was: {text:?}");
+                return None;
+            }
+        };
+        let mut out = Vec::new();
+        for (step, dt) in (&set).into_iter().enumerate() {
+            if dt > to {
+                break;
+            }
+            if dt >= from {
+                if keep(&dt) {
+                    out.push(dt);
+                    if out.len() >= MAX_OCCURRENCES {
+                        break;
+                    }
+                }
+            } else if step >= WALK_BUDGET {
+                eprintln!(
+                    "caldav: recurrence walked {WALK_BUDGET} occurrences before {from}, stopped"
+                );
+                break;
+            }
+        }
+        Some(out)
+    };
+    // nothing the walk touches is used after a panic
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(walk))
+        .ok()
+        .flatten()
+}
+
+/// `dtstart` moved forward by whole periods of `rule` to at most `target`, where that leaves the
+/// occurrences from `target` on as they are: no COUNT (it counts from the first), no UNTIL before
+/// `target`, and a period of whole days (DAILY, WEEKLY, HOURLY in whole days) or of months with the
+/// same day (MONTHLY, YEARLY), so the crate need not walk from a DTSTART centuries back.
+pub(super) fn fast_forward(
+    dtstart: NaiveDateTime,
+    rule: &str,
+    target: NaiveDateTime,
+) -> NaiveDateTime {
+    if dtstart >= target {
+        return dtstart;
+    }
+    let mut freq = None;
+    let mut interval: u32 = 1;
+    for part in rule.split(';') {
+        let Some((k, v)) = part.split_once('=') else {
+            continue;
+        };
+        let v = v.trim();
+        match k.trim().to_ascii_uppercase().as_str() {
+            "FREQ" => freq = Some(v.to_ascii_uppercase()),
+            "INTERVAL" => match v.parse() {
+                Ok(n) if n > 0 => interval = n,
+                _ => return dtstart,
+            },
+            "COUNT" => return dtstart,
+            "UNTIL" => match parse_dtstart(v) {
+                Some(u) if target.checked_add_days(Days::new(2)).is_some_and(|t| u > t) => {}
+                _ => return dtstart,
+            },
+            _ => {}
+        }
+    }
+    let days = |step: u64| {
+        let k = u64::try_from((target - dtstart).num_days()).unwrap_or(0) / step;
+        dtstart
+            .checked_add_days(Days::new(k * step))
+            .unwrap_or(dtstart)
+    };
+    let months = |step: u32| {
+        let diff =
+            (target.year() - dtstart.year()) * 12 + target.month() as i32 - dtstart.month() as i32;
+        let mut k = u32::try_from(diff).unwrap_or(0) / step;
+        // the same day of the month, and not past `target` (a month without that day is skipped)
+        for _ in 0..24 {
+            if k == 0 {
+                break;
+            }
+            if let Some(dt) = dtstart.checked_add_months(chrono::Months::new(k * step)) {
+                if dt.day() == dtstart.day() && dt <= target {
+                    return dt;
+                }
+            }
+            k -= 1;
+        }
+        dtstart
+    };
+    let interval64 = u64::from(interval);
+    match freq.as_deref() {
+        Some("DAILY") => days(interval64),
+        Some("WEEKLY") => days(7 * interval64),
+        // whole days of `interval` hours: lcm(interval, 24) hours
+        Some("HOURLY") => days(interval64 / gcd(interval64, 24)),
+        Some("MONTHLY") => months(interval),
+        Some("YEARLY") => interval.checked_mul(12).map_or(dtstart, months),
+        _ => dtstart,
+    }
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 { a } else { gcd(b, a % b) }
 }
 
 /// Parse an RFC 5545 §3.3.14 UTC-offset value (`[+-]HHMM[SS]`) as used in
@@ -497,6 +748,7 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
     };
 
     let timezones = calendar.timezones;
+    let tz = TzResolver::new(&timezones);
     let mut results = Vec::new();
 
     for event in calendar.events {
@@ -567,7 +819,7 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
                     }
                 }
                 "DURATION" => duration_str = property.value,
-                "RRULE" => rrule = property.value,
+                "RRULE" => rrule = property.value.filter(|r| usable_rule(r)),
                 "RDATE" => {
                     if let Some(val) = property.value {
                         let mut rdate_tzid = None;
@@ -582,7 +834,7 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
                         }
                         for v in val.split(',') {
                             let v = v.trim();
-                            if !v.is_empty() {
+                            if !v.is_empty() && v.is_ascii() && rdates.len() < MAX_DATES {
                                 rdates.push(DateProperty {
                                     value: v.to_string(),
                                     tzid: rdate_tzid.clone(),
@@ -606,7 +858,7 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
                         }
                         for v in val.split(',') {
                             let v = v.trim();
-                            if !v.is_empty() {
+                            if !v.is_empty() && v.is_ascii() && exdates.len() < MAX_DATES {
                                 exdates.push(DateProperty {
                                     value: v.to_string(),
                                     tzid: exdate_tzid.clone(),
@@ -675,22 +927,13 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
             Some(dt) => dt,
             None => continue,
         };
-        let dtstart_tz = resolve_tzid(
-            dtstart_tzid.as_deref(),
-            &timezones,
-            dtstart,
-            raw_dtstart.ends_with('Z'),
-        );
+        let dtstart_tz = tz.resolve(dtstart_tzid.as_deref(), dtstart, raw_dtstart.ends_with('Z'));
 
         let duration = if let Some(ref dtend_raw) = dtend_value {
             match parse_dtstart(dtend_raw) {
                 Some(dtend) => {
-                    let dtend_tz = resolve_tzid(
-                        dtend_tzid.as_deref(),
-                        &timezones,
-                        dtend,
-                        dtend_raw.ends_with('Z'),
-                    );
+                    let dtend_tz =
+                        tz.resolve(dtend_tzid.as_deref(), dtend, dtend_raw.ends_with('Z'));
                     if dtstart_tz.is_anchored() && dtend_tz.is_anchored() {
                         // Instant delta: honors a DTEND whose TZID (or UTC
                         // form) differs from DTSTART's.
@@ -718,12 +961,19 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
         } else {
             TimeDelta::zero()
         };
+        // An end past the dates chrono knows (`DURATION:P100000000D`) is no end: the default length.
+        let duration = if dtstart.checked_add_signed(duration).is_some() {
+            duration
+        } else if dtstart_is_date {
+            TimeDelta::days(1)
+        } else {
+            TimeDelta::zero()
+        };
 
         let recurrence_id = recurrence_id_value.as_ref().and_then(|v| parse_dtstart(v));
         let recurrence_id_tz = match recurrence_id {
-            Some(rid) => resolve_tzid(
+            Some(rid) => tz.resolve(
                 recurrence_id_tzid.as_deref(),
-                &timezones,
                 rid,
                 recurrence_id_value
                     .as_deref()
@@ -734,21 +984,11 @@ fn parse_raw_events(ical_data: &str) -> Vec<RawIcalEvent> {
 
         for rdate in rdates.iter_mut() {
             let at = parse_dtstart(&rdate.value).unwrap_or(dtstart);
-            rdate.resolved = resolve_tzid(
-                rdate.tzid.as_deref(),
-                &timezones,
-                at,
-                rdate.value.ends_with('Z'),
-            );
+            rdate.resolved = tz.resolve(rdate.tzid.as_deref(), at, rdate.value.ends_with('Z'));
         }
         for exdate in exdates.iter_mut() {
             let at = parse_dtstart(&exdate.value).unwrap_or(dtstart);
-            exdate.resolved = resolve_tzid(
-                exdate.tzid.as_deref(),
-                &timezones,
-                at,
-                exdate.value.ends_with('Z'),
-            );
+            exdate.resolved = tz.resolve(exdate.tzid.as_deref(), at, exdate.value.ends_with('Z'));
         }
 
         let mut alarms: Vec<Alarm> = Vec::new();
@@ -820,7 +1060,7 @@ fn parse_relative_trigger(s: &str) -> Option<i64> {
     let s = s.strip_prefix('P')?;
     let minutes = if let Some(rest) = s.strip_prefix('T') {
         if let Some(h) = rest.strip_suffix('H') {
-            h.parse::<i64>().ok()? * 60
+            h.parse::<i64>().ok()?.checked_mul(60)?
         } else if let Some(m) = rest.strip_suffix('M') {
             m.parse::<i64>().ok()?
         } else if let Some(sec) = rest.strip_suffix('S') {
@@ -829,67 +1069,56 @@ fn parse_relative_trigger(s: &str) -> Option<i64> {
             return None;
         }
     } else if let Some(d) = s.strip_suffix('D') {
-        d.parse::<i64>().ok()? * 1440
+        d.parse::<i64>().ok()?.checked_mul(1440)?
     } else {
         return None;
     };
-    Some(if negative { -minutes } else { minutes })
+    // an alarm more than ~100 years from its event is no alarm (and its arithmetic cannot overflow)
+    (minutes.unsigned_abs() <= 100 * 366 * 1440).then_some(if negative {
+        -minutes
+    } else {
+        minutes
+    })
 }
 
+/// An RFC 5545 duration; `None` for a malformed one or one beyond what `TimeDelta` holds.
 fn parse_ical_duration(s: &str) -> Option<TimeDelta> {
     let s = s.trim();
     let negative = s.starts_with('-');
     let s = s.trim_start_matches('+').trim_start_matches('-');
+    let s = s.strip_prefix('P')?;
 
-    if !s.starts_with('P') {
-        return None;
-    }
-    let s = &s[1..];
-
+    let total = |n: &str, unit: i64| n.parse::<i64>().ok()?.checked_mul(unit);
     let mut total_secs: i64 = 0;
 
     if let Some(week_pos) = s.find('W') {
-        let weeks: i64 = s[..week_pos].parse().ok()?;
-        total_secs += weeks * 7 * 86400;
-        return Some(if negative {
-            TimeDelta::seconds(-total_secs)
-        } else {
-            TimeDelta::seconds(total_secs)
-        });
-    }
-
-    let (date_part, time_part) = if let Some(t_pos) = s.find('T') {
-        (&s[..t_pos], &s[t_pos + 1..])
+        total_secs = total(&s[..week_pos], 7 * 86400)?;
     } else {
-        (s, "")
-    };
+        let (date_part, time_part) = match s.find('T') {
+            Some(t_pos) => (&s[..t_pos], &s[t_pos + 1..]),
+            None => (s, ""),
+        };
 
-    if let Some(day_pos) = date_part.find('D') {
-        let days: i64 = date_part[..day_pos].parse().ok()?;
-        total_secs += days * 86400;
-    }
+        if let Some(day_pos) = date_part.find('D') {
+            total_secs = total_secs.checked_add(total(&date_part[..day_pos], 86400)?)?;
+        }
 
-    let mut remaining = time_part;
-    if let Some(hour_pos) = remaining.find('H') {
-        let hours: i64 = remaining[..hour_pos].parse().ok()?;
-        total_secs += hours * 3600;
-        remaining = &remaining[hour_pos + 1..];
-    }
-    if let Some(min_pos) = remaining.find('M') {
-        let mins: i64 = remaining[..min_pos].parse().ok()?;
-        total_secs += mins * 60;
-        remaining = &remaining[min_pos + 1..];
-    }
-    if let Some(sec_pos) = remaining.find('S') {
-        let secs: i64 = remaining[..sec_pos].parse().ok()?;
-        total_secs += secs;
+        let mut remaining = time_part;
+        for (unit, secs) in [('H', 3600), ('M', 60), ('S', 1)] {
+            if let Some(pos) = remaining.find(unit) {
+                total_secs = total_secs.checked_add(total(&remaining[..pos], secs)?)?;
+                remaining = &remaining[pos + 1..];
+            }
+        }
     }
 
-    Some(if negative {
-        TimeDelta::seconds(-total_secs)
-    } else {
-        TimeDelta::seconds(total_secs)
-    })
+    TimeDelta::try_seconds(if negative { -total_secs } else { total_secs })
+}
+
+/// When an occurrence starting at `start` ends; one that would end past the dates chrono knows
+/// ends where it starts.
+fn end_of(start: NaiveDateTime, duration: TimeDelta) -> NaiveDateTime {
+    start.checked_add_signed(duration).unwrap_or(start)
 }
 
 pub(super) fn parse_and_expand_events(
@@ -948,7 +1177,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                         &override_event.location,
                         override_event.dtstart,
                         override_event.dtstart_is_date,
-                        Some(override_event.dtstart + override_event.duration),
+                        Some(end_of(override_event.dtstart, override_event.duration)),
                         override_event.dtstart_is_date,
                         &override_event.dtstart_tz,
                         true,
@@ -965,7 +1194,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                         &master.location,
                         dt,
                         master.dtstart_is_date,
-                        Some(dt + master.duration),
+                        Some(end_of(dt, master.duration)),
                         master.dtstart_is_date,
                         &master.dtstart_tz,
                         true,
@@ -984,7 +1213,7 @@ fn expand_events(raw_events: Vec<RawIcalEvent>, start: NaiveDate, end: NaiveDate
                 &master.location,
                 master.dtstart,
                 master.dtstart_is_date,
-                Some(master.dtstart + master.duration),
+                Some(end_of(master.dtstart, master.duration)),
                 master.dtstart_is_date,
                 &master.dtstart_tz,
                 false,
@@ -1032,13 +1261,31 @@ fn push_date_property_line(out: &mut String, prop: &str, date_property: &DatePro
     }
 }
 
+/// The occurrences of `master` from `start` to `end` (at most MAX_OCCURRENCES). DTSTART is first moved
+/// forward to the window (`fast_forward`) and the walk to it is bounded (WALK_BUDGET); a set the
+/// crate refuses or panics on is the event once, at its DTSTART.
 fn expand_recurring(master: &RawIcalEvent, start: NaiveDate, end: NaiveDate) -> Vec<NaiveDateTime> {
+    let (Some(from), Some(to)) = (
+        start
+            .checked_sub_days(Days::new(1))
+            .and_then(|d| d.and_hms_opt(0, 0, 0)),
+        end.checked_add_days(Days::new(1))
+            .and_then(|d| d.and_hms_opt(23, 59, 59)),
+    ) else {
+        return vec![];
+    };
+    // a day's margin more for the offset between the event's zone and the window's UTC
+    let dtstart = match (&master.rrule, from.checked_sub_days(Days::new(1))) {
+        (Some(rule), Some(target)) => fast_forward(master.dtstart, rule, target),
+        _ => master.dtstart,
+    };
+
     let mut rrule_str = String::new();
 
     if master.dtstart_is_date {
         rrule_str.push_str(&format!(
             "DTSTART;VALUE=DATE:{}\n",
-            master.dtstart.format("%Y%m%d")
+            dtstart.format("%Y%m%d")
         ));
     } else {
         match &master.dtstart_tz {
@@ -1046,18 +1293,15 @@ fn expand_recurring(master: &RawIcalEvent, start: NaiveDate, end: NaiveDate) -> 
                 rrule_str.push_str(&format!(
                     "DTSTART;TZID={}:{}\n",
                     tz.name(),
-                    master.dtstart.format("%Y%m%dT%H%M%S")
+                    dtstart.format("%Y%m%dT%H%M%S")
                 ));
             }
             ResolvedTz::Fixed { offset, .. } => {
-                let utc_dt = fixed_offset_to_utc_naive(master.dtstart, *offset);
+                let utc_dt = fixed_offset_to_utc_naive(dtstart, *offset);
                 rrule_str.push_str(&format!("DTSTART:{}Z\n", utc_dt.format("%Y%m%dT%H%M%S")));
             }
             ResolvedTz::Utc | ResolvedTz::Floating => {
-                rrule_str.push_str(&format!(
-                    "DTSTART:{}Z\n",
-                    master.dtstart.format("%Y%m%dT%H%M%S")
-                ));
+                rrule_str.push_str(&format!("DTSTART:{}Z\n", dtstart.format("%Y%m%dT%H%M%S")));
             }
         }
     }
@@ -1074,31 +1318,15 @@ fn expand_recurring(master: &RawIcalEvent, start: NaiveDate, end: NaiveDate) -> 
         push_date_property_line(&mut rrule_str, "EXDATE", exdate);
     }
 
-    let rrule_set: RRuleSet = match rrule_str.parse() {
-        Ok(set) => set,
-        Err(e) => {
-            eprintln!("Failed to parse RRuleSet: {e} - string was: {rrule_str:?}");
-            return vec![master.dtstart];
-        }
+    let utc = |dt: NaiveDateTime| rrule::Tz::UTC.from_utc_datetime(&dt);
+    let in_window = |dt: &chrono::DateTime<rrule::Tz>| {
+        let date = dt.naive_local().date();
+        date >= start && date <= end
     };
-
-    let start_utc = rrule::Tz::UTC
-        .from_utc_datetime(&(start - TimeDelta::days(1)).and_hms_opt(0, 0, 0).unwrap());
-    let end_utc = rrule::Tz::UTC
-        .from_utc_datetime(&(end + TimeDelta::days(1)).and_hms_opt(23, 59, 59).unwrap());
-
-    let rrule_set = rrule_set.after(start_utc).before(end_utc);
-    let result = rrule_set.all(65535);
-
-    result
-        .dates
-        .into_iter()
-        .filter(|dt| {
-            let date = dt.naive_local().date();
-            date >= start && date <= end
-        })
-        .map(|dt| dt.naive_local())
-        .collect()
+    match occurrences_between(&rrule_str, utc(from), utc(to), in_window) {
+        Some(dates) => dates.into_iter().map(|dt| dt.naive_local()).collect(),
+        None => vec![master.dtstart],
+    }
 }
 
 fn format_datetime_with_tz(dt: NaiveDateTime, tz: &ResolvedTz) -> String {
@@ -1307,7 +1535,7 @@ pub fn preview_events_from_raw_ical(raw_ical: &str) -> Vec<Event> {
                 &raw.location,
                 raw.dtstart,
                 raw.dtstart_is_date,
-                Some(raw.dtstart + raw.duration),
+                Some(end_of(raw.dtstart, raw.duration)),
                 raw.dtstart_is_date,
                 &raw.dtstart_tz,
                 raw.rrule.is_some() || !raw.rdates.is_empty(),
@@ -1611,7 +1839,7 @@ pub(super) fn extract_push_expiry(xml: &str) -> Option<i64> {
 
     if text.starts_with('P') {
         let seconds = parse_iso_duration_secs(text)?;
-        return Some(now + seconds);
+        return now.checked_add(seconds);
     }
 
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(text) {
@@ -1638,7 +1866,7 @@ fn parse_iso_duration_secs(s: &str) -> Option<i64> {
     let mut rest = date_part;
     if let Some(pos) = rest.find('D') {
         let days: i64 = rest[..pos].parse().ok()?;
-        total += days * 86400;
+        total = total.checked_add(days.checked_mul(86400)?)?;
         rest = &rest[pos + 1..];
     }
     let _ = rest;
@@ -1646,17 +1874,17 @@ fn parse_iso_duration_secs(s: &str) -> Option<i64> {
     let mut rest = time_part;
     if let Some(pos) = rest.find('H') {
         let hours: i64 = rest[..pos].parse().ok()?;
-        total += hours * 3600;
+        total = total.checked_add(hours.checked_mul(3600)?)?;
         rest = &rest[pos + 1..];
     }
     if let Some(pos) = rest.find('M') {
         let mins: i64 = rest[..pos].parse().ok()?;
-        total += mins * 60;
+        total = total.checked_add(mins.checked_mul(60)?)?;
         rest = &rest[pos + 1..];
     }
     if let Some(pos) = rest.find('S') {
         let secs: i64 = rest[..pos].parse().ok()?;
-        total += secs;
+        total = total.checked_add(secs)?;
     }
 
     if total > 0 { Some(total) } else { None }
@@ -1991,4 +2219,16 @@ BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:evt1\r\nEND:VEVENT\r\nEND:
         assert_eq!(cals.len(), 1);
         assert_eq!(cals[0].name, "Me & Work");
     }
+}
+
+/// A set's occurrences from `from` to `to` (naive UTC), as the expansion walks them.
+#[cfg(test)]
+pub(super) fn occurrences_for_tests(
+    text: &str,
+    from: NaiveDateTime,
+    to: NaiveDateTime,
+) -> Option<Vec<NaiveDateTime>> {
+    let utc = |dt: NaiveDateTime| rrule::Tz::UTC.from_utc_datetime(&dt);
+    occurrences_between(text, utc(from), utc(to), |_| true)
+        .map(|v| v.into_iter().map(|d| d.naive_utc()).collect())
 }

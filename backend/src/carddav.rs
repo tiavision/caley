@@ -969,9 +969,14 @@ fn normalize_crlf(s: &str) -> String {
     s.replace("\r\n", "\n").replace('\n', "\r\n")
 }
 
-/// Derive the contact href from addressbook href and uid.
+/// Where a contact with `uid` goes in the addressbook when it has no href of its own (a new one): a
+/// single path segment from the UID (`caldav::resource_name`).
 pub fn contact_href(addressbook_href: &str, uid: &str) -> String {
-    format!("{}/{}.vcf", addressbook_href.trim_end_matches('/'), uid)
+    format!(
+        "{}/{}.vcf",
+        addressbook_href.trim_end_matches('/'),
+        crate::caldav::resource_name(uid)
+    )
 }
 
 #[cfg(test)]

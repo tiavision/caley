@@ -1,3 +1,4 @@
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use axum::{
@@ -13,6 +14,8 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use crate::email_db;
 use crate::email_sync::eml_path;
 use crate::oidc::{AppState, CurrentUser};
+use crate::public_net::{PublicOnly, literal_host_is_public};
+use crate::raster_image::{AllowedImage, detect_allowed_image};
 use crate::version;
 
 fn decompress_eml(bytes: &[u8]) -> std::io::Result<Vec<u8>> {
@@ -73,41 +76,10 @@ pub struct ProxyImageQuery {
     pub cid: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AllowedImage {
-    Png,
-    Jpeg,
-    Gif,
-    WebP,
-    Avif,
-}
-
-impl AllowedImage {
-    fn content_type(self) -> &'static str {
-        match self {
-            Self::Png => "image/png",
-            Self::Jpeg => "image/jpeg",
-            Self::Gif => "image/gif",
-            Self::WebP => "image/webp",
-            Self::Avif => "image/avif",
-        }
-    }
-}
-
-fn detect_allowed_image(data: &[u8]) -> Option<AllowedImage> {
-    match infer::get(data).map(|t| t.mime_type()) {
-        Some("image/png") => Some(AllowedImage::Png),
-        Some("image/jpeg") => Some(AllowedImage::Jpeg),
-        Some("image/gif") => Some(AllowedImage::Gif),
-        Some("image/webp") => Some(AllowedImage::WebP),
-        Some("image/avif") => Some(AllowedImage::Avif),
-        _ => None,
-    }
-}
-
 /// An image of a message: an inline part by Content-ID, or a remote image of a whitelisted origin.
 /// Only PNG, JPEG, GIF, WebP and AVIF (sniffed from the bytes) are served; anything else, an
-/// origin not whitelisted, an unsafe address or a failed fetch is a 1×1 transparent GIF.
+/// origin not whitelisted, a non-public address, a redirect, more than 10 MiB or a failed fetch is a
+/// 1×1 transparent GIF.
 #[utoipa::path(
     get,
     path = "/email/proxy-image",
@@ -190,7 +162,8 @@ pub async fn proxy_image(
         _ => return (StatusCode::BAD_REQUEST, "invalid url").into_response(),
     };
 
-    if !is_ssrf_safe(&parsed).await {
+    // an address in the URL is not resolved (PublicOnly): checked here
+    if !literal_host_is_public(&parsed) {
         return transparent_pixel();
     }
 
@@ -204,30 +177,11 @@ pub async fn proxy_image(
         _ => return transparent_pixel(),
     }
 
-    let client = match image_client() {
-        Ok(c) => c,
-        Err(_) => return transparent_pixel(),
-    };
-
-    let resp = match client.get(&url).send().await {
-        Ok(r) => r,
-        Err(_) => return transparent_pixel(),
-    };
-
-    if !resp.status().is_success() {
+    let Some(client) = image_client() else {
         return transparent_pixel();
-    }
-
-    let bytes = match resp.bytes().await {
-        Ok(b) => b,
-        Err(_) => {
-            return transparent_pixel();
-        }
     };
-
-    let kind = match detect_allowed_image(&bytes) {
-        Some(k) => k,
-        None => return transparent_pixel(),
+    let Some((kind, bytes)) = fetch_image(client, parsed).await else {
+        return transparent_pixel();
     };
 
     (
@@ -245,47 +199,128 @@ pub async fn proxy_image(
         .into_response()
 }
 
-/// The client remote images are fetched with. It does not follow redirects: a whitelisted origin could
-/// otherwise 302 to an internal address (e.g. 127.0.0.1 / link-local metadata) that the pre-fetch
-/// is_ssrf_safe() check never sees. A redirect is not a success, so it is answered with the transparent pixel.
-fn image_client() -> reqwest::Result<reqwest::Client> {
+/// The most a remote image may be (10 MiB): a larger one is the transparent pixel.
+const MAX_REMOTE_IMAGE: usize = 10 << 20;
+
+/// The client remote images are fetched with (one for all requests). Names resolve to public addresses only
+/// (`PublicOnly`; also on a later lookup, DNS rebinding), and it does not follow redirects: a whitelisted
+/// origin could otherwise 302 to an internal address. A redirect is not a success, so it is the pixel.
+fn image_client() -> Option<&'static reqwest::Client> {
+    static CLIENT: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
+        image_client_builder()
+            .dns_resolver(Arc::new(PublicOnly))
+            .build()
+            .inspect_err(|e| eprintln!("[email] image client: {e}"))
+            .ok()
+    });
+    CLIENT.as_ref()
+}
+
+/// `image_client` but its resolver.
+fn image_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .user_agent(version::USER_AGENT)
         .use_preconfigured_tls(crate::imap_client::tls_config())
         .redirect(reqwest::redirect::Policy::none())
-        .build()
+}
+
+/// A remote image: a success, at most `MAX_REMOTE_IMAGE` bytes, that sniffs as an allowed image.
+async fn fetch_image(client: &reqwest::Client, url: url::Url) -> Option<(AllowedImage, Vec<u8>)> {
+    let resp = client.get(url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let bytes = read_capped(resp, MAX_REMOTE_IMAGE).await?;
+    Some((detect_allowed_image(&bytes)?, bytes))
+}
+
+/// The body, unless it is (or says it is) more than `cap` bytes: reading stops there.
+async fn read_capped(mut resp: reqwest::Response, cap: usize) -> Option<Vec<u8>> {
+    if resp.content_length().is_some_and(|n| n > cap as u64) {
+        return None;
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await.ok()? {
+        if body.len() + chunk.len() > cap {
+            return None;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Some(body)
 }
 
 // ── Attachment download ───────────────────────────────────────────────────────
 
-fn can_preview_attachment(content_type: &str) -> bool {
-    let content_type = content_type
-        .split(';')
-        .next()
+/// The audio and video types an attachment is shown as, compared with the declared type's essence (before
+/// `;`, trimmed, lowercased) exactly. The frontend's `PREVIEW_TYPES` (lib/mailUtils.ts) is this list with
+/// the images, `application/pdf` and `text/plain`.
+const MEDIA_TYPES: &[&str] = &[
+    "audio/aac",
+    "audio/flac",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/wav",
+    "audio/webm",
+    "audio/x-wav",
+    "video/mp4",
+    "video/ogg",
+    "video/quicktime",
+    "video/webm",
+];
+
+/// The policy of an image or text attachment shown in the browser: `sandbox` gives the document an opaque
+/// origin and no script, wherever it is opened; it loads nothing but itself (an image document).
+const SANDBOX_CSP: &str = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; \
+    style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
+/// `SANDBOX_CSP` for audio and video, the document left its origin (`allow-same-origin`; still no script,
+/// form or popup): in an opaque origin Chromium's media document cannot load the file it shows (CORS).
+const MEDIA_CSP: &str = "sandbox allow-same-origin; default-src 'none'; img-src 'self'; \
+    media-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; \
+    frame-ancestors 'none'";
+
+/// How an attachment is served. Its Content-Type is never the declared one, which the sender wrote
+/// (mail-parser keeps `audio/mpeg,text/html` whole, and browsers read the last type of such a header).
+#[derive(Debug, PartialEq, Eq)]
+enum Served {
+    /// an image or text, shown in the browser as this type in the sandbox (`SANDBOX_CSP`)
+    Sandboxed(&'static str),
+    /// audio or video, shown as this type (`MEDIA_CSP`)
+    Media(&'static str),
+    /// a PDF, shown without the sandbox (Chrome's viewer does not run in one): the app's CSP
+    Pdf,
+    /// downloaded, as `application/octet-stream`
+    Download,
+}
+
+/// Images by their bytes (PNG, JPEG, GIF, WebP, AVIF; their sniffed type, whatever was declared), a PDF
+/// declared so that starts `%PDF-`, UTF-8 plain text declared so, and `MEDIA_TYPES`; anything else is a download.
+fn serve_as(declared: Option<&str>, bytes: &[u8]) -> Served {
+    if let Some(image) = detect_allowed_image(bytes) {
+        return Served::Sandboxed(image.content_type());
+    }
+    let essence = declared
+        .and_then(|t| t.split(';').next())
         .unwrap_or_default()
         .trim()
         .to_ascii_lowercase();
-
-    matches!(
-        content_type.as_str(),
-        "application/pdf"
-            | "text/plain"
-            | "image/png"
-            | "image/jpeg"
-            | "image/gif"
-            | "image/webp"
-            | "image/avif"
-    ) || (content_type.starts_with("audio/") && content_type.len() > "audio/".len())
-        || (content_type.starts_with("video/") && content_type.len() > "video/".len())
+    match essence.as_str() {
+        "application/pdf" if bytes.starts_with(b"%PDF-") => Served::Pdf,
+        // text parts arrive decoded to UTF-8 (part_to_bytes)
+        "text/plain" if std::str::from_utf8(bytes).is_ok() => {
+            Served::Sandboxed("text/plain; charset=utf-8")
+        }
+        t => MEDIA_TYPES
+            .iter()
+            .find(|m| **m == t)
+            .map_or(Served::Download, |m| Served::Media(m)),
+    }
 }
 
-fn attachment_disposition(content_type: &str, filename: &str) -> String {
-    let kind = if can_preview_attachment(content_type) {
-        "inline"
-    } else {
-        "attachment"
-    };
+fn attachment_disposition(inline: bool, filename: &str) -> String {
+    let kind = if inline { "inline" } else { "attachment" };
     format!("{kind}; filename=\"{filename}\"")
 }
 
@@ -298,14 +333,15 @@ pub struct DownloadAttachmentQuery {
     pub filename: String,
 }
 
-/// An attachment of a cached message, with its declared content type. Content-Disposition is
-/// `inline` for previewable types (PDF, plain text, raster images, audio, video), else `attachment`.
+/// An attachment of a cached message. Shown (`inline`) only as a PNG, JPEG, GIF, WebP or AVIF its bytes
+/// are, a PDF, UTF-8 plain text or one of a list of audio and video types, all but PDF sandboxed
+/// (`Content-Security-Policy: sandbox …`); anything else is `application/octet-stream`, `attachment`.
 #[utoipa::path(
     get,
     path = "/email/attachment",
     params(DownloadAttachmentQuery),
     responses(
-        (status = 200, description = "the attachment's bytes, as its declared content type (`application/octet-stream` without one)", body = crate::api::Binary, content_type = "application/octet-stream"),
+        (status = 200, description = "the attachment's bytes: as the image type they are, `application/pdf`, `text/plain; charset=utf-8`, an audio or video type, else `application/octet-stream`", body = crate::api::Binary, content_type = "application/octet-stream"),
         (status = 404, description = "no such account, attachment or part (plain text)", body = String, content_type = "text/plain"),
         (status = 500, description = "database or file error (plain text)", body = String, content_type = "text/plain")
     )
@@ -357,9 +393,6 @@ pub async fn download_attachment(
         None => return (StatusCode::NOT_FOUND, "attachment part not found").into_response(),
     };
 
-    let ct = att
-        .content_type
-        .unwrap_or_else(|| "application/octet-stream".to_string());
     // Strip control chars / quotes so the (user-supplied) filename can't break out
     // of the header value or inject additional headers.
     let safe_name: String = q
@@ -373,24 +406,39 @@ pub async fn download_attachment(
             }
         })
         .collect();
-    let disposition = attachment_disposition(&ct, &safe_name);
+    let (content_type, csp) = match serve_as(att.content_type.as_deref(), &bytes) {
+        Served::Sandboxed(t) => (Some(t), Some(SANDBOX_CSP)),
+        Served::Media(t) => (Some(t), Some(MEDIA_CSP)),
+        Served::Pdf => (Some("application/pdf"), None),
+        Served::Download => (None, None),
+    };
 
-    (
+    let mut response = (
         StatusCode::OK,
         [
-            (header::CONTENT_TYPE, ct),
             (
-                header::HeaderName::from_static("content-disposition"),
-                disposition,
+                header::CONTENT_TYPE,
+                content_type.unwrap_or("application/octet-stream"),
             ),
             (
                 header::HeaderName::from_static("x-content-type-options"),
-                "nosniff".to_string(),
+                "nosniff",
             ),
         ],
+        [(
+            header::CONTENT_DISPOSITION,
+            attachment_disposition(content_type.is_some(), &safe_name),
+        )],
         bytes,
     )
-        .into_response()
+        .into_response();
+    if let Some(csp) = csp {
+        response.headers_mut().insert(
+            header::CONTENT_SECURITY_POLICY,
+            header::HeaderValue::from_static(csp),
+        );
+    }
+    response
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────
@@ -484,46 +532,6 @@ pub async fn export_account(
         )
         .body(Body::from_stream(stream))
         .unwrap()
-}
-
-async fn is_ssrf_safe(parsed: &url::Url) -> bool {
-    let host = match parsed.host_str() {
-        Some(h) => h,
-        None => return false,
-    };
-    let port = parsed.port_or_known_default().unwrap_or(80);
-    match tokio::net::lookup_host(format!("{host}:{port}")).await {
-        Ok(mut addrs) => addrs.all(|a| !is_private_ip(a.ip())),
-        Err(_) => false,
-    }
-}
-
-fn is_private_ip(ip: std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(v4) => is_private_v4(v4),
-        std::net::IpAddr::V6(v6) => {
-            // IPv4-mapped addresses (::ffff:a.b.c.d) connect to the embedded IPv4
-            // host, so apply the v4 rules — otherwise ::ffff:127.0.0.1 bypasses.
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_private_v4(v4);
-            }
-            let seg0 = v6.segments()[0];
-            v6.is_loopback()
-                || v6.is_multicast()
-                || v6.is_unspecified()
-                || (seg0 & 0xfe00) == 0xfc00 // fc00::/7 unique local
-                || (seg0 & 0xffc0) == 0xfe80 // fe80::/10 link-local
-        }
-    }
-}
-
-fn is_private_v4(v4: std::net::Ipv4Addr) -> bool {
-    v4.is_loopback()
-        || v4.is_private()
-        || v4.is_link_local()
-        || v4.is_broadcast()
-        || v4.is_multicast()
-        || v4.is_unspecified()
 }
 
 fn transparent_pixel() -> Response {
@@ -751,42 +759,119 @@ pub fn routes() -> OpenApiRouter<AppState> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AllowedImage, attachment_disposition, can_preview_attachment, detect_allowed_image,
-        extract_part_bytes, image_client,
+        MAX_REMOTE_IMAGE, Served, attachment_disposition, extract_part_bytes, fetch_image,
+        image_client_builder, read_capped, serve_as,
     };
+    use crate::raster_image::tests::PNG;
+    use axum::{Router, response::Redirect, routing::get};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
+    /// A server on 127.0.0.1 with `app`; its address.
+    async fn serve(app: Router) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        addr
+    }
+
+    /// The image client's policy (`image_client` is it with `PublicOnly`, which would not reach 127.0.0.1).
     #[tokio::test]
     async fn the_image_client_does_not_follow_redirects() {
-        use axum::{Router, response::Redirect, routing::get};
-        use std::sync::Arc;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
         let _ = rustls::crypto::ring::default_provider().install_default();
         // `/image` redirects to `/internal`, which counts its requests
         let hits = Arc::new(AtomicUsize::new(0));
         let counted = Arc::clone(&hits);
-        let app = Router::new()
-            .route("/image", get(|| async { Redirect::temporary("/internal") }))
-            .route(
-                "/internal",
-                get(move || async move {
-                    counted.fetch_add(1, Ordering::SeqCst);
-                    "secret"
-                }),
-            );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let addr = serve(
+            Router::new()
+                .route("/image", get(|| async { Redirect::temporary("/internal") }))
+                .route(
+                    "/internal",
+                    get(move || async move {
+                        counted.fetch_add(1, Ordering::SeqCst);
+                        "secret"
+                    }),
+                ),
+        )
+        .await;
 
-        let response = image_client()
-            .unwrap()
-            .get(format!("http://{addr}/image"))
-            .send()
-            .await
-            .unwrap();
+        let client = image_client_builder().build().unwrap();
+        let url = url::Url::parse(&format!("http://{addr}/image")).unwrap();
+        let response = client.get(url.clone()).send().await.unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::TEMPORARY_REDIRECT);
-        assert!(!response.status().is_success());
+        assert!(fetch_image(&client, url).await.is_none());
         assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
+
+    /// The image client itself reaches no name that resolves to this machine.
+    #[tokio::test]
+    async fn the_image_client_reaches_no_internal_address() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&hits);
+        let addr = serve(Router::new().route(
+            "/a.png",
+            get(move || async move {
+                counted.fetch_add(1, Ordering::SeqCst);
+                PNG
+            }),
+        ))
+        .await;
+        let client = super::image_client().unwrap();
+        let url = url::Url::parse(&format!("http://localhost:{}/a.png", addr.port())).unwrap();
+        assert!(fetch_image(client, url).await.is_none());
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
+
+    /// Larger than the cap, by Content-Length or streamed without one: nothing; at the cap, the image.
+    #[tokio::test]
+    async fn remote_images_are_capped() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        fn image(len: usize) -> Vec<u8> {
+            let mut body = PNG.to_vec();
+            body.resize(len, 0);
+            body
+        }
+        let addr = serve(
+            Router::new()
+                .route("/big", get(|| async { image(MAX_REMOTE_IMAGE + 1) }))
+                .route("/fits", get(|| async { image(MAX_REMOTE_IMAGE) }))
+                .route(
+                    "/streamed",
+                    get(|| async {
+                        // chunked, no Content-Length: 11 chunks of 1 MiB
+                        let chunks = (0..11).map(|i| {
+                            let chunk = if i == 0 {
+                                image(1 << 20)
+                            } else {
+                                vec![0; 1 << 20]
+                            };
+                            Ok::<_, std::io::Error>(bytes::Bytes::from(chunk))
+                        });
+                        axum::body::Body::from_stream(futures_util::stream::iter(chunks))
+                    }),
+                ),
+        )
+        .await;
+        let client = image_client_builder().build().unwrap();
+        let get = |path: &str| {
+            let url = format!("http://{addr}{path}");
+            let client = client.clone();
+            async move { client.get(url).send().await.unwrap() }
+        };
+
+        let big = get("/big").await;
+        assert_eq!(big.content_length(), Some(MAX_REMOTE_IMAGE as u64 + 1));
+        assert!(read_capped(big, MAX_REMOTE_IMAGE).await.is_none());
+        let streamed = get("/streamed").await;
+        assert_eq!(streamed.content_length(), None);
+        assert!(read_capped(streamed, MAX_REMOTE_IMAGE).await.is_none());
+        let fits = read_capped(get("/fits").await, MAX_REMOTE_IMAGE).await;
+        assert_eq!(fits.map(|b| b.len()), Some(MAX_REMOTE_IMAGE));
+
+        let url = |path: &str| url::Url::parse(&format!("http://{addr}{path}")).unwrap();
+        assert!(fetch_image(&client, url("/streamed")).await.is_none());
+        assert!(fetch_image(&client, url("/fits")).await.is_some());
     }
 
     #[test]
@@ -800,61 +885,265 @@ mod tests {
     }
 
     #[test]
-    fn previewable_attachment_types_are_allowlisted_case_insensitively() {
-        for content_type in [
-            "application/pdf",
-            "APPLICATION/PDF; version=1.7",
-            " text/plain; charset=utf-8",
-            "image/png",
-            "image/jpeg",
-            "image/gif",
-            "image/webp",
-            "image/avif",
-            "audio/mpeg",
-            "video/mp4",
+    fn attachments_shown_are_allowlisted_exactly() {
+        let pdf = b"%PDF-1.7\n";
+        for (declared, bytes, served) in [
+            ("application/pdf", &pdf[..], Served::Pdf),
+            ("APPLICATION/PDF; version=1.7", pdf, Served::Pdf),
+            (
+                " text/plain; charset=iso-8859-1",
+                b"hello",
+                Served::Sandboxed("text/plain; charset=utf-8"),
+            ),
+            ("audio/mpeg", b"ID3", Served::Media("audio/mpeg")),
+            ("Video/MP4", b"\0\0\0", Served::Media("video/mp4")),
+            ("audio/x-wav", b"RIFF", Served::Media("audio/x-wav")),
         ] {
-            assert!(can_preview_attachment(content_type), "{content_type}");
+            assert_eq!(serve_as(Some(declared), bytes), served, "{declared}");
         }
     }
 
     #[test]
-    fn active_and_unknown_attachment_types_are_not_previewable() {
-        for content_type in [
+    fn anything_else_is_a_download() {
+        let html = b"<!doctype html><script>alert(1)</script>";
+        for declared in [
+            // browsers read the last type of a list: HTML
+            "audio/mpeg,text/html",
+            "video/mp4 , text/html",
+            "text/plain,text/html",
+            "audio/x\ttext/html",
+            "audio/mpeg text/html",
+            "application/pdf,text/html",
             "text/html",
+            "application/xhtml+xml",
             "image/svg+xml",
             "application/xml",
+            "text/xml",
             "application/javascript",
+            "text/javascript",
+            "application/x-javascript",
+            "text/css",
+            "application/json",
             "application/octet-stream",
             "audio/",
             "video/",
+            "audio/x-unknown",
             "",
+            // declared an image, the bytes are HTML
+            "image/png",
+            "image/jpeg",
         ] {
-            assert!(!can_preview_attachment(content_type), "{content_type}");
+            assert_eq!(
+                serve_as(Some(declared), html),
+                Served::Download,
+                "{declared:?}"
+            );
+        }
+        assert_eq!(serve_as(None, html), Served::Download);
+        // a PDF that is not one
+        assert_eq!(serve_as(Some("application/pdf"), html), Served::Download);
+        // plain text that is not UTF-8
+        assert_eq!(serve_as(Some("text/plain"), b"caf\xe9"), Served::Download);
+    }
+
+    #[test]
+    fn images_are_served_as_their_bytes_are() {
+        for declared in [
+            Some("text/html"),
+            Some("application/octet-stream"),
+            Some("image/gif"),
+            Some("audio/mpeg,text/html"),
+            None,
+        ] {
+            assert_eq!(
+                serve_as(declared, PNG),
+                Served::Sandboxed("image/png"),
+                "{declared:?}"
+            );
         }
     }
 
     #[test]
-    fn disposition_uses_preview_policy() {
+    fn disposition() {
         assert_eq!(
-            attachment_disposition("application/pdf", "file.pdf"),
+            attachment_disposition(true, "file.pdf"),
             "inline; filename=\"file.pdf\""
         );
         assert_eq!(
-            attachment_disposition("text/html", "file.html"),
+            attachment_disposition(false, "file.html"),
             "attachment; filename=\"file.html\""
         );
     }
 
-    #[test]
-    fn image_detection_sniffs_bytes_not_declared_type() {
-        let png =
-            b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89";
-        assert_eq!(detect_allowed_image(png), Some(AllowedImage::Png));
+    /// The handler: what a mail declares is not what is served.
+    #[tokio::test]
+    async fn download_attachment_serves_by_policy() {
+        use crate::email_db::{self, AccountProtocol};
+        use crate::jmap::api_tests::{USER, app_state, user};
+        use axum::extract::{Query, State};
+        use axum::http::header;
+        use base64::Engine;
 
-        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>"#;
-        assert_eq!(detect_allowed_image(svg), None);
+        let state = app_state().await;
+        let account = "attachments-test";
+        email_db::upsert_account(
+            &state.db,
+            USER,
+            account,
+            "Mail",
+            "127.0.0.1",
+            1,
+            "user",
+            "pw",
+            false,
+            None,
+            None,
+            &AccountProtocol {
+                protocol: "imap",
+                jmap_url: None,
+                auth: "password",
+                oauth_client_id: None,
+                oauth_client_secret: None,
+            },
+            &state.encryption_key,
+        )
+        .await
+        .unwrap();
+        let png = base64::engine::general_purpose::STANDARD.encode(PNG);
+        // part 1 the body, the attachments from 2 on
+        let parts: [(&str, &str, &str, &str); 7] = [
+            (
+                "trick.mp3",
+                "audio/mpeg,text/html",
+                "7bit",
+                "<script>alert(1)</script>",
+            ),
+            (
+                "notes.txt",
+                "text/plain; charset=iso-8859-1",
+                "quoted-printable",
+                "caf=E9",
+            ),
+            ("doc.pdf", "application/pdf", "7bit", "%PDF-1.4\r\n%%EOF"),
+            ("pic.bin", "application/octet-stream", "base64", &png),
+            (
+                "fake.png",
+                "image/png",
+                "7bit",
+                "<!doctype html><script>alert(1)</script>",
+            ),
+            ("app.js", "application/javascript", "7bit", "alert(1)"),
+            ("song.mp3", "audio/mpeg", "base64", "SUQz"),
+        ];
+        let mut raw = String::from(
+            "From: a@example.com\r\nSubject: s\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n\
+             --b\r\nContent-Type: text/plain\r\n\r\nbody\r\n",
+        );
+        for (name, ct, cte, body) in parts {
+            raw.push_str(&format!(
+                "--b\r\nContent-Type: {ct}\r\nContent-Transfer-Encoding: {cte}\r\n\
+                 Content-Disposition: attachment; filename={name}\r\n\r\n{body}\r\n"
+            ));
+        }
+        raw.push_str("--b--\r\n");
+        let path = crate::email_sync::eml_path(
+            &state.data_dir,
+            email_db::MailAccountId::internal(account),
+            "INBOX",
+            1,
+        );
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, zstd::encode_all(raw.as_bytes(), 3).unwrap()).unwrap();
+        for (i, (name, ct, ..)) in parts.iter().enumerate() {
+            // stored as extract_attachments stores it: type/subtype, the rest of the subtype kept
+            let stored = ct.split(';').next().unwrap();
+            email_db::insert_attachment(
+                &state.db,
+                account,
+                "INBOX",
+                1,
+                name,
+                stored,
+                1,
+                i as i64 + 2,
+                None,
+            )
+            .await
+            .unwrap();
+        }
 
-        let html = b"<!doctype html><script>alert(1)</script>";
-        assert_eq!(detect_allowed_image(html), None);
+        let sandbox = Some(super::SANDBOX_CSP);
+        for (name, content_type, disposition, csp, body) in [
+            (
+                "trick.mp3",
+                "application/octet-stream",
+                "attachment",
+                None,
+                None,
+            ),
+            (
+                "notes.txt",
+                "text/plain; charset=utf-8",
+                "inline",
+                sandbox,
+                Some("café".as_bytes()),
+            ),
+            ("doc.pdf", "application/pdf", "inline", None, None),
+            ("pic.bin", "image/png", "inline", sandbox, Some(PNG)),
+            (
+                "fake.png",
+                "application/octet-stream",
+                "attachment",
+                None,
+                None,
+            ),
+            (
+                "app.js",
+                "application/octet-stream",
+                "attachment",
+                None,
+                None,
+            ),
+            (
+                "song.mp3",
+                "audio/mpeg",
+                "inline",
+                Some(super::MEDIA_CSP),
+                Some(&b"ID3"[..]),
+            ),
+        ] {
+            let response = super::download_attachment(
+                State(state.clone()),
+                user(),
+                Query(super::DownloadAttachmentQuery {
+                    account_id: account.into(),
+                    mailbox: "INBOX".into(),
+                    uid: 1,
+                    filename: name.into(),
+                }),
+            )
+            .await;
+            assert_eq!(response.status(), 200, "{name}");
+            let h = response.headers();
+            assert_eq!(h[header::CONTENT_TYPE], content_type, "{name}");
+            assert_eq!(
+                h[header::CONTENT_DISPOSITION],
+                format!("{disposition}; filename=\"{name}\""),
+                "{name}"
+            );
+            assert_eq!(h[header::X_CONTENT_TYPE_OPTIONS], "nosniff", "{name}");
+            assert_eq!(
+                h.get(header::CONTENT_SECURITY_POLICY)
+                    .map(|v| v.to_str().unwrap()),
+                csp,
+                "{name}"
+            );
+            let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            if let Some(body) = body {
+                assert_eq!(&bytes[..], body, "{name}");
+            }
+        }
     }
 }

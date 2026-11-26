@@ -596,13 +596,52 @@ fn address_to_emails(addrs: mail_parser::AddressList<'_>) -> Vec<String> {
         .collect()
 }
 
+/// A mailbox for display (`Name <addr>`). The name is decoded text a sender chose, so it can never forge an
+/// angle-address: `<` and `>` are dropped from it (and from a malformed address), and it is quoted (RFC 5322) when
+/// it holds characters that would split or reshape an address list (`"Smith, Ann" <ann@x>`).
 fn format_addr(a: mail_parser::Mailbox<'_>) -> String {
-    match (a.name(), a.address()) {
+    let name = a
+        .name()
+        .map(|n| n.replace(['<', '>'], "").trim().to_owned())
+        .filter(|n| !n.is_empty())
+        .map(|n| {
+            if n.contains([',', ';', ':', '"', '\\', '@', '(', ')', '[', ']']) {
+                format!("\"{}\"", n.replace('\\', "\\\\").replace('"', "\\\""))
+            } else {
+                n
+            }
+        });
+    let addr = a.address().map(|addr| addr.replace(['<', '>'], ""));
+    match (name, addr) {
         (Some(name), Some(addr)) => format!("{name} <{addr}>"),
-        (None, Some(addr)) => addr.to_string(),
-        (Some(name), None) => name.to_string(),
+        (None, Some(addr)) => addr,
+        (Some(name), None) => name,
         _ => String::new(),
     }
+}
+
+/// The bare address (trimmed, lowercased, as keys are stored) of a message's sender: the From header's single
+/// mailbox. None for no From, more than one From field, a group, not exactly one mailbox, or no address; also when
+/// the header section does not end within `header_bytes`. What a sender's keys are bound to, never the display
+/// string `format_addr` makes.
+pub fn single_sender(header_bytes: &[u8]) -> Option<String> {
+    use mail_parser::{Address, HeaderName, MessageParser};
+    let crlf = header_bytes.windows(4).position(|w| w == b"\r\n\r\n");
+    let lf = header_bytes.windows(2).position(|w| w == b"\n\n");
+    let end = crlf.into_iter().chain(lf).min()?;
+    let msg = MessageParser::default().parse_headers(&header_bytes[..end + 2])?;
+    if msg.headers().all(HeaderName::From).count() != 1 {
+        return None;
+    }
+    let from = msg.from()?;
+    let mut items = from.iter();
+    let (Some(Address::Mailbox(mailbox)), None) = (items.next(), items.next()) else {
+        return None;
+    };
+    let addr = mailbox.address()?.trim().to_lowercase();
+    let plain = addr.matches('@').count() == 1
+        && !addr.contains(|c: char| c.is_whitespace() || c.is_control() || "<>\",;".contains(c));
+    plain.then_some(addr)
 }
 
 pub(crate) fn parse_body_bytes(
@@ -931,6 +970,79 @@ pub(crate) mod tests {
         assert_eq!(reply_to, expected);
         assert_eq!(parse_reply_to(raw), expected);
         assert!(parse_reply_to(b"From: a@example.test\r\n\r\nbody").is_empty());
+    }
+
+    fn from_of(raw: &[u8]) -> (Option<String>, Option<String>) {
+        let (_, _, from, ..) = parse_header_bytes(raw);
+        (from, single_sender(raw))
+    }
+
+    #[test]
+    fn a_display_name_never_forges_the_senders_address() {
+        let attacker = Some("attacker@evil.example".to_owned());
+        // a quoted name that looks like an angle-address
+        let (from, sender) =
+            from_of(b"From: \"<ceo@bank.example>\" <attacker@evil.example>\r\n\r\nbody");
+        assert_eq!(
+            from.as_deref(),
+            Some("\"ceo@bank.example\" <attacker@evil.example>")
+        );
+        assert_eq!(sender, attacker);
+        // the same name as an RFC 2047 encoded word
+        let (from, sender) = from_of(
+            b"From: =?utf-8?Q?=3Cceo=40bank.example=3E?= <attacker@evil.example>\r\n\r\nbody",
+        );
+        assert_eq!(
+            from.as_deref(),
+            Some("\"ceo@bank.example\" <attacker@evil.example>")
+        );
+        assert_eq!(sender, attacker);
+        // stray angle brackets in a name are dropped
+        let (from, sender) = from_of(b"From: \"Ann > Bob <x\" <attacker@evil.example>\r\n\r\nbody");
+        assert_eq!(from.as_deref(), Some("Ann  Bob x <attacker@evil.example>"));
+        assert_eq!(sender, attacker);
+        // two angle-addresses: mail-parser joins them into one malformed address, which is nobody's
+        let (from, sender) =
+            from_of(b"From: <ceo@bank.example> <attacker@evil.example>\r\n\r\nbody");
+        assert_eq!(
+            from.as_deref(),
+            Some("ceo@bank.exampleattacker@evil.example")
+        );
+        assert_eq!(sender, None);
+        // a name without an address
+        let (from, sender) = from_of(b"From: \"<ceo@bank.example>\"\r\n\r\nbody");
+        assert_eq!(from.as_deref(), Some("\"ceo@bank.example\""));
+        assert_eq!(sender, None);
+        // a name that would split an address list is quoted, its quotes escaped
+        let (from, _) = from_of(b"From: \"Smith, \\\"Ann\\\"\" <ann@example.test>\r\n\r\nbody");
+        assert_eq!(
+            from.as_deref(),
+            Some("\"Smith, \\\"Ann\\\"\" <ann@example.test>")
+        );
+    }
+
+    #[test]
+    fn the_sender_is_the_single_mailbox_of_one_from_field() {
+        assert_eq!(
+            single_sender(b"From: Ann <Ann@Example.TEST >\r\n\r\nbody").as_deref(),
+            Some("ann@example.test")
+        );
+        assert_eq!(
+            single_sender(b"From: ann@example.test\n\nbody").as_deref(),
+            Some("ann@example.test")
+        );
+        // two mailboxes, a group, no address, no From, two From fields, no end of the header section
+        for raw in [
+            &b"From: ann@example.test, bob@example.test\r\n\r\nbody"[..],
+            b"From: team: ann@example.test;\r\n\r\nbody",
+            b"From: undisclosed-recipients:;\r\n\r\nbody",
+            b"From: Ann\r\n\r\nbody",
+            b"Subject: hi\r\n\r\nbody",
+            b"From: ann@example.test\r\nFrom: bob@example.test\r\n\r\nbody",
+            b"From: ann@example.test\r\n",
+        ] {
+            assert_eq!(single_sender(raw), None, "{}", String::from_utf8_lossy(raw));
+        }
     }
 
     #[test]

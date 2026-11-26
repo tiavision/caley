@@ -243,11 +243,11 @@ pub async fn save_event(
         return (StatusCode::BAD_REQUEST, "Missing date").into_response();
     }
 
-    let event_href = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
     let (account, client) = match require_account_client(&state, &user, &account_id).await {
         Ok(c) => c,
         Err(r) => return r,
     };
+    let event_href = resolve_event_href(&state, account.id(), &calendar_href, &uid).await;
 
     if scope == EventScope::ThisInstance {
         let raw_ical = match fetch_event_ical(&state, &client, account.id(), &calendar_href, &uid)
@@ -303,7 +303,7 @@ pub async fn save_event(
             }
         };
 
-        match client.put_event(&calendar_href, &uid, &modified).await {
+        match client.put_event(&event_href, &modified).await {
             Ok(_) => {
                 optimistic_upsert(
                     &state,
@@ -433,7 +433,7 @@ pub async fn save_event(
             )
         };
 
-        match client.put_event(&calendar_href, &uid, &ical).await {
+        match client.put_event(&event_href, &ical).await {
             Ok(_) => {
                 if let Some(ref orig) = original_calendar_href {
                     let moved_account = original_account_id
@@ -441,10 +441,11 @@ pub async fn save_event(
                         .is_some_and(|id| id != account_id);
                     if (!orig.is_empty()) && (*orig != calendar_href || moved_account) {
                         let delete_client = original_client.unwrap_or(&client);
-                        if let Err(e) = delete_client.delete_event(orig, &uid).await {
+                        let old_href =
+                            resolve_event_href(&state, original_account.id(), orig, &uid).await;
+                        if let Err(e) = delete_client.delete_event(&old_href).await {
                             eprintln!("Failed to delete event from old calendar: {e}");
                         } else {
-                            let old_href = format!("{}/{}.ics", orig.trim_end_matches('/'), uid);
                             let _ = db::delete_event_by_href(
                                 &state.db,
                                 original_account.id().as_str(),
@@ -535,9 +536,9 @@ pub async fn delete_event(
                 }
             };
         let modified = add_exdate(&raw_ical, &original_dtstart, tz.as_deref().unwrap_or("UTC"));
-        return match client.put_event(&calendar_href, &uid, &modified).await {
+        let event_href = resolve_event_href(&state, account.id(), &calendar_href, &uid).await;
+        return match client.put_event(&event_href, &modified).await {
             Ok(_) => {
-                let event_href = format!("{}/{}.ics", calendar_href.trim_end_matches('/'), uid);
                 optimistic_upsert(
                     &state,
                     &user.user_id,
@@ -564,7 +565,8 @@ pub async fn delete_event(
         };
     }
 
-    match client.delete_event(&calendar_href, &uid).await {
+    let href = resolve_event_href(&state, account.id(), &calendar_href, &uid).await;
+    match client.delete_event(&href).await {
         Ok(_) => {
             let _ = db::delete_cached_event(&state.db, account.id(), &calendar_href, &uid).await;
             state.sse_broadcaster.send(
@@ -611,7 +613,22 @@ async fn fetch_event_ical(
         .await?;
         return Ok(raw);
     }
-    client.get_event(calendar_href, uid).await.map(Some)
+    let href = resolve_event_href(state, account, calendar_href, uid).await;
+    client.get_event(&href).await.map(Some)
+}
+
+/// The href of the event `uid` in `calendar_href`: the one the server gave it when it is cached, else
+/// where a new one goes (`caldav::new_event_href`, a name the UID cannot turn into another path).
+pub(super) async fn resolve_event_href(
+    state: &AppState,
+    account: db::CalDavAccountId<'_>,
+    calendar_href: &str,
+    uid: &str,
+) -> String {
+    match db::get_event_href(&state.db, account, calendar_href, uid).await {
+        Ok(Some(href)) => href,
+        _ => crate::caldav::new_event_href(calendar_href, uid),
+    }
 }
 
 pub(super) async fn optimistic_upsert(
