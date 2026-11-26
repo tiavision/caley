@@ -1,10 +1,13 @@
 use anyhow::{Context, bail};
 use quick_xml::Reader;
 use quick_xml::events::Event as XmlEvent;
+use reqwest::Method;
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 
-use crate::caldav::{CalDavClient, extract_ctag_and_token, extract_hrefs, resolve_url};
+use crate::caldav::parsing::resolve_url;
+use crate::caldav::pin::resolve_href;
+use crate::caldav::{CalDavClient, Service, extract_ctag_and_token, extract_hrefs};
 use crate::xml_util::resolve_ref;
 
 #[derive(Serialize, Clone)]
@@ -48,7 +51,7 @@ pub struct CardSyncResult {
 // ── Discovery ─────────────────────────────────────────────────────────────────
 
 pub async fn discover_addressbooks(client: &CalDavClient) -> anyhow::Result<Vec<Addressbook>> {
-    let start_url = client_start_url(client).await;
+    let start_url = client.start_url_for(Service::CardDav).await;
 
     // Step 1: find current-user-principal
     let principal_body = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -61,7 +64,8 @@ pub async fn discover_addressbooks(client: &CalDavClient) -> anyhow::Result<Vec<
     let principal_xml = client.propfind(&start_url, "0", principal_body).await?;
 
     let principal_url = match extract_hrefs(&principal_xml, "current-user-principal") {
-        Ok(hrefs) if !hrefs.is_empty() => resolve_url(&start_url, &hrefs[0]),
+        Ok(hrefs) if !hrefs.is_empty() => resolve_href(&start_url, &hrefs[0])
+            .context("the current-user-principal is not on the account's server")?,
         _ => start_url.clone(),
     };
 
@@ -79,36 +83,15 @@ pub async fn discover_addressbooks(client: &CalDavClient) -> anyhow::Result<Vec<
         .with_context(|| "addressbook-home-set not found")?;
 
     let mut all = Vec::new();
-    for h in &home_hrefs {
-        let home_url = resolve_url(&principal_url, h);
+    for home_url in home_hrefs
+        .iter()
+        .filter_map(|h| resolve_href(&principal_url, h))
+    {
         if let Ok(books) = find_addressbooks_in_home(client, &home_url).await {
             all.extend(books);
         }
     }
     Ok(all)
-}
-
-async fn client_start_url(client: &CalDavClient) -> String {
-    // Try .well-known/carddav redirect; fall back to base_url
-    let well_known = format!("{}/.well-known/carddav", client.base_url());
-    let resp = client
-        .http_client()
-        .get(&well_known)
-        .basic_auth(client.username(), Some(client.password()))
-        .send()
-        .await;
-    if let Ok(r) = resp {
-        if r.status().is_redirection() {
-            if let Some(loc) = r.headers().get("location") {
-                if let Ok(s) = loc.to_str() {
-                    return resolve_url(&well_known, s)
-                        .trim_end_matches('/')
-                        .to_string();
-                }
-            }
-        }
-    }
-    client.base_url().to_string()
 }
 
 async fn find_addressbooks_in_home(
@@ -187,12 +170,12 @@ fn parse_addressbooks(xml: &str, base_url: &str) -> anyhow::Result<Vec<Addressbo
                     "displayname" => in_displayname = false,
                     "response" => {
                         if is_addressbook {
-                            if let Some(href) = current_href
+                            if let Some(resolved) = current_href
                                 .as_deref()
                                 .map(str::trim)
                                 .filter(|h| !h.is_empty())
+                                .and_then(|href| resolve_href(base_url, href))
                             {
-                                let resolved = resolve_url(base_url, href);
                                 if resolved.trim_end_matches('/')
                                     != base_resolved.trim_end_matches('/')
                                 {
@@ -348,9 +331,12 @@ fn extract_contacts_with_hrefs(
                     "getetag" => in_etag = false,
                     "address-data" => in_address_data = false,
                     "response" => {
-                        if !current_href.is_empty() && !current_vcard.is_empty() {
+                        let href = (!current_href.is_empty())
+                            .then(|| resolve_href(base_url, current_href.trim()))
+                            .flatten();
+                        if let Some(href) = href.filter(|_| !current_vcard.is_empty()) {
                             results.push((
-                                resolve_url(base_url, current_href.trim()),
+                                href,
                                 current_etag.trim().trim_matches('"').to_string(),
                                 current_vcard.trim().to_string(),
                             ));
@@ -451,15 +437,14 @@ fn extract_card_sync_result(xml: &str, base_url: &str) -> anyhow::Result<CardSyn
                     "address-data" => in_address_data = false,
                     "status" => in_status = false,
                     "response" => {
-                        let href = resolve_url(base_url, current_href.trim());
-                        if current_status.contains("404") {
-                            deleted.push(href);
-                        } else if !current_vcard.is_empty() {
-                            changed.push((
+                        match resolve_href(base_url, current_href.trim()) {
+                            Some(href) if current_status.contains("404") => deleted.push(href),
+                            Some(href) if !current_vcard.is_empty() => changed.push((
                                 href,
                                 current_etag.trim().trim_matches('"').to_string(),
                                 current_vcard.trim().to_string(),
-                            ));
+                            )),
+                            _ => {}
                         }
                         in_response = false;
                     }
@@ -490,77 +475,54 @@ pub async fn put_contact(
         // Demo mode: no CardDAV server; the caller updates the local cache only.
         return Ok(None);
     }
-    let mut url = contact_href.to_string();
-    for _ in 0..5 {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            CONTENT_TYPE,
-            HeaderValue::from_static("text/vcard; charset=utf-8"),
-        );
-        if is_new {
-            headers.insert("If-None-Match", HeaderValue::from_static("*"));
-        }
-
-        let resp = client
-            .http_client()
-            .put(&url)
-            .headers(headers)
-            .basic_auth(client.username(), Some(client.password()))
-            .body(raw_vcard.to_string())
-            .send()
-            .await
-            .context("PUT contact request failed")?;
-
-        let status = resp.status();
-        if status.is_redirection() {
-            if let Some(location) = resp.headers().get("location") {
-                url = location.to_str()?.to_string();
-                continue;
-            }
-            bail!("PUT redirect without Location header");
-        }
-        if !status.is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            bail!("PUT contact returned {status}: {text}");
-        }
-        let new_etag = resp
-            .headers()
-            .get("etag")
-            .and_then(|v| v.to_str().ok())
-            .map(|v| v.trim().trim_matches('"').to_string());
-        return Ok(new_etag);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/vcard; charset=utf-8"),
+    );
+    if is_new {
+        headers.insert("If-None-Match", HeaderValue::from_static("*"));
     }
-    bail!("too many redirects for PUT contact")
+    let resp = client
+        .send(
+            Method::PUT,
+            contact_href,
+            headers,
+            Some(raw_vcard),
+            "PUT contact",
+        )
+        .await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        bail!("PUT contact returned {status}: {text}");
+    }
+    let new_etag = resp
+        .headers()
+        .get("etag")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.trim().trim_matches('"').to_string());
+    Ok(new_etag)
 }
 
 pub async fn delete_contact(client: &CalDavClient, contact_href: &str) -> anyhow::Result<()> {
     if client.demo_mode {
         return Ok(());
     }
-    let mut url = contact_href.to_string();
-    for _ in 0..5 {
-        let resp = client
-            .http_client()
-            .delete(&url)
-            .basic_auth(client.username(), Some(client.password()))
-            .send()
-            .await
-            .context("DELETE contact request failed")?;
-
-        let status = resp.status();
-        if status.is_redirection() {
-            if let Some(location) = resp.headers().get("location") {
-                url = location.to_str()?.to_string();
-                continue;
-            }
-            bail!("DELETE redirect without Location header");
-        }
-        if !status.is_success() {
-            bail!("DELETE contact returned {status}");
-        }
-        return Ok(());
+    let resp = client
+        .send(
+            Method::DELETE,
+            contact_href,
+            HeaderMap::new(),
+            None,
+            "DELETE contact",
+        )
+        .await?;
+    let status = resp.status();
+    if !status.is_success() {
+        bail!("DELETE contact returned {status}");
     }
-    bail!("too many redirects for DELETE contact")
+    Ok(())
 }
 
 // ── vCard parsing / building ──────────────────────────────────────────────────

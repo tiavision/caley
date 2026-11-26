@@ -659,12 +659,12 @@ pub(super) fn parse_all_calendars(xml: &str, base_url: &str) -> anyhow::Result<V
                     "displayname" => in_displayname = false,
                     "calendar-color" => in_color = false,
                     "response" => {
-                        if let Some(href) = current_href
+                        if let Some(resolved) = current_href
                             .as_deref()
                             .map(str::trim)
                             .filter(|h| !h.is_empty())
+                            .and_then(|href| super::pin::resolve_href(base_url, href))
                         {
-                            let resolved = resolve_url(base_url, href);
                             if resolved.trim_end_matches('/')
                                 != base_url_resolved.trim_end_matches('/')
                             {
@@ -1683,9 +1683,12 @@ pub(super) fn extract_events_with_hrefs(
                     "getetag" => in_etag = false,
                     "calendar-data" => in_calendar_data = false,
                     "response" => {
-                        if !current_href.is_empty() && !current_ical.is_empty() {
+                        let href = (!current_href.is_empty())
+                            .then(|| super::pin::resolve_href(base_url, current_href.trim()))
+                            .flatten();
+                        if let Some(href) = href.filter(|_| !current_ical.is_empty()) {
                             results.push((
-                                resolve_url(base_url, current_href.trim()),
+                                href,
                                 current_etag.trim().trim_matches('"').to_string(),
                                 current_ical.trim().to_string(),
                             ));
@@ -1786,15 +1789,14 @@ pub(super) fn extract_sync_result(xml: &str, base_url: &str) -> anyhow::Result<S
                     "calendar-data" => in_calendar_data = false,
                     "status" => in_status = false,
                     "response" => {
-                        let href = resolve_url(base_url, current_href.trim());
-                        if current_status.contains("404") {
-                            deleted.push(href);
-                        } else if !current_ical.is_empty() {
-                            changed.push((
+                        match super::pin::resolve_href(base_url, current_href.trim()) {
+                            Some(href) if current_status.contains("404") => deleted.push(href),
+                            Some(href) if !current_ical.is_empty() => changed.push((
                                 href,
                                 current_etag.trim().trim_matches('"').to_string(),
                                 current_ical.trim().to_string(),
-                            ));
+                            )),
+                            _ => {}
                         }
                         in_response = false;
                     }

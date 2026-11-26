@@ -1,25 +1,33 @@
 use anyhow::{Context, bail};
 use chrono::Utc;
-use reqwest::Client;
-use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
+use std::sync::Arc;
+
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, LOCATION};
+use reqwest::{Client, Method};
+use tokio::sync::OnceCell;
+use url::Url;
 use uuid::Uuid;
 
 use crate::version;
 
 pub(crate) mod generation;
 pub(crate) mod parsing;
+pub(crate) mod pin;
 pub mod types;
 pub(crate) mod windows_tz;
 
 #[cfg(test)]
 mod limits_tests;
+#[cfg(test)]
+mod pin_tests;
 
 pub use generation::{
     add_exdate, add_recurrence_override, generate_ical_event, generate_new_uid,
     split_vcalendar_into_events, update_vcalendar_event,
 };
 pub use parsing::preview_events_from_raw_ical;
-pub(crate) use parsing::{extract_ctag_and_token, extract_hrefs, resolve_url, unescape_ical_text};
+pub(crate) use parsing::{extract_ctag_and_token, extract_hrefs, unescape_ical_text};
+
 pub use types::{Alarm, Attendee, Calendar, Event, PartStat, RecurrenceInfo, SyncResult};
 
 /// The resource name (one path segment, without extension) Caley gives a new calendar object or
@@ -78,7 +86,26 @@ pub struct CalDavClient {
     base_url: String,
     username: String,
     password: String,
+    /// Where the `.well-known/caldav` and `.well-known/carddav` discovery led (`pin::well_known_target`),
+    /// asked once per client: the servers besides the account URL's that credentials may go to.
+    well_known: Arc<[OnceCell<Option<Url>>; 2]>,
     pub demo_mode: bool,
+}
+
+/// The `.well-known` services a DAV account is discovered by.
+#[derive(Clone, Copy)]
+pub(crate) enum Service {
+    CalDav,
+    CardDav,
+}
+
+impl Service {
+    fn name(self) -> &'static str {
+        match self {
+            Service::CalDav => "caldav",
+            Service::CardDav => "carddav",
+        }
+    }
 }
 
 impl CalDavClient {
@@ -93,6 +120,7 @@ impl CalDavClient {
             base_url: base_url.trim_end_matches('/').to_string(),
             username,
             password,
+            well_known: Arc::default(),
             demo_mode: false,
         })
     }
@@ -103,21 +131,102 @@ impl CalDavClient {
             base_url: String::new(),
             username: String::new(),
             password: String::new(),
+            well_known: Arc::default(),
             demo_mode: true,
         }
     }
 
-    pub(crate) fn base_url(&self) -> &str {
-        &self.base_url
+    /// Where `service`'s `.well-known` URL led on the account's server (`pin::well_known_target`), asked
+    /// once; `None` when it does not redirect (or not to a server credentials may go to).
+    async fn well_known_target(&self, service: Service) -> Option<Url> {
+        self.well_known[service as usize]
+            .get_or_init(|| async {
+                let well_known =
+                    Url::parse(&format!("{}/.well-known/{}", self.base_url, service.name()))
+                        .ok()?;
+                let resp = self
+                    .client
+                    .get(well_known.clone())
+                    .basic_auth(&self.username, Some(&self.password))
+                    .send()
+                    .await
+                    .ok()?;
+                if !resp.status().is_redirection() {
+                    return None;
+                }
+                let location = resp.headers().get(LOCATION)?.to_str().ok()?;
+                pin::well_known_target(&well_known, location)
+            })
+            .await
+            .clone()
     }
-    pub(crate) fn username(&self) -> &str {
-        &self.username
+
+    /// Where discovery of `service` starts: where its `.well-known` URL led, else the account URL.
+    pub(crate) async fn start_url_for(&self, service: Service) -> String {
+        match self.well_known_target(service).await {
+            Some(url) => url.as_str().trim_end_matches('/').to_string(),
+            None => self.base_url.clone(),
+        }
     }
-    pub(crate) fn password(&self) -> &str {
-        &self.password
+
+    /// The servers a request to `url` may go to: the account URL's, and where the `.well-known`
+    /// discovery led when `url` is not on the account URL's (asked then, once).
+    async fn servers_for(&self, url: &Url) -> Vec<Url> {
+        let mut servers: Vec<Url> = Url::parse(&self.base_url).into_iter().collect();
+        if !servers.iter().any(|s| pin::same_server(s, url)) {
+            for service in [Service::CalDav, Service::CardDav] {
+                servers.extend(self.well_known_target(service).await);
+            }
+        }
+        servers
     }
-    pub(crate) fn http_client(&self) -> &Client {
-        &self.client
+
+    /// Sends `method` to `url` with the account's credentials, following redirects (at most 5) on the
+    /// account's servers only (`pin`): a URL or a redirect elsewhere is an error, and nothing (no
+    /// credentials) is sent there.
+    pub(crate) async fn send(
+        &self,
+        method: Method,
+        url: &str,
+        headers: HeaderMap,
+        body: Option<&str>,
+        what: &str,
+    ) -> anyhow::Result<reqwest::Response> {
+        let mut url = Url::parse(url).with_context(|| format!("{what}: invalid URL {url:?}"))?;
+        let servers = self.servers_for(&url).await;
+        if !servers.iter().any(|s| pin::same_server(s, &url)) {
+            bail!(
+                "{what} to {}, which is not the account's server: refused",
+                url.host_str().unwrap_or("?")
+            );
+        }
+        for _ in 0..5 {
+            let mut request = self
+                .client
+                .request(method.clone(), url.clone())
+                .headers(headers.clone())
+                .basic_auth(&self.username, Some(&self.password));
+            if let Some(body) = body {
+                request = request.body(body.to_owned());
+            }
+            let resp = request
+                .send()
+                .await
+                .with_context(|| format!("{what} request failed"))?;
+            if !resp.status().is_redirection() {
+                return Ok(resp);
+            }
+            let Some(location) = resp.headers().get(LOCATION) else {
+                bail!("{what} redirect without Location header");
+            };
+            let location = location.to_str()?.to_owned();
+            let servers = match url.join(&location) {
+                Ok(next) => self.servers_for(&next).await,
+                Err(_) => servers.clone(),
+            };
+            url = pin::redirect_target(&url, &location, &servers, what)?;
+        }
+        bail!("too many redirects for {what}")
     }
 
     pub async fn calendars(&self) -> anyhow::Result<Vec<Calendar>> {
@@ -148,10 +257,12 @@ impl CalDavClient {
 </propfind>"#;
         let xml = self.propfind(&start_url, "0", principal_body).await?;
         let principal_hrefs = parsing::extract_hrefs(&xml, "current-user-principal")?;
-        if principal_hrefs.is_empty() {
+        let Some(principal_url) = principal_hrefs
+            .first()
+            .and_then(|h| pin::resolve_href(&start_url, h))
+        else {
             return Ok(None);
-        }
-        let principal_url = parsing::resolve_url(&start_url, &principal_hrefs[0]);
+        };
         let display_body = r#"<?xml version="1.0" encoding="utf-8"?>
 <propfind xmlns="DAV:">
   <prop>
@@ -163,34 +274,7 @@ impl CalDavClient {
     }
 
     async fn start_url(&self) -> String {
-        self.discover_caldav_endpoint()
-            .await
-            .unwrap_or_else(|| self.base_url.clone())
-    }
-
-    async fn discover_caldav_endpoint(&self) -> Option<String> {
-        let well_known = format!("{}/.well-known/caldav", self.base_url);
-
-        let resp = self
-            .client
-            .get(&well_known)
-            .basic_auth(&self.username, Some(&self.password))
-            .send()
-            .await
-            .ok()?;
-
-        if resp.status().is_redirection() {
-            if let Some(location) = resp.headers().get("location") {
-                let location = location.to_str().ok()?.to_string();
-                return Some(
-                    parsing::resolve_url(&well_known, &location)
-                        .trim_end_matches('/')
-                        .to_string(),
-                );
-            }
-        }
-
-        None
+        self.start_url_for(Service::CalDav).await
     }
 
     async fn discover_calendar_home_sets(&self, start_url: &str) -> anyhow::Result<Vec<String>> {
@@ -203,47 +287,30 @@ impl CalDavClient {
 
         let xml = self.propfind(start_url, "0", principal_body).await?;
 
-        match parsing::extract_hrefs(&xml, "current-user-principal") {
-            Ok(hrefs) if !hrefs.is_empty() => {
-                let principal_href = &hrefs[0];
-                let principal_url = parsing::resolve_url(start_url, principal_href);
-
-                let home_body = r#"<?xml version="1.0" encoding="utf-8"?>
+        let principal_url = match parsing::extract_hrefs(&xml, "current-user-principal") {
+            Ok(hrefs) if !hrefs.is_empty() => pin::resolve_href(start_url, &hrefs[0])
+                .context("the current-user-principal is not on the account's server")?,
+            _ => start_url.to_owned(),
+        };
+        let home_body = r#"<?xml version="1.0" encoding="utf-8"?>
 <propfind xmlns="DAV:">
   <prop>
     <calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav"/>
   </prop>
 </propfind>"#;
 
-                let home_xml = self.propfind(&principal_url, "0", home_body).await?;
-                let hrefs =
-                    parsing::extract_hrefs(&home_xml, "calendar-home-set").with_context(|| {
-                        format!("calendar-home-set not found in response from {principal_url}")
-                    })?;
-                Ok(hrefs
-                    .into_iter()
-                    .map(|h| parsing::resolve_url(&principal_url, &h))
-                    .collect())
-            }
-            _ => {
-                let home_body = r#"<?xml version="1.0" encoding="utf-8"?>
-<propfind xmlns="DAV:">
-  <prop>
-    <calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav"/>
-  </prop>
-</propfind>"#;
-
-                let home_xml = self.propfind(start_url, "0", home_body).await?;
-                let hrefs =
-                    parsing::extract_hrefs(&home_xml, "calendar-home-set").with_context(|| {
-                        format!("calendar-home-set not found in response from {start_url}")
-                    })?;
-                Ok(hrefs
-                    .into_iter()
-                    .map(|h| parsing::resolve_url(start_url, &h))
-                    .collect())
-            }
+        let home_xml = self.propfind(&principal_url, "0", home_body).await?;
+        let hrefs = parsing::extract_hrefs(&home_xml, "calendar-home-set").with_context(|| {
+            format!("calendar-home-set not found in response from {principal_url}")
+        })?;
+        let home_sets: Vec<String> = hrefs
+            .iter()
+            .filter_map(|h| pin::resolve_href(&principal_url, h))
+            .collect();
+        if home_sets.is_empty() {
+            bail!("no calendar-home-set on the account's server");
         }
+        Ok(home_sets)
     }
 
     async fn find_calendars_in_home_set(
@@ -268,185 +335,108 @@ impl CalDavClient {
         depth: &str,
         body: &str,
     ) -> anyhow::Result<String> {
-        let mut url = url.to_string();
-        for _ in 0..5 {
-            let depth_hdr = HeaderName::from_static("depth");
-            let mut headers = HeaderMap::new();
-            headers.insert(depth_hdr, HeaderValue::from_str(depth)?);
-            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
-
-            let resp = self
-                .client
-                .request(reqwest::Method::from_bytes(b"PROPFIND")?, &url)
-                .headers(headers)
-                .basic_auth(&self.username, Some(&self.password))
-                .body(body.to_string())
-                .send()
-                .await
-                .context("PROPFIND request failed")?;
-
-            let status = resp.status();
-
-            if status.is_redirection() {
-                if let Some(location) = resp.headers().get("location") {
-                    let location = location.to_str()?.to_string();
-                    url = location;
-                    continue;
-                }
-                bail!("PROPFIND redirect without Location header");
-            }
-
-            if !status.is_success() && status.as_u16() != 207 {
-                bail!("PROPFIND returned {status}");
-            }
-
-            let text = resp
-                .text()
-                .await
-                .context("failed to read PROPFIND response")?;
-            return Ok(text);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("depth"),
+            HeaderValue::from_str(depth)?,
+        );
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+        let resp = self
+            .send(
+                Method::from_bytes(b"PROPFIND")?,
+                url,
+                headers,
+                Some(body),
+                "PROPFIND",
+            )
+            .await?;
+        let status = resp.status();
+        if !status.is_success() && status.as_u16() != 207 {
+            bail!("PROPFIND returned {status}");
         }
-        bail!("too many redirects for PROPFIND")
+        resp.text()
+            .await
+            .context("failed to read PROPFIND response")
     }
 
     pub(crate) async fn report(&self, url: &str, body: &str) -> anyhow::Result<String> {
-        let mut url = url.to_string();
-        for _ in 0..5 {
-            let depth_hdr = HeaderName::from_static("depth");
-            let mut headers = HeaderMap::new();
-            headers.insert(depth_hdr, HeaderValue::from_static("1"));
-            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
-
-            let resp = self
-                .client
-                .request(reqwest::Method::from_bytes(b"REPORT")?, &url)
-                .headers(headers)
-                .basic_auth(&self.username, Some(&self.password))
-                .body(body.to_string())
-                .send()
-                .await
-                .context("REPORT request failed")?;
-
-            let status = resp.status();
-
-            if status.is_redirection() {
-                if let Some(location) = resp.headers().get("location") {
-                    let location = location.to_str()?.to_string();
-                    url = location;
-                    continue;
-                }
-                bail!("REPORT redirect without Location header");
-            }
-
-            if !status.is_success() && status.as_u16() != 207 {
-                bail!("REPORT returned {status}");
-            }
-
-            let text = resp
-                .text()
-                .await
-                .context("failed to read REPORT response")?;
-            return Ok(text);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("depth"),
+            HeaderValue::from_static("1"),
+        );
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
+        let resp = self
+            .send(
+                Method::from_bytes(b"REPORT")?,
+                url,
+                headers,
+                Some(body),
+                "REPORT",
+            )
+            .await?;
+        let status = resp.status();
+        if !status.is_success() && status.as_u16() != 207 {
+            bail!("REPORT returned {status}");
         }
-        bail!("too many redirects for REPORT")
+        resp.text().await.context("failed to read REPORT response")
     }
 
     /// PUTs the calendar object at `event_href` (`new_event_href`, or the href it has).
     pub async fn put_event(&self, event_href: &str, ical_data: &str) -> anyhow::Result<()> {
+        self.put_event_with(event_href, ical_data, HeaderMap::new())
+            .await
+    }
+
+    /// `put_event` with `extra` headers besides the content type.
+    pub async fn put_event_with(
+        &self,
+        event_href: &str,
+        ical_data: &str,
+        extra: HeaderMap,
+    ) -> anyhow::Result<()> {
         if self.demo_mode {
             return Ok(());
         }
-        let mut url = event_href.to_owned();
-        for _ in 0..5 {
-            let mut headers = HeaderMap::new();
-            headers.insert(
-                CONTENT_TYPE,
-                HeaderValue::from_static("text/calendar; charset=utf-8"),
-            );
-
-            let resp = self
-                .client
-                .put(&url)
-                .headers(headers)
-                .basic_auth(&self.username, Some(&self.password))
-                .body(ical_data.to_string())
-                .send()
-                .await
-                .context("PUT request failed")?;
-
-            let status = resp.status();
-            if status.is_redirection() {
-                if let Some(location) = resp.headers().get("location") {
-                    url = location.to_str()?.to_string();
-                    continue;
-                }
-                bail!("PUT redirect without Location header");
-            }
-            if !status.is_success() {
-                let text = resp.text().await.unwrap_or_default();
-                bail!("PUT returned {status}: {text}");
-            }
-            return Ok(());
+        let mut headers = extra;
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("text/calendar; charset=utf-8"),
+        );
+        let resp = self
+            .send(Method::PUT, event_href, headers, Some(ical_data), "PUT")
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            bail!("PUT returned {status}: {text}");
         }
-        bail!("too many redirects for PUT")
+        Ok(())
     }
 
     pub async fn delete_event(&self, event_href: &str) -> anyhow::Result<()> {
         if self.demo_mode {
             return Ok(());
         }
-        let mut url = event_href.to_owned();
-        for _ in 0..5 {
-            let resp = self
-                .client
-                .delete(&url)
-                .basic_auth(&self.username, Some(&self.password))
-                .send()
-                .await
-                .context("DELETE request failed")?;
-
-            let status = resp.status();
-            if status.is_redirection() {
-                if let Some(location) = resp.headers().get("location") {
-                    url = location.to_str()?.to_string();
-                    continue;
-                }
-                bail!("DELETE redirect without Location header");
-            }
-            if !status.is_success() {
-                bail!("DELETE returned {status}");
-            }
-            return Ok(());
+        let resp = self
+            .send(Method::DELETE, event_href, HeaderMap::new(), None, "DELETE")
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            bail!("DELETE returned {status}");
         }
-        bail!("too many redirects for DELETE")
+        Ok(())
     }
 
     pub async fn get_event(&self, event_href: &str) -> anyhow::Result<String> {
-        let mut url = event_href.to_owned();
-        for _ in 0..5 {
-            let resp = self
-                .client
-                .get(&url)
-                .basic_auth(&self.username, Some(&self.password))
-                .send()
-                .await
-                .context("GET request failed")?;
-
-            let status = resp.status();
-            if status.is_redirection() {
-                if let Some(location) = resp.headers().get("location") {
-                    url = location.to_str()?.to_string();
-                    continue;
-                }
-                bail!("GET redirect without Location header");
-            }
-            if !status.is_success() {
-                bail!("GET returned {status}");
-            }
-            let text = resp.text().await.context("failed to read GET response")?;
-            return Ok(text);
+        let resp = self
+            .send(Method::GET, event_href, HeaderMap::new(), None, "GET")
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            bail!("GET returned {status}");
         }
-        bail!("too many redirects for GET")
+        resp.text().await.context("failed to read GET response")
     }
 
     /// Expand raw iCalendar text into `Event` structs for a date range.
@@ -561,15 +551,17 @@ impl CalDavClient {
 </push-register>"#
         );
 
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/xml"));
         let resp = self
-            .client
-            .post(calendar_href)
-            .header(CONTENT_TYPE, "application/xml")
-            .basic_auth(&self.username, Some(&self.password))
-            .body(body)
-            .send()
-            .await
-            .context("push-register POST failed")?;
+            .send(
+                Method::POST,
+                calendar_href,
+                headers,
+                Some(&body),
+                "push-register POST",
+            )
+            .await?;
 
         let status = resp.status();
         if status.as_u16() == 405 || status.as_u16() == 501 || status.as_u16() == 404 {
@@ -626,17 +618,15 @@ impl CalDavClient {
 </C:mkcalendar>"#
         );
 
-        let method =
-            reqwest::Method::from_bytes(b"MKCALENDAR").context("invalid method MKCALENDAR")?;
+        let method = Method::from_bytes(b"MKCALENDAR").context("invalid method MKCALENDAR")?;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/xml; charset=utf-8"),
+        );
         let resp = self
-            .client
-            .request(method, &calendar_url)
-            .header(CONTENT_TYPE, "application/xml; charset=utf-8")
-            .basic_auth(&self.username, Some(&self.password))
-            .body(body)
-            .send()
-            .await
-            .context("MKCALENDAR request failed")?;
+            .send(method, &calendar_url, headers, Some(&body), "MKCALENDAR")
+            .await?;
 
         match resp.status().as_u16() {
             200 | 201 => Ok(calendar_url),
