@@ -215,13 +215,15 @@ fn image_client() -> Option<&'static reqwest::Client> {
     CLIENT.as_ref()
 }
 
-/// `image_client` but its resolver.
+/// `image_client` but its resolver: no redirects, and no proxy from the environment.
 fn image_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .user_agent(version::USER_AGENT)
         .use_preconfigured_tls(crate::imap_client::tls_config())
         .redirect(reqwest::redirect::Policy::none())
+        // no HTTP_PROXY/HTTPS_PROXY/ALL_PROXY: through a proxy PublicOnly would resolve only the proxy's name
+        .no_proxy()
 }
 
 /// A remote image: a success, at most `MAX_REMOTE_IMAGE` bytes, that sniffs as an allowed image.
@@ -901,6 +903,88 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    /// `HTTP_PROXY` and the like are not used by the public-only clients (the image proxy's, notifications'):
+    /// through a proxy `PublicOnly` would resolve only the proxy's name. The environment is the process's, so the
+    /// check runs in a process of its own: this test binary again, running only `proxy_env_child`.
+    #[test]
+    fn the_public_only_clients_use_no_proxy() {
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "email::attachments::tests::proxy_env_child",
+                "--ignored",
+                "--test-threads=1",
+            ])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "{stdout}{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "run by the_public_only_clients_use_no_proxy, in a process of its own"]
+    fn proxy_env_child() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let proxy = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        proxy.set_nonblocking(true).unwrap();
+        let url = format!("http://{}", proxy.local_addr().unwrap());
+        // SAFETY: this process runs this one test, on one thread, before any client is built
+        unsafe {
+            for var in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"] {
+                std::env::set_var(var, &url);
+                std::env::set_var(var.to_lowercase(), &url);
+            }
+            std::env::remove_var("NO_PROXY");
+            std::env::remove_var("no_proxy");
+        }
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let clients = [
+                ("image", super::image_client().unwrap().clone()),
+                (
+                    "notifications",
+                    crate::notifications::http_client_builder(false)
+                        .build()
+                        .unwrap(),
+                ),
+            ];
+            for (name, client) in clients {
+                for target in [
+                    "http://images.invalid/a.png",
+                    "https://images.invalid/a.png",
+                ] {
+                    let sent = client
+                        .get(target)
+                        .timeout(std::time::Duration::from_secs(3))
+                        .send()
+                        .await;
+                    assert!(sent.is_err());
+                    assert!(
+                        proxy.accept().is_err(),
+                        "the {name} client went through the proxy for {target}"
+                    );
+                }
+            }
+            // NOTIFICATIONS_ALLOW_PRIVATE: no public-only limit, the environment's proxy as before
+            let client = crate::notifications::http_client_builder(true)
+                .build()
+                .unwrap();
+            let _ = client
+                .get("http://images.invalid/")
+                .timeout(std::time::Duration::from_millis(500))
+                .send()
+                .await;
+            assert!(proxy.accept().is_ok());
+        });
     }
 
     /// The image client's policy (`image_client` is it with `PublicOnly`, which would not reach 127.0.0.1).

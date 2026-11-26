@@ -84,6 +84,22 @@ pub(crate) enum Payload {
     Test,
 }
 
+/// The client pushes are posted with: no redirects, and unless `allow_private` names resolve to public addresses only
+/// (`PublicOnly`) and no proxy is used: `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` would have the client resolve only the
+/// proxy's name and the proxy reach whatever the endpoint names. With `allow_private` (NOTIFICATIONS_ALLOW_PRIVATE)
+/// there is no such limit to keep, and the environment's proxy is used as before.
+pub(crate) fn http_client_builder(allow_private: bool) -> reqwest::ClientBuilder {
+    let http = reqwest::Client::builder()
+        .use_preconfigured_tls(crate::imap_client::tls_config())
+        .timeout(Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none());
+    if allow_private {
+        http
+    } else {
+        http.dns_resolver(Arc::new(PublicOnly)).no_proxy()
+    }
+}
+
 impl Notifier {
     pub fn new(
         db: Db,
@@ -91,14 +107,7 @@ impl Notifier {
         app_base_url: &str,
         allow_private: bool,
     ) -> anyhow::Result<Self> {
-        let mut http = reqwest::Client::builder()
-            .use_preconfigured_tls(crate::imap_client::tls_config())
-            .timeout(Duration::from_secs(15))
-            .redirect(reqwest::redirect::Policy::none());
-        if !allow_private {
-            http = http.dns_resolver(Arc::new(PublicOnly));
-        }
-        let http = http.build()?;
+        let http = http_client_builder(allow_private).build()?;
         let contact = app_base_url
             .starts_with("https://")
             .then(|| app_base_url.trim_end_matches('/').to_owned());
