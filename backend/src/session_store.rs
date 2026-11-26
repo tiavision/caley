@@ -44,6 +44,31 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Deletes the sessions that have expired (`load` no longer returns them); how many there were.
+    /// A session is also written for visitors who are not signed in (the page wanted, an OIDC sign-in
+    /// under way), so without this the table only grows.
+    pub async fn delete_expired(&self) -> sqlx::Result<u64> {
+        let done = sqlx::query("DELETE FROM tower_sessions WHERE expiry_date <= ?")
+            .bind(OffsetDateTime::now_utc())
+            .execute(&self.pool)
+            .await?;
+        Ok(done.rows_affected())
+    }
+
+    /// Deletes the expired sessions now and then once an hour.
+    pub fn spawn_cleanup(&self) {
+        let store = self.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
+            loop {
+                interval.tick().await;
+                if let Err(e) = store.delete_expired().await {
+                    eprintln!("[sessions] deleting expired sessions: {e}");
+                }
+            }
+        });
+    }
+
     /// Returns `false` if the ID is already taken.
     async fn try_create(
         conn: &mut SqliteConnection,
@@ -115,5 +140,41 @@ impl SessionStore for SqliteStore {
             .await
             .map_err(backend_err)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use time::Duration;
+
+    #[tokio::test]
+    async fn expired_sessions_are_deleted() {
+        // one connection: each connection to `sqlite::memory:` is a database of its own
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let store = SqliteStore::new(pool.clone());
+        store.migrate().await.unwrap();
+        let record = |expires_in: Duration| Record {
+            id: Id::default(),
+            data: Default::default(),
+            expiry_date: OffsetDateTime::now_utc() + expires_in,
+        };
+        let (old, live) = (record(Duration::minutes(-1)), record(Duration::days(7)));
+        store.save(&old).await.unwrap();
+        store.save(&live).await.unwrap();
+
+        assert_eq!(store.delete_expired().await.unwrap(), 1);
+        assert!(store.load(&live.id).await.unwrap().is_some());
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tower_sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 1);
+        assert_eq!(store.delete_expired().await.unwrap(), 0);
     }
 }

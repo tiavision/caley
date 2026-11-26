@@ -134,6 +134,30 @@ impl FromRequestParts<AppState> for CurrentUser {
     }
 }
 
+impl UserIdClaim {
+    /// A warning for a claim that is only as safe as the identity provider makes it: the user ID decides
+    /// whose data a sign-in reaches, so a claim users can set themselves lets one become another.
+    pub fn warning(&self) -> Option<&'static str> {
+        match self {
+            UserIdClaim::Sub => None,
+            UserIdClaim::Email => Some(
+                "OIDC_USER_ID_CLAIM=email: a sign-in is refused unless the ID token says email_verified",
+            ),
+            UserIdClaim::PreferredUsername => Some(
+                "OIDC_USER_ID_CLAIM=preferred-username identifies users by a name: safe only if the identity \
+                 provider keeps it unique and users cannot change it",
+            ),
+            UserIdClaim::Name => Some(
+                "OIDC_USER_ID_CLAIM=name identifies users by their display name, which users can usually \
+                 change: anyone who takes another user's name signs in as them. Use sub",
+            ),
+        }
+    }
+}
+
+/// The user ID of a sign-in: the configured claim, and nothing in its place. Without the claim (or with an
+/// email the provider has not verified) there is no ID: falling back to `sub` would let one user's `sub`
+/// be another's email or name.
 pub fn extract_user_id(
     claims: &openidconnect::IdTokenClaims<
         openidconnect::EmptyAdditionalClaims,
@@ -141,17 +165,21 @@ pub fn extract_user_id(
     >,
     claim: &UserIdClaim,
 ) -> Option<String> {
-    match claim {
+    let id = match claim {
         UserIdClaim::Sub => Some(claims.subject().as_str().to_owned()),
         UserIdClaim::PreferredUsername => {
             claims.preferred_username().map(|u| u.as_str().to_owned())
         }
-        UserIdClaim::Email => claims.email().map(|e| e.as_str().to_owned()),
+        UserIdClaim::Email => claims
+            .email()
+            .filter(|_| claims.email_verified() == Some(true))
+            .map(|e| e.as_str().to_owned()),
         UserIdClaim::Name => claims
             .name()
             .and_then(|n| n.get(None))
             .map(|s| s.as_str().to_owned()),
-    }
+    };
+    id.filter(|id| !id.trim().is_empty())
 }
 
 /// The signed-in user (an OIDC or a demo session alike).
@@ -216,13 +244,27 @@ pub async fn auth_config(State(state): State<AppState>) -> impl IntoResponse {
     })
 }
 
+/// Whether a request comes from the app itself or from the user (the address bar, a bookmark): what
+/// `Sec-Fetch-Site` says, `same-origin` or `none`. A browser that does not send the header is let through.
+fn from_this_site(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get("sec-fetch-site")
+        .is_none_or(|v| v == "same-origin" || v == "none")
+}
+
 /// Unified logout. For OIDC sessions, performs RP-initiated logout using the
 /// end_session_endpoint from discovery. Other sessions (the demo's) just get a flush.
 pub async fn logout_handler(
     State(state): State<AppState>,
     RequestOrigin(origin): RequestOrigin,
     session: Session,
+    headers: axum::http::HeaderMap,
 ) -> Response {
+    // A GET that ends the session: not for another site to send someone to (the session cookie is
+    // SameSite=Lax, which a link or redirect from elsewhere still carries).
+    if !from_this_site(&headers) {
+        return Redirect::to("/").into_response();
+    }
     let is_oidc = session
         .get::<bool>("oidc_session")
         .await
@@ -341,8 +383,14 @@ pub async fn oidc_handler(
 
         let id_token_hint = id_token.to_string();
 
-        let user_id = extract_user_id(claims, &state.oidc_user_id_claim)
-            .unwrap_or_else(|| claims.subject().as_str().to_owned());
+        let Some(user_id) = extract_user_id(claims, &state.oidc_user_id_claim) else {
+            eprintln!(
+                "OIDC sign-in refused: the ID token has no usable {:?} claim (OIDC_USER_ID_CLAIM; an \
+                 email must be email_verified)",
+                state.oidc_user_id_claim
+            );
+            return Redirect::to("/").into_response();
+        };
         let display_name = claims
             .name()
             .and_then(|n| n.get(None))
@@ -574,4 +622,66 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// This module's public routes, relative to `/api` (api.rs).
 pub fn public_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new().routes(routes!(auth_config))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderMap;
+    use openidconnect::core::CoreIdTokenClaims;
+
+    fn claims(extra: serde_json::Value) -> CoreIdTokenClaims {
+        let mut claims = json!({
+            "iss": "https://idp.example", "sub": "u-1", "aud": ["caley"], "exp": 4102444800u64, "iat": 1700000000,
+        });
+        claims
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(claims).unwrap()
+    }
+
+    #[test]
+    fn the_user_id_is_the_configured_claim_or_none() {
+        let id = |extra, claim| extract_user_id(&claims(extra), &claim);
+        assert_eq!(id(json!({}), UserIdClaim::Sub).as_deref(), Some("u-1"));
+        // an email counts only when the provider has verified it
+        let email = json!({"email": "a@example.org"});
+        assert_eq!(id(email, UserIdClaim::Email), None);
+        let unverified = json!({"email": "a@example.org", "email_verified": false});
+        assert_eq!(id(unverified, UserIdClaim::Email), None);
+        let verified = json!({"email": "a@example.org", "email_verified": true});
+        assert_eq!(
+            id(verified, UserIdClaim::Email).as_deref(),
+            Some("a@example.org")
+        );
+        // a missing claim is no ID: never the `sub` in its place
+        assert_eq!(id(json!({}), UserIdClaim::Email), None);
+        assert_eq!(id(json!({}), UserIdClaim::PreferredUsername), None);
+        assert_eq!(id(json!({}), UserIdClaim::Name), None);
+        assert_eq!(id(json!({"name": "  "}), UserIdClaim::Name), None);
+        assert_eq!(
+            id(
+                json!({"preferred_username": "ann"}),
+                UserIdClaim::PreferredUsername
+            )
+            .as_deref(),
+            Some("ann")
+        );
+        assert!(UserIdClaim::Sub.warning().is_none());
+        assert!(UserIdClaim::Name.warning().is_some());
+    }
+
+    #[test]
+    fn logout_is_for_the_app_and_the_user() {
+        let from = |site: Option<&str>| {
+            let mut h = HeaderMap::new();
+            if let Some(site) = site {
+                h.insert("sec-fetch-site", site.parse().unwrap());
+            }
+            from_this_site(&h)
+        };
+        assert!(from(Some("same-origin")) && from(Some("none")) && from(None));
+        assert!(!from(Some("cross-site")) && !from(Some("same-site")));
+    }
 }
