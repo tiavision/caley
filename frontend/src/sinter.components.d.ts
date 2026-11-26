@@ -66,8 +66,9 @@ declare module '*/mail-view.html' {
 }
 declare module '*/alloy-sortable.html' {
   type Move = import('../node_modules/@tiavision/sinter-alloy/sinter/sinter.types').Move;
+  type SortError = import('../node_modules/@tiavision/sinter-alloy/sinter/sinter.types').SortError;
   type SortableText = import('../node_modules/@tiavision/sinter-alloy/sinter/sinter.types').SortableText;
   const Base: typeof import('@tiaforge-ui/sinter/runtime/components').Component;
   /** the base of `@tiavision/sinter-alloy/sinter/components/alloy-sortable.ts`: props, events, refs and state as `alloy-sortable.html` declares them */
-  export class AlloySortableComponent extends Base<{ items: readonly any[]; keyOf: (item: any) => string; nameOf?: (item: any) => string; label: string; disabled?: boolean; quiet?: boolean; text?: Partial<SortableText> }, { move: Move }, {  }, { lifted: string; via: string; dy: number; lineKey: string; lineSide: string; status: string; instructions: string }> {}
+  export class AlloySortableComponent extends Base<{ items: readonly any[]; keyOf: (item: any) => string; nameOf?: (item: any) => string; label: string; resource?: string; field?: string; save?: string; disabled?: boolean; quiet?: boolean; text?: Partial<SortableText> }, { move: Move; 'sort-error': SortError }, {  }, { lifted: string; via: string; dy: number; lineKey: string; lineSide: string; status: string; instructions: string; error: string }> {}
 }
