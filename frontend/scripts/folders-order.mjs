@@ -32,7 +32,7 @@ for (const f of before.filter((f) => f.display_name.startsWith('e2e-'))) await a
 const ids = [];
 for (const display_name of NAMES) ids.push((await (await api.post(`${base}/api/email/folder`, { data: { display_name, rules: [] } })).json()).folder_id);
 // these three first, in this order (other folders the demo user has follow them)
-await api.put(`${base}/api/email/folders/order`, { data: { folder_ids: ids } });
+await api.put(`${base}/api/email/folders/order`, { data: { order: ids } });
 const total = (await (await api.get(`${base}/api/email/folders`)).json()).folders.length;
 
 /** a tab that records console errors, page errors and CSP violations */

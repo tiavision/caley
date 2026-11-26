@@ -396,7 +396,6 @@
   "sort_moved": "{name}: Position {position} von {total}.",
   "sort_dropped": "{name} an Position {position} von {total} abgelegt.",
   "sort_cancelled": "Verschieben abgebrochen. {name} ist wieder an Position {position}.",
-  "mail_folderOrderFailed": "Die Reihenfolge der Ordner konnte nicht gespeichert werden.",
   "mail_createVirtualFolder": "Virtuellen Ordner erstellen",
   "mail_folderNamePlaceholder": "Virtueller Ordner",
   "mail_mailboxesToInclude": "Einzuschließende Postfächer",
@@ -565,5 +564,6 @@
   "share_share": "Teilen",
   "share_downloadIcs": ".ics herunterladen",
   "share_downloadVCard": ".vCard herunterladen",
-  "share_email": "Per E-Mail senden"
+  "share_email": "Per E-Mail senden",
+  "sort_failed": "Die neue Reihenfolge konnte nicht gespeichert werden; der Ordner ist wieder an seinem Platz."
 }

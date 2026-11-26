@@ -931,11 +931,11 @@ async fn folders_response(state: &AppState, user_id: &str) -> axum::response::Re
     }
 }
 
-/// The order of the virtual folders: their ids, first to last.
+/// The order of the virtual folders: their ids, first to last (the shape sinter-alloy's sortable sends).
 #[derive(Deserialize, ToSchema)]
 pub struct VirtualFoldersOrder {
-    /// the user's folders in their new order; folders left out follow in their current order
-    pub folder_ids: Vec<String>,
+    /// the user's folder ids in their new order; folders left out follow in their current order
+    pub order: Vec<String>,
 }
 
 /// Reorders the virtual folders (`sort_order` 0, 1, … in the order given) and answers the folders as
@@ -955,7 +955,7 @@ pub async fn reorder_virtual_folders(
     user: CurrentUser,
     Json(body): Json<VirtualFoldersOrder>,
 ) -> impl IntoResponse {
-    match email_db::reorder_virtual_folders(&state.db, &user.user_id, &body.folder_ids).await {
+    match email_db::reorder_virtual_folders(&state.db, &user.user_id, &body.order).await {
         Ok(Ok(())) => {
             state
                 .sse_broadcaster

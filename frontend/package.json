@@ -22,7 +22,7 @@
     "@fontsource-variable/figtree": "^5.3.0",
     "@tiaforge-ui/sinter": "^0.22.1",
     "@tiaforge-ui/temper": "^0.4.0",
-    "@tiavision/sinter-alloy": "file:../../sinter-alloy",
+    "@tiavision/sinter-alloy": "https://codeload.github.com/tiavision/sinter-alloy/tar.gz/c2dd01df4b6ac3419f229361666a97021fc4227f",
     "@tiavision/sinter-mail": "^0.22.1",
     "openpgp": "^6.3.1"
   },

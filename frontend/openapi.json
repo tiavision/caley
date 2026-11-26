@@ -6139,17 +6139,17 @@
       },
       "VirtualFoldersOrder": {
         "type": "object",
-        "description": "The order of the virtual folders: their ids, first to last.",
+        "description": "The order of the virtual folders: their ids, first to last (the shape sinter-alloy's sortable sends).",
         "required": [
-          "folder_ids"
+          "order"
         ],
         "properties": {
-          "folder_ids": {
+          "order": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "the user's folders in their new order; folders left out follow in their current order"
+            "description": "the user's folder ids in their new order; folders left out follow in their current order"
           }
         }
       },

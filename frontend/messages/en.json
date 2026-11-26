@@ -396,7 +396,6 @@
   "sort_moved": "{name}: position {position} of {total}.",
   "sort_dropped": "Dropped {name} at position {position} of {total}.",
   "sort_cancelled": "Move cancelled. {name} is back at position {position}.",
-  "mail_folderOrderFailed": "The folders' order could not be saved.",
   "mail_createVirtualFolder": "Create virtual folder",
   "mail_folderNamePlaceholder": "Virtual Folder",
   "mail_mailboxesToInclude": "Mailboxes to include",
@@ -565,5 +564,6 @@
   "share_share": "Share",
   "share_downloadIcs": "Download .ics",
   "share_downloadVCard": "Download .vCard",
-  "share_email": "Send by email"
+  "share_email": "Send by email",
+  "sort_failed": "The new order could not be saved; the folder is back where it was."
 }

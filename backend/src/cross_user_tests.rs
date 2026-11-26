@@ -365,7 +365,7 @@ fn cases() -> Vec<Case> {
         case(
             "PUT",
             "/api/email/folders/order",
-            Payload::Json(json!({ "folder_ids": [A_FOLDER] })),
+            Payload::Json(json!({ "order": [A_FOLDER] })),
         ),
         case(
             "POST",

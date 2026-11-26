@@ -9,6 +9,9 @@ const root = import.meta.dirname;
 
 
 export default defineConfig({
+  // one sinter for the app and its libraries: sinter-alloy's scripts find the page's app through sinter's `instance()`,
+  // which a second copy (the library's own dev install, under a `file:` link) would not know
+  resolve: { dedupe: ['@tiaforge-ui/sinter', '@tiaforge-ui/temper'] },
   appType: 'mpa',
   plugins: [
     // Every HTML entry is compiled by sinter (src/components/, src/layouts/, src/sinter.{config,helpers,actions,types,content}.ts). The
