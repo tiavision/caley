@@ -500,19 +500,24 @@
               </select>
             </label>
           </template>
+          <!-- another sender's key trusted for the address: a key change, warned of as in the reader; only then is
+               `replace` sent. A 409 (a key trusted since the key was read) goes back to reading it. -->
+          <template data-sn-if="pubKey.changes.includes(pubKey.body.email)">
+            <p data-callout data-tone="warning" data-sn-text="m.pgp_acceptChangeHint({ email: pubKey.body.email })"></p>
+          </template>
           <footer>
             <button type="button" data-variant="ghost" data-sn-on-click="pubKey = null" data-sn-text="m.event_cancel()"></button>
             <button type="button" data-icon="shield-check" data-sn-attr="{disabled: !pubKey.body.email}"
-                    data-sn-post="/pgp/key" data-sn-body="pubKey.body"
-                    data-sn-then="upsert(publicKeys, $result); pubKey = null; pubSuccess = m.pgp_publicKeyImported(); closeDialog('pgp-public-key-dialog')"
-                    data-sn-catch="pubError = m.pgp_publicKeyImportError()"
-                    data-sn-text="m.pgp_trustImportButton()"></button>
+                    data-sn-post="/pgp/key" data-sn-body="{ ...pubKey.body, replace: pubKey.changes.includes(pubKey.body.email) }"
+                    data-sn-then="pubKey.changes.includes(pubKey.body.email) ? refresh(publicKeys) : upsert(publicKeys, $result); pubKey = null; pubSuccess = m.pgp_publicKeyImported(); closeDialog('pgp-public-key-dialog')"
+                    data-sn-catch="pubError = $error.status === 409 ? m.pgp_keyChangeConflict() : m.pgp_publicKeyImportError(); $error.status === 409 && (pubKey = null); refresh(publicKeys)"
+                    data-sn-text="pubKey.changes.includes(pubKey.body.email) ? m.pgp_acceptNewKey() : m.pgp_trustImportButton()"></button>
           </footer>
         </div>
       </template>
       <template data-sn-else>
         <form data-layout="stack" data-gap="md"
-              data-sn-call="pgpKeys.publicKey(pubArmored)" data-sn-on-submit="pubError = ''; pubSuccess = ''"
+              data-sn-call="pgpKeys.publicKey(pubArmored, publicKeys ?? [])" data-sn-on-submit="pubError = ''; pubSuccess = ''"
               data-sn-then="pubKey = $result"
               data-sn-catch="pubError = loadErrorOr($error, m.pgp_publicKeyImportError())">
           <label>
@@ -552,7 +557,7 @@
             <button type="button" data-icon="shield-check"
                     data-sn-post="/pgp/key/accept" data-sn-body="{ fingerprint: accepting.key.fingerprint, replace: accepting.change }"
                     data-sn-then="refresh(publicKeys); accepting = null; closeDialog('pgp-accept-dialog')"
-                    data-sn-catch="pubError = m.pgp_keyAcceptError(); closeDialog('pgp-accept-dialog')"
+                    data-sn-catch="pubError = $error.status === 409 ? m.pgp_keyChangeConflict() : m.pgp_keyAcceptError(); refresh(publicKeys); closeDialog('pgp-accept-dialog')"
                     data-sn-text="accepting.change ? m.pgp_acceptNewKey() : m.pgp_acceptKey()"></button>
           </footer>
         </div>

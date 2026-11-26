@@ -95,11 +95,9 @@ async function show(routes: Record<string, RouteResponse> = {}, pending: { subje
       autodiscover: async () => discovery,
       send: async (draft: { encrypt: boolean }) => { sent.push(draft); return null; },
       forwardFiles: async (_msg: unknown, html: string) => ({ files: [], html }),
-      // as the action: POST /pgp/key, then for a key change POST /pgp/key/accept with replace
-      importKey: async (body: { fingerprint: string }, replace: boolean, ctx: { request: (url: string, init: object) => Promise<unknown> }) => {
-        const stored = await ctx.request('/api/pgp/key', { method: 'POST', body });
-        return replace ? ctx.request('/api/pgp/key/accept', { method: 'POST', body: { fingerprint: body.fingerprint, replace: true } }) : stored;
-      },
+      // as the action: one POST /pgp/key, with `replace` for a key change
+      importKey: async (body: { fingerprint: string }, replace: boolean, ctx: { request: (url: string, init: object) => Promise<unknown> }) =>
+        ctx.request('/api/pgp/key', { method: 'POST', body: replace ? { ...body, replace } : body }),
       popout: () => {}, unlock: async () => true, icsFile: async (_m: unknown, filename: string) => new File(['x'], filename),
       pendingCompose: () => { pendingCalls++; const p = pending; pending = null; return p; },
     },
@@ -745,19 +743,31 @@ test('importing a key for an address another trusted key is stored for warns of 
     body: { fingerprint: 'AB12', email: 's1@x', armored: 'K', is_own: false, source: 'message_attachment' },
     facts: { fingerprint: 'AB12', userIds: ['Sender 1 <s1@x>'], emails: ['s1@x'] }, sender: 's1@x', claimsAddress: true, changes: ['s1@x'],
   }, {
-    'POST /api/pgp/key': (call) => ({ ...(call.body as object), trust: 'trusted' }),
-    'POST /api/pgp/key/accept': (call) => { bodyExtra = {}; return { fingerprint: (call.body as { fingerprint: string }).fingerprint, email: 's1@x', armored: 'K', is_own: false, source: 'message_attachment', trust: 'trusted' }; },
+    'POST /api/pgp/key': (call) => { bodyExtra = {}; return { ...(call.body as object), trust: 'trusted' }; },
   });
   expect(dialog.textContent).toContain(m.pgp_acceptChangeHint({ email: 's1@x' }));
   const store = [...dialog.querySelectorAll('button')].find((b) => b.textContent === m.pgp_acceptNewKey())!;
   store.click();
   await settle();
   const posts = requests.calls.filter((c) => c.method === 'POST' && c.path.startsWith('/api/pgp/key'));
+  // one request: the server stores the key and removes the old one together (never both trusted)
   expect(posts.map((c) => [c.path, c.body])).toEqual([
-    ['/api/pgp/key', { fingerprint: 'AB12', email: 's1@x', armored: 'K', is_own: false, source: 'message_attachment' }],
-    ['/api/pgp/key/accept', { fingerprint: 'AB12', replace: true }],
+    ['/api/pgp/key', { fingerprint: 'AB12', email: 's1@x', armored: 'K', is_own: false, source: 'message_attachment', replace: true }],
   ]);
   expect(dialog.open).toBe(false);
+});
+
+test('a key change the reader did not know of (409) is said so, and nothing is replaced', async () => {
+  const { dialog, settle, requests } = await openKeyImport({
+    body: { fingerprint: 'AB12', email: 's1@x', armored: 'K', is_own: false, source: 'message_attachment' },
+    facts: { fingerprint: 'AB12', userIds: ['Sender 1 <s1@x>'], emails: ['s1@x'] }, sender: 's1@x', claimsAddress: true, changes: [],
+  }, { 'POST /api/pgp/key': { status: 409, body: { error: 'key_change' } } });
+  [...dialog.querySelectorAll('button')].find((b) => b.textContent === m.pgp_trustImportButton())!.click();
+  await settle();
+  const posts = requests.calls.filter((c) => c.method === 'POST' && c.path.startsWith('/api/pgp/key'));
+  expect(posts.map((c) => c.body)).toEqual([{ fingerprint: 'AB12', email: 's1@x', armored: 'K', is_own: false, source: 'message_attachment' }]);
+  expect(dialog.querySelector('[role="alert"]')!.textContent).toBe(m.pgp_keyChangeConflict());
+  expect(dialog.open).toBe(true);
 });
 
 test('a key change only for the address chosen: no warning for another of the key\'s addresses, and no replacing', async () => {

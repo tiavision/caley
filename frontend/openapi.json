@@ -2607,7 +2607,7 @@
     },
     "/pgp/key": {
       "post": {
-        "summary": "Adds or replaces a public key; answers the key as stored. Its trust follows its `source`: a key the user\nimported is trusted, one found in mail (`harvested_…`) is stored `unverified`, and never changes a stored key\nthe user trusts or owns (the answer is then that key, unchanged).",
+        "summary": "Adds or replaces a public key; answers the key as stored. Its trust follows its `source`: a key the user\nimported is trusted, one found in mail (`harvested_…`) is stored `unverified`, and never changes a stored key\nthe user trusts or owns (the answer is then that key, unchanged). One sender's key is trusted for an address:\na trusted key for an address with another's trusted key is a key change, stored only with `replace`.",
         "operationId": "save_public_key",
         "requestBody": {
           "content": {
@@ -2632,6 +2632,16 @@
           },
           "400": {
             "description": "plain text: invalid public key, an unknown source, or an own key with a `harvested_…` source"
+          },
+          "409": {
+            "description": "`key_change`: another sender's key is trusted for the address (send `replace` once the user accepted the change)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           },
           "500": {
             "description": "plain text: database error"
@@ -2663,7 +2673,7 @@
     },
     "/pgp/key/accept": {
       "post": {
-        "summary": "The user accepted a stored key (one found in mail, after seeing its fingerprint and user IDs): it is trusted for\nthe address it was stored for; with `replace` (a key change) it takes the place of the other senders' keys stored\nfor that address. Answers the key.",
+        "summary": "The user accepted a stored key (one found in mail, after seeing its fingerprint and user IDs): it is trusted for\nthe address it was stored for; with `replace` (a key change) it takes the place of the other senders' keys stored\nfor that address, without it a key change is a 409. Answers the key.",
         "operationId": "accept_public_key",
         "requestBody": {
           "content": {
@@ -2688,6 +2698,16 @@
           },
           "404": {
             "description": "plain text: no such key"
+          },
+          "409": {
+            "description": "`key_change`: another sender's key is trusted for the address (send `replace` once the user accepted the change)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           },
           "500": {
             "description": "plain text: database error"
@@ -5400,6 +5420,13 @@
               "null"
             ],
             "description": "default `imported`; `harvested_autocrypt` and `harvested_attachment` (found in mail, not chosen by the user)\nstore the key `unverified`"
+          },
+          "replace": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "a key change the user saw and accepted: a trusted key for an address another sender's key is trusted for\ntakes its place (the others stored for the address are removed). Without it such a key is a 409 (default false)"
           }
         }
       },

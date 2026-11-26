@@ -175,13 +175,12 @@ async function importableKeys(msg: Message, files: { filename: string; content_t
 
 /**
  * Stores a key attached to the open message as trusted, for the address the reader's import dialog chose. A key change
- * (`replace`: another key is trusted for that address, KeyCandidate.changes) then takes that key's place, as accepting
- * a changed key in Settings or compose does (POST /pgp/key/accept with `replace`). Answers the key as stored.
+ * (`replace`: another key is trusted for that address, KeyCandidate.changes) then takes that key's place in the same
+ * request (POST /pgp/key with `replace`: the server stores it and removes the other in one transaction); without it
+ * the server refuses a key change (409). Answers the key as stored.
  */
 export async function importKey(body: PublicKeyBody, replace: boolean, ctx: CallContext): Promise<StoredPublicKey> {
-  const stored = await ctx.request('/api/pgp/key', { method: 'POST', body }) as StoredPublicKey;
-  if (!replace) return stored;
-  return await ctx.request('/api/pgp/key/accept', { method: 'POST', body: { fingerprint: stored.fingerprint, replace: true } }) as StoredPublicKey;
+  return await ctx.request('/api/pgp/key', { method: 'POST', body: replace ? { ...body, replace } : body }) as StoredPublicKey;
 }
 
 // ── Messages read here: sinter-mail's mail.mime, and the OpenPGP steps it asks for ──────────────────────────────

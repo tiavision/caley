@@ -544,6 +544,7 @@
   "pgp_acceptKey": "Schlüssel annehmen",
   "pgp_acceptNewKey": "Neuen Schlüssel annehmen (ersetzt den alten)",
   "pgp_keyAcceptError": "Der Schlüssel konnte nicht angenommen werden.",
+  "pgp_keyChangeConflict": "Für diese Adresse wird inzwischen dem Schlüssel eines anderen Absenders vertraut. Lies den Schlüssel erneut ein, um die Änderung zu sehen, bevor du jenen Schlüssel ersetzt.",
   "pgp_storedKeyMismatch": "Dieser gespeicherte Schlüssel passt nicht zu seinem Fingerabdruck. Entferne ihn.",
   "pgp_readKeyButton": "Schlüssel lesen",
   "pgp_importConfirmHint": "Vergleiche diesen Fingerabdruck mit dem, den dir der Besitzer des Schlüssels nennt, bevor du ihm vertraust.",

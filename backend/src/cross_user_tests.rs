@@ -554,10 +554,24 @@ fn cases() -> Vec<Case> {
             "/api/pgp/key",
             Payload::Json(json!({ "fingerprint": "ALICEFPR" })),
         ),
+        // a key change for an address Alice has keys for: removes only the caller's own keys of it
+        case(
+            "POST",
+            "/api/pgp/key",
+            Payload::Json(json!({
+                "fingerprint": "MALLORYFPR", "email": "bob@example.com", "replace": true,
+                "armored": "-----BEGIN PGP PUBLIC KEY BLOCK-----\nx\n-----END PGP PUBLIC KEY BLOCK-----",
+            })),
+        ),
         case(
             "POST",
             "/api/pgp/key/accept",
             Payload::Json(json!({ "fingerprint": "ALICEHARVESTED" })),
+        ),
+        case(
+            "POST",
+            "/api/pgp/key/accept",
+            Payload::Json(json!({ "fingerprint": "ALICEHARVESTED", "replace": true })),
         ),
         case("GET", "/api/pgp/vault", Payload::None),
         case(
