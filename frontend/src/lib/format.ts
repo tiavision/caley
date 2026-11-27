@@ -1,5 +1,6 @@
 import { m } from '@tiaforge-ui/sinter/messages';
 import type { AlarmFields, EventJson, RecurrenceInfo, PartStat } from '../types/calendar.ts';
+import { browserTimeZone as zoneOfBrowser, dateFormat } from './date-format.ts';
 
 export const PARTSTAT_KEYS: Record<PartStat, string> = {
   'NEEDS-ACTION': 'event_attendeeStatusNeedsAction',
@@ -18,17 +19,13 @@ export interface EventTimeText {
 }
 
 function browserTimeZone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  } catch {
-    return 'UTC';
-  }
+  return zoneOfBrowser() || 'UTC';
 }
 
 function supportsTimeZone(tz: string): boolean {
   if (!tz) return false;
   try {
-    new Intl.DateTimeFormat('en', { timeZone: tz }).format(new Date());
+    dateFormat('en', { timeZone: tz });
     return true;
   } catch {
     return false;
@@ -63,22 +60,15 @@ export function eventTimeLabel(ev: EventJson): string {
   if (ev.is_all_day) return m.event_allDay();
   const d = eventStartDate(ev);
   if (!d) return '';
-  return new Intl.DateTimeFormat(navigator.language || 'en', {
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(d);
+  return dateFormat(navigator.language || 'en', { hour: '2-digit', minute: '2-digit' }).format(d);
 }
 
 function formatDatePart(date: Date, loc: string, timeZone?: string): string {
-  return new Intl.DateTimeFormat(loc, { dateStyle: 'long', ...(timeZone ? { timeZone } : {}) }).format(date);
+  return dateFormat(loc, { dateStyle: 'long', ...(timeZone ? { timeZone } : {}) }).format(date);
 }
 
 function formatTimePart(date: Date, loc: string, timeZone?: string): string {
-  return new Intl.DateTimeFormat(loc, {
-    hour: '2-digit',
-    minute: '2-digit',
-    ...(timeZone ? { timeZone } : {}),
-  }).format(date);
+  return dateFormat(loc, { hour: '2-digit', minute: '2-digit', ...(timeZone ? { timeZone } : {}) }).format(date);
 }
 
 function formatDateTimeRange(start: Date, end: Date | null, loc: string, timeZone?: string): string {
@@ -99,7 +89,7 @@ export function formatEventTimes(ev: EventJson): EventTimeText {
     if (ev.dtstart) {
       const [y, monthNum, d] = ev.dtstart.split('T')[0].split('-').map(Number);
       return {
-        localText: m.event_allDay() + ' · ' + new Date(y, monthNum - 1, d).toLocaleDateString(loc, { dateStyle: 'long' }),
+        localText: m.event_allDay() + ' · ' + dateFormat(loc, { dateStyle: 'long' }).format(new Date(y, monthNum - 1, d)),
         sourceText: '',
       };
     }
@@ -147,7 +137,7 @@ export function formatRecurrence(r: RecurrenceInfo | null, locale: string): stri
   const interval = r.interval && r.interval > 1 ? r.interval : 1;
   let text = interval === 1 ? singular[r.freq]() : plural[r.freq]({ n: interval });
   if (r.by_day?.length && r.freq === 'WEEKLY') {
-    const dtf = new Intl.DateTimeFormat(loc, { weekday: 'long' });
+    const dtf = dateFormat(loc, { weekday: 'long' });
     const ref = new Date(2024, 0, 1);
     text += m.rec_on() + r.by_day.map(c => { ref.setDate(1 + (dayMap[c] ?? 0)); return dtf.format(ref); }).join(', ');
   }
@@ -156,7 +146,7 @@ export function formatRecurrence(r: RecurrenceInfo | null, locale: string): stri
   else if (r.until) {
     const parts = r.until.split(' ')[0].split('-').map(Number);
     const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(r.until + 'T00:00:00');
-    if (!isNaN(d.getTime())) text += m.rec_until() + d.toLocaleDateString(loc, { dateStyle: 'long' });
+    if (!isNaN(d.getTime())) text += m.rec_until() + dateFormat(loc, { dateStyle: 'long' }).format(d);
   }
   return text;
 }
@@ -167,7 +157,7 @@ export function formatAlarm(alarm: AlarmFields): string {
     if (!alarm.datetime) return '';
     const iso = alarm.datetime.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/, '$1-$2-$3T$4:$5:$6Z');
     const d = new Date(iso);
-    return isNaN(d.getTime()) ? alarm.datetime : d.toLocaleString(loc, { dateStyle: 'medium', timeStyle: 'short' });
+    return isNaN(d.getTime()) ? alarm.datetime : dateFormat(loc, { dateStyle: 'medium', timeStyle: 'short' }).format(d);
   }
   const abs = parseInt(alarm.value || '15') * parseInt(alarm.unit || '1');
   let vs = '';

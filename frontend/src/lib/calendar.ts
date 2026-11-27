@@ -5,6 +5,7 @@ import type { DayEventsJson, EventJson, MonthGridJson } from '../types/calendar.
 import { localDateIso } from './format.ts';
 import { eventKey } from './events.ts';
 import { shortcutKey } from './contacts.ts';
+import { browserTimeZone, dateFormat } from './date-format.ts';
 
 function parse(iso: string): Date {
   const [y, mo, d] = iso.split('-').map(Number);
@@ -13,7 +14,7 @@ function parse(iso: string): Date {
 
 /** The viewer's time zone for the `tz` parameter of /api/events and /api/calendar ('' when unknown). */
 export function userTz(): string {
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; }
+  return browserTimeZone();
 }
 
 export function addDays(iso: string, n: number): string {
@@ -46,12 +47,12 @@ export function weekRangeText(weekStart: string, locale: string, today: string):
   // formatRange leaves out what both ends share ("Nov 9 – 15", "9.–15. Nov."), which keeps the toolbar on one line.
   const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
   if (start.getFullYear() !== cy || end.getFullYear() !== cy) options.year = 'numeric';
-  return new Intl.DateTimeFormat(locale, options).formatRange(start, end);
+  return dateFormat(locale, options).formatRange(start, end);
 }
 
 /** A day's date formatted with `options` (weekday, "Nov 9", long date …). */
 export function dayLabel(iso: string, locale: string, options: Intl.DateTimeFormatOptions): string {
-  return iso ? parse(iso).toLocaleDateString(locale, options) : '';
+  return iso ? dateFormat(locale, options).format(parse(iso)) : '';
 }
 
 /** Past days of the current week start collapsed (narrow screens); a click on the day heading flips that. */
@@ -113,7 +114,7 @@ export function inWeek(iso: string, weekStart: string): boolean {
 
 /** Monday-first weekday names, short (picker) or from the messages (month grid header). */
 export function weekdayNames(locale: string): string[] {
-  return Array.from({ length: 7 }, (_, i) => new Date(2024, 0, 1 + i).toLocaleDateString(locale, { weekday: 'short' }));
+  return Array.from({ length: 7 }, (_, i) => dateFormat(locale, { weekday: 'short' }).format(new Date(2024, 0, 1 + i)));
 }
 
 export function monthGridHeader(): string[] {
@@ -121,7 +122,7 @@ export function monthGridHeader(): string[] {
 }
 
 export function monthNames(locale: string): string[] {
-  return Array.from({ length: 12 }, (_, i) => new Date(2024, i, 1).toLocaleDateString(locale, { month: 'long' }));
+  return Array.from({ length: 12 }, (_, i) => dateFormat(locale, { month: 'long' }).format(new Date(2024, i, 1)));
 }
 
 /** The picker's years: fifty back and fifty ahead of `today`'s. */
@@ -137,7 +138,7 @@ export function monthTitle(grid: MonthGridJson | null): string {
 /** "November 2026" for a month (YYYY-MM), in `locale`. */
 export function monthLabel(ym: string, locale: string, month: 'long' | 'short' = 'long'): string {
   const [y, mo] = ym.split('-').map(Number);
-  return new Date(y!, mo! - 1, 1).toLocaleDateString(locale, { month, year: 'numeric' });
+  return dateFormat(locale, { month, year: 'numeric' }).format(new Date(y!, mo! - 1, 1));
 }
 
 /** A cell of the month grid, as the browser builds it (no data needed). */

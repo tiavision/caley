@@ -13,6 +13,7 @@ import {
 import type { Account, Attachment, Identity, Mailbox, Message, ThreadNode, VirtualFolder } from './MailTypes.ts';
 import { formatAddress, isPlainAddress, lastEntryStart, parseEnvelopeAddresses } from './addresses.ts';
 import type { Body, ParseOptions } from '@tiavision/sinter-mail';
+import { formatMessageDateTime } from './mailUtils.ts';
 import type { ReaderPart } from './mail-reader.ts';
 import type { PendingKey } from './pgp-keys.ts';
 
@@ -572,7 +573,7 @@ export function isSentMailbox(mailbox: string | null): boolean {
 }
 
 export function messageDateTime(ts: number | null): string {
-  return ts ? new Date(ts * 1000).toLocaleString() : '';
+  return formatMessageDateTime(ts);
 }
 
 /** Attachments the server lists that the reader shows (signatures and, when encrypted, PGP transport parts are hidden). */
