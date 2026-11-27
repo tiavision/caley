@@ -6,6 +6,7 @@ import type {
   AlarmFields, AttendeeFields, CalDavAccountJson, CalendarJson, ContactJson, EventJson, PartStat, RecurrenceInfo,
 } from '../types/calendar.ts';
 import { dateFromEventValue, localDateIso } from './format.ts';
+import { browserTimeZone, dateFormat } from './date-format.ts';
 
 // ── Calendars ───────────────────────────────────────────────────────────────
 
@@ -75,12 +76,12 @@ export function attendeeLabel(a: Pick<AttendeeFields, 'cn' | 'email'>): string {
 export function eventDateLong(dtstart: string, locale: string): string {
   if (dtstart.includes('T') && dtstart.includes('-')) {
     const d = dateFromEventValue(dtstart);
-    if (d) return d.toLocaleDateString(locale, { dateStyle: 'long' });
+    if (d) return dateFormat(locale, { dateStyle: 'long' }).format(d);
   }
   const datePart = dtstart.split('T')[0]!.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
   const [y, mo, d] = datePart.split('-').map(Number);
   if (!y || !mo || !d) return dtstart;
-  return new Date(y, mo - 1, d).toLocaleDateString(locale, { dateStyle: 'long' });
+  return dateFormat(locale, { dateStyle: 'long' }).format(new Date(y, mo - 1, d));
 }
 
 // ── Event form ──────────────────────────────────────────────────────────────
@@ -135,7 +136,7 @@ export function weekdays(): Array<{ code: string; label: string }> {
 }
 
 function userTz(): string {
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+  return browserTimeZone() || 'UTC';
 }
 
 function emptyRecurrence(): RecurrenceDraft {
@@ -309,7 +310,7 @@ function timeSuggestions(input: string): SummarySuggestion[] {
   if (isNaN(h) || h > 23 || isNaN(min) || min > 59) return [];
   const make = (hour: number, minute: number): SummarySuggestion => ({
     h: hour, m: minute, prefixLen,
-    label: new Date(2024, 0, 1, hour, minute).toLocaleTimeString(navigator.language || 'en', { hour: '2-digit', minute: '2-digit' }),
+    label: dateFormat(navigator.language || 'en', { hour: '2-digit', minute: '2-digit' }).format(new Date(2024, 0, 1, hour, minute)),
   });
   if (ampm === 'am') return h <= 12 ? [make(h === 12 ? 0 : h, min)] : [];
   if (ampm === 'pm') return h <= 12 ? [make(h === 12 ? 12 : h + 12, min)] : [];
@@ -326,8 +327,8 @@ function daySuggestions(input: string, locale: string, today: Date): SummarySugg
   ];
   for (let i = 0; i < 7; i++) {
     const date = new Date(2024, 0, 7 + i);
-    const long = date.toLocaleDateString(locale, { weekday: 'long' }).toLowerCase();
-    const short = date.toLocaleDateString(locale, { weekday: 'short' }).toLowerCase().replace(/\.$/, '');
+    const long = dateFormat(locale, { weekday: 'long' }).format(date).toLowerCase();
+    const short = dateFormat(locale, { weekday: 'short' }).format(date).toLowerCase().replace(/\.$/, '');
     names.push({ name: long, dayIndex: i });
     if (short !== long) names.push({ name: short, dayIndex: i });
   }
@@ -351,7 +352,7 @@ function daySuggestions(input: string, locale: string, today: Date): SummarySugg
     const target = new Date(today.getFullYear(), today.getMonth(), today.getDate() + ahead);
     out.push({
       date: localDateIso(target), prefixLen: wordLen,
-      label: target.toLocaleDateString(navigator.language || 'en', { weekday: 'long', month: 'short', day: 'numeric' }),
+      label: dateFormat(navigator.language || 'en', { weekday: 'long', month: 'short', day: 'numeric' }).format(target),
     });
   }
   return out;

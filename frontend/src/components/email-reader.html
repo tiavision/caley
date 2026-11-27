@@ -17,7 +17,7 @@
 <template data-sn-props="{ open: MessageRef | null; defaultCal: string }"
           data-sn-emits="{ compose: ComposeDraft; 'origins-open': string[] | null; 'ics-import': ImportDraft; 'thread-open': ThreadRef; 'mail-removed': MessageRef; decrypt: void }">
   <!-- keyImport: the attached public key the import dialog shows; keyImported: the message whose key was just stored -->
-  <div data-sn-import="openpgp, @tiavision/sinter-mail"
+  <div class="reader-root" data-sn-import="@tiavision/sinter-mail" data-sn-preload="openpgp"
        data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null), keyImport: /** @type {KeyCandidate|null} */ (null), keyImportError: '', keyImported: '' }"
        data-sn-on-media="media = $event.detail">
     <!-- One switch per message: the reader keeps the last message read in full (busy) until the open one's body is in
@@ -415,7 +415,9 @@
   </div>
 </template>
 
-<!-- The root only groups the reader's branches: it takes no part in the layout (.message-detail lays out .reader). -->
+<!-- The root only groups the reader's branches: it takes no part in the layout (.message-detail lays out .reader).
+     By its class, not `:scope` alone: `:scope` is also each element the reader puts into another component's slot
+     (the subject line and the controls in <email-header-fit>), which must keep their boxes. -->
 <style>
-  :scope { display: contents; }
+  :scope.reader-root { display: contents; }
 </style>

@@ -1,3 +1,4 @@
+import { dateFormat } from './date-format.ts';
 import type { Attachment, BodySegment, FolderKind, Message, ThreadNode, ThreadTreeNode } from './MailTypes.ts';
 
 // ── Attachment type checks ────────────────────────────────────────────────────
@@ -181,15 +182,18 @@ export function formatDate(ts: number | null): string {
   const d = new Date(ts * 1000);
   const now = new Date();
   if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return dateFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(d);
   }
   const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
   if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
-  return d.toLocaleDateString([], opts);
+  return dateFormat(undefined, opts).format(d);
 }
 
+/** What `toLocaleString()` shows: the numeric date and the time with seconds. */
+const DATE_TIME: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' };
+
 export function formatMessageDateTime(ts: number | null): string {
-  return ts ? new Date(ts * 1000).toLocaleString() : '';
+  return ts ? dateFormat(undefined, DATE_TIME).format(new Date(ts * 1000)) : '';
 }
 
 export function humanSize(bytes: number): string {
