@@ -17,7 +17,7 @@
 <template data-sn-props="{ open: MessageRef | null; defaultCal: string }"
           data-sn-emits="{ compose: ComposeDraft; 'origins-open': string[] | null; 'ics-import': ImportDraft; 'thread-open': ThreadRef; 'mail-removed': MessageRef; decrypt: void }">
   <!-- keyImport: the attached public key the import dialog shows; keyImported: the message whose key was just stored -->
-  <div class="reader-root" data-sn-import="openpgp, @tiavision/sinter-mail"
+  <div class="reader-root" data-sn-import="@tiavision/sinter-mail" data-sn-preload="openpgp"
        data-sn-state="{ media: /** @type {'wide' | 'narrow' | null} */ (null), keyImport: /** @type {KeyCandidate|null} */ (null), keyImportError: '', keyImported: '' }"
        data-sn-on-media="media = $event.detail">
     <!-- One switch per message: the reader keeps the last message read in full (busy) until the open one's body is in
