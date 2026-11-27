@@ -117,7 +117,7 @@
          data-sn-on-view-removed="view = currentView(noView(), accounts, mailboxes, folders); sel = unmarked(sel);
                                   navigate(viewHref(view), { replace: true })"
          data-sn-on-mail-view="sel = cleared(sel, null); searchBox = noSearchBox()"
-         data-sn-on-list-step="hit = bulk.messages.length ? null : neighbor(list, open ? messageKey(open) : sel.cursor, $event.detail);
+         data-sn-on-list-step="hit = bulk.messages.length ? null : neighbor(list, open ? messageKey(open) : sel.cursor, Number($event.detail));
                                hit && emit('mail-open', hit);
                                hit && elementIn($el, '.message-detail')?.focus();
                                !hit && !bulk.messages.length && page(list, $event.detail > 0 ? 'next' : 'prev')"
