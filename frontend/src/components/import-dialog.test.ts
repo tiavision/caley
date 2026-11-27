@@ -7,6 +7,11 @@ import * as ics from '../actions/ics.ts';
 import { app, scripts } from '../test-components.ts';
 import '../test-dom.ts';                 // jsdom: dialogs, popovers, commandfor, Blob.stream
 
+/** a multipart body's field names: a FormData of any realm (jsdom's or Node's: no `instanceof`), or its text */
+const fieldNames = (body: unknown): string[] => Object.prototype.toString.call(body) === '[object FormData]'
+  ? [...(body as FormData).keys()]
+  : [...String(body).matchAll(/name="([^"]+)"/g)].map((x) => x[1]!);
+
 // The dialog as mail uses it: a calendar attachment opens it with the file already set (ics.draft from an action),
 // a plain button with an empty draft.
 const page = `
@@ -54,7 +59,7 @@ test('an attachment opens it with the file set; after an import it closes and re
   expect(input.required).toBe(false);                        // the file comes with the draft, not the input
   dialog.querySelector('form')!.requestSubmit();
   await settle();
-  expect([...(requests.calls.at(-2)!.body as FormData).keys()]).toContain('email_uid'); // the multipart body, as sent
+  expect(fieldNames(requests.calls.at(-2)!.body)).toContain('email_uid');
   expect(dialog.querySelector('[role=status]')!.textContent!.trim()).toBe(m.cal_importSuccess({ n: 3 }));
   await new Promise((resolve) => setTimeout(resolve, 1600));
   expect(dialog.open).toBe(false);
