@@ -126,7 +126,8 @@ function type(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, va
 
 /** Text fields of a multipart body (the mock keeps it as text where jsdom cannot parse it). */
 function multipart(body: unknown): Record<string, string> {
-  if (body instanceof FormData) return Object.fromEntries([...body].map(([k, v]) => [k, String(v)]));
+  // a FormData of any realm (jsdom's, or Node's: no `instanceof`)
+  if (Object.prototype.toString.call(body) === '[object FormData]') return Object.fromEntries([...(body as FormData)].map(([k, v]) => [k, String(v)]));
   return Object.fromEntries([...String(body).matchAll(/name="([^"]+)"\r\n\r\n([^\r]*)\r\n/g)].map((x) => [x[1]!, x[2]!]));
 }
 

@@ -54,7 +54,7 @@ test('an attachment opens it with the file set; after an import it closes and re
   expect(input.required).toBe(false);                        // the file comes with the draft, not the input
   dialog.querySelector('form')!.requestSubmit();
   await settle();
-  expect(String(requests.calls.at(-2)!.body)).toContain('name="email_uid"');
+  expect([...(requests.calls.at(-2)!.body as FormData).keys()]).toContain('email_uid'); // the multipart body, as sent
   expect(dialog.querySelector('[role=status]')!.textContent!.trim()).toBe(m.cal_importSuccess({ n: 3 }));
   await new Promise((resolve) => setTimeout(resolve, 1600));
   expect(dialog.open).toBe(false);

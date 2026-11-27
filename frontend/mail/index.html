@@ -179,17 +179,21 @@
                data-sn-state="{ menuAcc: /** @type {Account|null} */ (null) }"
                data-sn-class="{open: sidebarOpen}" data-sn-attr="{'aria-label': m.mail_aria_folders()}">
           <template data-sn-if="folders.length > 0">
-            <div data-tm-layout="stack" data-tm-gap="none">
+            <div data-tm-layout="stack" data-tm-gap="none" data-sn-state="{ sortFailed: false }">
               <div class="section-header" data-tm-layout="row" data-tm-gap="xs" data-tm-wrap="none">
                 <span data-tm-caption data-tm-truncate data-tm-grow data-sn-text="m.mail_virtualFolders()"></span>
               </div>
               <!-- The folders in their order (sort_order, the resource's `order`), reordered by dragging a handle or with the
-                   keyboard (alloy's <alloy-sortable>), which saves a drop itself: the moved folder's sort_order goes
-                   between its new neighbours' at once (an optimistic change of `folders`), then PUT /email/folders/order
-                   { order: [ids] }; the answer's renumbered folders are written through, a refused one puts the row back
-                   and says so in the component. Other tabs follow through `folders_changed`. -->
-              <alloy-sortable data-sn-with="{ items: folders, keyOf: (f) => f.folder_id, nameOf: (f) => f.display_name, label: m.mail_virtualFolders(),
-                                              resource: 'folders', save: '/api/email/folders/order', quiet: true, text: sortText() }">
+                   keyboard (alloy's <alloy-sortable>, which reports a drop as `move`). The page saves it: the moved folder's
+                   sort_order goes between its new neighbours' at once (an optimistic change of `folders`), then
+                   PUT /email/folders/order { order: [ids] } (sinter queues the saves of quick moves); the answer's
+                   renumbered folders are written through, a refused one puts the row back and says so below the list.
+                   Other tabs follow through `folders_changed`. -->
+              <alloy-sortable data-sn-with="{ items: folders, keyOf: (f) => f.folder_id, nameOf: (f) => f.display_name, label: m.mail_virtualFolders(), quiet: true, text: sortText() }"
+                              data-sn-put="/email/folders/order" data-sn-trigger="move"
+                              data-sn-body="{ order: alloy.keysAfter(folders, $event.detail, (f) => f.folder_id) }"
+                              data-sn-optimistic="merge(folders.find((f) => f.folder_id === $event.detail.key), { sort_order: alloy.between(folders, $event.detail, 'sort_order') })"
+                              data-sn-then="sortFailed = false" data-sn-catch="sortFailed = true">
                 <div slot="item" data-tm-layout="row" data-tm-gap="none" data-tm-wrap="none" data-tm-grow
                      data-sn-let="{ f: /** @type {VirtualFolder} */ ($slot.item), n: unread?.folders?.[$slot.item.folder_id] ?? 0 }">
                   <button type="button" class="sidebar-item" data-tm-variant="item" data-tm-size="sm" data-tm-layout="row" data-tm-gap="sm" data-tm-wrap="none" data-tm-grow
@@ -210,6 +214,7 @@
                           data-sn-attr="{'aria-label': m.mail_removeAttachment()}"></button>
                 </div>
               </alloy-sortable>
+              <template data-sn-if="sortFailed"><p role="alert" data-tm-tone="danger" data-tm-pad="xs" data-sn-text="m.sort_failed()"></p></template>
             </div>
           </template>
 

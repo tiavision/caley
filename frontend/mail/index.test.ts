@@ -593,8 +593,9 @@ test('a failed folder removal brings it back', async () => {
   expect(folderItems(root)).toEqual(['followup-Folder']);
 });
 
-// The virtual folders in their order: alloy's <alloy-sortable> around them, saving a drop itself; the row moves at once
-// (the moved folder's sort_order between its neighbours', the resource ordered by it) and the whole order is sent.
+// The virtual folders in their order: alloy's <alloy-sortable> around them reports a drop, the page's action on its tag
+// saves it; the row moves at once (the moved folder's sort_order between its neighbours', the resource ordered by it)
+// and the whole order is sent.
 const threeFolders = ['A', 'B', 'C'].map((n, i) => ({ ...folderRow, folder_id: `f${n}`, display_name: `followup-${n}`, sort_order: i }));
 const handle = (root: HTMLElement, name: string) => root.querySelector<HTMLElement>(`button.al-handle[aria-label="${m.sort_handle({ name })}"]`)!;
 /** a keyboard press on a button: its click, with no pointer */
@@ -635,7 +636,7 @@ test('a folder order the server refuses goes back, with a note', async () => {
   press(h);
   await settle();
   expect(folderItems(root)).toEqual(['followup-A', 'followup-B', 'followup-C']);
-  expect(root.querySelector('.mail-sidebar .alloy-sortable [role="alert"]')!.textContent).toBe(m.sort_failed());
+  expect(root.querySelector('.mail-sidebar [role="alert"]')!.textContent).toBe(m.sort_failed());
 });
 
 test('folders_changed (another tab reordered them) reloads the folders in their new order', async () => {
