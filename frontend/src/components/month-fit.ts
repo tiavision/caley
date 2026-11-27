@@ -96,7 +96,7 @@ export default class extends MonthFitComponent {
     this.#counts = counts;
     this.#lines = lines;
     this.#flow = flow;
-    this.emit('fit', { counts, lines, flow, narrow: !!this.#mql?.matches, settled: !this.#hiding });
+    this.emit('fit', structuredClone({ counts, lines, flow, narrow: !!this.#mql?.matches, settled: !this.#hiding }));
   }
 
   /**
