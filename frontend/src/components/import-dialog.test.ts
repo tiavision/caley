@@ -41,7 +41,7 @@ async function show() {
   return { ...r, requests };
 }
 
-/** A multipart body's field: a FormData (jsdom) or the encoded text. */
+/** A multipart body's field: the mock's FormData (Node's, where Node parses the body) or the encoded text. */
 function field(body: unknown, name: string): string | undefined {
   const form = body as { get?: (n: string) => unknown };
   if (typeof form?.get === 'function') {
@@ -114,7 +114,7 @@ test('an attachment opens it with the file set; after an import it closes and re
   expect(input.required).toBe(false);                        // the file comes with the draft, not the input
   dialog.querySelector('form')!.requestSubmit();
   await settle();
-  expect(String(requests.calls.at(-2)!.body)).toContain('name="email_uid"');
+  expect(field(requests.calls.at(-2)!.body, 'email_uid')).toBe('7');
   expect(dialog.querySelector('[role=status]')!.textContent!.trim()).toBe(m.cal_importSuccess({ n: 3 }));
   await new Promise((resolve) => setTimeout(resolve, 1600));
   expect(dialog.open).toBe(false);

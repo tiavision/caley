@@ -130,9 +130,11 @@ function type(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, va
   el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
 }
 
-/** Text fields of a multipart body (the mock keeps it as text where jsdom cannot parse it). */
+/** Text fields of a multipart body: the mock's FormData (Node's, so not `instanceof` the page's jsdom FormData) where
+ *  Node parses it, else the encoded text. */
 function multipart(body: unknown): Record<string, string> {
-  if (body instanceof FormData) return Object.fromEntries([...body].map(([k, v]) => [k, String(v)]));
+  const form = body as FormData | null;
+  if (typeof form?.getAll === 'function') return Object.fromEntries([...form].map(([k, v]) => [k, String(v)]));
   return Object.fromEntries([...String(body).matchAll(/name="([^"]+)"\r\n\r\n([^\r]*)\r\n/g)].map((x) => [x[1]!, x[2]!]));
 }
 
