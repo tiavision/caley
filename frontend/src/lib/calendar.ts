@@ -1,5 +1,6 @@
 // Pure helpers for the calendar page (calendar/index.html): dates as YYYY-MM-DD strings in the viewer's zone,
 // months as YYYY-MM. Exported to templates through src/sinter.helpers.ts.
+import { memo } from '@tiaforge-ui/sinter/memo';
 import { m } from '@tiaforge-ui/sinter/messages';
 import type { DayEventsJson, EventJson, MonthGridJson } from '../types/calendar.ts';
 import { localDateIso } from './format.ts';
@@ -149,7 +150,8 @@ export interface MonthCell { date_str: string; day_number: number; is_current_mo
  * of the last day, as /api/calendar builds them (backend list_calendar), so the grid and its events request need
  * no response first.
  */
-export function monthCells(ym: string): MonthCell[] {
+export const monthCells = memo(monthCellsImpl);
+function monthCellsImpl(ym: string): MonthCell[] {
   const [y, mo] = ym.split('-').map(Number);
   const first = new Date(y!, mo! - 1, 1);
   const offset = (first.getDay() + 6) % 7; // days since Monday
