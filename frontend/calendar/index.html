@@ -15,6 +15,7 @@
               weekStart: mondayOf(todayIso($now)),
               gridMonth: monthOf(mondayOf(todayIso($now))),
               pickerAt: '',
+              pickerOpen: false,
               focusDate: '',
               flippedDays: /** @type {string[]} */ ([]),
               focusPos: '0:0',
@@ -130,10 +131,10 @@
 
           <!-- Month picker (was MonthPicker.svelte): picks a week in the week view, a month in the month view. -->
           <div popover id="month-picker" data-menu
-               data-sn-on-beforetoggle="$event.newState === 'open' && view === 'month' && (pickerAt = gridMonth)">
+               data-sn-on-beforetoggle="pickerOpen = pickerOpen || $event.newState === 'open'; $event.newState === 'open' && view === 'month' && (pickerAt = gridMonth)">
             <div class="picker" data-layout="stack" data-gap="sm" data-pad="xs"
                  data-sn-let="{ pg: view === 'month' ? pickerGrid : monthGrid }">
-              <template data-sn-if="pg">
+              <template data-sn-if="pickerOpen && pg">
                 <div data-layout="row" data-gap="xs" data-wrap="none">
                   <button type="button" data-variant="ghost" data-size="sm" data-icon="chevron-left" data-sn-attr="{'aria-label': m.cal_aria_prevMonth()}"
                           data-sn-on-click="view === 'month' ? pickerAt = pg.prev_month : gridMonth = pg.prev_month"></button>
@@ -177,7 +178,7 @@
                   </template>
                 </div>
               </template>
-              <template data-sn-else>
+              <template data-sn-else data-sn-if="pickerOpen">
                 <p data-muted aria-busy="true" data-sn-text="m.cal_loadingCalendar()"></p>
               </template>
             </div>

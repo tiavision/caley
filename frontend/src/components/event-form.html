@@ -8,8 +8,8 @@
 <template data-sn-props=""
           data-sn-emits="{ 'event-new': EventDraft; 'event-saved': EventDraft; 'event-deleted': EventDraft; 'calendar-chosen': string }">
   <div data-sn-state="{ draft: /** @type {EventDraft|null} */ (null), eventError: '', summaryHints: false, attendeeRow: -1, attendeeQuery: '', edited: false }"
-       data-sn-on-event-new="draft = $event.detail; openDialog('event-form')"
-       data-sn-on-event-edit="draft = editEventDraft($event.detail.event, $event.detail.scope); openDialog('event-form')">
+       data-sn-on-event-new="draft = structuredClone($event.detail); openDialog('event-form')"
+       data-sn-on-event-edit="draft = structuredClone(editEventDraft($event.detail.event, $event.detail.scope)); openDialog('event-form')">
     <sn-resource name="calendars" src="/calendars"></sn-resource>
     <sn-resource name="caldavAccounts" src="/caldav/accounts"></sn-resource>
     <!-- attendee suggestions: loaded when the form first opens -->
@@ -48,7 +48,7 @@
               <div data-menu role="listbox" id="event-summary-suggestions" data-sn-show="hints.length > 0">
                 <template data-sn-for="(s, i) in hints" data-sn-key="i">
                   <div role="option" tabindex="-1" data-sn-text="s.label"
-                       data-sn-on-click="draft = applySummarySuggestion(draft, s); summaryHints = false"></div>
+                       data-sn-on-click="draft = structuredClone(applySummarySuggestion(draft, s)); summaryHints = false"></div>
                 </template>
               </div>
             </div>

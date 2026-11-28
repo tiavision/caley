@@ -15,7 +15,7 @@
          edited: false,
          rcpt: { field: '', token: '' },
        }"
-       data-sn-on-compose="compose = $event.detail; edited = false; openDialog('email-compose')"
+       data-sn-on-compose="compose = structuredClone($event.detail); edited = false; openDialog('email-compose')"
        data-sn-on-sn-navigate="edited && $event.preventDefault(); edited && (composeError = m.mail_leaveDraft())">
     <sn-resource name="composeKeys" call="mail.composeKeys()" when="!!compose"></sn-resource>
     <sn-resource name="recipientAddrs" src="/email/suggest-addrs?q={rcpt.token}" when="rcpt.token.length >= 2"></sn-resource>
